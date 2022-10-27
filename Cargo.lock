@@ -865,7 +865,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=bacffd142fc38a01fe255407b0c8d5d0aacfe778#bacffd142fc38a01fe255407b0c8d5d0aacfe778"
+source = "git+https://github.com/oxidecomputer/crucible?rev=144d8dafa41715e00b08a5929cc62140ff0eb561#144d8dafa41715e00b08a5929cc62140ff0eb561"
 dependencies = [
  "anyhow",
  "chrono",
@@ -880,7 +880,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=bacffd142fc38a01fe255407b0c8d5d0aacfe778#bacffd142fc38a01fe255407b0c8d5d0aacfe778"
+source = "git+https://github.com/oxidecomputer/crucible?rev=144d8dafa41715e00b08a5929cc62140ff0eb561#144d8dafa41715e00b08a5929cc62140ff0eb561"
 dependencies = [
  "base64",
  "schemars",
@@ -1480,8 +1480,7 @@ dependencies = [
 [[package]]
 name = "fatfs"
 version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e18f80a87439240dac45d927fd8f8081b6f1e34c03e97271189fa8a8c2e96c8f"
+source = "git+https://github.com/luqmana/rust-fatfs?branch=stable-0.3#af26bc712db9f770294fb87b52f202c88c2a89df"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -4083,10 +4082,12 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c0776be03bf0928651996eb00ad6f3665e99ebe7#c0776be03bf0928651996eb00ad6f3665e99ebe7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a#9da9cea30adfcce6d8185d7060a20f55df00a72a"
 dependencies = [
+ "base64",
  "crucible-client-types",
  "propolis_types",
+ "rand 0.8.5",
  "reqwest",
  "ring",
  "schemars",
@@ -4100,7 +4101,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c0776be03bf0928651996eb00ad6f3665e99ebe7#c0776be03bf0928651996eb00ad6f3665e99ebe7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a#9da9cea30adfcce6d8185d7060a20f55df00a72a"
 dependencies = [
  "serde",
 ]
@@ -4769,6 +4770,9 @@ name = "semver"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e25dfac463d778e353db5be2449d1cce89bd6fd23c9f1ea21310ce6e5a1b29c4"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "semver-parser"
@@ -6530,12 +6534,22 @@ name = "wicket"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 4.0.18",
  "crossterm",
  "futures",
+ "hex",
+ "semver 1.0.14",
+ "serde",
+ "serde_json",
+ "sha3",
  "slog",
  "slog-async",
  "slog-term",
+ "snafu",
+ "tar",
+ "tempfile",
  "tokio",
+ "toml",
  "tui",
 ]
 
