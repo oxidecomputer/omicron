@@ -283,13 +283,14 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
+        // Create any specified disks
         for (i, disk) in params.create_params.disks.iter().enumerate() {
             if let params::InstanceDiskAttachment::Create(create_disk) = disk {
                 let subsaga_name =
                     SagaName::new(&format!("instance-create-disk-{i}"));
                 let subsaga_builder = DagBuilder::new(subsaga_name);
                 subsaga_append(
-                    "create-disk",
+                    "create_disk",
                     SagaDiskCreate::make_saga_dag(
                         &disk_create::Params {
                             serialized_authn: params.serialized_authn.clone(),
@@ -305,26 +306,27 @@ impl NexusSaga for SagaInstanceCreate {
             }
         }
 
-        // See the comment above where we add nodes for creating NICs.  We use
-        // the same pattern here.
-        for i in 0..(MAX_DISKS_PER_INSTANCE as usize) {
-            let disk_params =
-                DiskParams { saga_params: params.clone(), which: i };
-            let subsaga_name =
-                SagaName::new(&format!("instance-attach-disk-{i}"));
-            let mut subsaga_builder = DagBuilder::new(subsaga_name);
-            subsaga_builder.append(Node::action(
-                "attach_disk_output",
-                format!("AttachDisksToInstance-{i}").as_str(),
-                ATTACH_DISKS_TO_INSTANCE.as_ref(),
-            ));
-            subsaga_append(
-                "disk",
-                subsaga_builder.build()?,
-                &mut builder,
-                disk_params,
-                i,
-            )?;
+        // Attach any specified disks, including those previously created
+        for (i, disk) in params.create_params.disks.iter().enumerate() {
+            if let params::InstanceDiskAttachment::Attach(_) = disk {
+                let disk_params =
+                    DiskParams { saga_params: params.clone(), which: i };
+                let subsaga_name =
+                    SagaName::new(&format!("instance-attach-disk-{i}"));
+                let mut subsaga_builder = DagBuilder::new(subsaga_name);
+                subsaga_builder.append(Node::action(
+                    "attach_disk_output",
+                    format!("AttachDisksToInstance-{i}").as_str(),
+                    ATTACH_DISKS_TO_INSTANCE.as_ref(),
+                ));
+                subsaga_append(
+                    "attach_disk",
+                    subsaga_builder.build()?,
+                    &mut builder,
+                    disk_params,
+                    i,
+                )?;
+            }
         }
 
         builder.append(Node::action(
