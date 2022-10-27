@@ -280,7 +280,7 @@
     },
     "/service": {
       "put": {
-        "summary": "Report that a service within a pool has come online.",
+        "summary": "Report that a service has come online.",
         "operationId": "service_put",
         "requestBody": {
           "content": {

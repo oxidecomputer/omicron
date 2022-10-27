@@ -171,7 +171,7 @@ async fn dataset_put(
     Ok(HttpResponseOk(DatasetPutResponse { reservation: None, quota: None }))
 }
 
-/// Report that a service within a pool has come online.
+/// Report that a service has come online.
 #[endpoint {
      method = PUT,
      path = "/service",
