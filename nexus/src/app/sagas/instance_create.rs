@@ -106,8 +106,8 @@ lazy_static! {
     );
     static ref ATTACH_DISKS_TO_INSTANCE: NexusAction = ActionFunc::new_action(
         "instance-create.attach-disks-to-instance",
-        sic_attach_disks_to_instance,
-        sic_attach_disks_to_instance_undo,
+        sic_attach_disk_to_instance,
+        sic_attach_disk_to_instance_undo,
     );
     static ref INSTANCE_ENSURE: NexusAction = new_action_noop_undo(
         "instance-create.instance-ensure",
@@ -716,13 +716,13 @@ async fn sic_allocate_instance_external_ip_undo(
     Ok(())
 }
 
-async fn sic_attach_disks_to_instance(
+async fn sic_attach_disk_to_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     ensure_instance_disk_attach_state(sagactx, true).await
 }
 
-async fn sic_attach_disks_to_instance_undo(
+async fn sic_attach_disk_to_instance_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     Ok(ensure_instance_disk_attach_state(sagactx, false).await?)
