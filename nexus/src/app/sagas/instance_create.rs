@@ -179,7 +179,7 @@ impl NexusSaga for SagaInstanceCreate {
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
             node_basename: &'static str,
-            subsaga_builder: steno::DagBuilder,
+            subsaga_dag: steno::Dag,
             parent_builder: &mut steno::DagBuilder,
             params: S,
             which: usize,
@@ -198,7 +198,7 @@ impl NexusSaga for SagaInstanceCreate {
             let output_name = format!("{}{}", node_basename, which);
             parent_builder.append(Node::subsaga(
                 output_name.as_str(),
-                subsaga_builder.build()?,
+                subsaga_dag,
                 params_node_name,
             ));
             Ok(())
@@ -243,7 +243,7 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             subsaga_append(
                 "network_interface",
-                subsaga_builder,
+                subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
                 i,
@@ -281,7 +281,7 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             subsaga_append(
                 "external_ip",
-                subsaga_builder,
+                subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
                 i,
@@ -308,7 +308,7 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             subsaga_append(
                 "disk",
-                subsaga_builder,
+                subsaga_builder.build()?,
                 &mut builder,
                 disk_params,
                 i,
