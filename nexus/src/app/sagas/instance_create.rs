@@ -293,7 +293,7 @@ impl NexusSaga for SagaInstanceCreate {
                     SagaDiskCreate::make_saga_dag(
                         &disk_create::Params {
                             serialized_authn: params.serialized_authn.clone(),
-                            project_id: params.project_id.clone(),
+                            project_id: params.project_id,
                             create_params: create_disk.clone(),
                         },
                         subsaga_builder,
