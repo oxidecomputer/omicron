@@ -45,7 +45,7 @@ fn enable_mg_ddm_service_blocking(
 
     let interface_names: Vec<String> = interfaces
         .iter()
-        .map(|interface| format!(r#""{}""#, interface.to_string()))
+        .map(|interface| format!(r#""{}""#, interface))
         .collect();
     let property_value = format!("({})", interface_names.join(" "));
     info!(log, "Setting mg-ddm interfaces"; "interfaces" => &property_value);

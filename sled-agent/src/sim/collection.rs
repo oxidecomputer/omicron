@@ -428,7 +428,7 @@ mod test {
             assert!(rprev.run_state.is_stopped());
             let dropped = instance
                 .transition(InstanceRuntimeStateRequested {
-                    run_state: state.clone(),
+                    run_state: state,
                     migration_params: None,
                 })
                 .unwrap();
@@ -869,20 +869,20 @@ mod test {
         let rprev = r1;
         assert!(!rprev.disk_state.is_attached());
         assert!(disk
-            .transition(DiskStateRequested::Attached(id.clone()))
+            .transition(DiskStateRequested::Attached(id))
             .unwrap()
             .is_none());
         let rnext = disk.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.disk_state, DiskState::Attaching(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Attaching(id));
         assert!(rnext.disk_state.is_attached());
         assert_eq!(id, *rnext.disk_state.attached_instance_id().unwrap());
         let rprev = rnext;
 
         disk.transition_finish();
         let rnext = disk.object.current().clone();
-        assert_eq!(rnext.disk_state, DiskState::Attached(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Attached(id));
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
         let rprev = rnext;
@@ -890,13 +890,13 @@ mod test {
         disk.transition_finish();
         let rnext = disk.object.current().clone();
         assert_eq!(rnext.gen, rprev.gen);
-        assert_eq!(rnext.disk_state, DiskState::Attached(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Attached(id));
         assert!(rnext.disk_state.is_attached());
         let rprev = rnext;
 
         // If we go straight to "Attached" again, there's nothing to do.
         assert!(disk
-            .transition(DiskStateRequested::Attached(id.clone()))
+            .transition(DiskStateRequested::Attached(id))
             .unwrap()
             .is_none());
         let rnext = disk.object.current().clone();
@@ -907,7 +907,7 @@ mod test {
         let id2 = uuid::Uuid::new_v4();
         assert_ne!(id, id2);
         let error = disk
-            .transition(DiskStateRequested::Attached(id2.clone()))
+            .transition(DiskStateRequested::Attached(id2))
             .unwrap_err();
         if let Error::InvalidRequest { message } = error {
             assert_eq!("disk is already attached", message);
@@ -923,7 +923,7 @@ mod test {
         disk.transition(DiskStateRequested::Detached).unwrap();
         let rnext = disk.object.current().clone();
         assert!(rnext.gen > rprev.gen);
-        assert_eq!(rnext.disk_state, DiskState::Detaching(id.clone()));
+        assert_eq!(rnext.disk_state, DiskState::Detaching(id));
         assert!(rnext.disk_state.is_attached());
         let rprev = rnext;
 
@@ -934,15 +934,15 @@ mod test {
 
         // Verify that it works fine to change directions in the middle of an
         // async transition.
-        disk.transition(DiskStateRequested::Attached(id.clone())).unwrap();
+        disk.transition(DiskStateRequested::Attached(id)).unwrap();
         assert_eq!(
             disk.object.current().disk_state,
-            DiskState::Attaching(id.clone())
+            DiskState::Attaching(id)
         );
         disk.transition(DiskStateRequested::Destroyed).unwrap();
         assert_eq!(
             disk.object.current().disk_state,
-            DiskState::Detaching(id.clone())
+            DiskState::Detaching(id)
         );
         disk.transition_finish();
         assert_eq!(disk.object.current().disk_state, DiskState::Destroyed);
@@ -960,19 +960,19 @@ mod test {
         assert_eq!(r1.gen, Generation::new());
 
         let id = uuid::Uuid::new_v4();
-        disk.transition(DiskStateRequested::Attached(id.clone())).unwrap();
+        disk.transition(DiskStateRequested::Attached(id)).unwrap();
         disk.transition_finish();
         assert_eq!(
             disk.object.current().disk_state,
-            DiskState::Attached(id.clone())
+            DiskState::Attached(id)
         );
         disk.transition(DiskStateRequested::Faulted).unwrap();
         assert_eq!(
             disk.object.current().disk_state,
-            DiskState::Detaching(id.clone())
+            DiskState::Detaching(id)
         );
         let error = disk
-            .transition(DiskStateRequested::Attached(id.clone()))
+            .transition(DiskStateRequested::Attached(id))
             .unwrap_err();
         if let Error::InvalidRequest { message } = error {
             assert_eq!("cannot attach from detaching", message);
