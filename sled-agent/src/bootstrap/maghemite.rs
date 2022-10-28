@@ -21,6 +21,9 @@ pub enum Error {
 
     #[error("Error starting service: {0}")]
     Join(#[from] tokio::task::JoinError),
+
+    #[error("Argument error: {0}")]
+    Argument(String),
 }
 
 pub async fn enable_mg_ddm_service(
@@ -37,6 +40,12 @@ fn enable_mg_ddm_service_blocking(
     log: Logger,
     interfaces: Vec<AddrObject>,
 ) -> Result<(), Error> {
+    if interfaces.is_empty() {
+        return Err(Error::Argument(
+            "Service mg-ddm requires at least one interface".to_string(),
+        ));
+    }
+
     // TODO-correctness Should we try to shut down / remove any existing mg-ddm
     // service first? This appears to work fine as-is on a restart of the
     // sled-agent service.
