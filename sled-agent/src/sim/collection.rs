@@ -906,9 +906,8 @@ mod test {
         // It's illegal to go straight to attached to a different instance.
         let id2 = uuid::Uuid::new_v4();
         assert_ne!(id, id2);
-        let error = disk
-            .transition(DiskStateRequested::Attached(id2))
-            .unwrap_err();
+        let error =
+            disk.transition(DiskStateRequested::Attached(id2)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
             assert_eq!("disk is already attached", message);
         } else {
@@ -935,15 +934,9 @@ mod test {
         // Verify that it works fine to change directions in the middle of an
         // async transition.
         disk.transition(DiskStateRequested::Attached(id)).unwrap();
-        assert_eq!(
-            disk.object.current().disk_state,
-            DiskState::Attaching(id)
-        );
+        assert_eq!(disk.object.current().disk_state, DiskState::Attaching(id));
         disk.transition(DiskStateRequested::Destroyed).unwrap();
-        assert_eq!(
-            disk.object.current().disk_state,
-            DiskState::Detaching(id)
-        );
+        assert_eq!(disk.object.current().disk_state, DiskState::Detaching(id));
         disk.transition_finish();
         assert_eq!(disk.object.current().disk_state, DiskState::Destroyed);
         logctx.cleanup_successful();
@@ -962,18 +955,11 @@ mod test {
         let id = uuid::Uuid::new_v4();
         disk.transition(DiskStateRequested::Attached(id)).unwrap();
         disk.transition_finish();
-        assert_eq!(
-            disk.object.current().disk_state,
-            DiskState::Attached(id)
-        );
+        assert_eq!(disk.object.current().disk_state, DiskState::Attached(id));
         disk.transition(DiskStateRequested::Faulted).unwrap();
-        assert_eq!(
-            disk.object.current().disk_state,
-            DiskState::Detaching(id)
-        );
-        let error = disk
-            .transition(DiskStateRequested::Attached(id))
-            .unwrap_err();
+        assert_eq!(disk.object.current().disk_state, DiskState::Detaching(id));
+        let error =
+            disk.transition(DiskStateRequested::Attached(id)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
             assert_eq!("cannot attach from detaching", message);
         } else {
