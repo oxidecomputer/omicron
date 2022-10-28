@@ -757,6 +757,8 @@ async fn ensure_instance_disk_attach_state(
             .await
             .map_err(ActionError::action_failed)?;
 
+    // TODO-correctness TODO-security It's not correct to re-resolve the
+    // disk name now.  See oxidecomputer/omicron#1536.
     let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, &datastore)
         .project_id(project_id)
         .disk_name(&disk_name)
