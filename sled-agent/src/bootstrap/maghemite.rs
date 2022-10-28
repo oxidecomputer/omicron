@@ -21,36 +21,46 @@ pub enum Error {
 
     #[error("Error starting service: {0}")]
     Join(#[from] tokio::task::JoinError),
+
+    #[error("Argument error: {0}")]
+    Argument(String),
 }
 
 pub async fn enable_mg_ddm_service(
     log: Logger,
-    interface: AddrObject,
+    interfaces: Vec<AddrObject>,
 ) -> Result<(), Error> {
     tokio::task::spawn_blocking(|| {
-        enable_mg_ddm_service_blocking(log, interface)
+        enable_mg_ddm_service_blocking(log, interfaces)
     })
     .await?
 }
 
 fn enable_mg_ddm_service_blocking(
     log: Logger,
-    interface: AddrObject,
+    interfaces: Vec<AddrObject>,
 ) -> Result<(), Error> {
+    if interfaces.is_empty() {
+        return Err(Error::Argument(
+            "Service mg-ddm requires at least one interface".to_string(),
+        ));
+    }
+
     // TODO-correctness Should we try to shut down / remove any existing mg-ddm
     // service first? This appears to work fine as-is on a restart of the
     // sled-agent service.
     info!(log, "Importing mg-ddm service"; "path" => MANIFEST_PATH);
     smf::Config::import().run(MANIFEST_PATH)?;
 
-    // TODO-cleanup mg-ddm supports multiple interfaces, but `smf` currently
-    // doesn't expose an equivalent of `svccfg addpropvalue`. If we need
-    // multiple interfaces we'll need to extend smf.
-    let interface = interface.to_string();
-    info!(log, "Setting mg-ddm interface"; "interface" => interface.as_str());
+    let interface_names: Vec<String> = interfaces
+        .iter()
+        .map(|interface| format!(r#""{}""#, interface))
+        .collect();
+    let property_value = format!("({})", interface_names.join(" "));
+    info!(log, "Setting mg-ddm interfaces"; "interfaces" => &property_value);
     smf::Config::set_property(SERVICE_FMRI).run(smf::Property::new(
         smf::PropertyName::new("config", "interfaces").unwrap(),
-        smf::PropertyValue::Astring(interface),
+        smf::PropertyValue::Astring(property_value),
     ))?;
 
     info!(log, "Enabling mg-ddm service");
