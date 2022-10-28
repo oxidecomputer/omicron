@@ -1,12 +1,11 @@
-use anyhow::{bail, Result};
-use end_to_end_tests::helpers::ctx::{build_client, nexus_addr, Context};
-use end_to_end_tests::helpers::generate_name;
+use anyhow::Result;
+use end_to_end_tests::helpers::ctx::{build_client, Context};
+use end_to_end_tests::helpers::{generate_name, get_system_ip_pool};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, IpPoolCreate, IpRange, Ipv4Range,
 };
 use oxide_client::{ClientDisksExt, ClientOrganizationsExt, ClientSystemExt};
-use std::net::IpAddr;
 use std::time::Duration;
 
 #[tokio::main]
@@ -30,17 +29,7 @@ async fn main() -> Result<()> {
 
     // ===== CREATE IP POOL ===== //
     eprintln!("creating IP pool...");
-    let nexus_addr = match nexus_addr().ip() {
-        IpAddr::V4(addr) => addr.octets(),
-        IpAddr::V6(_) => bail!("not sure what to do about IPv6 here"),
-    };
-    // TODO: not really sure about a good heuristic for selecting an IP address
-    // range here. in both my (iliana's) environment and the lab, the last octet
-    // is 20; in my environment the DHCP range is 100-249, and in the buildomat
-    // lab environment the network is currently private.
-    let first = [nexus_addr[0], nexus_addr[1], nexus_addr[2], 50].into();
-    let last = [nexus_addr[0], nexus_addr[1], nexus_addr[2], 90].into();
-
+    let (first, last) = get_system_ip_pool()?;
     let pool_name = client
         .ip_pool_create()
         .body(IpPoolCreate {

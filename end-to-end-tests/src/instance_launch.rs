@@ -219,7 +219,7 @@ async fn instance_launch() -> Result<()> {
     );
 
     // tear-down
-    eprintln!("tear-down");
+    eprintln!("stopping instance");
     ctx.client
         .instance_stop()
         .organization_name(ctx.org_name.clone())
@@ -227,6 +227,24 @@ async fn instance_launch() -> Result<()> {
         .instance_name(instance.name.clone())
         .send()
         .await?;
+
+    eprintln!("deleting instance");
+    wait_for_condition(
+        || async {
+            ctx.client
+                .instance_delete()
+                .organization_name(ctx.org_name.clone())
+                .project_name(ctx.project_name.clone())
+                .instance_name(instance.name.clone())
+                .send()
+                .await
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await?;
+
     ctx.cleanup().await
 }
 
