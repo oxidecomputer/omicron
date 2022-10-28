@@ -80,7 +80,7 @@ impl Server {
         // TODO-correctness Eventually we need mg-ddm to listen on multiple
         // interfaces (link-local addresses of both NICs).
         info!(log, "Starting mg-ddm service");
-        maghemite::enable_mg_ddm_service(log.clone(), mg_addr_objs[0].clone())
+        maghemite::enable_mg_ddm_service(log.clone(), mg_addr_objs.clone())
             .await
             .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
 
