@@ -289,14 +289,14 @@ impl NexusSaga for SagaInstanceCreate {
                 let subsaga_name =
                     SagaName::new(&format!("instance-create-disk-{i}"));
                 let subsaga_builder = DagBuilder::new(subsaga_name);
-                let params = &disk_create::Params {
+                let params = disk_create::Params {
                     serialized_authn: params.serialized_authn.clone(),
                     project_id: params.project_id,
                     create_params: create_disk.clone(),
                 };
                 subsaga_append(
                     "create_disk",
-                    SagaDiskCreate::make_saga_dag(params, subsaga_builder)?,
+                    SagaDiskCreate::make_saga_dag(&params, subsaga_builder)?,
                     &mut builder,
                     params,
                     i,
