@@ -125,8 +125,15 @@ impl InstanceStates {
         // Most commands to update Propolis are triggered via requests (from
         // Nexus), but if the instance reports that it has been destroyed,
         // we should clean it up.
-        if matches!(observed, Observed::Destroyed) {
+        if let Observed::Destroyed = observed {
             Some(Action::Destroy)
+        } else if let (None, Observed::Stopped) = (desired, observed) {
+            // It might seem a bit weird to send a stop request to propolis when we've
+            // just observed a Stopped state, but given there's no corresponding desired
+            // state that means it was the guest itself that powered off. In that case,
+            // we still want to explicity ask propolis to clean up any other state.
+            // This subsequent Stop request will result in it transitioning to Destroyed.
+            Some(Action::Stop)
         } else {
             None
         }
