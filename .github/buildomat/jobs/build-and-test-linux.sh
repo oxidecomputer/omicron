@@ -59,8 +59,11 @@ ptime -m cargo +'nightly-2022-09-27' build --locked --all-targets --verbose
 # NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
 # having to rebuild here.
 #
+# We also don't use `--workspace` here because we're not prepared to run tests
+# from end-to-end-tests.
+#
 banner test
-ptime -m cargo +'nightly-2022-09-27' test --workspace --locked --verbose \
+ptime -m cargo +'nightly-2022-09-27' test --locked --verbose \
     --no-fail-fast
 
 #
