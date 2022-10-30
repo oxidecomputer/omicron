@@ -37,7 +37,9 @@ pub mod sp;
 mod storage_manager;
 mod updates;
 
+pub use illumos::zfs;
 pub use illumos::zone;
+pub use illumos::zpool;
 pub use sled_agent::cleanup_networking_resources;
 
 #[cfg(test)]

@@ -51,7 +51,7 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 pub enum Error {
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]
-    ZfsListFilesystems(#[from] crate::illumos::zfs::ListFilesystemsError),
+    ZfsListDataset(#[from] crate::illumos::zfs::ListDatasetsError),
 
     #[error(transparent)]
     ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
@@ -848,7 +848,7 @@ impl StorageWorker {
                     // If we find filesystems within our datasets, ensure their
                     // zones are up-and-running.
                     let mut datasets = vec![];
-                    let existing_filesystems = Zfs::list_filesystems(&pool_name.to_string())?;
+                    let existing_filesystems = Zfs::list_datasets(&pool_name.to_string())?;
                     for fs_name in existing_filesystems {
                         info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name.to_string());
                         // We intentionally do not exit on error here -
