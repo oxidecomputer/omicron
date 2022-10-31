@@ -1973,6 +1973,7 @@ dependencies = [
  "omicron-common",
  "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -7111,6 +7112,28 @@ dependencies = [
  "tokio",
  "toml",
  "tui",
+]
+
+[[package]]
+name = "wicketd"
+version = "0.1.0"
+dependencies = [
+ "clap 4.0.18",
+ "dropshot",
+ "futures",
+ "gateway-client",
+ "hex",
+ "http",
+ "hyper",
+ "omicron-common",
+ "schemars",
+ "serde",
+ "slog",
+ "slog-dtrace",
+ "snafu",
+ "tokio",
+ "toml",
+ "uuid",
 ]
 
 [[package]]

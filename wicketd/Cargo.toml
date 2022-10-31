@@ -1,0 +1,34 @@
+[package]
+name = "wicketd"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+futures = "0.3.25"
+hex = "0.4"
+http = "0.2.7"
+hyper = "0.14.20"
+schemars = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+slog-dtrace = "0.2"
+snafu = "0.7"
+toml = "0.5.9"
+uuid = "1.2.1"
+
+gateway-client = { path = "../gateway-client" }
+omicron-common = { path = "../common" }
+
+[dependencies.slog]
+version = "2.7"
+features = [ "max_level_trace", "release_max_level_debug" ]
+
+[dependencies.tokio]
+version = "1.21"
+features = [ "full" ]
+
+[[bin]]
+name = "wicketd"
+doc = false
