@@ -25,7 +25,7 @@ libc = "0.2.135"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "23fdf5856f10f23e2d26865d2d7e2d3bc537bca3", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "e6e197a08c086cfa4cdb2e58bf71c580f89229ac", features = [ "api", "std" ] }
 oximeter = { version = "0.1.0", path = "../oximeter/oximeter" }
 oximeter-producer = { version = "0.1.0", path = "../oximeter/producer" }
 p256 = "0.9.0"
@@ -59,7 +59,7 @@ vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
 zone = "0.1"
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "23fdf5856f10f23e2d26865d2d7e2d3bc537bca3" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "e6e197a08c086cfa4cdb2e58bf71c580f89229ac" }
 
 [dev-dependencies]
 expectorate = "1.0.5"
