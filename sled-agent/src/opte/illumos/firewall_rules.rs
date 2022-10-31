@@ -8,6 +8,7 @@ use crate::opte::Vni;
 use crate::params::VpcFirewallRule;
 use macaddr::MacAddr6;
 use omicron_common::api::external::IpNet;
+use omicron_common::api::external::VpcAddress;
 use omicron_common::api::external::VpcFirewallRuleAction;
 use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
@@ -62,15 +63,22 @@ impl FromVpcFirewallRule for VpcFirewallRule {
                 hosts
                     .iter()
                     .map(|host| match host {
-                        IpNet::V4(net) if net.prefix() == 32 => {
+                        VpcAddress::Ip(IpNet::V4(net))
+                            if net.prefix() == 32 =>
+                        {
                             Address::Ip(net.ip().into())
                         }
-                        IpNet::V4(net) => Address::Subnet(Ipv4Cidr::new(
-                            net.ip().into(),
-                            Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                        )),
-                        IpNet::V6(_net) => {
+                        VpcAddress::Ip(IpNet::V4(net)) => {
+                            Address::Subnet(Ipv4Cidr::new(
+                                net.ip().into(),
+                                Ipv4PrefixLen::new(net.prefix()).unwrap(),
+                            ))
+                        }
+                        VpcAddress::Ip(IpNet::V6(_net)) => {
                             todo!("IPv6 host filters")
+                        }
+                        VpcAddress::Vpc(vni) => {
+                            Address::Vni(Vni::new(u32::from(*vni)).unwrap())
                         }
                     })
                     .collect::<Vec<Address>>()

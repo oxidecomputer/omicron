@@ -1191,6 +1191,15 @@ impl From<Ipv6Addr> for IpNet {
     }
 }
 
+impl From<IpAddr> for IpNet {
+    fn from(n: IpAddr) -> IpNet {
+        match n {
+            IpAddr::V4(v4) => IpNet::from(v4),
+            IpAddr::V6(v6) => IpNet::from(v6),
+        }
+    }
+}
+
 impl std::fmt::Display for IpNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1267,6 +1276,15 @@ impl JsonSchema for IpNet {
         }
         .into()
     }
+}
+
+/// A `VpcAddress` represents either an explicit IP network (v4 or v6)
+/// or an entire VPC (identified by its VNI).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum VpcAddress {
+    Ip(IpNet),
+    Vpc(Vni),
 }
 
 /// Insert another level of schema indirection in order to provide an

@@ -1736,6 +1736,47 @@
           }
         ]
       },
+      "VpcAddress": {
+        "description": "A `VpcAddress` represents either an explicit IP network (v4 or v6) or an entire VPC (identified by its VNI).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Vni"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "VpcFirewallRule": {
         "description": "VPC firewall rule after object name resolution has been performed by Nexus",
         "type": "object",
@@ -1750,7 +1791,7 @@
             "nullable": true,
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/VpcAddress"
             }
           },
           "filter_ports": {

@@ -206,6 +206,12 @@ impl From<omicron_common::api::external::Vni> for types::Vni {
     }
 }
 
+impl From<types::Vni> for omicron_common::api::external::Vni {
+    fn from(s: types::Vni) -> Self {
+        Self::try_from(s.0 as u32).unwrap()
+    }
+}
+
 impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     fn from(s: omicron_common::api::external::MacAddr) -> Self {
         Self::try_from(s.0.to_string())
@@ -309,6 +315,16 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
 
         match s {
             UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcAddress> for types::VpcAddress {
+    fn from(s: omicron_common::api::external::VpcAddress) -> Self {
+        use omicron_common::api::external::VpcAddress::*;
+        match s {
+            Ip(net) => Self::Ip(net.into()),
+            Vpc(vni) => Self::Vpc(vni.into()),
         }
     }
 }
