@@ -234,33 +234,6 @@ fn is_default_firewall_rules(
         },
         VpcFirewallRule {
             identity: IdentityMetadata {
-                id: "dd166833-cd79-4279-beb0-186cadb982ce".parse().unwrap(),
-                name: "allow-rdp".parse().unwrap(),
-                description:
-                    "allow inbound TCP connections on port 3389 from anywhere"
-                        .to_string(),
-                time_created: "2021-11-16T00:24:06.027404Z".parse().unwrap(),
-                time_modified: "2021-11-16T00:24:06.027404Z".parse().unwrap(),
-            },
-            status: VpcFirewallRuleStatus::Enabled,
-            direction: VpcFirewallRuleDirection::Inbound,
-            targets: vec![VpcFirewallRuleTarget::Vpc(
-                vpc_name.parse().unwrap(),
-            )],
-            filters: VpcFirewallRuleFilter {
-                hosts: None,
-                protocols: Some(vec![VpcFirewallRuleProtocol::Tcp]),
-                ports: Some(vec![L4PortRange {
-                    first: L4Port::try_from(3389).unwrap(),
-                    last: L4Port::try_from(3389).unwrap(),
-                }]),
-            },
-            action: VpcFirewallRuleAction::Allow,
-            priority: VpcFirewallRulePriority(65534),
-            vpc_id: Uuid::new_v4(),
-        },
-        VpcFirewallRule {
-            identity: IdentityMetadata {
                 id: "4cb76726-4cb6-4bc2-8d32-71c36e3881d4".parse().unwrap(),
                 name: "allow-ssh".parse().unwrap(),
                 description:
