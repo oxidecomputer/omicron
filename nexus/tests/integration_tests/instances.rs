@@ -1990,6 +1990,135 @@ async fn test_instance_create_attach_disks(
     }
 }
 
+#[nexus_test]
+async fn test_instance_create_attach_disks_undo(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    const POOL_NAME: &str = "p0";
+    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
+    const PROJECT_NAME: &str = "bit-barrel";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata2")
+        .await;
+    let faulted_disk =
+        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata3")
+            .await;
+
+    let url_project_disks = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+
+    // fault probablydata3
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+    assert!(nexus
+        .set_disk_as_faulted(&faulted_disk.identity.id)
+        .await
+        .unwrap());
+
+    // Assert FAULTED
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 2);
+
+    for (i, disk) in disks.iter().enumerate() {
+        if i == 0 {
+            assert_eq!(disk.state, DiskState::Detached);
+        } else {
+            assert_eq!(disk.state, DiskState::Faulted);
+        }
+    }
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nfs")).unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("nfs"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![
+            params::InstanceDiskAttachment::Create(params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from(String::from("probablydata")).unwrap(),
+                    description: String::from("probably data"),
+                },
+                size: ByteCount::from_gibibytes_u32(5),
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            }),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata2"))
+                        .unwrap(),
+                },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata3"))
+                        .unwrap(),
+                },
+            ),
+        ],
+        start: true,
+    };
+
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::BAD_REQUEST));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to fail!");
+
+    // Assert disks are created and attached
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 2);
+
+    for (i, disk) in disks.iter().enumerate() {
+        if i == 0 {
+            assert_eq!(disk.state, DiskState::Detached);
+        } else {
+            assert_eq!(disk.state, DiskState::Faulted);
+        }
+    }
+}
+
 // Test that 8 disks is supported
 #[nexus_test]
 async fn test_attach_eight_disks_to_instance(
