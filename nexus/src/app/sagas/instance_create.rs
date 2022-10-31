@@ -319,7 +319,7 @@ impl NexusSaga for SagaInstanceCreate {
             let params = DiskAttachParams {
                 serialized_authn: params.serialized_authn.clone(),
                 project_id: params.project_id,
-                instance_id: instance_id.clone(),
+                instance_id,
                 attach_params: disk_attach.clone(),
             };
             subsaga_append(
