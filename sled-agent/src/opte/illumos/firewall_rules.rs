@@ -24,38 +24,38 @@ use oxide_vpc::api::ProtoFilter;
 use oxide_vpc::api::Protocol;
 
 trait FromVpcFirewallRule {
-    fn action(self: &Self) -> Action;
-    fn direction(self: &Self) -> Direction;
-    fn disabled(self: &Self) -> bool;
-    fn hosts(self: &Self) -> Vec<Address>;
-    fn ports(self: &Self) -> Ports;
-    fn priority(self: &Self) -> u16;
-    fn protos(self: &Self) -> Vec<ProtoFilter>;
+    fn action(&self) -> Action;
+    fn direction(&self) -> Direction;
+    fn disabled(&self) -> bool;
+    fn hosts(&self) -> Vec<Address>;
+    fn ports(&self) -> Ports;
+    fn priority(&self) -> u16;
+    fn protos(&self) -> Vec<ProtoFilter>;
 }
 
 impl FromVpcFirewallRule for VpcFirewallRule {
-    fn action(self: &Self) -> Action {
+    fn action(&self) -> Action {
         match self.action {
             VpcFirewallRuleAction::Allow => Action::Allow,
             VpcFirewallRuleAction::Deny => Action::Deny,
         }
     }
 
-    fn direction(self: &Self) -> Direction {
+    fn direction(&self) -> Direction {
         match self.direction {
             VpcFirewallRuleDirection::Inbound => Direction::In,
             VpcFirewallRuleDirection::Outbound => Direction::Out,
         }
     }
 
-    fn disabled(self: &Self) -> bool {
+    fn disabled(&self) -> bool {
         match self.status {
             VpcFirewallRuleStatus::Disabled => false,
             VpcFirewallRuleStatus::Enabled => true,
         }
     }
 
-    fn hosts(self: &Self) -> Vec<Address> {
+    fn hosts(&self) -> Vec<Address> {
         self.filter_hosts.as_ref().map_or_else(
             || vec![Address::Any],
             |hosts| {
@@ -78,7 +78,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
         )
     }
 
-    fn ports(self: &Self) -> Ports {
+    fn ports(&self) -> Ports {
         match self.filter_ports {
             Some(ref ports) if ports.len() > 0 => Ports::PortList(
                 ports
@@ -93,11 +93,11 @@ impl FromVpcFirewallRule for VpcFirewallRule {
         }
     }
 
-    fn priority(self: &Self) -> u16 {
+    fn priority(&self) -> u16 {
         self.priority.0
     }
 
-    fn protos(self: &Self) -> Vec<ProtoFilter> {
+    fn protos(&self) -> Vec<ProtoFilter> {
         self.filter_protocols.as_ref().map_or_else(
             || vec![ProtoFilter::Any],
             |protos| {
@@ -125,6 +125,7 @@ pub fn opte_firewall_rules(
     vni: &Vni,
     mac: &MacAddr6,
 ) -> Vec<FirewallRule> {
+    #[allow(clippy::map_flatten)]
     rules
         .iter()
         .filter(|rule| rule.disabled())
@@ -154,8 +155,8 @@ pub fn opte_firewall_rules(
                             filters: {
                                 let mut filters = Filters::new();
                                 filters
-                                    .set_hosts(hosts.clone())
-                                    .set_protocol(proto.clone())
+                                    .set_hosts(*hosts)
+                                    .set_protocol(*proto)
                                     .set_ports(ports.clone());
                                 filters
                             },

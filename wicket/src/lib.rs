@@ -25,13 +25,13 @@ use std::io::{stdout, Stdout};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
-use tui::layout::Rect;
 use tui::Terminal;
 
 pub(crate) mod defaults;
 pub(crate) mod inventory;
 mod mgs;
 mod screens;
+pub mod update;
 mod widgets;
 
 use inventory::{Component, ComponentId, Inventory, PowerState};
@@ -165,9 +165,7 @@ impl Wizard {
     fn mainloop(&mut self) -> anyhow::Result<()> {
         let rect = self.terminal.get_frame().size();
         // Size the rack for the initial draw
-        self.state
-            .rack_state
-            .resize(&self.terminal.get_frame().size(), &MARGIN);
+        self.state.rack_state.resize(rect.width, rect.height, &MARGIN);
 
         // Draw the initial screen
         let screen = self.screens.get_mut(self.active_screen);
@@ -195,8 +193,7 @@ impl Wizard {
                     self.handle_actions(actions)?;
                 }
                 Event::Term(TermEvent::Resize(width, height)) => {
-                    let rect = Rect { x: 0, y: 0, width, height };
-                    self.state.rack_state.resize(&rect, &MARGIN);
+                    self.state.rack_state.resize(width, height, &MARGIN);
                     screen.resize(&mut self.state, width, height);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
