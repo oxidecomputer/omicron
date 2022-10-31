@@ -1888,7 +1888,7 @@
           },
           "port": {
             "nullable": true,
-            "description": "Port on whcih a service is listening.",
+            "description": "Port on which a service is listening.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
