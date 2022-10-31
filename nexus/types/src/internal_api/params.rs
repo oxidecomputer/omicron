@@ -172,7 +172,7 @@ pub struct ServicePutRequest {
     /// Address on which a service is responding to requests.
     pub address: Option<Ipv6Addr>,
 
-    /// Port on whcih a service is listening.
+    /// Port on which a service is listening.
     pub port: Option<u16>,
 
     /// Type of service being inserted.
