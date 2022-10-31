@@ -278,7 +278,7 @@ impl PortManager {
                 snat,
                 external_ips: external_ip,
             }),
-            private_mac: MacAddr::from(mac.into_array()),
+            guest_mac: MacAddr::from(mac.into_array()),
             gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
             phys_ip: self.inner.underlay_ip.into(),

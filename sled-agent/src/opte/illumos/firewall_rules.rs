@@ -12,10 +12,10 @@ use omicron_common::api::external::VpcFirewallRuleAction;
 use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
 use omicron_common::api::external::VpcFirewallRuleStatus;
-use oxide_vpc::api::Action;
 use oxide_vpc::api::Address;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::Filters;
+use oxide_vpc::api::FirewallAction;
 use oxide_vpc::api::FirewallRule;
 use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::Ipv4PrefixLen;
@@ -24,7 +24,7 @@ use oxide_vpc::api::ProtoFilter;
 use oxide_vpc::api::Protocol;
 
 trait FromVpcFirewallRule {
-    fn action(&self) -> Action;
+    fn action(&self) -> FirewallAction;
     fn direction(&self) -> Direction;
     fn disabled(&self) -> bool;
     fn hosts(&self) -> Vec<Address>;
@@ -34,10 +34,10 @@ trait FromVpcFirewallRule {
 }
 
 impl FromVpcFirewallRule for VpcFirewallRule {
-    fn action(&self) -> Action {
+    fn action(&self) -> FirewallAction {
         match self.action {
-            VpcFirewallRuleAction::Allow => Action::Allow,
-            VpcFirewallRuleAction::Deny => Action::Deny,
+            VpcFirewallRuleAction::Allow => FirewallAction::Allow,
+            VpcFirewallRuleAction::Deny => FirewallAction::Deny,
         }
     }
 
