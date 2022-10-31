@@ -43,19 +43,17 @@ pub const MAX_PASSWORD_LENGTH: usize = 512;
 
 // Minimum expected time for each password hash verification
 //
-// We choose this time from first principles.  Then we choose Argon2 parameters
-// (above) to meet this constraint.
-//
-// The longer this time, the more resources are required to brute-force a user's
-// password (so it's more secure).  But the longer this time, the more
-// server-side resources are required for each login attempt and the more time
-// an end user waits while logging in.
-//
-// Note that this constant describes what we believe will result from the above
-// Argon2 parameters.  This constant is only used to verify the behavior.  It
-// doesn't affect the behavior of the hashing or verification in any way.
+// This is not quite the same as the _target_ password verification time on
+// production hardware.  Choosing that is a balance between more attacker
+// resources required to brute-force a user's password (so it's more secure) vs.
+// more production resources required for each login (so more expensive) and
+// more time an end user waits while logging in (worse user experience).
+// The value specified below does not _determine_ how long password hashing
+// takes.  It's only used in automated tests to _verify_ that password hashing
+// takes as long as we think it should on whatever machine the test suite is
+// running on.
 pub const MIN_EXPECTED_PASSWORD_VERIFY_TIME: std::time::Duration =
-    std::time::Duration::from_secs(1);
+    std::time::Duration::from_millis(900);
 
 /// Returns an [`Argon2`] context suitable for hashing passwords the same way
 /// we do for external authentication
