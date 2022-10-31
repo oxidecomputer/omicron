@@ -22,7 +22,7 @@
     Call "start", joining with other crdb instances
   -->
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/cockroachdb/bin/cockroach start-single-node --insecure --listen-addr=%{config/listen_addr} --store=%{config/store} &amp;'
+    exec='/var/svc/manifest/site/cockroachdb/method_script.sh'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
