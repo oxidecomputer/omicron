@@ -67,6 +67,7 @@ struct NetParams {
 struct DiskAttachParams {
     serialized_authn: authn::saga::Serialized,
     project_id: Uuid,
+    instance_id: Uuid,
     attach_params: InstanceDiskAttachment,
 }
 
@@ -318,6 +319,7 @@ impl NexusSaga for SagaInstanceCreate {
             let params = DiskAttachParams {
                 serialized_authn: params.serialized_authn.clone(),
                 project_id: params.project_id,
+                instance_id: instance_id.clone(),
                 attach_params: disk_attach.clone(),
             };
             subsaga_append(
@@ -738,7 +740,7 @@ async fn ensure_instance_disk_attach_state(
     let params = sagactx.saga_params::<DiskAttachParams>()?;
     let datastore = osagactx.datastore();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = params.instance_id;
     let project_id = params.project_id;
 
     let disk_name = match params.attach_params {
