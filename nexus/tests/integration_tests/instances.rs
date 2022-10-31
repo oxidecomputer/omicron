@@ -1907,15 +1907,9 @@ async fn test_instance_create_attach_disks(
 ) {
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata2")
         .await;
 
@@ -1925,7 +1919,7 @@ async fn test_instance_create_attach_disks(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(3),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1936,7 +1930,7 @@ async fn test_instance_create_attach_disks(
                     name: Name::try_from(String::from("probablydata")).unwrap(),
                     description: String::from("probably data"),
                 },
-                size: ByteCount::from_gibibytes_u32(10),
+                size: ByteCount::from_gibibytes_u32(4),
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(512).unwrap(),
                 },
@@ -1996,15 +1990,9 @@ async fn test_instance_create_attach_disks_undo(
 ) {
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata2")
         .await;
     let faulted_disk =
@@ -2061,7 +2049,7 @@ async fn test_instance_create_attach_disks_undo(
                     name: Name::try_from(String::from("probablydata")).unwrap(),
                     description: String::from("probably data"),
                 },
-                size: ByteCount::from_gibibytes_u32(5),
+                size: ByteCount::from_gibibytes_u32(4),
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(512).unwrap(),
                 },
