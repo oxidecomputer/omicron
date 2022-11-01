@@ -16,6 +16,7 @@ mod instances;
 mod ip_pools;
 mod organizations;
 mod oximeter;
+mod password_login;
 mod projects;
 mod rack;
 mod role_assignments;

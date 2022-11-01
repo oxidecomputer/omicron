@@ -357,6 +357,14 @@ CREATE UNIQUE INDEX ON omicron.public.silo_user (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TABLE omicron.public.silo_user_password_hash (
+    silo_user_id UUID NOT NULL,
+    hash TEXT NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY(silo_user_id)
+);
+
 /*
  * Silo groups
  */

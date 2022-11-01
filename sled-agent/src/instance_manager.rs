@@ -300,7 +300,7 @@ mod test {
             source_nat: SourceNatConfig {
                 ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
                 first_port: 0,
-                last_port: 1 << 14 - 1,
+                last_port: 1 << (14 - 1),
             },
             external_ips: vec![],
             firewall_rules: vec![],

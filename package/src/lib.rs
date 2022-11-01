@@ -68,7 +68,7 @@ pub enum DeployCommand {
     /// to ensure that we are not swapping packages underneath running services,
     /// which may result in unexpected behavior.
     /// The "uninstall before unpack" behavior can be disabled by setting
-    /// the environment variable OMICRON_NO_INSTALL.
+    /// the environment variable OMICRON_NO_UNINSTALL.
     ///
     /// `unpack` does not actually start any services, but it prepares services
     /// to be launched with the `activate` command.
