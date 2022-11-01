@@ -3308,7 +3308,7 @@ dependencies = [
  "oximeter-producer",
  "parse-display",
  "pq-sys",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704)",
+ "propolis-client",
  "rand 0.8.5",
  "ref-cast",
  "regex",
@@ -3406,7 +3406,7 @@ dependencies = [
  "p256",
  "percent-encoding",
  "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a)",
+ "propolis-client",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -4436,33 +4436,12 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a#9da9cea30adfcce6d8185d7060a20f55df00a72a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e58937fea67aca6bc2d37a3cc50a72291328ae0e#e58937fea67aca6bc2d37a3cc50a72291328ae0e"
 dependencies = [
  "base64",
  "crucible-client-types",
  "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a)",
- "rand 0.8.5",
- "reqwest",
- "ring",
- "schemars",
- "serde",
- "serde_json",
- "slog",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "propolis-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704#da3cfc26e4a6239810e0c7904aefe68443627704"
-dependencies = [
- "base64",
- "crucible-client-types",
- "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704)",
+ "propolis_types",
  "rand 0.8.5",
  "reqwest",
  "ring",
@@ -4478,15 +4457,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a#9da9cea30adfcce6d8185d7060a20f55df00a72a"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "propolis_types"
-version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704#da3cfc26e4a6239810e0c7904aefe68443627704"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e58937fea67aca6bc2d37a3cc50a72291328ae0e#e58937fea67aca6bc2d37a3cc50a72291328ae0e"
 dependencies = [
  "serde",
 ]
