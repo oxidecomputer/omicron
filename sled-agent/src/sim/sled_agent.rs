@@ -22,7 +22,7 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use propolis_client::api::VolumeConstructionRequest;
+use crucible_client_types::VolumeConstructionRequest;
 
 use super::collection::SimCollection;
 use super::config::Config;

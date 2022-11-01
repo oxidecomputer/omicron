@@ -43,6 +43,7 @@ instance_network_interface_view          /organizations/{organization_name}/proj
 instance_network_interface_view_by_id    /by-id/network-interfaces/{id}
 instance_reboot                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
 instance_serial_console                  /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console
+instance_serial_console_stream           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream
 instance_start                           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
 instance_stop                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
@@ -50,6 +51,7 @@ instance_view_by_id                      /by-id/instances/{id}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
+login_local                              /login/{silo_name}/local
 login_saml                               /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
@@ -128,6 +130,7 @@ ip_pool_view                             /system/ip-pools/{pool_name}
 ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
 local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
 local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
+local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
 saga_list                                /system/sagas

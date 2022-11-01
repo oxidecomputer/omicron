@@ -243,13 +243,13 @@ resource SiloUser {
 	# of the only areas of Silo configuration that Fleet Administrators have
 	# permissions on.
 	relations = { parent_silo: Silo, parent_fleet: Fleet };
-	"list_children" if "viewer" on "parent_silo";
-	"read" if "viewer" on "parent_silo";
+	"list_children" if "read" on "parent_silo";
+	"read" if "read" on "parent_silo";
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
-	"list_children" if "admin" on "parent_fleet";
+	"list_children" if "read" on "parent_fleet";
+	"read" if "read" on "parent_fleet";
 	"modify" if "admin" on "parent_fleet";
-	"read" if "admin" on "parent_fleet";
 	"create_child" if "admin" on "parent_fleet";
 }
 has_relation(silo: Silo, "parent_silo", user: SiloUser)
@@ -273,8 +273,8 @@ resource SiloGroup {
 	];
 
 	relations = { parent_silo: Silo };
-	"list_children" if "viewer" on "parent_silo";
-	"read" if "viewer" on "parent_silo";
+	"list_children" if "read" on "parent_silo";
+	"read" if "read" on "parent_silo";
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
 }

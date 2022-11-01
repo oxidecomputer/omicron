@@ -102,7 +102,8 @@ pub struct InstanceHardware {
     /// provided to an instance to allow inbound connectivity.
     pub external_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<VpcFirewallRule>,
-    pub disks: Vec<propolis_client::api::DiskRequest>,
+    // TODO: replace `propolis_client::handmade::*` with locally-modeled request type
+    pub disks: Vec<propolis_client::handmade::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }
 

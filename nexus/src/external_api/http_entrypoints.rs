@@ -20,7 +20,6 @@ use crate::db;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
@@ -37,6 +36,9 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
+use dropshot::{
+    channel, endpoint, WebsocketChannelResult, WebsocketConnection,
+};
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
@@ -142,6 +144,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_start)?;
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
+        api.register(instance_serial_console_stream)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -237,6 +240,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(local_idp_user_create)?;
         api.register(local_idp_user_delete)?;
+        api.register(local_idp_user_set_password)?;
 
         api.register(system_image_list)?;
         api.register(system_image_create)?;
@@ -253,6 +257,7 @@ pub fn external_api() -> NexusApiDescription {
 
         // Console API operations
         api.register(console_api::login_begin)?;
+        api.register(console_api::login_local)?;
         api.register(console_api::login_spoof_begin)?;
         api.register(console_api::login_spoof)?;
         api.register(console_api::login_saml_begin)?;
@@ -865,6 +870,38 @@ async fn local_idp_user_delete(
             )
             .await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set or invalidate a user's password
+///
+/// Passwords can only be updated for users in Silos with identity mode
+/// `LocalOnly`.
+#[endpoint {
+    method = POST,
+    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
+    tags = ["system"],
+}]
+async fn local_idp_user_set_password(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+    update: TypedBody<params::UserPassword>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .local_idp_user_set_password(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+                update.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2292,6 +2329,36 @@ async fn instance_serial_console(
         Ok(HttpResponseOk(data))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Connect to an instance's serial console
+#[channel {
+    protocol = WEBSOCKETS,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream",
+    tags = ["instances"],
+}]
+async fn instance_serial_console_stream(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    conn: WebsocketConnection,
+    path_params: Path<InstancePathParam>,
+) -> WebsocketChannelResult {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let opctx = OpContext::for_external_api(&rqctx).await?;
+    nexus
+        .instance_serial_console_stream(
+            &opctx,
+            conn,
+            organization_name,
+            project_name,
+            instance_name,
+        )
+        .await?;
+    Ok(())
 }
 
 /// List an instance's disks

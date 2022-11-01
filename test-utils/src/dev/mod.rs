@@ -139,7 +139,9 @@ async fn setup_database(
     }
 
     info!(&log, "cockroach command line: {}", starter.cmdline());
-    let database = starter.start().await.unwrap();
+    let database = starter.start().await.unwrap_or_else(|error| {
+        panic!("failed to start CockroachDB: {:#}", error);
+    });
     info!(&log, "cockroach pid: {}", database.pid());
     let db_url = database.pg_config();
     info!(&log, "cockroach listen URL: {}", db_url);

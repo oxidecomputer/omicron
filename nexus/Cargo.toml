@@ -10,7 +10,7 @@ path = "../rpaths"
 [dependencies]
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.56"
+async-trait = "0.1.58"
 base64 = "0.13.1"
 bb8 = "0.8.0"
 clap = { version = "4.0", features = ["derive"] }
@@ -47,6 +47,7 @@ oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.6.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "da3cfc26e4a6239810e0c7904aefe68443627704", features = [ "generated" ] }
 rand = "0.8.5"
 ref-cast = "1.0"
 reqwest = { version = "0.11.12", features = [ "json" ] }
@@ -60,6 +61,7 @@ slog-dtrace = "0.2"
 steno = { git = "https://github.com/oxidecomputer/steno", branch = "node-access" }
 tempfile = "3.3"
 thiserror = "1.0"
+tokio-tungstenite = "0.17.2"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.1"
@@ -68,6 +70,7 @@ authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
 nexus-defaults = { path = "defaults" }
 nexus-db-model = { path = "db-model" }
+nexus-passwords = { path = "passwords" }
 nexus-types = { path = "types" }
 
 [dependencies.chrono]
