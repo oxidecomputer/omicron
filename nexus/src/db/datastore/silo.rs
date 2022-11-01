@@ -205,6 +205,7 @@ impl DataStore {
         use db::schema::silo_group;
         use db::schema::silo_group_membership;
         use db::schema::silo_user;
+        use db::schema::silo_user_password_hash;
 
         // Make sure there are no organizations present within this silo.
         let id = authz_silo.id();
@@ -251,10 +252,30 @@ impl DataStore {
 
         info!(opctx.log, "deleted silo {}", id);
 
-        // If silo deletion succeeded, delete all silo users
         // TODO-correctness This needs to happen in a saga or some other
         // mechanism that ensures it happens even if we crash at this point.
         // TODO-scalability This needs to happen in batches
+        // If silo deletion succeeded, delete all silo users and password hashes
+        let updated_rows = diesel::delete(
+            silo_user_password_hash::dsl::silo_user_password_hash,
+        )
+        .filter(
+            silo_user_password_hash::dsl::silo_user_id.eq_any(
+                silo_user::dsl::silo_user
+                    .filter(silo_user::dsl::silo_id.eq(id))
+                    .filter(silo_user::dsl::time_deleted.is_null())
+                    .select(silo_user::dsl::id),
+            ),
+        )
+        .execute_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+
+        debug!(
+            opctx.log,
+            "deleted {} password hashes for silo {}", updated_rows, id
+        );
+
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
             .filter(silo_user::dsl::silo_id.eq(id))
             .filter(silo_user::dsl::time_deleted.is_null())

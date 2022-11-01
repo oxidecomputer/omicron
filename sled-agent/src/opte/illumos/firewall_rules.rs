@@ -93,11 +93,11 @@ impl FromVpcFirewallRule for VpcFirewallRule {
         }
     }
 
-    fn priority(self: &Self) -> u16 {
+    fn priority(&self) -> u16 {
         self.priority.0
     }
 
-    fn protos(self: &Self) -> Vec<ProtoFilter> {
+    fn protos(&self) -> Vec<ProtoFilter> {
         self.filter_protocols.as_ref().map_or_else(
             || vec![ProtoFilter::Any],
             |protos| {

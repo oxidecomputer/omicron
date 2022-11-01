@@ -198,6 +198,7 @@ impl Drop for RunningState {
 
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
+    addr: SocketAddr,
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
     port_tickets: Option<Vec<PortTicket>>,
@@ -312,7 +313,7 @@ impl InstanceInner {
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { client, running_zone, port_tickets } = setup;
+        let PropolisSetup { addr, client, running_zone, port_tickets } = setup;
 
         let nics = running_zone
             .opte_ports()
@@ -358,7 +359,7 @@ impl InstanceInner {
 
         // Monitor propolis for state changes in the background.
         let monitor_task = Some(tokio::task::spawn(async move {
-            let r = instance.monitor_state_task().await;
+            let r = instance.monitor_state_task(addr).await;
             let log = &instance.inner.lock().await.log;
             match r {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
@@ -704,6 +705,7 @@ impl Instance {
         wait_for_http_server(&inner.log, &client).await?;
 
         Ok(PropolisSetup {
+            addr: server_addr,
             client,
             running_zone,
             port_tickets: Some(port_tickets),
@@ -759,16 +761,14 @@ impl Instance {
     // Monitors propolis until explicitly told to disconnect.
     //
     // Intended to be spawned in a tokio task within [`Instance::start`].
-    async fn monitor_state_task(&self) -> Result<(), Error> {
-        // Grab the UUID and Propolis Client before we start looping, so we
-        // don't need to contend the lock to access them in steady state.
-        //
-        // They aren't modified after being initialized, so it's fine to grab
-        // a copy.
-        let client = {
-            let inner = self.inner.lock().await;
-            inner.running_state.as_ref().unwrap().client.clone()
-        };
+    async fn monitor_state_task(&self, addr: SocketAddr) -> Result<(), Error> {
+        // We use a custom client builder here because the default progenitor
+        // one has a timeout of 15s but we want to be able to wait indefinitely.
+        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
+        let client = PropolisClient::new_with_client(
+            &format!("http://{}", addr),
+            reqwest_client,
+        );
 
         let mut gen = 0;
         loop {
@@ -940,10 +940,8 @@ mod test {
     async fn transition_before_start() {
         let logctx = test_setup_log("transition_before_start");
         let log = &logctx.log;
-        let vnic_allocator = VnicAllocator::new(
-            "Test".to_string(),
-            Etherstub("mylink".to_string()),
-        );
+        let vnic_allocator =
+            VnicAllocator::new("Test", Etherstub("mylink".to_string()));
         let underlay_ip = std::net::Ipv6Addr::new(
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
