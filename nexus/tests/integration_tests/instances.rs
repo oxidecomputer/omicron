@@ -1910,8 +1910,13 @@ async fn test_instance_create_attach_disks(
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
     create_org_and_project(&client).await;
-    create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata2")
-        .await;
+    let attachable_disk = create_disk(
+        &client,
+        ORGANIZATION_NAME,
+        PROJECT_NAME,
+        "attachable-disk",
+    )
+    .await;
 
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -1927,8 +1932,10 @@ async fn test_instance_create_attach_disks(
         disks: vec![
             params::InstanceDiskAttachment::Create(params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
-                    name: Name::try_from(String::from("probablydata")).unwrap(),
-                    description: String::from("probably data"),
+                    name: Name::try_from(String::from("created-disk")).unwrap(),
+                    description: String::from(
+                        "A disk that was created by instance create",
+                    ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
                 disk_source: params::DiskSource::Blank {
@@ -1937,8 +1944,7 @@ async fn test_instance_create_attach_disks(
             }),
             params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach {
-                    name: Name::try_from(String::from("probablydata2"))
-                        .unwrap(),
+                    name: attachable_disk.identity.name,
                 },
             ),
         ],
@@ -1993,10 +1999,11 @@ async fn test_instance_create_attach_disks_undo(
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
     create_org_and_project(&client).await;
-    create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata2")
-        .await;
+    let regular_disk =
+        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "a-reg-disk")
+            .await;
     let faulted_disk =
-        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata3")
+        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "faulted-disk")
             .await;
 
     let url_project_disks = format!(
@@ -2004,7 +2011,7 @@ async fn test_instance_create_attach_disks_undo(
         ORGANIZATION_NAME, PROJECT_NAME,
     );
 
-    // fault probablydata3
+    // set `faulted_disk` to the faulted state
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
     assert!(nexus
@@ -2012,7 +2019,7 @@ async fn test_instance_create_attach_disks_undo(
         .await
         .unwrap());
 
-    // Assert FAULTED
+    // Assert regular and faulted disks were created
     let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
         client,
         &url_project_disks,
@@ -2024,13 +2031,11 @@ async fn test_instance_create_attach_disks_undo(
     .all_items;
     assert_eq!(disks.len(), 2);
 
-    for (i, disk) in disks.iter().enumerate() {
-        if i == 0 {
-            assert_eq!(disk.state, DiskState::Detached);
-        } else {
-            assert_eq!(disk.state, DiskState::Faulted);
-        }
-    }
+    assert_eq!(disks[0].identity.id, regular_disk.identity.id);
+    assert_eq!(disks[0].state, DiskState::Detached);
+
+    assert_eq!(disks[1].identity.id, faulted_disk.identity.id);
+    assert_eq!(disks[1].state, DiskState::Faulted);
 
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -2055,16 +2060,10 @@ async fn test_instance_create_attach_disks_undo(
                 },
             }),
             params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
-                    name: Name::try_from(String::from("probablydata2"))
-                        .unwrap(),
-                },
+                params::InstanceDiskAttach { name: regular_disk.identity.name },
             ),
             params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
-                    name: Name::try_from(String::from("probablydata3"))
-                        .unwrap(),
-                },
+                params::InstanceDiskAttach { name: faulted_disk.identity.name },
             ),
         ],
         start: true,
@@ -2086,7 +2085,7 @@ async fn test_instance_create_attach_disks_undo(
         .await
         .expect("Expected instance creation to fail!");
 
-    // Assert disks are created and attached
+    // Assert disks are in the same state as before the instance creation began
     let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
         client,
         &url_project_disks,
@@ -2098,13 +2097,11 @@ async fn test_instance_create_attach_disks_undo(
     .all_items;
     assert_eq!(disks.len(), 2);
 
-    for (i, disk) in disks.iter().enumerate() {
-        if i == 0 {
-            assert_eq!(disk.state, DiskState::Detached);
-        } else {
-            assert_eq!(disk.state, DiskState::Faulted);
-        }
-    }
+    assert_eq!(disks[0].identity.id, regular_disk.identity.id);
+    assert_eq!(disks[0].state, DiskState::Detached);
+
+    assert_eq!(disks[1].identity.id, faulted_disk.identity.id);
+    assert_eq!(disks[1].state, DiskState::Faulted);
 }
 
 // Test that 8 disks is supported
