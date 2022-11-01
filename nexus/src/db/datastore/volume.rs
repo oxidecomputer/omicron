@@ -177,10 +177,10 @@ impl DataStore {
 
         #[derive(Debug, thiserror::Error)]
         enum VolumeGetError {
-            #[error("Error removing read only parent: {0}")]
+            #[error("Error during volume_get: {0}")]
             DieselError(#[from] diesel::result::Error),
 
-            #[error("Serde error removing read only parent: {0}")]
+            #[error("Serde error during volume_get: {0}")]
             SerdeError(#[from] serde_json::Error),
 
             #[error("Updated {0} database rows, expected {1}")]
@@ -230,10 +230,6 @@ impl DataStore {
                                     gen,
                                 } => {
                                     update_needed = true;
-                                    println!(
-                                        "ZZZ Update vid:{} gen:{}",
-                                        id, gen,
-                                    );
                                     new_sv.push(
                                         VolumeConstructionRequest::Region {
                                             block_size,
