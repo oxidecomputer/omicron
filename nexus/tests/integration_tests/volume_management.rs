@@ -27,7 +27,7 @@ use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -1502,6 +1502,289 @@ async fn test_volume_remove_rop_saga_deleted_volume(
             read_only_parent,
         } => {
             assert!(read_only_parent.is_some());
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
+}
+
+#[nexus_test]
+async fn test_volume_get_updates_gen(cptestctx: &ControlPlaneTestContext) {
+    // Verify that a volume_get will update the generation number in the
+    // database when the volume type is Volume with sub_volume Region.
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create a sub_vol with generation 1.
+    let subvol = create_region(block_size, 1, Uuid::new_v4());
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol],
+        read_only_parent: None,
+    };
+
+    // Take our VCR from above and insert into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get 1 but internally the generation number goes
+    // to 2.
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![1]);
+
+    // Request again, we should get 2 now.
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![2]);
+}
+
+#[nexus_test]
+async fn test_volume_get_updates_nothing(cptestctx: &ControlPlaneTestContext) {
+    // Verify that a volume_get will do nothing for a volume that does
+    // not contain a sub_volume with a generation field.
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Build our sub_vol and VCR from parts.
+    let subvol = VolumeConstructionRequest::File {
+        id: volume_id,
+        block_size,
+        path: "/lol".to_string(),
+    };
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol],
+        read_only_parent: None,
+    };
+
+    // Take our VCR from above and insert into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Verify nothing happens to our non generation number volume.
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![0]);
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![0]);
+}
+
+#[nexus_test]
+async fn test_volume_get_updates_multiple_gen(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_get will update the generation number in the
+    // database when the volume type is Volume with multiple sub_volumes of
+    // type Region.
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create two regions.
+    let subvol_one = create_region(block_size, 3, Uuid::new_v4());
+    let subvol_two = create_region(block_size, 8, Uuid::new_v4());
+
+    // Make the volume with our two regions as sub_volumes
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol_one, subvol_two],
+        read_only_parent: None,
+    };
+
+    // Insert the volume into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get our original values, but internally the
+    // generation number goes up.
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![3, 8]);
+
+    // Request again, we should see the incremented values now..
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![4, 9]);
+
+    // Request one more, because why not.
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![5, 10]);
+}
+
+#[nexus_test]
+async fn test_volume_get_updates_sparse_multiple_gen(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_get will update the generation number in the
+    // database when the volume type is Volume with multiple sub_volumes of
+    // type Region and also verify that a non generation sub_volume won't be a
+    // problem
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create three sub_vols.
+    let subvol_one = VolumeConstructionRequest::File {
+        id: Uuid::new_v4(),
+        block_size,
+        path: "/lol".to_string(),
+    };
+    let subvol_two = create_region(block_size, 7, Uuid::new_v4());
+    let subvol_three = create_region(block_size, 9, Uuid::new_v4());
+
+    // Make the volume with our three regions as sub_volumes
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol_one, subvol_two, subvol_three],
+        read_only_parent: None,
+    };
+
+    // Insert the volume into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get our original values, but internally the
+    // generation number goes up.
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![0, 7, 9]);
+
+    // Request again, we should see the incremented values now..
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![0, 8, 10]);
+}
+#[nexus_test]
+async fn test_volume_get_updates_sparse_mid_multiple_gen(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_get will update the generation number in the
+    // database when the volume type is Volume with multiple sub_volumes of
+    // type Region and also verify that a non generation sub_volume in the
+    // middle of the sub_volumes won't be a problem
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create three sub_vols.
+    let subvol_one = create_region(block_size, 7, Uuid::new_v4());
+    let subvol_two = VolumeConstructionRequest::File {
+        id: Uuid::new_v4(),
+        block_size,
+        path: "/lol".to_string(),
+    };
+    let subvol_three = create_region(block_size, 9, Uuid::new_v4());
+
+    // Make the volume with our three sub_volumes
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol_one, subvol_two, subvol_three],
+        read_only_parent: None,
+    };
+
+    // Insert the volume into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get our original values, but internally the
+    // generation number goes up.
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![7, 0, 9]);
+
+    // Request again, we should see the incremented values now..
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![8, 0, 10]);
+}
+
+// Test function that creates a VolumeConstructionRequest::Region With gen,
+// and UUID you passed in.
+fn create_region(
+    block_size: u64,
+    gen: u64,
+    id: Uuid,
+) -> VolumeConstructionRequest {
+    VolumeConstructionRequest::Region {
+        block_size,
+        gen,
+        opts: CrucibleOpts {
+            id,
+            target: Vec::new(),
+            lossy: false,
+            flush_timeout: None,
+            key: None,
+            cert_pem: None,
+            key_pem: None,
+            root_cert_pem: None,
+            control: None,
+            read_only: false,
+        },
+    }
+}
+
+// Test function that expects a very specific type of volume and expects
+// the generation number provided to match the generation number in the
+// sub-volume.  The value 0 in the expected_gen vec tells this test function
+// that index in the list of sub_volumes should not be a Region, and therefore
+// will not have a generation number field.
+fn volume_match_gen(volume: nexus_db_model::Volume, expected_gen: Vec<u64>) {
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(volume.data()).unwrap();
+
+    println!("VCR is: {:?}", vcr);
+    // Volume should have what we started with.
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes,
+            read_only_parent: _,
+        } => {
+            for (index, sv) in sub_volumes.iter().enumerate() {
+                match sv {
+                    VolumeConstructionRequest::Region {
+                        block_size: _,
+                        gen,
+                        opts: _,
+                    } => {
+                        assert_eq!(*gen, expected_gen[index]);
+                    }
+                    _ => {
+                        assert_eq!(expected_gen[index], 0);
+                    }
+                }
+            }
         }
         x => {
             panic!("Unexpected volume type returned: {:?}", x);
