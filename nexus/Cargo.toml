@@ -68,6 +68,7 @@ authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
 nexus-defaults = { path = "defaults" }
 nexus-db-model = { path = "db-model" }
+nexus-passwords = { path = "passwords" }
 nexus-types = { path = "types" }
 
 [dependencies.chrono]

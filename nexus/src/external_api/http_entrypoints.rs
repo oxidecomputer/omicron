@@ -240,6 +240,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(local_idp_user_create)?;
         api.register(local_idp_user_delete)?;
+        api.register(local_idp_user_set_password)?;
 
         api.register(system_image_list)?;
         api.register(system_image_create)?;
@@ -256,6 +257,7 @@ pub fn external_api() -> NexusApiDescription {
 
         // Console API operations
         api.register(console_api::login_begin)?;
+        api.register(console_api::login_local)?;
         api.register(console_api::login_spoof_begin)?;
         api.register(console_api::login_spoof)?;
         api.register(console_api::login_saml_begin)?;
@@ -868,6 +870,38 @@ async fn local_idp_user_delete(
             )
             .await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set or invalidate a user's password
+///
+/// Passwords can only be updated for users in Silos with identity mode
+/// `LocalOnly`.
+#[endpoint {
+    method = POST,
+    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
+    tags = ["system"],
+}]
+async fn local_idp_user_set_password(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+    update: TypedBody<params::UserPassword>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .local_idp_user_set_password(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+                update.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -34,6 +34,7 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::{
     data_page_params_for, PaginatedById, ScanById, ScanParams,
 };
@@ -323,10 +324,7 @@ pub async fn login_saml_begin(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Authenticate a user
-///
-/// Either receive a username and password, or some sort of identity provider
-/// data (like a SAMLResponse). Use these to set the user's session cookie.
+/// Authenticate a user (i.e., log in) via SAML
 #[endpoint {
    method = POST,
    path = "/login/{silo_name}/saml/{provider_name}",
@@ -342,8 +340,9 @@ pub async fn login_saml(
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
 
-        // Use opctx_external_authn because this request will be
-        // unauthenticated.
+        // By definition, this request is not authenticated.  These operations
+        // happen using the Nexus "external authentication" context, which we
+        // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
 
         let (authz_silo, db_silo, identity_provider) =
@@ -384,60 +383,85 @@ pub async fn login_saml(
             )
             .await?;
 
-        if user.is_none() {
-            Err(Error::Unauthenticated {
-                internal_message: String::from(
-                    "no matching user found or credentials were not valid",
-                ),
-            })?;
-        }
-
-        let user = user.unwrap();
-
-        // always create a new console session if the user is POSTing here.
-        let session = nexus.session_create(&opctx, user.id()).await?;
-
-        let next_url = if let Some(relay_state) = &relay_state {
-            if let Some(referer) = &relay_state.referer {
-                referer.clone()
-            } else {
-                "/".to_string()
-            }
-        } else {
-            "/".to_string()
-        };
-
-        debug!(
-            &apictx.log,
-            "successful login to silo {} using provider {}: authenticated \
-            subject {} = user id {}",
-            path_params.silo_name,
-            path_params.provider_name,
-            authenticated_subject.external_id,
-            user.id(),
-        );
-
-        let mut response_with_headers = http_response_see_other(next_url)?;
-
-        {
-            let headers = response_with_headers.headers_mut();
-            headers.append(
-                header::SET_COOKIE,
-                http::HeaderValue::from_str(&session_cookie_header_value(
-                    &session.token,
-                    apictx.session_idle_timeout(),
-                ))
-                .map_err(|error| {
-                    HttpError::for_internal_error(format!(
-                        "unsupported cookie value: {:#}",
-                        error
-                    ))
-                })?,
-            );
-        }
-        Ok(response_with_headers)
+        login_finish(&opctx, apictx, user, relay_state.and_then(|r| r.referer))
+            .await
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginPathParam {
+    pub silo_name: crate::db::model::Name,
+}
+
+/// Authenticate a user (i.e., log in) via username and password
+#[endpoint {
+   method = POST,
+   path = "/login/{silo_name}/local",
+   tags = ["login"],
+}]
+pub async fn login_local(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<LoginPathParam>,
+    credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
+) -> Result<HttpResponseSeeOther, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+        let credentials = credentials.into_inner();
+
+        // By definition, this request is not authenticated.  These operations
+        // happen using the Nexus "external authentication" context, which we
+        // keep specifically for this purpose.
+        let opctx = nexus.opctx_external_authn();
+        let user = nexus
+            .login_local(&opctx, &path_params.silo_name, credentials)
+            .await?;
+        login_finish(&opctx, apictx, user, None).await
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+async fn login_finish(
+    opctx: &OpContext,
+    apictx: &ServerContext,
+    user: Option<crate::db::model::SiloUser>,
+    next_url: Option<String>,
+) -> Result<HttpResponseSeeOther, HttpError> {
+    let nexus = &apictx.nexus;
+
+    if user.is_none() {
+        Err(Error::Unauthenticated {
+            internal_message: String::from(
+                "no matching user found or credentials were not valid",
+            ),
+        })?;
+    }
+
+    let user = user.unwrap();
+    let session = nexus.session_create(&opctx, user.id()).await?;
+    let next_url = next_url.unwrap_or_else(|| "/".to_string());
+
+    let mut response_with_headers = http_response_see_other(next_url)?;
+
+    {
+        let headers = response_with_headers.headers_mut();
+        headers.append(
+            header::SET_COOKIE,
+            http::HeaderValue::from_str(&session_cookie_header_value(
+                &session.token,
+                apictx.session_idle_timeout(),
+            ))
+            .map_err(|error| {
+                HttpError::for_internal_error(format!(
+                    "unsupported cookie value: {:#}",
+                    error
+                ))
+            })?,
+        );
+    }
+    Ok(response_with_headers)
 }
 
 // Log user out of web console by deleting session in both server and browser

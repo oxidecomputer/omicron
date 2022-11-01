@@ -1680,7 +1680,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     // create other users.
     let new_silo_user_id =
         "6922f0b2-9a92-659b-da6b-93ad4955a3a3".parse().unwrap();
-    let _ = nexus
+    let admin_user = nexus
         .silo_user_create(
             silo.identity.id,
             new_silo_user_id,
@@ -1705,7 +1705,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     for caller in
         [AuthnMode::PrivilegedUser, AuthnMode::SiloUser(new_silo_user_id)]
     {
-        let error: dropshot::HttpErrorResponseBody =
+        verify_local_idp_404(
             NexusRequest::expect_failure_with_body(
                 client,
                 StatusCode::NOT_FOUND,
@@ -1713,18 +1713,12 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 "/system/silos/jit/identity-providers/local/users",
                 &params::UserCreate {
                     external_id: params::UserId::from_str("dummy").unwrap(),
+                    password: params::UserPassword::InvalidPassword,
                 },
             )
-            .authn_as(caller)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
-        assert_eq!(
-            error.message,
-            "not found: identity-provider with name \"local\""
-        );
+            .authn_as(caller),
+        )
+        .await;
     }
 
     // Now create another user, as might happen via JIT.
@@ -1737,30 +1731,82 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         "/system/silos/jit/identity-providers/local/users/{}",
         other_user_id
     );
+    let user_url_set_password = format!(
+        "/system/silos/jit/identity-providers/local/users/{}/set-password",
+        other_user_id
+    );
 
     // Neither the "test-privileged" user nor the Silo Admin ought to be able to
-    // remove this user via the local identity provider.
+    // remove this user via the local identity provider, nor set the user's
+    // password.
+    let password = params::Password::from_str("dummy").unwrap();
     for caller in
         [AuthnMode::PrivilegedUser, AuthnMode::SiloUser(new_silo_user_id)]
     {
-        let error: dropshot::HttpErrorResponseBody =
+        verify_local_idp_404(
             NexusRequest::expect_failure(
                 client,
                 StatusCode::NOT_FOUND,
                 Method::DELETE,
                 &user_url_delete,
             )
-            .authn_as(caller)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
-        assert_eq!(
-            error.message,
-            "not found: identity-provider with name \"local\""
-        );
+            .authn_as(caller.clone()),
+        )
+        .await;
+
+        verify_local_idp_404(
+            NexusRequest::expect_failure_with_body(
+                client,
+                StatusCode::NOT_FOUND,
+                Method::POST,
+                &user_url_set_password,
+                &params::UserPassword::Password(password.clone()),
+            )
+            .authn_as(caller.clone()),
+        )
+        .await;
     }
+
+    // One should also not be able to log into this kind of Silo with a username
+    // and password.
+    verify_local_idp_404(NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::POST,
+        "/login/jit/local",
+        &params::UsernamePasswordCredentials {
+            username: params::UserId::from_str(&admin_user.external_id)
+                .unwrap(),
+            password: password.clone(),
+        },
+    ))
+    .await;
+
+    // They should get the same error for a user that does not exist.
+    verify_local_idp_404(NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::POST,
+        "/login/jit/local",
+        &params::UsernamePasswordCredentials {
+            username: params::UserId::from_str("bogus").unwrap(),
+            password: password.clone(),
+        },
+    ))
+    .await;
+}
+
+async fn verify_local_idp_404<'a>(request: NexusRequest<'a>) {
+    let error = request
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<dropshot::HttpErrorResponseBody>()
+        .unwrap();
+    assert_eq!(
+        error.message,
+        "not found: identity-provider with name \"local\""
+    );
 }
 
 /// Tests that SamlJit-specific endpoints are not available in LocalOnly Silos
@@ -1841,7 +1887,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     );
 
     // The SAML login endpoints should not work, either.
-    NexusRequest::expect_failure(
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
@@ -1849,8 +1895,11 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     )
     .execute()
     .await
+    .unwrap()
+    .parsed_body()
     .unwrap();
-    NexusRequest::expect_failure(
+    assert_eq!(error.message, "not found: identity-provider with name \"foo\"");
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
@@ -1858,7 +1907,10 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     )
     .execute()
     .await
+    .unwrap()
+    .parsed_body()
     .unwrap();
+    assert_eq!(error.message, "not found: identity-provider with name \"foo\"");
 }
 
 #[nexus_test]
@@ -1945,6 +1997,7 @@ async fn run_user_tests(
         &url_user_create,
         &params::UserCreate {
             external_id: params::UserId::from_str("a-test-user").unwrap(),
+            password: params::UserPassword::InvalidPassword,
         },
     )
     .authn_as(authn_mode.clone())
