@@ -86,6 +86,11 @@ opt-level = 3
 [profile.dev.package.lalrpop]
 opt-level = 3
 
+# `polar-core` is exercised heavily during the test suite and it's worthwhile to
+# have it built with optimizations.
+[profile.dev.package.polar-core]
+opt-level = 3
+
 # Password hashing is expensive by construction.  Build the hashing libraries
 # with optimizations to significantly speed up tests.
 [profile.dev.package.argon2]
