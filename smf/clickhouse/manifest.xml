@@ -4,7 +4,7 @@
 <service_bundle type='manifest' name='clickhouse'>
 
   <service name='system/illumos/clickhouse' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
   <single_instance />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
@@ -17,13 +17,17 @@
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
     </method_environment>
   </method_context>
+
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse/clickhouse server --log-file /var/tmp/clickhouse-server.log --errorlog-file /var/tmp/clickhouse-server.errlog -- --path %{config/store} --listen_host %{config/listen_host} --http_port 8123 &amp;'
+    exec='/var/svc/manifest/site/clickhouse/method_script.sh'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <propval name='listen_host' type='astring' value='unknown' />
+    <propval name='datalink' type='astring' value='unknown' />
+    <propval name='gateway' type='astring' value='unknown' />
+    <propval name='listen_addr' type='astring' value='unknown' />
+    <propval name='listen_port' type='astring' value='unknown' />
     <propval name='store' type='astring' value='unknown' />
   </property_group>
 

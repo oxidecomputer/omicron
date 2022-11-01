@@ -17,10 +17,6 @@
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
     </method_environment>
   </method_context>
-  <!--
-    TODO(https://github.com/oxidecomputer/omicron/issues/727)
-    Call "start", joining with other crdb instances
-  -->
   <exec_method type='method' name='start'
     exec='/var/svc/manifest/site/cockroachdb/method_script.sh'
     timeout_seconds='0' />

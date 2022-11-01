@@ -397,10 +397,6 @@ impl ServiceManager {
 
             let running_zone = RunningZone::boot(installed_zone).await?;
 
-            // TODO TODO TODO:
-            //
-            // Move the "below" info up above...
-
             for addr in &req.addresses {
                 info!(self.log, "Ensuring address {} exists", addr.to_string());
                 let addr_request =

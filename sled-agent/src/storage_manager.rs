@@ -12,6 +12,7 @@ use crate::illumos::zpool::ZpoolName;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use crate::nexus::LazyNexusClient;
 use crate::params::DatasetKind;
+use crate::profile::*;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -37,12 +38,6 @@ use uuid::Uuid;
 use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use crate::illumos::{zfs::Zfs, zpool::Zpool};
-
-const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
-const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
-
-const CLICKHOUSE_SVC: &str = "svc:/system/illumos/clickhouse";
-const CLICKHOUSE_DEFAULT_SVC: &str = "svc:/system/illumos/clickhouse:default";
 
 const CRUCIBLE_AGENT_SVC: &str = "svc:/oxide/crucible/agent";
 const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
@@ -234,223 +229,96 @@ impl DatasetInfo {
         format!("{}{}_", ZONE_PREFIX, self.name.full())
     }
 
-    async fn start_zone(
+    async fn start_crucible_zone(
         &self,
         log: &Logger,
         zone: &RunningZone,
         address: SocketAddrV6,
-        do_format: bool,
     ) -> Result<(), Error> {
-        match self.kind {
-            DatasetKind::CockroachDb { .. } => {
-                info!(log, "start_zone: Loading CRDB manifest");
-                // Load the CRDB manifest.
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/cockroachdb/manifest.xml",
-                ])?;
+        info!(log, "Initializing Crucible");
 
-                // Set parameters which are passed to the CRDB binary.
-                info!(
-                    log,
-                    "start_zone: setting CRDB's config/listen_addr: {}",
-                    address
-                );
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_SVC,
-                    "setprop",
-                    &format!("config/listen_addr={}", address),
-                ])?;
+        zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "import",
+            "/var/svc/manifest/site/crucible/agent.xml",
+        ])?;
 
-                info!(log, "start_zone: setting CRDB's config/store");
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_SVC,
-                    "setprop",
-                    "config/store=/data",
-                ])?;
-                // TODO(https://github.com/oxidecomputer/omicron/issues/727)
-                //
-                // Set these addresses, use "start" instead of
-                // "start-single-node".
-                info!(log, "start_zone: setting CRDB's config/join_addrs");
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_SVC,
-                    "setprop",
-                    &format!("config/join_addrs={}", "unknown"),
-                ])?;
+        zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "import",
+            "/var/svc/manifest/site/crucible/downstairs.xml",
+        ])?;
 
-                // Refresh the manifest with the new properties we set,
-                // so they become "effective" properties when the service is enabled.
-                info!(log, "start_zone: refreshing manifest");
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_DEFAULT_SVC,
-                    "refresh",
-                ])?;
+        zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            CRUCIBLE_AGENT_SVC,
+            "setprop",
+            &format!("config/listen={}", address),
+        ])?;
 
-                info!(log, "start_zone: enabling CRDB service");
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
-                    "enable",
-                    "-t",
-                    COCKROACH_DEFAULT_SVC,
-                ])?;
+        zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            CRUCIBLE_AGENT_SVC,
+            "setprop",
+            &format!("config/dataset={}", self.name.full()),
+        ])?;
 
-                // Await liveness of the cluster.
-                info!(log, "start_zone: awaiting liveness of CRDB");
-                let check_health = || async {
-                    let http_addr =
-                        SocketAddrV6::new(*address.ip(), 8080, 0, 0);
-                    reqwest::get(format!("http://{}/health?ready=1", http_addr))
-                        .await
-                        .map_err(backoff::BackoffError::transient)
-                };
-                let log_failure = |_, _| {
-                    warn!(log, "cockroachdb not yet alive");
-                };
-                backoff::retry_notify(
-                    backoff::internal_service_policy(),
-                    check_health,
-                    log_failure,
-                )
-                .await
-                .expect("expected an infinite retry loop waiting for crdb");
+        zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            CRUCIBLE_AGENT_SVC,
+            "setprop",
+            &format!("config/uuid={}", Uuid::new_v4()),
+        ])?;
 
-                info!(log, "CRDB is online");
-                // If requested, format the cluster with the initial tables.
-                if do_format {
-                    info!(log, "Formatting CRDB");
-                    zone.run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        &address.to_string(),
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                    ])?;
-                    zone.run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        &address.to_string(),
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                    ])?;
-                    info!(log, "Formatting CRDB - Completed");
-                }
+        // Refresh the manifest with the new properties we set,
+        // so they become "effective" properties when the service is enabled.
+        zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            CRUCIBLE_AGENT_DEFAULT_SVC,
+            "refresh",
+        ])?;
 
-                Ok(())
-            }
-            DatasetKind::Clickhouse { .. } => {
-                info!(log, "Initialiting Clickhouse");
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/clickhouse/manifest.xml",
-                ])?;
+        zone.run_cmd(&[
+            crate::illumos::zone::SVCADM,
+            "enable",
+            "-t",
+            CRUCIBLE_AGENT_DEFAULT_SVC,
+        ])?;
 
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    CLICKHOUSE_SVC,
-                    "setprop",
-                    &format!("config/listen_host={}", address.ip()),
-                ])?;
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    CLICKHOUSE_SVC,
-                    "setprop",
-                    "config/store=/data",
-                ])?;
-
-                // Refresh the manifest with the new properties we set,
-                // so they become "effective" properties when the service is enabled.
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    CLICKHOUSE_DEFAULT_SVC,
-                    "refresh",
-                ])?;
-
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
-                    "enable",
-                    "-t",
-                    CLICKHOUSE_DEFAULT_SVC,
-                ])?;
-
-                Ok(())
-            }
-            DatasetKind::Crucible { .. } => {
-                info!(log, "Initializing Crucible");
-
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/crucible/agent.xml",
-                ])?;
-
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/crucible/downstairs.xml",
-                ])?;
-
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_SVC,
-                    "setprop",
-                    &format!("config/listen={}", address),
-                ])?;
-
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_SVC,
-                    "setprop",
-                    &format!("config/dataset={}", self.name.full()),
-                ])?;
-
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_SVC,
-                    "setprop",
-                    &format!("config/uuid={}", Uuid::new_v4()),
-                ])?;
-
-                // Refresh the manifest with the new properties we set,
-                // so they become "effective" properties when the service is enabled.
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_DEFAULT_SVC,
-                    "refresh",
-                ])?;
-
-                zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
-                    "enable",
-                    "-t",
-                    CRUCIBLE_AGENT_DEFAULT_SVC,
-                ])?;
-
-                Ok(())
-            }
-        }
+        Ok(())
     }
+}
+
+async fn add_profile_to_zone(
+    log: &Logger,
+    installed_zone: &InstalledZone,
+    profile: ProfileBuilder,
+) -> Result<(), Error> {
+
+    info!(log, "Profile for {}:\n{}", installed_zone.name(), profile);
+
+    let profile_path =
+        format!(
+            "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
+            zone_mountpoint = crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
+            zone = installed_zone.name(),
+        );
+
+    std::fs::write(
+        &profile_path,
+        format!("{profile}").as_bytes(),
+    ).map_err(|err| {
+        Error::Io {
+            message: format!("Cannot write to {profile_path}"),
+            err,
+        }
+    })?;
+
+    Ok(())
 }
 
 // Ensures that a zone backing a particular dataset is running.
@@ -492,11 +360,11 @@ async fn ensure_running_zone(
             )
             .await?;
 
-            // TODO: Unwind this; we're just trying to get control over specific
-            // dataset types as we implement this incrementally...
+            // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
+            // Once crucible is added to this match statement, it'll be easier
+            // to deduplicate a fair bit.
             let zone = match dataset_info.kind {
                 DatasetKind::CockroachDb { .. } => {
-                    use super::profile::*;
                     let config = PropertyGroupBuilder::new("config")
                         .add_property("datalink", "astring", installed_zone.get_control_vnic_name())
                         .add_property("gateway", "astring", &underlay_address.to_string())
@@ -509,26 +377,11 @@ async fn ensure_running_zone(
                             ServiceBuilder::new("system/illumos/cockroachdb")
                                 .add_property_group(config)
                         );
-
-                    info!(log, "Profile for CRDB: {}", profile);
-
-                    let profile_path =
-                        format!(
-                            "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
-                            zone_mountpoint = crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
-                            zone = installed_zone.name(),
-                        );
-
-                    std::fs::write(
-                        &profile_path,
-                        format!("{profile}").as_bytes(),
-                    ).map_err(|err| {
-                        Error::Io {
-                            message: format!("Cannot write to {profile_path}"),
-                            err,
-                        }
-                    })?;
-
+                    add_profile_to_zone(
+                        log,
+                        &installed_zone,
+                        profile
+                    ).await?;
                     let zone = RunningZone::boot(installed_zone).await?;
 
                     // Await liveness of the cluster.
@@ -578,7 +431,27 @@ async fn ensure_running_zone(
 
                     zone
                 }
-                _ => {
+                DatasetKind::Clickhouse { .. } => {
+                    let config = PropertyGroupBuilder::new("config")
+                        .add_property("datalink", "astring", installed_zone.get_control_vnic_name())
+                        .add_property("gateway", "astring", &underlay_address.to_string())
+                        .add_property("listen_addr", "astring", &dataset_info.address.ip().to_string())
+                        .add_property("listen_port", "astring", &dataset_info.address.port().to_string())
+                        .add_property("store", "astring", "/data");
+
+                    let profile = ProfileBuilder::new("omicron")
+                        .add_service(
+                            ServiceBuilder::new("system/illumos/clickhouse")
+                                .add_property_group(config)
+                        );
+                    add_profile_to_zone(
+                        log,
+                        &installed_zone,
+                        profile
+                    ).await?;
+                    RunningZone::boot(installed_zone).await?
+                }
+                DatasetKind::Crucible => {
                     let zone = RunningZone::boot(installed_zone).await?;
 
                     zone.ensure_address(address_request).await?;
@@ -589,7 +462,7 @@ async fn ensure_running_zone(
                         .map_err(Error::ZoneCommand)?;
 
                     dataset_info
-                        .start_zone(log, &zone, dataset_info.address, do_format)
+                        .start_crucible_zone(log, &zone, dataset_info.address)
                         .await?;
                     zone
                 }
