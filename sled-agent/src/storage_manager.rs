@@ -232,25 +232,20 @@ async fn add_profile_to_zone(
     installed_zone: &InstalledZone,
     profile: ProfileBuilder,
 ) -> Result<(), Error> {
-
     info!(log, "Profile for {}:\n{}", installed_zone.name(), profile);
 
-    let profile_path =
-        format!(
-            "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
-            zone_mountpoint = crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
-            zone = installed_zone.name(),
-        );
+    let profile_path = format!(
+        "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
+        zone_mountpoint = crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
+        zone = installed_zone.name(),
+    );
 
-    std::fs::write(
-        &profile_path,
-        format!("{profile}").as_bytes(),
-    ).map_err(|err| {
-        Error::Io {
+    std::fs::write(&profile_path, format!("{profile}").as_bytes()).map_err(
+        |err| Error::Io {
             message: format!("Cannot write to {profile_path}"),
             err,
-        }
-    })?;
+        },
+    )?;
 
     Ok(())
 }
@@ -294,35 +289,42 @@ async fn ensure_running_zone(
             )
             .await?;
 
+            let datalink = installed_zone.get_control_vnic_name();
+            let gateway = &underlay_address.to_string();
+            let listen_addr = &dataset_info.address.ip().to_string();
+            let listen_port = &dataset_info.address.port().to_string();
+
             let zone = match dataset_info.kind {
                 DatasetKind::CockroachDb { .. } => {
                     let config = PropertyGroupBuilder::new("config")
-                        .add_property("datalink", "astring", installed_zone.get_control_vnic_name())
-                        .add_property("gateway", "astring", &underlay_address.to_string())
-                        .add_property("listen_addr", "astring", &dataset_info.address.ip().to_string())
-                        .add_property("listen_port", "astring", &dataset_info.address.port().to_string())
+                        .add_property("datalink", "astring", datalink)
+                        .add_property("gateway", "astring", gateway)
+                        .add_property("listen_addr", "astring", listen_addr)
+                        .add_property("listen_port", "astring", listen_port)
                         .add_property("store", "astring", "/data");
 
-                    let profile = ProfileBuilder::new("omicron")
-                        .add_service(
-                            ServiceBuilder::new("system/illumos/cockroachdb")
-                                .add_property_group(config)
-                        );
-                    add_profile_to_zone(
-                        log,
-                        &installed_zone,
-                        profile
-                    ).await?;
+                    let profile = ProfileBuilder::new("omicron").add_service(
+                        ServiceBuilder::new("system/illumos/cockroachdb")
+                            .add_property_group(config),
+                    );
+                    add_profile_to_zone(log, &installed_zone, profile).await?;
                     let zone = RunningZone::boot(installed_zone).await?;
 
                     // Await liveness of the cluster.
                     info!(log, "start_zone: awaiting liveness of CRDB");
                     let check_health = || async {
-                        let http_addr =
-                            SocketAddrV6::new(*dataset_info.address.ip(), 8080, 0, 0);
-                        reqwest::get(format!("http://{}/health?ready=1", http_addr))
-                            .await
-                            .map_err(backoff::BackoffError::transient)
+                        let http_addr = SocketAddrV6::new(
+                            *dataset_info.address.ip(),
+                            8080,
+                            0,
+                            0,
+                        );
+                        reqwest::get(format!(
+                            "http://{}/health?ready=1",
+                            http_addr
+                        ))
+                        .await
+                        .map_err(backoff::BackoffError::transient)
                     };
                     let log_failure = |_, _| {
                         warn!(log, "cockroachdb not yet alive");
@@ -364,44 +366,36 @@ async fn ensure_running_zone(
                 }
                 DatasetKind::Clickhouse { .. } => {
                     let config = PropertyGroupBuilder::new("config")
-                        .add_property("datalink", "astring", installed_zone.get_control_vnic_name())
-                        .add_property("gateway", "astring", &underlay_address.to_string())
-                        .add_property("listen_addr", "astring", &dataset_info.address.ip().to_string())
-                        .add_property("listen_port", "astring", &dataset_info.address.port().to_string())
+                        .add_property("datalink", "astring", datalink)
+                        .add_property("gateway", "astring", gateway)
+                        .add_property("listen_addr", "astring", listen_addr)
+                        .add_property("listen_port", "astring", listen_port)
                         .add_property("store", "astring", "/data");
 
-                    let profile = ProfileBuilder::new("omicron")
-                        .add_service(
-                            ServiceBuilder::new("system/illumos/clickhouse")
-                                .add_property_group(config)
-                        );
-                    add_profile_to_zone(
-                        log,
-                        &installed_zone,
-                        profile
-                    ).await?;
+                    let profile = ProfileBuilder::new("omicron").add_service(
+                        ServiceBuilder::new("system/illumos/clickhouse")
+                            .add_property_group(config),
+                    );
+                    add_profile_to_zone(log, &installed_zone, profile).await?;
                     RunningZone::boot(installed_zone).await?
                 }
                 DatasetKind::Crucible => {
+                    let dataset = &dataset_info.name.full();
+                    let uuid = &Uuid::new_v4().to_string();
                     let config = PropertyGroupBuilder::new("config")
-                        .add_property("datalink", "astring", installed_zone.get_control_vnic_name())
-                        .add_property("gateway", "astring", &underlay_address.to_string())
-                        .add_property("dataset", "astring", &dataset_info.name.full())
-                        .add_property("listen_addr", "astring", &dataset_info.address.ip().to_string())
-                        .add_property("listen_port", "astring", &dataset_info.address.port().to_string())
-                        .add_property("uuid", "astring", &Uuid::new_v4().to_string())
+                        .add_property("datalink", "astring", datalink)
+                        .add_property("gateway", "astring", gateway)
+                        .add_property("dataset", "astring", dataset)
+                        .add_property("listen_addr", "astring", listen_addr)
+                        .add_property("listen_port", "astring", listen_port)
+                        .add_property("uuid", "astring", uuid)
                         .add_property("store", "astring", "/data");
 
-                    let profile = ProfileBuilder::new("omicron")
-                        .add_service(
-                            ServiceBuilder::new("oxide/crucible/agent")
-                                .add_property_group(config)
-                        );
-                    add_profile_to_zone(
-                        log,
-                        &installed_zone,
-                        profile
-                    ).await?;
+                    let profile = ProfileBuilder::new("omicron").add_service(
+                        ServiceBuilder::new("oxide/crucible/agent")
+                            .add_property_group(config),
+                    );
+                    add_profile_to_zone(log, &installed_zone, profile).await?;
                     RunningZone::boot(installed_zone).await?
                 }
             };
