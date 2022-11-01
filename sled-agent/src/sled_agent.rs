@@ -458,7 +458,17 @@ fn delete_addresses_matching_prefixes(
     let mut cmd = Command::new(PFEXEC);
     let cmd = cmd.args(&[IPADM, "show-addr", "-p", "-o", "ADDROBJ"]);
     let output = execute(cmd)?;
-    for addrobj in output.stdout.lines().flatten() {
+
+    // `ipadm show-addr` can return multiple addresses with the same name, but
+    // multiple values. Collecting to a set ensures that only a single name is
+    // used.
+    let addrobjs = output
+        .stdout
+        .lines()
+        .flatten()
+        .collect::<std::collections::HashSet<_>>();
+
+    for addrobj in addrobjs {
         if prefixes.iter().any(|prefix| addrobj.starts_with(prefix)) {
             warn!(
                 log,

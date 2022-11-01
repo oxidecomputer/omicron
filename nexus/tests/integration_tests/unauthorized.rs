@@ -195,6 +195,7 @@ lazy_static! {
             id_routes: vec![
                 &*DEMO_SILO_USER_ID_GET_URL,
                 &*DEMO_SILO_USER_ID_DELETE_URL,
+                &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
         },
         // Create an IP pool
