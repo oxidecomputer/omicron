@@ -39,9 +39,6 @@ use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use crate::illumos::{zfs::Zfs, zpool::Zpool};
 
-const CRUCIBLE_AGENT_SVC: &str = "svc:/oxide/crucible/agent";
-const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     // TODO: We could add the context of "why are we doint this op", maybe?
@@ -228,69 +225,6 @@ impl DatasetInfo {
     fn zone_prefix(&self) -> String {
         format!("{}{}_", ZONE_PREFIX, self.name.full())
     }
-
-    async fn start_crucible_zone(
-        &self,
-        log: &Logger,
-        zone: &RunningZone,
-        address: SocketAddrV6,
-    ) -> Result<(), Error> {
-        info!(log, "Initializing Crucible");
-
-        zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "import",
-            "/var/svc/manifest/site/crucible/agent.xml",
-        ])?;
-
-        zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "import",
-            "/var/svc/manifest/site/crucible/downstairs.xml",
-        ])?;
-
-        zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "-s",
-            CRUCIBLE_AGENT_SVC,
-            "setprop",
-            &format!("config/listen={}", address),
-        ])?;
-
-        zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "-s",
-            CRUCIBLE_AGENT_SVC,
-            "setprop",
-            &format!("config/dataset={}", self.name.full()),
-        ])?;
-
-        zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "-s",
-            CRUCIBLE_AGENT_SVC,
-            "setprop",
-            &format!("config/uuid={}", Uuid::new_v4()),
-        ])?;
-
-        // Refresh the manifest with the new properties we set,
-        // so they become "effective" properties when the service is enabled.
-        zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "-s",
-            CRUCIBLE_AGENT_DEFAULT_SVC,
-            "refresh",
-        ])?;
-
-        zone.run_cmd(&[
-            crate::illumos::zone::SVCADM,
-            "enable",
-            "-t",
-            CRUCIBLE_AGENT_DEFAULT_SVC,
-        ])?;
-
-        Ok(())
-    }
 }
 
 async fn add_profile_to_zone(
@@ -360,9 +294,6 @@ async fn ensure_running_zone(
             )
             .await?;
 
-            // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
-            // Once crucible is added to this match statement, it'll be easier
-            // to deduplicate a fair bit.
             let zone = match dataset_info.kind {
                 DatasetKind::CockroachDb { .. } => {
                     let config = PropertyGroupBuilder::new("config")
@@ -452,19 +383,26 @@ async fn ensure_running_zone(
                     RunningZone::boot(installed_zone).await?
                 }
                 DatasetKind::Crucible => {
-                    let zone = RunningZone::boot(installed_zone).await?;
+                    let config = PropertyGroupBuilder::new("config")
+                        .add_property("datalink", "astring", installed_zone.get_control_vnic_name())
+                        .add_property("gateway", "astring", &underlay_address.to_string())
+                        .add_property("dataset", "astring", &dataset_info.name.full())
+                        .add_property("listen_addr", "astring", &dataset_info.address.ip().to_string())
+                        .add_property("listen_port", "astring", &dataset_info.address.port().to_string())
+                        .add_property("uuid", "astring", &Uuid::new_v4().to_string())
+                        .add_property("store", "astring", "/data");
 
-                    zone.ensure_address(address_request).await?;
-
-                    let gateway = underlay_address;
-                    zone.add_default_route(gateway)
-                        .await
-                        .map_err(Error::ZoneCommand)?;
-
-                    dataset_info
-                        .start_crucible_zone(log, &zone, dataset_info.address)
-                        .await?;
-                    zone
+                    let profile = ProfileBuilder::new("omicron")
+                        .add_service(
+                            ServiceBuilder::new("oxide/crucible/agent")
+                                .add_property_group(config)
+                        );
+                    add_profile_to_zone(
+                        log,
+                        &installed_zone,
+                        profile
+                    ).await?;
+                    RunningZone::boot(installed_zone).await?
                 }
             };
             Ok(zone)

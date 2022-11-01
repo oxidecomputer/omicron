@@ -92,10 +92,10 @@ service_name = "crucible"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "144d8dafa41715e00b08a5929cc62140ff0eb561"
+source.commit = "5aa4e86eccb2763ef23e03dfccbe5b55c006a367"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "2de086b0ba27efc638c88ff46a6d110236c2db92499266eccbd2a3ec28acc693"
+source.sha256 = "f9949062f8a06f43dc0002d3c82a174ccafac84a4666b625bfff914d37643641"
 output.type = "zone"
 
 # Refer to
