@@ -132,6 +132,18 @@ async fn make_silo(
     }
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
+    let idp_id = Uuid::new_v4();
+    builder.new_resource(authz::IdentityProvider::new(
+        silo.clone(),
+        idp_id,
+        LookupType::ByName(format!("{}-identity-provider", silo_name)),
+    ));
+    builder.new_resource(authz::SamlIdentityProvider::new(
+        silo.clone(),
+        idp_id,
+        LookupType::ByName(format!("{}-saml-identity-provider", silo_name)),
+    ));
+
     builder.new_resource(authz::SiloUserList::new(silo.clone()));
     let silo_user_id = Uuid::new_v4();
     let silo_user = authz::SiloUser::new(
@@ -292,8 +304,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),
         authz::RoleBuiltin::get_polar_class(),
-        authz::IdentityProvider::get_polar_class(),
-        authz::SamlIdentityProvider::get_polar_class(),
         authz::UpdateAvailableArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
     ]

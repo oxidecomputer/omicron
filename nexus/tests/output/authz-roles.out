@@ -134,6 +134,40 @@ resource: Silo "silo1": identity provider list
   silo1-org1-proj1-viewer          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: IdentityProvider "silo1-identity-provider"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: SamlIdentityProvider "silo1-saml-identity-provider"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: Silo "silo1": user list
 
   USER                             Q  R LC RP  M MP CC  D
@@ -616,6 +650,40 @@ resource: Silo "silo2": identity provider list
   fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
   fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: IdentityProvider "silo2-identity-provider"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: SamlIdentityProvider "silo2-saml-identity-provider"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
