@@ -375,6 +375,14 @@ impl InstalledZone {
         zone_name
     }
 
+    pub fn get_control_vnic_name(&self) -> &str {
+        self.control_vnic.name()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,

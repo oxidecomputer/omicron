@@ -4,7 +4,7 @@
 <service_bundle type='manifest' name='cockroachdb'>
 
   <service name='system/illumos/cockroachdb' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
   <single_instance />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
@@ -27,7 +27,10 @@
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
+    <propval name='datalink' type='astring' value='unknown' />
+    <propval name='gateway' type='astring' value='unknown' />
     <propval name='listen_addr' type='astring' value='unknown' />
+    <propval name='listen_port' type='astring' value='unknown' />
     <propval name='store' type='astring' value='unknown' />
     <propval name='join_addrs' type='astring' value='unknown' />
   </property_group>

@@ -492,19 +492,108 @@ async fn ensure_running_zone(
             )
             .await?;
 
-            let zone = RunningZone::boot(installed_zone).await?;
+            // TODO: Unwind this; we're just trying to get control over specific
+            // dataset types as we implement this incrementally...
+            let zone = match dataset_info.kind {
+                DatasetKind::CockroachDb { .. } => {
+                    use super::profile::*;
+                    let config = PropertyGroupBuilder::new("config")
+                        .add_property("datalink", "astring", installed_zone.get_control_vnic_name())
+                        .add_property("gateway", "astring", &underlay_address.to_string())
+                        .add_property("listen_addr", "astring", &dataset_info.address.ip().to_string())
+                        .add_property("listen_port", "astring", &dataset_info.address.port().to_string())
+                        .add_property("store", "astring", "/data");
 
-            zone.ensure_address(address_request).await?;
+                    let profile = ProfileBuilder::new("omicron")
+                        .add_service(
+                            ServiceBuilder::new("system/illumos/cockroachdb")
+                                .add_property_group(config)
+                        );
 
-            let gateway = underlay_address;
-            zone.add_default_route(gateway)
-                .await
-                .map_err(Error::ZoneCommand)?;
+                    info!(log, "Profile for CRDB: {}", profile);
 
-            dataset_info
-                .start_zone(log, &zone, dataset_info.address, do_format)
-                .await?;
+                    let profile_path =
+                        format!(
+                            "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
+                            zone_mountpoint = crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
+                            zone = installed_zone.name(),
+                        );
 
+                    std::fs::write(
+                        &profile_path,
+                        format!("{profile}").as_bytes(),
+                    ).map_err(|err| {
+                        Error::Io {
+                            message: format!("Cannot write to {profile_path}"),
+                            err,
+                        }
+                    })?;
+
+                    let zone = RunningZone::boot(installed_zone).await?;
+
+                    // Await liveness of the cluster.
+                    info!(log, "start_zone: awaiting liveness of CRDB");
+                    let check_health = || async {
+                        let http_addr =
+                            SocketAddrV6::new(*dataset_info.address.ip(), 8080, 0, 0);
+                        reqwest::get(format!("http://{}/health?ready=1", http_addr))
+                            .await
+                            .map_err(backoff::BackoffError::transient)
+                    };
+                    let log_failure = |_, _| {
+                        warn!(log, "cockroachdb not yet alive");
+                    };
+                    backoff::retry_notify(
+                        backoff::internal_service_policy(),
+                        check_health,
+                        log_failure,
+                    )
+                    .await
+                    .expect("expected an infinite retry loop waiting for crdb");
+
+                    info!(log, "CRDB is online");
+                    // If requested, format the cluster with the initial tables.
+                    if do_format {
+                        info!(log, "Formatting CRDB");
+                        zone.run_cmd(&[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &dataset_info.address.to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                        ])?;
+                        zone.run_cmd(&[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &dataset_info.address.to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                        ])?;
+                        info!(log, "Formatting CRDB - Completed");
+                    }
+
+                    zone
+                }
+                _ => {
+                    let zone = RunningZone::boot(installed_zone).await?;
+
+                    zone.ensure_address(address_request).await?;
+
+                    let gateway = underlay_address;
+                    zone.add_default_route(gateway)
+                        .await
+                        .map_err(Error::ZoneCommand)?;
+
+                    dataset_info
+                        .start_zone(log, &zone, dataset_info.address, do_format)
+                        .await?;
+                    zone
+                }
+            };
             Ok(zone)
         }
         Err(crate::illumos::running_zone::GetZoneError::NotRunning {
