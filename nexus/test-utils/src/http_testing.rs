@@ -224,6 +224,31 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Tells the request to initiate and expect a WebSocket upgrade handshake.
+    /// This also sets the request method to GET.
+    pub fn expect_websocket_handshake(mut self) -> Self {
+        const TEST_WEBSOCKET_REQUEST_KEY: &str = "SEFDSyBUSEUgUExBTkVUIQ==";
+        const TEST_WEBSOCKET_RESPONSE_KEY: &str =
+            "YmFpRQ3F6A+bsseEHaonFBhSKhA=";
+        self.allowed_headers.as_mut().unwrap().extend([
+            http::header::CONNECTION,
+            http::header::UPGRADE,
+            http::header::SEC_WEBSOCKET_ACCEPT,
+        ]);
+        self.method = http::method::Method::GET;
+        self.header(http::header::CONNECTION, "Upgrade")
+            .header(http::header::UPGRADE, "websocket")
+            .header(http::header::SEC_WEBSOCKET_VERSION, "13")
+            .header(http::header::SEC_WEBSOCKET_KEY, TEST_WEBSOCKET_REQUEST_KEY)
+            .expect_status(Some(http::StatusCode::SWITCHING_PROTOCOLS))
+            .expect_response_header(http::header::CONNECTION, "Upgrade")
+            .expect_response_header(http::header::UPGRADE, "websocket")
+            .expect_response_header(
+                http::header::SEC_WEBSOCKET_ACCEPT,
+                TEST_WEBSOCKET_RESPONSE_KEY,
+            )
+    }
+
     /// Allow non-dropshot error responses, i.e., errors that are not compatible
     /// with `dropshot::HttpErrorResponseBody`.
     pub fn allow_non_dropshot_errors(mut self) -> Self {
@@ -516,6 +541,13 @@ impl<'a> NexusRequest<'a> {
             }
         }
 
+        self
+    }
+
+    /// Tells the request to initiate and expect a WebSocket upgrade handshake.
+    pub fn websocket_handshake(mut self) -> Self {
+        self.request_builder =
+            self.request_builder.expect_websocket_handshake();
         self
     }
 

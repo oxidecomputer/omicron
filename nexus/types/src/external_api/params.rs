@@ -45,6 +45,8 @@ pub struct SiloCreate {
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
+    /// password used to log in
+    pub password: UserPassword,
 }
 
 /// A username for a local-only user
@@ -87,6 +89,105 @@ impl JsonSchema for UserId {
     ) -> schemars::schema::Schema {
         Name::json_schema(gen)
     }
+}
+
+/// A password used for authenticating a local-only user
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
+// We store both the raw String and nexus_passwords::Password forms of the
+// password.  That's because `nexus_passwords::Password` does not support
+// getting the String back out (by design), but we may need to do that in order
+// to impl Serialize.  See the `From<Password> for String` impl below.
+pub struct Password(String, nexus_passwords::Password);
+
+impl FromStr for Password {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Password::try_from(String::from(value))
+    }
+}
+
+// Used to impl `Deserialize`
+impl TryFrom<String> for Password {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let inner = nexus_passwords::Password::new(&value)
+            .map_err(|e| format!("unsupported password: {:#}", e))?;
+        // TODO-security If we want to apply password policy rules, this seems
+        // like the place.  We presumably want to also document them in the
+        // OpenAPI schema below.
+        Ok(Password(value, inner))
+    }
+}
+
+// This "From" impl only exists to make it easier to derive `Serialize`.  That
+// in turn is only to make this easier to use from the test suite.  (There's no
+// other reason structs in this file should need to impl Serialize at all.)
+impl From<Password> for String {
+    fn from(password: Password) -> Self {
+        password.0
+    }
+}
+
+impl JsonSchema for Password {
+    fn schema_name() -> String {
+        "Password".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some(
+                    "A password used to authenticate a user".to_string(),
+                ),
+                // TODO-doc If we apply password strength rules, they should
+                // presumably be documented here.
+                description: Some(
+                    "Passwords may be subject to additional constraints."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(
+                    u32::try_from(nexus_passwords::MAX_PASSWORD_LENGTH)
+                        .unwrap(),
+                ),
+                min_length: None,
+                pattern: None,
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl AsRef<nexus_passwords::Password> for Password {
+    fn as_ref(&self) -> &nexus_passwords::Password {
+        &self.1
+    }
+}
+
+/// Parameters for setting a user's password
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "user_password_value", content = "details")]
+pub enum UserPassword {
+    /// Sets the user's password to the provided value
+    Password(Password),
+    /// Invalidates any current password (disabling password authentication)
+    InvalidPassword,
+}
+
+/// Credentials for local user login
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+pub struct UsernamePasswordCredentials {
+    pub username: UserId,
+    pub password: Password,
 }
 
 // Silo identity providers

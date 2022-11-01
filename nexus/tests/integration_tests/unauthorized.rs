@@ -197,6 +197,7 @@ lazy_static! {
             id_routes: vec![
                 &*DEMO_SILO_USER_ID_GET_URL,
                 &*DEMO_SILO_USER_ID_DELETE_URL,
+                &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
         },
         // Create an IP pool
@@ -396,7 +397,12 @@ async fn verify_endpoint(
     // might find a 404 because of something that actually doesn't exist rather
     // than something that's just hidden from unauthorized users.
     let get_allowed = endpoint.allowed_methods.iter().find(|allowed| {
-        matches!(allowed, AllowedMethod::Get | AllowedMethod::GetUnimplemented)
+        matches!(
+            allowed,
+            AllowedMethod::Get
+                | AllowedMethod::GetUnimplemented
+                | AllowedMethod::GetWebsocket
+        )
     });
     let resource_before = match get_allowed {
         Some(AllowedMethod::Get) => {
@@ -428,6 +434,19 @@ async fn verify_endpoint(
             .execute()
             .await
             .unwrap();
+            None
+        }
+        Some(AllowedMethod::GetWebsocket) => {
+            info!(log, "test: privileged GET WebSocket");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::SWITCHING_PROTOCOLS,
+            )));
+            NexusRequest::object_get(client, uri.as_str())
+                .authn_as(AuthnMode::PrivilegedUser)
+                .websocket_handshake()
+                .execute()
+                .await
+                .unwrap();
             None
         }
         Some(_) => unimplemented!(),
@@ -471,15 +490,16 @@ async fn verify_endpoint(
                 Some(_) => unauthz_status,
                 None => StatusCode::METHOD_NOT_ALLOWED,
             };
-            let response = NexusRequest::new(
+            let mut request = NexusRequest::new(
                 RequestBuilder::new(client, method.clone(), &uri)
                     .body(body.as_ref())
                     .expect_status(Some(expected_status)),
             )
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await
-            .unwrap();
+            .authn_as(AuthnMode::UnprivilegedUser);
+            if let Some(&AllowedMethod::GetWebsocket) = allowed {
+                request = request.websocket_handshake();
+            }
+            let response = request.execute().await.unwrap();
             verify_response(&response);
             record_operation(WhichTest::Unprivileged(&expected_status));
         } else {
@@ -493,13 +513,14 @@ async fn verify_endpoint(
             Some(_) => unauthn_status,
             None => StatusCode::METHOD_NOT_ALLOWED,
         };
-        let response =
+        let mut request =
             RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
-                .expect_status(Some(expected_status))
-                .execute()
-                .await
-                .unwrap();
+                .expect_status(Some(expected_status));
+        if let Some(&AllowedMethod::GetWebsocket) = allowed {
+            request = request.expect_websocket_handshake();
+        }
+        let response = request.execute().await.unwrap();
         verify_response(&response);
         record_operation(WhichTest::Unauthenticated(&expected_status));
 
@@ -521,34 +542,36 @@ async fn verify_endpoint(
         // actor.
         info!(log, "test: bogus creds: bad actor"; "method" => ?method);
         let bad_actor_authn_header = &spoof::SPOOF_HEADER_BAD_ACTOR;
-        let response =
+        let mut request =
             RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
                 .header(
                     &http::header::AUTHORIZATION,
                     bad_actor_authn_header.0.encode(),
-                )
-                .execute()
-                .await
-                .unwrap();
+                );
+        if let Some(&AllowedMethod::GetWebsocket) = allowed {
+            request = request.expect_websocket_handshake();
+        }
+        let response = request.execute().await.unwrap();
         verify_response(&response);
         record_operation(WhichTest::UnknownUser(&expected_status));
 
         // Now try a syntactically invalid authn header.
         info!(log, "test: bogus creds: bad cred syntax"; "method" => ?method);
         let bad_creds_authn_header = &spoof::SPOOF_HEADER_BAD_CREDS;
-        let response =
+        let mut request =
             RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
                 .header(
                     &http::header::AUTHORIZATION,
                     bad_creds_authn_header.0.encode(),
-                )
-                .execute()
-                .await
-                .unwrap();
+                );
+        if let Some(&AllowedMethod::GetWebsocket) = allowed {
+            request = request.expect_websocket_handshake();
+        }
+        let response = request.execute().await.unwrap();
         verify_response(&response);
         record_operation(WhichTest::InvalidHeader(&expected_status));
 
@@ -593,6 +616,10 @@ async fn verify_endpoint(
 
 /// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
 fn verify_response(response: &TestResponse) {
+    if response.status == StatusCode::SWITCHING_PROTOCOLS {
+        // websocket handshake. avoid trying to parse absent body as json.
+        return;
+    }
     let error: HttpErrorResponseBody = response.parsed_body().unwrap();
     match response.status {
         StatusCode::UNAUTHORIZED => {

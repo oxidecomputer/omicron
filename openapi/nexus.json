@@ -619,6 +619,57 @@
         }
       }
     },
+    "/login/{silo_name}/local": {
+      "post": {
+        "tags": [
+          "login"
+        ],
+        "summary": "Authenticate a user (i.e., log in) via username and password",
+        "operationId": "login_local",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsernamePasswordCredentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "303": {
+            "description": "redirect (see other)",
+            "headers": {
+              "location": {
+                "description": "HTTP \"Location\" header",
+                "style": "simple",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/login/{silo_name}/saml/{provider_name}": {
       "get": {
         "tags": [
@@ -673,8 +724,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Authenticate a user",
-        "description": "Either receive a username and password, or some sort of identity provider data (like a SAMLResponse). Use these to set the user's session cookie.",
+        "summary": "Authenticate a user (i.e., log in) via SAML",
         "operationId": "login_saml",
         "parameters": [
           {
@@ -2974,6 +3024,55 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Connect to an instance's serial console",
+        "operationId": "instance_serial_console_stream",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-dropshot-websocket": {}
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start": {
@@ -6967,6 +7066,60 @@
         }
       }
     },
+    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Set or invalidate a user's password",
+        "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
+        "operationId": "local_idp_user_set_password",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/system/silos/{silo_name}/identity-providers/saml": {
       "post": {
         "tags": [
@@ -10161,6 +10314,12 @@
           }
         }
       },
+      "Password": {
+        "title": "A password used to authenticate a user",
+        "description": "Passwords may be subject to additional constraints.",
+        "type": "string",
+        "maxLength": 512
+      },
       "Project": {
         "description": "Client view of a [`Project`]",
         "type": "object",
@@ -11649,10 +11808,19 @@
                 "$ref": "#/components/schemas/UserId"
               }
             ]
+          },
+          "password": {
+            "description": "password used to log in",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserPassword"
+              }
+            ]
           }
         },
         "required": [
-          "external_id"
+          "external_id",
+          "password"
         ]
       },
       "UserId": {
@@ -11661,6 +11829,45 @@
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]$",
         "maxLength": 63
+      },
+      "UserPassword": {
+        "description": "Parameters for setting a user's password",
+        "oneOf": [
+          {
+            "description": "Sets the user's password to the provided value",
+            "type": "object",
+            "properties": {
+              "details": {
+                "$ref": "#/components/schemas/Password"
+              },
+              "user_password_value": {
+                "type": "string",
+                "enum": [
+                  "password"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "user_password_value"
+            ]
+          },
+          {
+            "description": "Invalidates any current password (disabling password authentication)",
+            "type": "object",
+            "properties": {
+              "user_password_value": {
+                "type": "string",
+                "enum": [
+                  "invalid_password"
+                ]
+              }
+            },
+            "required": [
+              "user_password_value"
+            ]
+          }
+        ]
       },
       "UserResultsPage": {
         "description": "A single page of results",
@@ -11681,6 +11888,22 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UsernamePasswordCredentials": {
+        "description": "Credentials for local user login",
+        "type": "object",
+        "properties": {
+          "password": {
+            "$ref": "#/components/schemas/Password"
+          },
+          "username": {
+            "$ref": "#/components/schemas/UserId"
+          }
+        },
+        "required": [
+          "password",
+          "username"
         ]
       },
       "Vpc": {

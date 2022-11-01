@@ -222,8 +222,11 @@ impl Agent {
         Ok((agent, trust_quorum))
     }
 
-    /// Initializes the Sled Agent on behalf of the RSS, if one has not already
-    /// been initialized.
+    /// Initializes the Sled Agent on behalf of the RSS.
+    ///
+    /// If the Sled Agent has already been initialized:
+    /// - This method is idempotent for the same request
+    /// - Thie method returns an error for different requests
     pub async fn request_agent(
         &self,
         request: &SledAgentRequest,

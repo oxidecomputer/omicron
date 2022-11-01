@@ -8,12 +8,15 @@
 
 use futures::StreamExt;
 use omicron_common::backoff::{retry, BackoffError, ExponentialBackoff};
+use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::WebSocketStream;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -159,42 +162,44 @@ pub(crate) struct SerialConsoleBuffer {
 impl SerialConsoleBuffer {
     /// Create a SerialConsoleBuffer and spawn a task to receive data from the given websocket to
     /// populate the buffer.
-    pub(crate) fn new(ws_uri: String, log: Logger) -> Self {
+    pub(crate) fn new(client: Weak<PropolisClient>, log: Logger) -> Self {
         let data = Arc::new(RwLock::new(BufferData::new(TTY_BUFFER_SIZE)));
         let data_inner = data.clone();
         let task = tokio::task::spawn(async move {
             let connect_future =
                 retry(ExponentialBackoff::default(), || async {
-                    match tokio_tungstenite::connect_async(&ws_uri).await {
-                        Ok(x) => Ok(x),
-                        Err(err) => {
-                            warn!(
-                                log,
-                                "TTY connection to {}: {:?}", &ws_uri, err
-                            );
-                            Err(BackoffError::Transient {
-                                err,
+                    let ws_bits = if let Some(strong) = client.upgrade() {
+                        strong.instance_serial().send().await.map_err(|e| {
+                            BackoffError::Transient {
+                                err: e.to_string(),
                                 retry_after: None,
-                            })
-                        }
-                    }
+                            }
+                        })?
+                    } else {
+                        return Err(BackoffError::Permanent(
+                            "Propolis client lost".to_string(),
+                        ));
+                    };
+                    let upgraded = ws_bits.into_inner();
+                    Ok(WebSocketStream::from_raw_socket(
+                        upgraded,
+                        Role::Client,
+                        None,
+                    )
+                    .await)
                 });
             match connect_future.await {
-                Ok((mut websocket, _)) => loop {
+                Ok(mut websocket) => loop {
                     match websocket.next().await {
                         None => break,
                         Some(Err(e)) => {
-                            error!(
-                                log,
-                                "Reading TTY from {}: {:?}", &ws_uri, e
-                            );
+                            error!(log, "Reading TTY: {:?}", e);
                             break;
                         }
                         Some(Ok(Message::Close(details))) => {
                             info!(
                                 log,
-                                "Closing TTY connection to {}{}",
-                                ws_uri,
+                                "Closing TTY connection{}",
                                 if let Some(cf) = details {
                                     format!(": {}", cf)
                                 } else {

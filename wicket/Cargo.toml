@@ -1,18 +1,36 @@
 [package]
 name = "wicket"
+description = "Technician port TUI"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [dependencies]
+anyhow = "1.0.65"
+clap = {version = "4.0", features = ["derive"]}
 crossterm = { version = "0.25.0", features = ["event-stream"] }
-tui = "0.19.0"
-tokio = { version = "1.21.1", features = ["full"] }
-anyhow = "1.0.66"
-slog = { version = "2.7.0", features = [ "max_level_trace", "release_max_level_debug" ] }
-slog-term = "2.9.0"
-slog-async = "2.7.0"
 futures = "0.3.25"
+hex = { version = "0.4", features = ["serde"] }
+semver = { version = "1.0.14", features = ["std", "serde"] }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
+sha3 = "0.10.5"
+slog = { version = "2.7.0", features = [ "max_level_trace", "release_max_level_debug" ] }
+slog-async = "2.7.0"
+slog-term = "2.9.0"
+snafu = "0.7.2"
+tar = "0.4"
+tokio = { version = "1.21.1", features = ["full"] }
+toml = "0.5.9"
+tui = "0.19.0"
+
+[dev-dependencies]
+tempfile = "3.3.0"
 
 [[bin]]
 name = "wicket"
+doc = false
+
+[[bin]]
+name = "mupdate-pkg"
 doc = false
