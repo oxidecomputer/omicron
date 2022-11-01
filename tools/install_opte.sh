@@ -17,167 +17,77 @@ if [[ "$(uname)" != "SunOS" ]]; then
     exit 1
 fi
 
-SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-cd "${SOURCE_DIR}/.."
-OMICRON_TOP="$PWD"
-OUT_DIR="$OMICRON_TOP/out"
-XDE_DIR="$OUT_DIR/xde"
-mkdir -p "$XDE_DIR"
-
-# Create a temporary directory in which to download artifacts, removing it on
-# exit
-DOWNLOAD_DIR="$(mktemp -t -d)"
-trap remove_download_dir EXIT ERR
-
-function remove_download_dir {
-    rm -rf $DOWNLOAD_DIR
+# Generate a random hex string of the provided number of octets.
+function random_string {
+    local LENGTH="${1:-4}"
+    xxd -l "$LENGTH" -c "$LENGTH" -p < /dev/random
 }
 
-# Compute the SHA256 of the path in $1, returning just the sum
-function file_sha {
-    sha256sum "$1" | cut -d ' ' -f 1
+# Create a boot environment in which to perform the operations.
+BE_NAME="helios-$(random_string 4)"
+BE_MOUNT_POINT="/tmp/$BE_NAME"
+
+# Remove the BE if this script fails.
+function remove_helios_be() {
+    pfexec beadm destroy -sfF "$BE_NAME"
 }
+trap remove_helios_be ERR
 
-# Download a file from $1 and compare its sha256 to the value provided in $2
-function download_and_check_sha {
-    local URL="$1"
-    local SHA="$2"
-    local FILENAME="$(basename "$URL")"
-    local DOWNLOAD_PATH="$(mktemp -p $DOWNLOAD_DIR)"
-    local OUT_PATH="$XDE_DIR/$FILENAME"
+pfexec beadm create "$BE_NAME"
+pfexec beadm mount "$BE_NAME" "$BE_MOUNT_POINT"
 
-    # Check if the file already exists, with the expected SHA
-    if ! [[ -f "$OUT_PATH" ]] || [[ "$SHA" != "$(file_sha "$OUT_PATH")" ]]; then
-        curl -L -o "$DOWNLOAD_PATH" "$URL" 2> /dev/null
-        local ACTUAL_SHA="$(sha256sum "$DOWNLOAD_PATH" | cut -d ' ' -f 1)"
-        if [[ "$ACTUAL_SHA" != "$SHA" ]]; then
-            echo "SHA mismatch downloding file $FILENAME"
-            exit 1
-        fi
-        mv -f "$DOWNLOAD_PATH" "$OUT_PATH"
-        echo "\"$OUT_PATH\" downloaded and has verified SHA"
-    else
-        echo "\"$OUT_PATH\" already exists with correct SHA"
-    fi
-}
+# Add the `helios-netdev` publisher, which contains both the `xde` driver and
+# `opteadm` CLI tool, as well as the kernel bits required for the driver and
+# other Oxide networking components to operate.
+pfexec pkg \
+    -R "$BE_MOUNT_POINT" \
+    set-publisher \
+    --search-first \
+    -O \
+    https://pkg.oxide.computer/helios-netdev/ \
+    helios-netdev
 
-# Download a SHA-256 sum output from $1 and return just the SHA
-function sha_from_url {
-    local SHA_URL="$1"
-    curl -L "$SHA_URL" 2> /dev/null | cut -d ' ' -f 1
-}
+# Make the stock `helios-dev` publisher non-sticky, to allow packages it
+# provides to be updated to those provided by `helios-netdev.
+pfexec pkg -R "$BE_MOUNT_POINT" set-publisher --non-sticky helios-dev
 
-# Echo the stickiness, 'sticky' or 'non-sticky' of the `helios-dev` publisher
-function helios_dev_stickiness {
-    local LINE="$(pkg publisher | grep '^helios-dev')"
-    if [[ -z "$LINE" ]]; then
-        echo "Expected a publisher named helios-dev, exiting!"
-        exit 1
-    fi
-    if [[ -z "$(echo "$LINE" | grep 'non-sticky')" ]]; then
-        echo "sticky"
-    else
-        echo "non-sticky"
-    fi
-}
-
-# Ensure that the `helios-dev` publisher is non-sticky. This does not modify the
-# publisher, if it is already non-sticky.
-function ensure_helios_dev_is_non_sticky {
-    local STICKINESS="$(helios_dev_stickiness)"
-    if [[ "$STICKINESS" = "sticky" ]]; then
-        pfexec pkg set-publisher --non-sticky helios-dev
-        STICKINESS="$(helios_dev_stickiness)"
-        if [[ "$STICKINESS" = "sticky" ]]; then
-            echo "Failed to make helios-dev publisher non-sticky"
-            exit 1
-        fi
-    else
-        echo "helios-dev publisher is already non-sticky"
-    fi
-}
-
-# Add the publisher specified by the provided path. If that publisher already
-# exists, set the origin instead. If more than one publisher with that name
-# exists, abort with an error.
-function add_publisher {
-    local ARCHIVE_PATH="$1"
-    local PUBLISHER_NAME="$(pkgrepo info -H -s "$ARCHIVE_PATH" | cut -d ' ' -f 1)"
-    local N_PUBLISHERS="$(pkg publisher | grep -c "$PUBLISHER_NAME")"
-    if [[ "$N_PUBLISHERS" -gt 1 ]]; then
-        echo "More than one publisher named \"$PUBLISHER_NAME\" found"
-        echo "Removing all publishers and installing from scratch"
-        pfexec pkg unset-publisher "$PUBLISHER_NAME"
-        pfexec pkg set-publisher -p "$ARCHIVE_PATH" --search-first
-    elif [[ "$N_PUBLISHERS" -eq 1 ]]; then
-        echo "Publisher \"$PUBLISHER_NAME\" already exists, setting"
-        echo "the origin to "$ARCHIVE_PATH""
-        pfexec pkg set-publisher --origin-uri "$ARCHIVE_PATH" --search-first "$PUBLISHER_NAME"
-    else
-        echo "Publisher \"$PUBLISHER_NAME\" does not exist, adding"
-        pfexec pkg set-publisher -p "$ARCHIVE_PATH" --search-first
-    fi
-}
-
-# `helios-netdev` provides the xde kernel driver and the `opteadm` userland tool
-# for interacting with it.
-HELIOS_NETDEV_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo"
-HELIOS_NETDEV_COMMIT="23fdf5856f10f23e2d26865d2d7e2d3bc537bca3"
-HELIOS_NETDEV_REPO_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p"
-HELIOS_NETDEV_REPO_SHA_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p.sha256"
-HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
-
-# The xde repo provides a full OS/Net incorporation, with updated kernel bits
-# that the `xde` kernel module and OPTE rely on.
-XDE_REPO_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/os-build/xde"
-XDE_REPO_COMMIT="37beaa374df2094e5b5df9f37d9fd87d77ebb4a0"
-XDE_REPO_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p"
-XDE_REPO_SHA_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p.sha256"
-XDE_REPO_PATH="$XDE_DIR/$(basename "$XDE_REPO_URL")"
-
-# Download and verify the package repositorieies
-download_and_check_sha "$HELIOS_NETDEV_REPO_URL" "$(sha_from_url "$HELIOS_NETDEV_REPO_SHA_URL")"
-download_and_check_sha "$XDE_REPO_URL" "$(sha_from_url "$XDE_REPO_SHA_URL")"
-
-# Set the `helios-dev` repo as non-sticky, meaning that packages that were
-# originally provided by it may be updated by another repository, if that repo
-# provides newer versions of the packages.
-ensure_helios_dev_is_non_sticky
-
-# Add the OPTE and xde repositories and update packages.
-add_publisher "$HELIOS_NETDEV_REPO_PATH"
-add_publisher "$XDE_REPO_PATH"
-
-# Actually install the xde kernel module and opteadm tool
+# Actually install the xde kernel module and opteadm tool.
 RC=0
-pfexec pkg install -v pkg://helios-netdev/driver/network/opte || RC=$?
+pfexec pkg -R "$BE_MOUNT_POINT" install -v driver/network/opte@latest || RC=$?
 if [[ "$RC" -ne 0 ]] && [[ "$RC" -ne 4 ]]; then
-    echo "Installing xde kernel driver and opteadm tool failed"
+    echo "Unknown failure installing OPTE"
+    echo "Return code from \`pkg install\` is: $?"
+    echo "Temporary boot environment $BE_NAME is still around."
+    echo "You may wish to destroy it with \`beadm destroy\`."
+    exit 1
     exit "$RC"
 fi
 
-# Check the user's path
-RC=0
-which opteadm > /dev/null || RC=$?
-if [[ "$RC" -ne 0 ]]; then
-    echo "The \`opteadm\` administration tool is not on your path."
-    echo "You may add \"/opt/oxide/opte/bin\" to your path to access it."
+# Notify the user about placing `opteadm` on their path.
+if [[ $? -eq 0 ]] || [[ $? -eq 4 ]]; then
+    if [[ -z "$(which opteadm 2> /dev/null)" ]]; then
+        echo "The \`opteadm\` administration tool has been installed."
+        echo "You may wish to add \"/opt/oxide/opte/bin\" to your path to access it."
+    fi
 fi
 
-# Install the kernel bits required for the xde kernel driver to operate
-# correctly
+# Install the kernel bits as well, if needed.
 RC=0
-pfexec pkg install -v pkg://on-nightly/consolidation/osnet/osnet-incorporation* || RC=$?
-if [[ "$RC" -eq 0 ]]; then
-    echo "The xde kernel driver, opteadm tool, and xde-related kernel bits"
-    echo "have successfully been installed. A reboot may be required to activate"
-    echo "the new boot environment, if the kernel has been changed (upgrade"
-    echo "or downgrade)"
-    exit 0
-elif [[ "$RC" -eq 4 ]]; then
-    echo "The kernel appears to be up-to-date for use with opte"
-    exit 0
+pfexec pkg -R "$BE_MOUNT_POINT" update -v || RC=$?
+
+# If all the above worked, and updates are in fact required, activate the BE and
+# request a reboot into it.
+if [[ $RC -eq 0 ]]; then 
+    pfexec beadm activate "$BE_NAME"
+    echo "Installed / updated OPTE and kernel bits."
+    echo "Please reboot for the changes to take effect."
+elif [[ $RC -eq 4 ]]; then
+    remove_helios_be
+    echo "Your system appears up-to-date!"
 else
-    echo "Installing kernel bits for xde failed"
-    exit "$RC"
+    echo "Unknown failure installing OPTE"
+    echo "Return code from \`pkg update\` is: $RC"
+    echo "Temporary boot environment $BE_NAME is still around."
+    echo "You may wish to destroy it with \`beadm destroy\`."
+    exit $RC
 fi
