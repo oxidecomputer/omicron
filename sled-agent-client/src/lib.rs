@@ -319,9 +319,11 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
     }
 }
 
-impl From<omicron_common::api::external::VpcAddress> for types::VpcAddress {
-    fn from(s: omicron_common::api::external::VpcAddress) -> Self {
-        use omicron_common::api::external::VpcAddress::*;
+impl From<omicron_common::api::internal::nexus::HostIdentifier>
+    for types::HostIdentifier
+{
+    fn from(s: omicron_common::api::internal::nexus::HostIdentifier) -> Self {
+        use omicron_common::api::internal::nexus::HostIdentifier::*;
         match s {
             Ip(net) => Self::Ip(net.into()),
             Vpc(vni) => Self::Vpc(vni.into()),

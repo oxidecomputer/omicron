@@ -8,7 +8,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, InstanceRuntimeState,
+    DiskRuntimeState, HostIdentifier, InstanceRuntimeState,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,7 @@ pub struct VpcFirewallRule {
     pub status: external::VpcFirewallRuleStatus,
     pub direction: external::VpcFirewallRuleDirection,
     pub targets: Vec<NetworkInterface>,
-    pub filter_hosts: Option<Vec<external::VpcAddress>>,
+    pub filter_hosts: Option<Vec<HostIdentifier>>,
     pub filter_ports: Option<Vec<external::L4PortRange>>,
     pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
     pub action: external::VpcFirewallRuleAction,

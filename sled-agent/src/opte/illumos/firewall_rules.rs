@@ -8,11 +8,11 @@ use crate::opte::Vni;
 use crate::params::VpcFirewallRule;
 use macaddr::MacAddr6;
 use omicron_common::api::external::IpNet;
-use omicron_common::api::external::VpcAddress;
 use omicron_common::api::external::VpcFirewallRuleAction;
 use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
 use omicron_common::api::external::VpcFirewallRuleStatus;
+use omicron_common::api::internal::nexus::HostIdentifier;
 use oxide_vpc::api::Address;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::Filters;
@@ -63,21 +63,21 @@ impl FromVpcFirewallRule for VpcFirewallRule {
                 hosts
                     .iter()
                     .map(|host| match host {
-                        VpcAddress::Ip(IpNet::V4(net))
+                        HostIdentifier::Ip(IpNet::V4(net))
                             if net.prefix() == 32 =>
                         {
                             Address::Ip(net.ip().into())
                         }
-                        VpcAddress::Ip(IpNet::V4(net)) => {
+                        HostIdentifier::Ip(IpNet::V4(net)) => {
                             Address::Subnet(Ipv4Cidr::new(
                                 net.ip().into(),
                                 Ipv4PrefixLen::new(net.prefix()).unwrap(),
                             ))
                         }
-                        VpcAddress::Ip(IpNet::V6(_net)) => {
+                        HostIdentifier::Ip(IpNet::V6(_net)) => {
                             todo!("IPv6 host filters")
                         }
-                        VpcAddress::Vpc(vni) => {
+                        HostIdentifier::Vpc(vni) => {
                             Address::Vni(Vni::new(u32::from(*vni)).unwrap())
                         }
                     })

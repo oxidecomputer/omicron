@@ -31,8 +31,8 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
-use omicron_common::api::external::VpcAddress;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use omicron_common::api::internal::nexus::HostIdentifier;
 use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
@@ -699,7 +699,7 @@ impl super::Nexus {
                                     .unwrap_or(&no_interfaces)
                                 {
                                     host_addrs.push(
-                                        VpcAddress::Ip(IpNet::from(
+                                        HostIdentifier::Ip(IpNet::from(
                                             interface.ip,
                                         ))
                                         .into(),
@@ -714,18 +714,21 @@ impl super::Nexus {
                                     .unwrap_or(&no_networks)
                                 {
                                     host_addrs.push(
-                                        VpcAddress::Ip(IpNet::from(*subnet))
-                                            .into(),
+                                        HostIdentifier::Ip(IpNet::from(
+                                            *subnet,
+                                        ))
+                                        .into(),
                                     );
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Ip(addr) => {
                                 host_addrs.push(
-                                    VpcAddress::Ip(IpNet::from(*addr)).into(),
+                                    HostIdentifier::Ip(IpNet::from(*addr))
+                                        .into(),
                                 )
                             }
                             external::VpcFirewallRuleHostFilter::IpNet(net) => {
-                                host_addrs.push(VpcAddress::Ip(*net).into())
+                                host_addrs.push(HostIdentifier::Ip(*net).into())
                             }
                             external::VpcFirewallRuleHostFilter::Vpc(name) => {
                                 for interface in vpc_interfaces
@@ -733,7 +736,7 @@ impl super::Nexus {
                                     .unwrap_or(&no_interfaces)
                                 {
                                     host_addrs.push(
-                                        VpcAddress::Vpc(Vni::try_from(
+                                        HostIdentifier::Vpc(Vni::try_from(
                                             *interface.vni,
                                         )?)
                                         .into(),

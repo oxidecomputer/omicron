@@ -1278,15 +1278,6 @@ impl JsonSchema for IpNet {
     }
 }
 
-/// A `VpcAddress` represents either an explicit IP network (v4 or v6)
-/// or an entire VPC (identified by its VNI).
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum VpcAddress {
-    Ip(IpNet),
-    Vpc(Vni),
-}
-
 /// Insert another level of schema indirection in order to provide an
 /// additional title for a subschema. This allows generators to infer a better
 /// variant name for an "untagged" enum.
