@@ -92,7 +92,9 @@ pub enum IdentityType {
 
 /// Describes how identities are managed and users are authenticated in this
 /// Silo
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SiloIdentityMode {
     /// Users are authenticated with SAML using an external authentication

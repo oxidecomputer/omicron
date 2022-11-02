@@ -291,10 +291,7 @@ the exact addresses that are available depends on the environment.
     }
     EOF
 
-6. Optionally, attach to the propolis server serial console, though the serial console is under active development and these commands are subject to change:
+6. Optionally, attach to the proxied propolis server serial console (this requires https://github.com/oxidecomputer/cli/commit/adab246142270778db7208126fb03724f5d35858[this commit] or newer of the CLI.)
 
-  a. find the zone launched for the instance: `zoneadm list -c | grep oxz_propolis-server`
-  b. get the instance uuid from the zone name. if the zone's name is `oxz_propolis-server_3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`, then the uuid is `3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`
-  c. find the propolis server listen address: `pfexec zlogin oxz_propolis-server_3b03ad43-4e9b-4f3a-866c-238d9ec4ac45 svccfg -s svc:/system/illumos/propolis-server:vm-3b03ad43-4e9b-4f3a-866c-238d9ec4ac45 listprop config/server_addr`
-  d. build and launch propolis-cli, filling in values for IP and PORT based on the listen address: `./target/release/propolis-cli -s <IP> -p <PORT> serial`
+    oxide instance serial --interactive -p myproj -o myorg myinst
 
