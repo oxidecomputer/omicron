@@ -131,13 +131,3 @@ panic = "abort"
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
-
-#
-# libsodium-sys is a dependency of thrussh, used in `end-to-end-tests`.  We
-# maintain a fork of the sodiumoxide repository to address an illumos build
-# issue.  See the README.oxide.md in the "omicron/oxide" branch of our fork for
-# details.
-#
-[patch.crates-io.libsodium-sys]
-git = 'https://github.com/oxidecomputer/sodiumoxide'
-branch = "oxide/omicron"
