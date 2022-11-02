@@ -3321,6 +3321,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "parse-display",
+ "petgraph",
  "pq-sys",
  "propolis-client",
  "rand 0.8.5",

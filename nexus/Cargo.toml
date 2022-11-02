@@ -131,6 +131,7 @@ nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 omicron-sled-agent = { path = "../sled-agent" }
 openapiv3 = "1.0"
+petgraph = "0.6.2"
 regex = "1.6.0"
 subprocess = "0.2.9"
 term = "0.7"
