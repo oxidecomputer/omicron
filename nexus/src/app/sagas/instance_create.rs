@@ -1178,10 +1178,7 @@ mod test {
             // This should cause the saga to unwind.
             nexus
                 .sec()
-                .saga_inject_error(
-                    runnable_saga.id(),
-                    node.index(),
-                )
+                .saga_inject_error(runnable_saga.id(), node.index())
                 .await
                 .unwrap();
             nexus
