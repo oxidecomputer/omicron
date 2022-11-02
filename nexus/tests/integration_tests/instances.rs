@@ -1990,6 +1990,9 @@ async fn test_instance_create_attach_disks(
     }
 }
 
+/// Tests to ensure that when an error occurs in the instance create saga after
+/// some disks are succesfully created and attached, those disks are detached
+/// and deleted.
 #[nexus_test]
 async fn test_instance_create_attach_disks_undo(
     cptestctx: &ControlPlaneTestContext,
