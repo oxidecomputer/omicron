@@ -1194,13 +1194,13 @@ mod test {
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
 
-        for i in 0..dag.get_node_count() {
+        for node in dag.get_nodes() {
             // Create a new saga for this node.
             info!(
                 log,
-                "Creating new saga which will fail at index {i}";
-                "node_name" => dag.get_node_name(i).unwrap(),
-                "label" => dag.get_node_label(i).unwrap(),
+                "Creating new saga which will fail at index {:?}", node.index();
+                "node_name" => node.name().as_ref(),
+                "label" => node.label(),
             );
 
             let runnable_saga =
@@ -1213,7 +1213,7 @@ mod test {
                 .sec()
                 .saga_inject_error(
                     runnable_saga.id(),
-                    petgraph::graph::NodeIndex::new(i),
+                    node.index(),
                 )
                 .await
                 .unwrap();

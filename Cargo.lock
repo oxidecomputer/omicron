@@ -5843,7 +5843,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "steno"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/steno?branch=node-access#19cdbd6c26b3f0ebcb1948cd95558d5857a66097"
+source = "git+https://github.com/oxidecomputer/steno?rev=6e4946b165622612453f2d96c82f9a59342325d6#6e4946b165622612453f2d96c82f9a59342325d6"
 dependencies = [
  "anyhow",
  "async-trait",
