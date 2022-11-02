@@ -7,8 +7,10 @@ use nexus_test_utils::resource_helpers::project_get;
 use omicron_nexus::external_api::views::Project;
 
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_projects(cptestctx: &ControlPlaneTestContext) {

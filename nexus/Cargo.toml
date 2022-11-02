@@ -30,10 +30,12 @@ hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
 lazy_static = "1.4.0"
-libc = "0.2.137"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
+# Not under "dev-dependencies"; these also need to be implemented for
+# integration tests.
+nexus-test-interface = { path = "test-interface" }
 num-integer = "0.1.45"
 # must match samael's crate!
 openssl = "0.10"
@@ -45,7 +47,7 @@ oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.6.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "da3cfc26e4a6239810e0c7904aefe68443627704", features = [ "generated" ] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e58937fea67aca6bc2d37a3cc50a72291328ae0e", features = [ "generated" ] }
 rand = "0.8.5"
 ref-cast = "1.0"
 reqwest = { version = "0.11.12", features = [ "json" ] }
@@ -56,7 +58,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "2.0.1"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
-steno = "0.2"
+steno = { git = "https://github.com/oxidecomputer/steno", rev = "4cebb996217453b79896b53c9c2026007f2e69e8" }
 tempfile = "3.3"
 thiserror = "1.0"
 tokio-tungstenite = "0.17.2"
@@ -127,7 +129,9 @@ itertools = "0.10.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
+omicron-sled-agent = { path = "../sled-agent" }
 openapiv3 = "1.0"
+petgraph = "0.6.2"
 regex = "1.6.0"
 subprocess = "0.2.9"
 term = "0.7"

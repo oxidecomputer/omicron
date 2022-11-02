@@ -22,6 +22,7 @@ use omicron_nexus::external_api::params::UserId;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
 use omicron_nexus::external_api::views::User;
@@ -130,10 +131,11 @@ pub async fn create_silo(
 
 pub async fn create_local_user(
     client: &ClientTestContext,
-    silo_name: &str,
+    silo: &views::Silo,
     username: &UserId,
     password: params::UserPassword,
 ) -> User {
+    let silo_name = &silo.identity.name;
     let url =
         format!("/system/silos/{}/identity-providers/local/users", silo_name);
     object_create(
@@ -432,7 +434,7 @@ impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
 
     // Creates fake physical storage, an organization, and a project.
-    pub async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
+    pub async fn new<N>(cptestctx: &ControlPlaneTestContext<N>) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
 
         let mut disk_test = Self { sled_agent, zpools: vec![] };

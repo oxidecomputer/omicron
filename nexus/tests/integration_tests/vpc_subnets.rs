@@ -17,13 +17,15 @@ use nexus_test_utils::resource_helpers::{
     create_instance, create_ip_pool, create_organization, create_project,
     create_vpc,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
 use omicron_nexus::external_api::{params, views::VpcSubnet};
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_delete_vpc_subnet_with_interfaces_fails(

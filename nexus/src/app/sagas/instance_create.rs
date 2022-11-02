@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::sagas::NexusAction;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
@@ -17,6 +18,7 @@ use crate::{authn, authz, db};
 use chrono::Utc;
 use lazy_static::lazy_static;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
+use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -61,12 +63,12 @@ struct NetParams {
     new_id: Uuid,
 }
 
-// The disk-related nodes get a similar treatment, but the data they need are
-// different.
 #[derive(Debug, Deserialize, Serialize)]
-struct DiskParams {
-    saga_params: Params,
-    which: usize,
+struct DiskAttachParams {
+    serialized_authn: authn::saga::Serialized,
+    project_id: Uuid,
+    instance_id: Uuid,
+    attach_params: InstanceDiskAttachment,
 }
 
 // instance create saga: actions
@@ -103,15 +105,10 @@ lazy_static! {
         sic_allocate_instance_external_ip,
         sic_allocate_instance_external_ip_undo,
     );
-    static ref CREATE_DISKS_FOR_INSTANCE: NexusAction = ActionFunc::new_action(
-        "instance-create.create-disks-for-instance",
-        sic_create_disks_for_instance,
-        sic_create_disks_for_instance_undo,
-    );
     static ref ATTACH_DISKS_TO_INSTANCE: NexusAction = ActionFunc::new_action(
         "instance-create.attach-disks-to-instance",
-        sic_attach_disks_to_instance,
-        sic_attach_disks_to_instance_undo,
+        sic_attach_disk_to_instance,
+        sic_attach_disk_to_instance_undo,
     );
     static ref INSTANCE_ENSURE: NexusAction = new_action_noop_undo(
         "instance-create.instance-ensure",
@@ -134,7 +131,6 @@ impl NexusSaga for SagaInstanceCreate {
         registry.register(Arc::clone(&*CREATE_NETWORK_INTERFACE));
         registry.register(Arc::clone(&*CREATE_SNAT_IP));
         registry.register(Arc::clone(&*CREATE_EXTERNAL_IP));
-        registry.register(Arc::clone(&*CREATE_DISKS_FOR_INSTANCE));
         registry.register(Arc::clone(&*ATTACH_DISKS_TO_INSTANCE));
         registry.register(Arc::clone(&*INSTANCE_ENSURE));
     }
@@ -179,7 +175,7 @@ impl NexusSaga for SagaInstanceCreate {
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
             node_basename: &'static str,
-            subsaga_builder: steno::DagBuilder,
+            subsaga_dag: steno::Dag,
             parent_builder: &mut steno::DagBuilder,
             params: S,
             which: usize,
@@ -198,7 +194,7 @@ impl NexusSaga for SagaInstanceCreate {
             let output_name = format!("{}{}", node_basename, which);
             parent_builder.append(Node::subsaga(
                 output_name.as_str(),
-                subsaga_builder.build()?,
+                subsaga_dag,
                 params_node_name,
             ));
             Ok(())
@@ -243,7 +239,7 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             subsaga_append(
                 "network_interface",
-                subsaga_builder,
+                subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
                 i,
@@ -281,36 +277,56 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             subsaga_append(
                 "external_ip",
-                subsaga_builder,
+                subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
                 i,
             )?;
         }
 
-        // See the comment above where we add nodes for creating NICs.  We use
-        // the same pattern here.
-        for i in 0..(MAX_DISKS_PER_INSTANCE as usize) {
-            let disk_params =
-                DiskParams { saga_params: params.clone(), which: i };
+        // Appends the disk create saga as a subsaga directly to the instance create builder.
+        for (i, disk) in params.create_params.disks.iter().enumerate() {
+            if let InstanceDiskAttachment::Create(create_disk) = disk {
+                let subsaga_name =
+                    SagaName::new(&format!("instance-create-disk-{i}"));
+                let subsaga_builder = DagBuilder::new(subsaga_name);
+                let params = disk_create::Params {
+                    serialized_authn: params.serialized_authn.clone(),
+                    project_id: params.project_id,
+                    create_params: create_disk.clone(),
+                };
+                subsaga_append(
+                    "create_disk",
+                    SagaDiskCreate::make_saga_dag(&params, subsaga_builder)?,
+                    &mut builder,
+                    params,
+                    i,
+                )?;
+            }
+        }
+
+        // Attaches all disks included in the instance create request, including those which were previously created
+        // by the disk create subsagas.
+        for (i, disk_attach) in params.create_params.disks.iter().enumerate() {
             let subsaga_name =
-                SagaName::new(&format!("instance-create-disk{i}"));
+                SagaName::new(&format!("instance-attach-disk-{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
-            subsaga_builder.append(Node::action(
-                "create_disk_output",
-                format!("CreateDisksForInstance-{i}").as_str(),
-                CREATE_DISKS_FOR_INSTANCE.as_ref(),
-            ));
             subsaga_builder.append(Node::action(
                 "attach_disk_output",
                 format!("AttachDisksToInstance-{i}").as_str(),
                 ATTACH_DISKS_TO_INSTANCE.as_ref(),
             ));
+            let params = DiskAttachParams {
+                serialized_authn: params.serialized_authn.clone(),
+                project_id: params.project_id,
+                instance_id,
+                attach_params: disk_attach.clone(),
+            };
             subsaga_append(
-                "disk",
-                subsaga_builder,
+                "attach_disk",
+                subsaga_builder.build()?,
                 &mut builder,
-                disk_params,
+                params,
                 i,
             )?;
         }
@@ -704,50 +720,13 @@ async fn sic_allocate_instance_external_ip_undo(
     Ok(())
 }
 
-/// Create disks during instance creation, and return a list of disk names
-// TODO implement
-async fn sic_create_disks_for_instance(
-    sagactx: NexusActionContext,
-) -> Result<Option<String>, ActionError> {
-    let disk_params = sagactx.saga_params::<DiskParams>()?;
-    let saga_params = disk_params.saga_params;
-    let disk_index = disk_params.which;
-    let saga_disks = &saga_params.create_params.disks;
-
-    if disk_index >= saga_disks.len() {
-        return Ok(None);
-    }
-
-    let disk = &saga_disks[disk_index];
-
-    match disk {
-        params::InstanceDiskAttachment::Create(_create_params) => {
-            return Err(ActionError::action_failed(
-                "Creating disk during instance create unsupported!".to_string(),
-            ));
-        }
-
-        _ => {}
-    }
-
-    Ok(None)
-}
-
-/// Undo disks created during instance creation
-// TODO implement
-async fn sic_create_disks_for_instance_undo(
-    _sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    Ok(())
-}
-
-async fn sic_attach_disks_to_instance(
+async fn sic_attach_disk_to_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     ensure_instance_disk_attach_state(sagactx, true).await
 }
 
-async fn sic_attach_disks_to_instance_undo(
+async fn sic_attach_disk_to_instance_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     Ok(ensure_instance_disk_attach_state(sagactx, false).await?)
@@ -758,64 +737,52 @@ async fn ensure_instance_disk_attach_state(
     attached: bool,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let disk_params = sagactx.saga_params::<DiskParams>()?;
-    let saga_params = disk_params.saga_params;
-    let disk_index = disk_params.which;
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let params = sagactx.saga_params::<DiskAttachParams>()?;
+    let datastore = osagactx.datastore();
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let instance_id = params.instance_id;
+    let project_id = params.project_id;
 
-    let saga_disks = &saga_params.create_params.disks;
-    let instance_name =
-        db::model::Name(saga_params.create_params.identity.name);
+    let disk_name = match params.attach_params {
+        InstanceDiskAttachment::Create(create_params) => {
+            db::model::Name(create_params.identity.name)
+        }
+        InstanceDiskAttachment::Attach(attach_params) => {
+            db::model::Name(attach_params.name)
+        }
+    };
 
-    if disk_index >= saga_disks.len() {
-        return Ok(());
-    }
-
-    let disk = &saga_disks[disk_index];
+    let (.., authz_instance, _db_instance) =
+        LookupPath::new(&opctx, &datastore)
+            .instance_id(instance_id)
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?;
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
-    // organization and project names now.  See oxidecomputer/omicron#1536.
-    let organization_name: db::model::Name =
-        saga_params.organization_name.clone().into();
-    let project_name: db::model::Name = saga_params.project_name.clone().into();
+    // disk name now.  See oxidecomputer/omicron#1536.
+    let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .disk_name(&disk_name)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
 
-    match disk {
-        params::InstanceDiskAttachment::Create(_) => {
-            // TODO grab disks created in sic_create_disks_for_instance
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "creating disks while creating an instance not supported",
-            )));
-        }
-        params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
-            let disk_name: db::model::Name =
-                instance_disk_attach.name.clone().into();
-
-            if attached {
-                osagactx
-                    .nexus()
-                    .instance_attach_disk(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &instance_name,
-                        &disk_name,
-                    )
-                    .await
-            } else {
-                osagactx
-                    .nexus()
-                    .instance_detach_disk(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &instance_name,
-                        &disk_name,
-                    )
-                    .await
-            }
+    if attached {
+        datastore
+            .instance_attach_disk(
+                &opctx,
+                &authz_instance,
+                &authz_disk,
+                MAX_DISKS_PER_INSTANCE,
+            )
+            .await
             .map_err(ActionError::action_failed)?;
-        }
+    } else {
+        datastore
+            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
+            .await
+            .map_err(ActionError::action_failed)?;
     }
 
     Ok(())
@@ -1013,4 +980,223 @@ async fn sic_instance_ensure(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        app::saga::create_saga_dag, app::sagas::instance_create::Params,
+        app::sagas::instance_create::SagaInstanceCreate,
+        authn::saga::Serialized, context::OpContext, db::datastore::DataStore,
+        external_api::params,
+    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use dropshot::test_util::ClientTestContext;
+    use nexus_test_utils::resource_helpers::create_disk;
+    use nexus_test_utils::resource_helpers::create_ip_pool;
+    use nexus_test_utils::resource_helpers::create_organization;
+    use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::{
+        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+    };
+    use omicron_sled_agent::sim::SledAgent;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    const ORG_NAME: &str = "test-org";
+    const PROJECT_NAME: &str = "springfield-squidport";
+    const DISK_NAME: &str = "my-disk";
+
+    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
+        create_ip_pool(&client, "p0", None, None).await;
+        create_organization(&client, ORG_NAME).await;
+        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+        create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+        project.identity.id
+    }
+
+    // Helper for creating instance create parameters
+    fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
+        Params {
+            serialized_authn: Serialized::for_opctx(opctx),
+            organization_name: ORG_NAME.parse().unwrap(),
+            project_name: PROJECT_NAME.parse().unwrap(),
+            project_id,
+            create_params: params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-instance".parse().unwrap(),
+                    description: "My instance".to_string(),
+                },
+                ncpus: InstanceCpuCount::try_from(2).unwrap(),
+                memory: ByteCount::from_gibibytes_u32(4),
+                hostname: String::from("inst"),
+                user_data: vec![],
+                network_interfaces:
+                    params::InstanceNetworkInterfaceAttachment::Default,
+                external_ips: vec![params::ExternalIpCreate::Ephemeral {
+                    pool_name: None,
+                }],
+                disks: vec![params::InstanceDiskAttachment::Attach(
+                    params::InstanceDiskAttach {
+                        name: DISK_NAME.parse().unwrap(),
+                    },
+                )],
+                start: true,
+            },
+        }
+    }
+
+    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+        OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            cptestctx.server.apictx.nexus.datastore().clone(),
+        )
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_basic_usage_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+
+        // Actually run the saga
+        nexus.run_saga(runnable_saga).await.unwrap();
+    }
+
+    async fn no_instance_records_exist(datastore: &DataStore) -> bool {
+        use crate::db::model::Instance;
+        use crate::db::schema::instance::dsl;
+
+        dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .select(Instance::as_select())
+            .first_async::<Instance>(datastore.pool_for_tests().await.unwrap())
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn no_network_interface_records_exist(datastore: &DataStore) -> bool {
+        use crate::db::model::NetworkInterface;
+        use crate::db::schema::network_interface::dsl;
+
+        dsl::network_interface
+            .filter(dsl::time_deleted.is_null())
+            .select(NetworkInterface::as_select())
+            .first_async::<NetworkInterface>(
+                datastore.pool_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
+        use crate::db::model::ExternalIp;
+        use crate::db::schema::external_ip::dsl;
+
+        dsl::external_ip
+            .filter(dsl::time_deleted.is_null())
+            .select(ExternalIp::as_select())
+            .first_async::<ExternalIp>(
+                datastore.pool_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn disk_is_detached(datastore: &DataStore) -> bool {
+        use crate::db::model::Disk;
+        use crate::db::schema::disk::dsl;
+
+        dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::name.eq(DISK_NAME))
+            .select(Disk::as_select())
+            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
+            .await
+            .unwrap()
+            .runtime_state
+            .disk_state
+            == "detached"
+    }
+
+    async fn no_instances_or_disks_on_sled(sled_agent: &SledAgent) -> bool {
+        sled_agent.instance_count().await == 0
+            && sled_agent.disk_count().await == 0
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
+
+        for node in dag.get_nodes() {
+            // Create a new saga for this node.
+            info!(
+                log,
+                "Creating new saga which will fail at index {:?}", node.index();
+                "node_name" => node.name().as_ref(),
+                "label" => node.label(),
+            );
+
+            let runnable_saga =
+                nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+            // Inject an error instead of running the node.
+            //
+            // This should cause the saga to unwind.
+            nexus
+                .sec()
+                .saga_inject_error(runnable_saga.id(), node.index())
+                .await
+                .unwrap();
+            nexus
+                .run_saga(runnable_saga)
+                .await
+                .expect_err("Saga should have failed");
+
+            let datastore = nexus.datastore();
+
+            // Check that no partial artifacts of instance creation exist
+            assert!(no_instance_records_exist(datastore).await);
+            assert!(no_network_interface_records_exist(datastore).await);
+            assert!(no_external_ip_records_exist(datastore).await);
+            assert!(disk_is_detached(datastore).await);
+            assert!(
+                no_instances_or_disks_on_sled(&cptestctx.sled_agent.sled_agent)
+                    .await
+            );
+        }
+    }
 }
