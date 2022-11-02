@@ -25,7 +25,7 @@ serde_json = "1.0"
 serde_with = "2.0.1"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 smf = "0.2"
-steno = { git = "https://github.com/oxidecomputer/steno", rev = "6e4946b165622612453f2d96c82f9a59342325d6" }
+steno = { git = "https://github.com/oxidecomputer/steno", rev = "4cebb996217453b79896b53c9c2026007f2e69e8" }
 thiserror = "1.0"
 tokio = { version = "1.21", features = [ "full" ] }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
