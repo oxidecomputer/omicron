@@ -434,7 +434,7 @@ impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
 
     // Creates fake physical storage, an organization, and a project.
-    pub async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
+    pub async fn new<N>(cptestctx: &ControlPlaneTestContext<N>) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
 
         let mut disk_test = Self { sled_agent, zpools: vec![] };

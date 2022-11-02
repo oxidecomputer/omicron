@@ -25,8 +25,8 @@ use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
-use nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::api::external;
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use std::net::IpAddr;
 use uuid::Uuid;
 

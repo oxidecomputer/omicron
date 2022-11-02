@@ -27,12 +27,13 @@ pub mod updates; // public for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
-pub use config::{Config, PackageConfig};
+pub use config::Config;
 pub use context::ServerContext;
 pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use slog::Logger;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 #[macro_use]
@@ -158,6 +159,33 @@ impl Server {
             .nexus
             .register_as_producer(self.http_server_internal.local_addr())
             .await;
+    }
+}
+
+#[async_trait::async_trait]
+impl nexus_test_interface::NexusServer for Server {
+    async fn start_and_populate(config: &Config, log: &Logger) -> Self {
+        let server = Server::start(config, log).await.unwrap();
+        server.apictx.nexus.wait_for_populate().await.unwrap();
+        server
+    }
+
+    fn get_http_servers_external(&self) -> Vec<SocketAddr> {
+        self.http_servers_external
+            .iter()
+            .map(|server| server.local_addr())
+            .collect()
+    }
+
+    fn get_http_server_internal(&self) -> SocketAddr {
+        self.http_server_internal.local_addr()
+    }
+
+    async fn close(mut self) {
+        for server in self.http_servers_external {
+            server.close().await.unwrap();
+        }
+        self.http_server_internal.close().await.unwrap();
     }
 }
 

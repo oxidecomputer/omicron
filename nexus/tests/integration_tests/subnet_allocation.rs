@@ -10,7 +10,6 @@ use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use ipnetwork::Ipv4Network;
-use nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -18,14 +17,17 @@ use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Ipv4Net,
     NetworkInterface,
 };
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_nexus::external_api::params;
 use std::net::Ipv4Addr;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 async fn create_instance_expect_failure(
     client: &ClientTestContext,

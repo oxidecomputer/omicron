@@ -130,6 +130,13 @@ impl DataStore {
         Ok(self.pool.pool())
     }
 
+    #[cfg(test)]
+    pub async fn pool_for_tests(
+        &self,
+    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
+        Ok(self.pool.pool())
+    }
+
     /// Return the next available IPv6 address for an Oxide service running on
     /// the provided sled.
     pub async fn next_ipv6_address(

@@ -74,8 +74,11 @@ async fn test_update_end_to_end() {
         trusted_root: tuf_repo.path().join("metadata").join("1.root.json"),
         default_base_url: format!("http://{}/", local_addr),
     });
-    let cptestctx =
-        test_setup_with_config("test_update_end_to_end", &mut config).await;
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_update_end_to_end",
+        &mut config,
+    )
+    .await;
     let client = &cptestctx.external_client;
 
     // call /system/updates/refresh on nexus
@@ -283,7 +286,9 @@ impl KeySource for KeyKeySource {
 // Tests that ".." paths are disallowed by dropshot.
 #[tokio::test]
 async fn test_download_with_dots_fails() {
-    let cptestctx = test_setup("test_download_with_dots_fails").await;
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_download_with_dots_fails")
+            .await;
     let client = &cptestctx.internal_client;
 
     let filename = "hey/can/you/look/../../../../up/the/directory/tree";

@@ -12,7 +12,9 @@ use omicron_test_utils::dev;
 // This is the default wrapper around most Nexus integration tests.
 // Benchmark how long an "empty test" would take.
 async fn do_full_setup() {
-    let ctx = nexus_test_utils::test_setup("full_setup").await;
+    let ctx =
+        nexus_test_utils::test_setup::<omicron_nexus::Server>("full_setup")
+            .await;
     ctx.teardown().await;
 }
 

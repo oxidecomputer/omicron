@@ -25,7 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.2.1", features = ["serde", "v4"] }
 
-steno = "0.2"
+steno = { git = "https://github.com/oxidecomputer/steno", rev = "4cebb996217453b79896b53c9c2026007f2e69e8" }
 
 db-macros = { path = "../db-macros" }
 omicron-common = { path = "../../common" }
