@@ -32,15 +32,15 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let silo_name = Name::from_str("test-silo").unwrap();
-    create_silo(
+    let silo = create_silo(
         client,
         silo_name.as_str(),
         true,
         shared::SiloIdentityMode::LocalOnly,
     )
     .await;
-    test_local_user_basic(client, &silo_name).await;
-    test_local_user_with_no_initial_password(client, &silo_name).await;
+    test_local_user_basic(client, &silo).await;
+    test_local_user_with_no_initial_password(client, &silo).await;
     NexusRequest::object_delete(
         client,
         &format!("/system/silos/{}", silo_name),
@@ -51,7 +51,9 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
-async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
+async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
+    let silo_name = &silo.identity.name;
+
     // First, try logging in with a non-existent user.  This naturally should
     // fail.  It should also take as long as it would take for a valid user.
     // The timing is verified in expect_login_failure().
@@ -70,7 +72,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
 
     let created_user = create_local_user(
         client,
-        silo_name.as_str(),
+        silo,
         &test_user,
         params::UserPassword::Password(test_password.clone()),
     )
@@ -160,7 +162,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
     let admin_password = params::Password::from_str("toodle-ooh").unwrap();
     let admin_user_obj = create_local_user(
         client,
-        silo_name.as_str(),
+        silo,
         &admin_user,
         params::UserPassword::Password(admin_password.clone()),
     )
@@ -298,13 +300,15 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
 
 async fn test_local_user_with_no_initial_password(
     client: &ClientTestContext,
-    silo_name: &Name,
+    silo: &views::Silo,
 ) {
+    let silo_name = &silo.identity.name;
+
     // Create a user with no initial password.
     let test_user = params::UserId::from_str("steven-falken").unwrap();
     let created_user = create_local_user(
         client,
-        silo_name.as_str(),
+        silo,
         &test_user,
         params::UserPassword::InvalidPassword,
     )

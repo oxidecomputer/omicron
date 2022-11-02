@@ -79,7 +79,7 @@ impl From<UserProvisionType> for shared::UserProvisionType {
 }
 
 /// Describes a silo within the database.
-#[derive(Queryable, Insertable, Debug, Resource, Selectable)]
+#[derive(Clone, Queryable, Insertable, Debug, Resource, Selectable)]
 #[diesel(table_name = silo)]
 pub struct Silo {
     #[diesel(embed)]

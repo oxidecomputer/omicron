@@ -22,6 +22,7 @@ use omicron_nexus::external_api::params::UserId;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
 use omicron_nexus::external_api::views::User;
@@ -130,10 +131,11 @@ pub async fn create_silo(
 
 pub async fn create_local_user(
     client: &ClientTestContext,
-    silo_name: &str,
+    silo: &views::Silo,
     username: &UserId,
     password: params::UserPassword,
 ) -> User {
+    let silo_name = &silo.identity.name;
     let url =
         format!("/system/silos/{}/identity-providers/local/users", silo_name);
     object_create(
