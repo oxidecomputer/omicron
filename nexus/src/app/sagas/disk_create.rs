@@ -755,7 +755,8 @@ mod test {
                 "node_name" => node.name().as_ref(),
                 "label" => node.label(),
             );
-            let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+            let runnable_saga =
+                nexus.create_runnable_saga(dag.clone()).await.unwrap();
 
             // Inject an error instead of running the node.
             //
