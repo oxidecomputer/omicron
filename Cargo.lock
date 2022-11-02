@@ -5813,8 +5813,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/steno?rev=4cebb996217453b79896b53c9c2026007f2e69e8#4cebb996217453b79896b53c9c2026007f2e69e8"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2d803a4bde6e855daf47c2f78c5e1eb3cabf5b416eda9b83666ee9f0a83f199"
 dependencies = [
  "anyhow",
  "async-trait",
