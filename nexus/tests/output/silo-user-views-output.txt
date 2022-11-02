@@ -1,72 +1,72 @@
 SILO: silo1
-    test user PrivilegedUser:
+    test user privileged:
         list = 200
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 200
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 200
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 404 (message = "not found: silo-user with id \"214b47a9-fe53-41f4-9c08-f89cc9ac5d33\"")
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 404 (message = "not found: silo-user with id \"22d8d84d-8959-cc32-847e-de69fa8ee944\"")
+        view "silo1-user1" = 200
+        view "silo1-user2" = 200
+        view "silo2-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user2" = 404 (message = "not found: silo-user with id ...")
 
-    test user SiloUser(1122f0b2-9a92-659b-da6b-93ad4955a3a3):
+    test user silo1-user1:
         list = 200
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 200
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 200
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 404 (message = "not found: silo-user with id \"214b47a9-fe53-41f4-9c08-f89cc9ac5d33\"")
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 404 (message = "not found: silo-user with id \"22d8d84d-8959-cc32-847e-de69fa8ee944\"")
+        view "silo1-user1" = 200
+        view "silo1-user2" = 200
+        view "silo2-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user2" = 404 (message = "not found: silo-user with id ...")
 
-    test user SiloUser(120600f5-f7f4-e026-e569-ef312c16a7fc):
+    test user silo1-user2:
         list = 200
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 200
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 200
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 404 (message = "not found: silo-user with id \"214b47a9-fe53-41f4-9c08-f89cc9ac5d33\"")
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 404 (message = "not found: silo-user with id \"22d8d84d-8959-cc32-847e-de69fa8ee944\"")
+        view "silo1-user1" = 200
+        view "silo1-user2" = 200
+        view "silo2-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user2" = 404 (message = "not found: silo-user with id ...")
 
-    test user SiloUser(214b47a9-fe53-41f4-9c08-f89cc9ac5d33):
+    test user silo2-user1:
         list = 404 (message = "not found: silo with name \"silo1\"")
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 404 (message = "not found: silo with name \"silo1\"")
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 404 (message = "not found: silo with name \"silo1\"")
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 404 (message = "not found: silo with name \"silo1\"")
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 404 (message = "not found: silo with name \"silo1\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
 
-    test user SiloUser(22d8d84d-8959-cc32-847e-de69fa8ee944):
+    test user silo2-user2:
         list = 404 (message = "not found: silo with name \"silo1\"")
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 404 (message = "not found: silo with name \"silo1\"")
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 404 (message = "not found: silo with name \"silo1\"")
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 404 (message = "not found: silo with name \"silo1\"")
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 404 (message = "not found: silo with name \"silo1\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
 
 SILO: silo2
-    test user PrivilegedUser:
+    test user privileged:
         list = 200
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 404 (message = "not found: silo-user with id \"1122f0b2-9a92-659b-da6b-93ad4955a3a3\"")
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 404 (message = "not found: silo-user with id \"120600f5-f7f4-e026-e569-ef312c16a7fc\"")
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 200
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 200
+        view "silo1-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo1-user2" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user1" = 200
+        view "silo2-user2" = 200
 
-    test user SiloUser(1122f0b2-9a92-659b-da6b-93ad4955a3a3):
+    test user silo1-user1:
         list = 404 (message = "not found: silo with name \"silo2\"")
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 404 (message = "not found: silo with name \"silo2\"")
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 404 (message = "not found: silo with name \"silo2\"")
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 404 (message = "not found: silo with name \"silo2\"")
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 404 (message = "not found: silo with name \"silo2\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
 
-    test user SiloUser(120600f5-f7f4-e026-e569-ef312c16a7fc):
+    test user silo1-user2:
         list = 404 (message = "not found: silo with name \"silo2\"")
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 404 (message = "not found: silo with name \"silo2\"")
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 404 (message = "not found: silo with name \"silo2\"")
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 404 (message = "not found: silo with name \"silo2\"")
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 404 (message = "not found: silo with name \"silo2\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
 
-    test user SiloUser(214b47a9-fe53-41f4-9c08-f89cc9ac5d33):
+    test user silo2-user1:
         list = 200
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 404 (message = "not found: silo-user with id \"1122f0b2-9a92-659b-da6b-93ad4955a3a3\"")
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 404 (message = "not found: silo-user with id \"120600f5-f7f4-e026-e569-ef312c16a7fc\"")
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 200
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 200
+        view "silo1-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo1-user2" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user1" = 200
+        view "silo2-user2" = 200
 
-    test user SiloUser(22d8d84d-8959-cc32-847e-de69fa8ee944):
+    test user silo2-user2:
         list = 200
-        view 1122f0b2-9a92-659b-da6b-93ad4955a3a3 (silo 1 user user1) = 404 (message = "not found: silo-user with id \"1122f0b2-9a92-659b-da6b-93ad4955a3a3\"")
-        view 120600f5-f7f4-e026-e569-ef312c16a7fc (silo 1 user user2) = 404 (message = "not found: silo-user with id \"120600f5-f7f4-e026-e569-ef312c16a7fc\"")
-        view 214b47a9-fe53-41f4-9c08-f89cc9ac5d33 (silo 2 user user1) = 200
-        view 22d8d84d-8959-cc32-847e-de69fa8ee944 (silo 2 user user2) = 200
+        view "silo1-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo1-user2" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user1" = 200
+        view "silo2-user2" = 200
 

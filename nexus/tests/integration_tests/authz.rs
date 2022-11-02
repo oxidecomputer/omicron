@@ -11,10 +11,9 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
-use omicron_nexus::TestInterfaces;
 
 use dropshot::ResultsPage;
-use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
@@ -27,7 +26,6 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with a two unprivileged users
     let silo = create_silo(
@@ -38,17 +36,22 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let user1 = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, user1, "user1".into())
-        .await
-        .unwrap();
-
-    let user2 = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, user2, "user2".into())
-        .await
-        .unwrap();
+    let user1 = create_local_user(
+        client,
+        &silo,
+        &"user1".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
+    let user2 = create_local_user(
+        client,
+        &silo,
+        &"user2".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
 
     // Create a key for user1
 
@@ -133,7 +136,6 @@ async fn test_global_image_read_for_unpriv(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
     let silo = create_silo(
@@ -144,11 +146,14 @@ async fn test_global_image_read_for_unpriv(
     )
     .await;
 
-    let new_silo_user_id = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, new_silo_user_id, "unpriv".into())
-        .await
-        .unwrap();
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"unpriv".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
 
     // Create a global image using AuthnMode::PrivilegedUser
     let server = ServerBuilder::new().run().unwrap();
@@ -213,7 +218,6 @@ async fn test_global_image_read_for_unpriv(
 #[nexus_test]
 async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
     let silo = create_silo(
@@ -224,11 +228,14 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let new_silo_user_id = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, new_silo_user_id, "unpriv".into())
-        .await
-        .unwrap();
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"unpriv".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
 
     // Create another silo with another unprivileged user
     let silo = create_silo(
@@ -239,10 +246,14 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    nexus
-        .silo_user_create(silo.identity.id, Uuid::new_v4(), "otheruser".into())
-        .await
-        .unwrap();
+    create_local_user(
+        client,
+        &silo,
+        &"otheruser".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
 
     // Listing users should work
     let users: ResultsPage<views::User> =
@@ -264,7 +275,6 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
     let silo = create_silo(
@@ -275,11 +285,14 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let new_silo_user_id = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, new_silo_user_id, "unpriv".into())
-        .await
-        .unwrap();
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"unpriv".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
 
     let _users: ResultsPage<views::IdentityProvider> =
         NexusRequest::object_get(
@@ -298,7 +311,6 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
     let silo = create_silo(
@@ -309,11 +321,14 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let new_silo_user_id = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, new_silo_user_id, "unpriv".into())
-        .await
-        .unwrap();
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"unpriv".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
 
     let _session_user: views::User =
         NexusRequest::object_get(client, &"/session/me")
@@ -329,7 +344,6 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
     let silo = create_silo(
@@ -340,11 +354,14 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let new_silo_user_id = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, new_silo_user_id, "unpriv".into())
-        .await
-        .unwrap();
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"unpriv".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
 
     // Create another silo
     let _silo = create_silo(
