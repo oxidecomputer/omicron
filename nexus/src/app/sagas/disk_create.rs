@@ -744,30 +744,25 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let nodes_to_fail = [
-            "disk_id",
-            "volume_id",
-            "created_disk",
-            "datasets_and_regions",
-            "regions_ensure",
-            "created_volume",
-            "disk_runtime",
-        ];
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
 
-        for failing_node in &nodes_to_fail {
+        for node in dag.get_nodes() {
             // Create a new saga for this node.
-            info!(log, "Creating new saga which will fail at {failing_node}");
-            let params = new_test_params(&opctx, project_id);
-            let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-            let node_id = dag.get_index(failing_node).unwrap();
-            let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+            info!(
+                log,
+                "Creating new saga which will fail at index {:?}", node.index();
+                "node_name" => node.name().as_ref(),
+                "label" => node.label(),
+            );
+            let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
 
             // Inject an error instead of running the node.
             //
             // This should cause the saga to unwind.
             nexus
                 .sec()
-                .saga_inject_error(runnable_saga.id(), node_id)
+                .saga_inject_error(runnable_saga.id(), node.index())
                 .await
                 .unwrap();
             nexus
