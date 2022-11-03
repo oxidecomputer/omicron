@@ -1802,15 +1802,13 @@ async fn instance_serial_console(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::InstanceSerialConsoleRequest>,
-    selector_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let selector = selector_params.into_inner();
     let instance_selector = params::InstanceSelector {
-        project_selector: selector.project_selector,
+        project_selector: query.project_selector.clone(),
         instance: path.instance,
     };
     let handler = async {
@@ -1834,7 +1832,7 @@ async fn instance_serial_console(
 async fn instance_serial_console_stream(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
-    query_params: Query<params::OptionalProjectSelector>,
+    query_params: Query<params::InstanceSerialConsoleRequest>,
     conn: WebsocketConnection,
 ) -> WebsocketChannelResult {
     let apictx = rqctx.context();
@@ -1843,11 +1841,13 @@ async fn instance_serial_console_stream(
     let query = query_params.into_inner();
     let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
     let instance_selector = params::InstanceSelector {
-        project_selector: query.project_selector,
+        project_selector: query.project_selector.clone(),
         instance: path.instance,
     };
     let instance_lookup = nexus.instance_lookup(&opctx, &instance_selector)?;
-    nexus.instance_serial_console_stream(conn, &instance_lookup).await?;
+    nexus
+        .instance_serial_console_stream(conn, &instance_lookup, &query)
+        .await?;
     Ok(())
 }
 

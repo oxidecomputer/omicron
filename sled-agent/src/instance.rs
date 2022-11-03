@@ -12,9 +12,7 @@ use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData,
 };
-use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
@@ -85,9 +83,6 @@ pub enum Error {
 
     #[error(transparent)]
     Opte(#[from] illumos_utils::opte::Error),
-
-    #[error("Serial console buffer: {0}")]
-    Serial(#[from] crate::serial::Error),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] dns_service_client::multiclient::ResolveError),
@@ -237,9 +232,6 @@ struct InstanceInner {
     state: InstanceStates,
     running_state: Option<RunningState>,
 
-    // Task buffering the instance's serial console
-    serial_tty_task: Option<SerialConsoleBuffer>,
-
     // Connection to Nexus
     lazy_nexus_client: LazyNexusClient,
 }
@@ -369,13 +361,6 @@ impl InstanceInner {
             }
         }));
 
-        if self.serial_tty_task.is_none() {
-            self.serial_tty_task = Some(SerialConsoleBuffer::new(
-                Arc::downgrade(&client),
-                self.log.clone(),
-            ));
-        }
-
         self.running_state = Some(RunningState {
             client,
             instance_ticket,
@@ -444,11 +429,6 @@ mockall::mock! {
             &self,
             target: InstanceRuntimeStateRequested,
         ) -> Result<InstanceRuntimeState, Error>;
-        pub async fn serial_console_buffer_data(
-            &self,
-            byte_offset: ByteOffset,
-            max_bytes: Option<usize>,
-        ) -> Result<InstanceSerialConsoleData, Error>;
         pub async fn issue_snapshot_request(
             &self,
             disk_id: Uuid,
@@ -512,7 +492,6 @@ impl Instance {
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             lazy_nexus_client,
-            serial_tty_task: None,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -825,24 +804,6 @@ impl Instance {
             inner.take_action(action).await?;
         }
         Ok(inner.state.current().clone())
-    }
-
-    pub async fn serial_console_buffer_data(
-        &self,
-        byte_offset: ByteOffset,
-        max_bytes: Option<usize>,
-    ) -> Result<InstanceSerialConsoleData, Error> {
-        let inner = self.inner.lock().await;
-        if let Some(ttybuf) = &inner.serial_tty_task {
-            let (data, last_byte_offset) =
-                ttybuf.contents(byte_offset, max_bytes).await?;
-            Ok(InstanceSerialConsoleData {
-                data,
-                last_byte_offset: last_byte_offset as u64,
-            })
-        } else {
-            Err(crate::serial::Error::Existential.into())
-        }
     }
 
     pub async fn issue_snapshot_request(
