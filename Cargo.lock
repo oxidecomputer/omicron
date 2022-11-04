@@ -7126,6 +7126,7 @@ dependencies = [
  "http",
  "hyper",
  "omicron-common",
+ "reqwest",
  "schemars",
  "serde",
  "slog",

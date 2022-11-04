@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
-const MGS_TIMEOUT: u32 = 3000; // 3 sec
+const MGS_TIMEOUT_MS: u32 = 3000; // 3 sec
 
 // 32 sleds, 2 switches, 2 PSCs (at some point)
 const MAX_COMPONENTS: Option<NonZeroU32> = NonZeroU32::new(36);
@@ -88,7 +88,18 @@ impl MgsManager {
         let endpoint =
             format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
         info!(log, "MGS Endpoint: {}", endpoint);
-        let mgs_client = gateway_client::Client::new(&endpoint, log.clone());
+        let timeout = std::time::Duration::from_millis(MGS_TIMEOUT_MS.into());
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(timeout)
+            .timeout(timeout)
+            .build()
+            .unwrap();
+
+        let mgs_client = gateway_client::Client::new_with_client(
+            &endpoint,
+            client,
+            log.clone(),
+        );
         let inventory = Arc::new(RackV1Inventory::default());
         MgsManager { log, tx, rx, mgs_client, inventory }
     }
@@ -138,7 +149,9 @@ pub async fn poll_inventory(
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            match client.sp_list(MAX_COMPONENTS, None, Some(MGS_TIMEOUT)).await
+            match client
+                .sp_list(MAX_COMPONENTS, None, Some(MGS_TIMEOUT_MS))
+                .await
             {
                 Ok(val) => {
                     // TODO: Get components for each sp

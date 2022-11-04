@@ -4,7 +4,7 @@
 
 // Copyright 2022 Oxide Computer Company
 
-//! Interface for API requests to a Management Gateway Service (MGS)
+//! Interface for API requests to a Management Gateway Service (MGS) instance
 
 // We specifically want to allow consumers, such as `wicketd`, to embed
 // inventory datatypes into their own APIs, rather than recreate structs. For
@@ -19,9 +19,9 @@
 // serves as a safety feature in the common case. The user of an underlying
 // dropshot server can always choose to use this escape hatch.
 //
-//  In this case, we choose to allow the escape hatch, because one of two
+// In this case, we choose to allow the escape hatch, because one of two
 // primary consumers of MGS is wicketd, and wicketd wants to share inventory
-// data, which is already in a useful TLV format, directly with wicket for
+// data, which is already in a useful format, directly with wicket for
 // processing without having to perform unnecessary manipulation. In essence,
 // wicketd is just proxying information for display. Furthermore, wicket
 // itself is a TUI, and so it will not be forwarding these types to any public
