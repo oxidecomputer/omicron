@@ -2401,6 +2401,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "illumos-devinfo"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/illumos-devinfo?rev=8fca0709e5137a3758374cb41ab1bfc60b03e6a9#8fca0709e5137a3758374cb41ab1bfc60b03e6a9"
+dependencies = [
+ "anyhow",
+ "libc",
+ "num_enum",
+]
+
+[[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=23fdf5856f10f23e2d26865d2d7e2d3bc537bca3#23fdf5856f10f23e2d26865d2d7e2d3bc537bca3"
@@ -3404,6 +3414,7 @@ dependencies = [
  "expectorate",
  "futures",
  "http",
+ "illumos-devinfo",
  "internal-dns-client",
  "ipnetwork",
  "libc",

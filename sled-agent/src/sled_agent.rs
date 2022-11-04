@@ -6,6 +6,7 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
+use crate::hardware::HardwareManager;
 use crate::illumos::vnic::VnicKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
@@ -13,7 +14,7 @@ use crate::illumos::zfs::{
 use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
-use crate::nexus::LazyNexusClient;
+use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
@@ -27,9 +28,13 @@ use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
 };
+use omicron_common::backoff::{
+    internal_service_policy_with_max, retry_notify, BackoffError,
+};
 use slog::Logger;
 use std::net::SocketAddrV6;
 use std::process::Command;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crucible_client_types::VolumeConstructionRequest;
@@ -140,9 +145,12 @@ impl From<Error> for dropshot::HttpError {
 /// Describes an executing Sled Agent object.
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
-pub struct SledAgent {
+struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
+
+    // Sled underlay address
+    addr: SocketAddrV6,
 
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
@@ -150,10 +158,22 @@ pub struct SledAgent {
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
 
-    lazy_nexus_client: LazyNexusClient,
+    // Component of Sled Agent responsible for monitoring hardware.
+    hardware: HardwareManager,
 
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
+
+    // Lazily-acquired connection to Nexus.
+    lazy_nexus_client: LazyNexusClient,
+
+    // A serialized request queue for operations interacting with Nexus.
+    nexus_request_queue: NexusRequestQueue,
+}
+
+#[derive(Clone)]
+pub struct SledAgent {
+    inner: Arc<SledAgentInner>,
 }
 
 impl SledAgent {
@@ -298,6 +318,9 @@ impl SledAgent {
             gateway_address: request.gateway.address,
             ..Default::default()
         };
+
+        let hardware = HardwareManager::new(&config, parent_log.clone());
+
         let services = ServiceManager::new(
             parent_log.clone(),
             etherstub.clone(),
@@ -309,11 +332,138 @@ impl SledAgent {
         )
         .await?;
 
-        Ok(SledAgent { id, storage, instances, lazy_nexus_client, services })
+        let sled_agent = SledAgent {
+            inner: Arc::new(SledAgentInner {
+                id,
+                addr: sled_address,
+                storage,
+                instances,
+                hardware,
+                services,
+                lazy_nexus_client,
+
+                // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
+                // Propagate usage of this request queue throughout the Sled Agent.
+                //
+                // Also, we could maybe de-dup some of the backoff code in the request queue?
+                nexus_request_queue: NexusRequestQueue::new(),
+            }),
+        };
+
+        // We immediately add a notification to the request queue about our
+        // existence. If inspection of the hardware later informs us that we're
+        // actually running on a scrimlet, that's fine, the updated value will
+        // be received by Nexus eventually.
+        sled_agent.notify_nexus_about_self(&log);
+
+        // Begin monitoring the underlying hardware, and reacting to changes.
+        let sa = sled_agent.clone();
+        tokio::spawn(async move {
+            sa.monitor(log).await;
+        });
+
+        Ok(sled_agent)
+    }
+
+    async fn monitor(&self, log: Logger) {
+        // Start monitoring the hardware for changes
+        let mut hardware_updates = self.inner.hardware.monitor();
+
+        // Scan the existing system for noteworthy events
+        // that may have happened before we started monitoring
+        if self.inner.hardware.is_scrimlet() {
+            self.ensure_scrimlet_services_active(&log).await;
+        }
+
+        // Rely on monitoring for tracking all future updates.
+        loop {
+            let update = hardware_updates.recv().await.unwrap();
+            match update {
+                crate::hardware::HardwareUpdate::TofinoLoaded => {
+                    self.ensure_scrimlet_services_active(&log).await;
+                }
+            }
+        }
+    }
+
+    async fn ensure_scrimlet_services_active(&self, log: &Logger) {
+        // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
+        //
+        // This won't block on Nexus responding; it may take while before
+        // Nexus actually comes online.
+        self.notify_nexus_about_self(log);
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/823): Launch the switch zone, with
+        // Dendrite, MGS, and any other services we want to enable.
     }
 
     pub fn id(&self) -> Uuid {
-        self.id
+        self.inner.id
+    }
+
+    // Sends a request to Nexus informing it that the current sled exists.
+    fn notify_nexus_about_self(&self, log: &Logger) {
+        let sled_id = self.inner.id;
+        let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
+        let sled_address = self.inner.addr;
+        let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let log = log.clone();
+        let fut = async move {
+            // Notify the control plane that we're up, and continue trying this
+            // until it succeeds. We retry with an randomized, capped exponential
+            // backoff.
+            //
+            // TODO-robustness if this returns a 400 error, we probably want to
+            // return a permanent error from the `notify_nexus` closure.
+            let notify_nexus = || async {
+                info!(
+                    log,
+                    "contacting server nexus, registering sled: {}", sled_id
+                );
+                let role = if is_scrimlet {
+                    nexus_client::types::SledRole::Scrimlet
+                } else {
+                    nexus_client::types::SledRole::Gimlet
+                };
+
+                let nexus_client = lazy_nexus_client
+                    .get()
+                    .await
+                    .map_err(|err| BackoffError::transient(err.to_string()))?;
+                nexus_client
+                    .sled_agent_put(
+                        &sled_id,
+                        &nexus_client::types::SledAgentStartupInfo {
+                            sa_address: sled_address.to_string(),
+                            role,
+                        },
+                    )
+                    .await
+                    .map_err(|err| BackoffError::transient(err.to_string()))
+            };
+            let log_notification_failure = |err, delay| {
+                warn!(
+                    log,
+                    "failed to notify nexus about sled agent: {}, will retry in {:?}", err, delay;
+                );
+            };
+            retry_notify(
+                internal_service_policy_with_max(
+                    std::time::Duration::from_secs(1),
+                ),
+                notify_nexus,
+                log_notification_failure,
+            )
+            .await
+            .expect("Expected an infinite retry loop contacting Nexus");
+        };
+        self.inner
+            .nexus_request_queue
+            .sender()
+            .send(Box::pin(fut))
+            .unwrap_or_else(|err| {
+                panic!("Failed to send future to request queue: {err}");
+            });
     }
 
     /// Ensures that particular services should be initialized.
@@ -324,7 +474,7 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
-        self.services.ensure(requested_services).await?;
+        self.inner.services.ensure(requested_services).await?;
         Ok(())
     }
 
@@ -335,7 +485,8 @@ impl SledAgent {
         dataset_kind: DatasetKind,
         address: SocketAddrV6,
     ) -> Result<(), Error> {
-        self.storage
+        self.inner
+            .storage
             .upsert_filesystem(zpool_uuid, dataset_kind, address)
             .await?;
         Ok(())
@@ -349,7 +500,8 @@ impl SledAgent {
         target: InstanceRuntimeStateRequested,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<InstanceRuntimeState, Error> {
-        self.instances
+        self.inner
+            .instances
             .ensure(instance_id, initial, target, migrate)
             .await
             .map_err(|e| Error::Instance(e))
@@ -373,7 +525,7 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifact,
     ) -> Result<(), Error> {
-        let nexus_client = self.lazy_nexus_client.get().await?;
+        let nexus_client = self.inner.lazy_nexus_client.get().await?;
         crate::updates::download_artifact(artifact, &nexus_client).await?;
         Ok(())
     }
@@ -384,7 +536,8 @@ impl SledAgent {
         byte_offset: ByteOffset,
         max_bytes: Option<usize>,
     ) -> Result<InstanceSerialConsoleData, Error> {
-        self.instances
+        self.inner
+            .instances
             .instance_serial_console_buffer_data(
                 instance_id,
                 byte_offset,
@@ -401,7 +554,8 @@ impl SledAgent {
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        self.instances
+        self.inner
+            .instances
             .instance_issue_disk_snapshot_request(
                 instance_id,
                 disk_id,
@@ -430,7 +584,11 @@ impl SledAgent {
         _vpc_id: Uuid,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
-        self.instances.firewall_rules_ensure(rules).await.map_err(Error::from)
+        self.inner
+            .instances
+            .firewall_rules_ensure(rules)
+            .await
+            .map_err(Error::from)
     }
 }
 

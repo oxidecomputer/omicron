@@ -272,19 +272,11 @@ impl Agent {
             *self.share.lock().await = Some(share);
         }
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/823):
-        // Currently, the prescence or abscence of RSS is our signal
-        // for "is this a scrimlet or not".
-        // Longer-term, we should make this call based on the underlying
-        // hardware.
-        let is_scrimlet = self.rss.lock().await.is_some();
-
         // Server does not exist, initialize it.
         let server = SledServer::start(
             &self.sled_config,
             self.parent_log.clone(),
             sled_address,
-            is_scrimlet,
             request.clone(),
         )
         .await
@@ -464,9 +456,13 @@ impl Agent {
         Ok(rack_secret)
     }
 
-    // Initializes the Rack Setup Service.
-    async fn start_rss(&self, config: &Config) -> Result<(), BootstrapError> {
+    /// Initializes the Rack Setup Service, if requested by `config`.
+    pub async fn start_rss(
+        &self,
+        config: &Config,
+    ) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
+            info!(&self.log, "bootstrap service initializing RSS");
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
@@ -482,20 +478,6 @@ impl Agent {
             );
             self.rss.lock().await.replace(rss);
         }
-        Ok(())
-    }
-
-    /// Performs device initialization:
-    ///
-    /// - Verifies, unpacks, and launches other services.
-    pub async fn initialize(
-        &self,
-        config: &Config,
-    ) -> Result<(), BootstrapError> {
-        info!(&self.log, "bootstrap service initializing");
-
-        self.start_rss(config).await?;
-
         Ok(())
     }
 }
