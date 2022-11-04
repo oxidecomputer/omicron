@@ -21,9 +21,9 @@ pub struct Hardware {
 }
 
 impl Hardware {
-    pub fn new(log: Logger, is_scrimlet: bool) -> Self {
+    pub fn new(log: Logger, is_scrimlet: bool) -> Result<Self, String> {
         let (tx, _) = broadcast::channel(1024);
-        Self { log, inner: Mutex::new(HardwareInner { is_scrimlet }), tx }
+        Ok(Self { log, inner: Mutex::new(HardwareInner { is_scrimlet }), tx })
     }
 
     pub fn is_scrimlet(&self) -> bool {

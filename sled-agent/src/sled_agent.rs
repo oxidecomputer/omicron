@@ -97,6 +97,9 @@ pub enum Error {
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] crate::opte::Error),
 
+    #[error("Error monitoring hardware: {0}")]
+    Hardware(String),
+
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
 }
@@ -319,7 +322,8 @@ impl SledAgent {
             ..Default::default()
         };
 
-        let hardware = HardwareManager::new(&config, parent_log.clone());
+        let hardware = HardwareManager::new(&config, parent_log.clone())
+            .map_err(|e| Error::Hardware(e))?;
 
         let services = ServiceManager::new(
             parent_log.clone(),

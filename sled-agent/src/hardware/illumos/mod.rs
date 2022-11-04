@@ -83,9 +83,16 @@ async fn hardware_tracking_task(
 impl Hardware {
     /// Creates a new representation of the underlying hardware, and initialize
     /// a task which periodically updates that representation.
-    pub fn new(log: Logger, is_scrimlet: bool) -> Self {
+    pub fn new(log: Logger, is_scrimlet: bool) -> Result<Self, String> {
         let (tx, _) = broadcast::channel(1024);
         let inner = Arc::new(Mutex::new(HardwareInner { is_scrimlet }));
+
+        // Force the device tree to be polled at least once before returning.
+        // This mitigates issues where the Sled Agent could try to propagate
+        // an "empty" view of hardware to other consumers before the first
+        // query.
+        poll_device_tree(&log, &inner, &tx)
+            .map_err(|err| format!("Failed to poll device tree: {err}"))?;
 
         let log2 = log.clone();
         let inner2 = inner.clone();
@@ -94,7 +101,7 @@ impl Hardware {
             hardware_tracking_task(log2, inner2, tx2).await
         });
 
-        Self { log, inner, tx, _worker }
+        Ok(Self { log, inner, tx, _worker })
     }
 
     pub fn is_scrimlet(&self) -> bool {

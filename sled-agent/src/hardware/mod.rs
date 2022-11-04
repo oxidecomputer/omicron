@@ -22,7 +22,10 @@ pub(crate) struct HardwareManager {
 }
 
 impl HardwareManager {
-    pub fn new(config: &crate::config::Config, log: Logger) -> Self {
+    pub fn new(
+        config: &crate::config::Config,
+        log: Logger,
+    ) -> Result<Self, String> {
         // Unless explicitly specified, we assume this device is a Gimlet until
         // told otherwise.
         let is_scrimlet = if let Some(is_scrimlet) = config.force_scrimlet {
@@ -32,7 +35,7 @@ impl HardwareManager {
         };
 
         let log = log.new(o!("component" => "HardwareManager"));
-        Self { _log: log.clone(), inner: Hardware::new(log, is_scrimlet) }
+        Ok(Self { _log: log.clone(), inner: Hardware::new(log, is_scrimlet)? })
     }
 
     pub fn is_scrimlet(&self) -> bool {
