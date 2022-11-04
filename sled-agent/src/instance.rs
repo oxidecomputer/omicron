@@ -355,7 +355,9 @@ impl InstanceInner {
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
-        client.instance_ensure().body(request).send().await?;
+        let result = client.instance_ensure().body(request).send().await;
+        info!(self.log, "result of instance_ensure call is {:?}", result);
+        result?;
 
         // Monitor propolis for state changes in the background.
         let monitor_task = Some(tokio::task::spawn(async move {
@@ -696,8 +698,13 @@ impl Instance {
 
         inner.state.current_mut().propolis_addr = Some(server_addr);
 
-        let client =
-            Arc::new(PropolisClient::new(&format!("http://{}", server_addr)));
+        // We use a custom client builder here because the default progenitor
+        // one has a timeout of 15s but we want to be able to wait indefinitely.
+        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
+        let client = Arc::new(PropolisClient::new_with_client(
+            &format!("http://{}", server_addr),
+            reqwest_client,
+        ));
 
         // Although the instance is online, the HTTP server may not be running
         // yet. Wait for it to respond to requests, so users of the instance
