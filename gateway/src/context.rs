@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::bulk_state_get::BulkSpStateRequests;
 use gateway_sp_comms::Communicator;
 use gateway_sp_comms::{error::StartupError, SwitchConfig};
 use slog::Logger;
@@ -11,7 +10,6 @@ use std::{sync::Arc, time::Duration};
 /// Shared state used by API request handlers
 pub struct ServerContext {
     pub sp_comms: Arc<Communicator>,
-    pub bulk_sp_state_requests: BulkSpStateRequests,
     pub timeouts: Timeouts,
     pub log: Logger,
 }
@@ -51,7 +49,6 @@ impl ServerContext {
         let comms = Arc::new(Communicator::new(switch_config, log).await?);
         Ok(Arc::new(ServerContext {
             sp_comms: Arc::clone(&comms),
-            bulk_sp_state_requests: BulkSpStateRequests::new(comms, log),
             timeouts: Timeouts::from(&timeouts),
             log: log.clone(),
         }))
