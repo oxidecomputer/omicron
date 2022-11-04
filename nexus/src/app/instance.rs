@@ -692,6 +692,15 @@ impl super::Nexus {
                     // the instance state to failed, we don't know what state
                     // the instance is in.
                     _ => {
+                        // Grab the potentially updated runtime before bumping
+                        // the generation number.
+                        let (.., db_instance) =
+                            LookupPath::new(opctx, &self.db_datastore)
+                                .instance_id(db_instance.id())
+                                .fetch_for(authz::Action::Modify)
+                                .await?;
+
+                        // Update the instance state to failed
                         let new_runtime = db::model::InstanceRuntimeState {
                             state: db::model::InstanceState::new(
                                 InstanceState::Failed,
