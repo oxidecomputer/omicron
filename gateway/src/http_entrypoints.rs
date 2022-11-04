@@ -350,9 +350,7 @@ async fn sp_list(
     let timeout = timeout
         .timeout_millis
         .map(|t| Duration::from_millis(u64::from(t)))
-        .unwrap_or(apictx.timeouts.bulk_request_default)
-        // TODO do we also want a floor for the timeout?
-        .min(apictx.timeouts.bulk_request_max);
+        .unwrap_or(apictx.timeouts.bulk_request_default);
     let timeout = SpTimeout::from_now(timeout);
 
     // query ignition controller to find out which SPs are powered on
@@ -378,7 +376,7 @@ async fn sp_list(
             // 2. Outer err => timeout; treat that as "success"
             //    (with state = unresponsive)
             // 3. Inner success => true success
-            //
+            // 4. Inner error => Log it (with state = unresponsive)
             let id = id.into();
             let details = ignition_details.into();
             let state = match result {

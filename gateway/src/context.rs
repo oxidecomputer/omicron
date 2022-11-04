@@ -16,9 +16,6 @@ pub struct ServerContext {
 
 pub struct Timeouts {
     pub bulk_request_default: Duration,
-    pub bulk_request_max: Duration,
-    pub bulk_request_page: Duration,
-    pub bulk_request_retain_grace_period: Duration,
 }
 
 impl From<&'_ crate::config::Timeouts> for Timeouts {
@@ -26,15 +23,6 @@ impl From<&'_ crate::config::Timeouts> for Timeouts {
         Self {
             bulk_request_default: Duration::from_millis(
                 timeouts.bulk_request_default_millis,
-            ),
-            bulk_request_max: Duration::from_millis(
-                timeouts.bulk_request_max_millis,
-            ),
-            bulk_request_page: Duration::from_millis(
-                timeouts.bulk_request_page_millis,
-            ),
-            bulk_request_retain_grace_period: Duration::from_millis(
-                timeouts.bulk_request_retain_grace_period_millis,
             ),
         }
     }
