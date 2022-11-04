@@ -6,12 +6,12 @@ mod config;
 mod context;
 mod http_entrypoints;
 mod inventory;
-mod mgs_manager;
+mod mgs;
 
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use inventory::RackV1Inventory;
-pub(crate) use mgs_manager::{MgsHandle, MgsManager};
+pub(crate) use mgs::{MgsHandle, MgsManager};
 
 use dropshot::ConfigDropshot;
 use slog::{debug, error, o, Drain};
