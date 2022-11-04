@@ -4,6 +4,7 @@ members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "end-to-end-tests",
     "gateway",
     "gateway-cli",
     "gateway-client",
@@ -34,7 +35,7 @@ members = [
     "oximeter-client",
     "test-utils",
     "wicket",
-    "end-to-end-tests",
+    "wicketd",
 ]
 
 default-members = [
