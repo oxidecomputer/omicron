@@ -9,16 +9,12 @@ use crate::RackV1Inventory;
 use gateway_client::types::SpInfo;
 use slog::{debug, info, o, warn, Logger};
 use std::net::SocketAddrV6;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const MGS_TIMEOUT_MS: u32 = 3000; // 3 sec
-
-// 32 sleds, 2 switches, 2 PSCs (at some point)
-const MAX_COMPONENTS: Option<NonZeroU32> = NonZeroU32::new(36);
 
 // We support:
 //   * One outstanding query request from wicket
@@ -149,13 +145,10 @@ pub async fn poll_inventory(
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            match client
-                .sp_list(MAX_COMPONENTS, None, Some(MGS_TIMEOUT_MS))
-                .await
-            {
+            match client.sp_list(Some(MGS_TIMEOUT_MS)).await {
                 Ok(val) => {
                     // TODO: Get components for each sp
-                    let _ = tx.send(val.into_inner().items).await;
+                    let _ = tx.send(val.into_inner()).await;
                 }
                 Err(e) => {
                     warn!(log, "{e}");

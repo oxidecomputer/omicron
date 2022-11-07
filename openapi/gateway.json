@@ -169,31 +169,9 @@
     "/sp": {
       "get": {
         "summary": "List SPs",
-        "description": "Since communication with SPs may be unreliable, consumers may specify an optional timeout to override the default.\nThis interface may return a page of SPs prior to reaching either the timeout with the expectation that callers will keep calling this interface until the terminal page is reached. If the timeout is reached, the final call will result in an error.\nThis interface makes use of Ignition as well as the management network. SPs that are powered off (and therefore cannot respond over the management network) are represented in the output set. SPs that Ignition reports as powered on, but that do not respond within the allotted timeout will similarly be represented in the output; these will only be included in the terminal output page when the allotted timeout has expired.\nNote that Ignition provides the full set of SPs that are plugged into the system so the gateway service knows prior to waiting for responses the expected cardinality.",
+        "description": "Since communication with SPs may be unreliable, consumers may specify an optional timeout to override the default.\nThis interface makes use of Ignition as well as the management network. SPs that are powered off (and therefore cannot respond over the management network) are represented in the output set. SPs that Ignition reports as powered on, but that do not respond within the allotted timeout will similarly be represented in the output; these will only be included in the output when the allotted timeout has expired.\nNote that Ignition provides the full set of SPs that are plugged into the system so the gateway service knows prior to waiting for responses the expected cardinality.",
         "operationId": "sp_list",
         "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
           {
             "in": "query",
             "name": "timeout_millis",
@@ -212,7 +190,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpInfoResultsPage"
+                  "title": "Array_of_SpInfo",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpInfo"
+                  }
                 }
               }
             }
@@ -223,8 +205,7 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "x-dropshot-pagination": true
+        }
       }
     },
     "/sp/{type}/{slot}": {
@@ -1158,27 +1139,6 @@
         "required": [
           "details",
           "info"
-        ]
-      },
-      "SpInfoResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpInfo"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "SpState": {

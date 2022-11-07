@@ -79,9 +79,6 @@ switch1 = ["sled", 1]
 
 [timeouts]
 bulk_request_default_millis = 10_000
-bulk_request_max_millis = 40_000
-bulk_request_page_millis = 2_000
-bulk_request_retain_grace_period_millis = 10_000
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel
