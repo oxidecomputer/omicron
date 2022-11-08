@@ -1104,7 +1104,7 @@ async fn test_volume_remove_read_only_parent_base(
 
     // Go and get the volume from the database, verify it no longer
     // has a read only parent.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1123,7 +1123,7 @@ async fn test_volume_remove_read_only_parent_base(
     }
 
     // Verify the t_vid now has a ROP.
-    let new_vol = datastore.volume_get(t_vid).await.unwrap();
+    let new_vol = datastore.volume_checkout(t_vid).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1150,7 +1150,7 @@ async fn test_volume_remove_read_only_parent_base(
     // We want to verify we can call volume_remove_rop twice and the second
     // time through it won't change what it did the first time. This is
     // critical to supporting replay of the saga, should it be needed.
-    let new_vol = datastore.volume_get(t_vid).await.unwrap();
+    let new_vol = datastore.volume_checkout(t_vid).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1299,7 +1299,7 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1357,7 +1357,7 @@ async fn test_volume_remove_rop_saga_twice(
         .unwrap();
 
     println!("first returns {:?}", res);
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1491,7 +1491,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
         .await
         .unwrap();
 
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1512,8 +1512,8 @@ async fn test_volume_remove_rop_saga_deleted_volume(
 }
 
 #[nexus_test]
-async fn test_volume_get_updates_gen(cptestctx: &ControlPlaneTestContext) {
-    // Verify that a volume_get will update the generation number in the
+async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
+    // Verify that a volume_checkout will update the generation number in the
     // database when the volume type is Volume with sub_volume Region.
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
@@ -1540,17 +1540,19 @@ async fn test_volume_get_updates_gen(cptestctx: &ControlPlaneTestContext) {
 
     // The first time back, we get 1 but internally the generation number goes
     // to 2.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![1]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(1)]);
 
     // Request again, we should get 2 now.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![2]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(2)]);
 }
 
 #[nexus_test]
-async fn test_volume_get_updates_nothing(cptestctx: &ControlPlaneTestContext) {
-    // Verify that a volume_get will do nothing for a volume that does
+async fn test_volume_checkout_updates_nothing(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_checkout will do nothing for a volume that does
     // not contain a sub_volume with a generation field.
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
@@ -1580,17 +1582,17 @@ async fn test_volume_get_updates_nothing(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // Verify nothing happens to our non generation number volume.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![0]);
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![0]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None]);
 }
 
 #[nexus_test]
-async fn test_volume_get_updates_multiple_gen(
+async fn test_volume_checkout_updates_multiple_gen(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // Verify that a volume_get will update the generation number in the
+    // Verify that a volume_checkout will update the generation number in the
     // database when the volume type is Volume with multiple sub_volumes of
     // type Region.
     let nexus = &cptestctx.server.apictx.nexus;
@@ -1621,23 +1623,23 @@ async fn test_volume_get_updates_multiple_gen(
 
     // The first time back, we get our original values, but internally the
     // generation number goes up.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![3, 8]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(3), Some(8)]);
 
     // Request again, we should see the incremented values now..
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![4, 9]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(4), Some(9)]);
 
     // Request one more, because why not.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![5, 10]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(5), Some(10)]);
 }
 
 #[nexus_test]
-async fn test_volume_get_updates_sparse_multiple_gen(
+async fn test_volume_checkout_updates_sparse_multiple_gen(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // Verify that a volume_get will update the generation number in the
+    // Verify that a volume_checkout will update the generation number in the
     // database when the volume type is Volume with multiple sub_volumes of
     // type Region and also verify that a non generation sub_volume won't be a
     // problem
@@ -1674,18 +1676,18 @@ async fn test_volume_get_updates_sparse_multiple_gen(
 
     // The first time back, we get our original values, but internally the
     // generation number goes up.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![0, 7, 9]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None, Some(7), Some(9)]);
 
     // Request again, we should see the incremented values now..
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![0, 8, 10]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None, Some(8), Some(10)]);
 }
 #[nexus_test]
-async fn test_volume_get_updates_sparse_mid_multiple_gen(
+async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // Verify that a volume_get will update the generation number in the
+    // Verify that a volume_checkout will update the generation number in the
     // database when the volume type is Volume with multiple sub_volumes of
     // type Region and also verify that a non generation sub_volume in the
     // middle of the sub_volumes won't be a problem
@@ -1722,12 +1724,12 @@ async fn test_volume_get_updates_sparse_mid_multiple_gen(
 
     // The first time back, we get our original values, but internally the
     // generation number goes up.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![7, 0, 9]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(7), None, Some(9)]);
 
     // Request again, we should see the incremented values now..
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
-    volume_match_gen(new_vol, vec![8, 0, 10]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(8), None, Some(10)]);
 }
 
 // Test function that creates a VolumeConstructionRequest::Region With gen,
@@ -1760,7 +1762,10 @@ fn create_region(
 // sub-volume.  The value 0 in the expected_gen vec tells this test function
 // that index in the list of sub_volumes should not be a Region, and therefore
 // will not have a generation number field.
-fn volume_match_gen(volume: nexus_db_model::Volume, expected_gen: Vec<u64>) {
+fn volume_match_gen(
+    volume: nexus_db_model::Volume,
+    expected_gen: Vec<Option<u64>>,
+) {
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(volume.data()).unwrap();
 
@@ -1780,10 +1785,10 @@ fn volume_match_gen(volume: nexus_db_model::Volume, expected_gen: Vec<u64>) {
                         gen,
                         opts: _,
                     } => {
-                        assert_eq!(*gen, expected_gen[index]);
+                        assert_eq!(*gen, expected_gen[index].unwrap());
                     }
                     _ => {
-                        assert_eq!(expected_gen[index], 0);
+                        assert!(expected_gen[index].is_none());
                     }
                 }
             }

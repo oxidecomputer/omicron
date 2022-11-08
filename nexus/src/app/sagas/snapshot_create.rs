@@ -562,7 +562,7 @@ async fn ssc_send_snapshot_request(
             // Grab volume construction request for the disk
             let disk_volume = osagactx
                 .datastore()
-                .volume_get(disk.volume_id)
+                .volume_checkout(disk.volume_id)
                 .await
                 .map_err(ActionError::action_failed)?;
 
@@ -726,7 +726,7 @@ async fn ssc_create_volume_record(
 
     let disk_volume = osagactx
         .datastore()
-        .volume_get(disk.volume_id)
+        .volume_checkout(disk.volume_id)
         .await
         .map_err(ActionError::action_failed)?;
 

@@ -312,7 +312,7 @@ async fn sdc_regions_ensure(
 
                 let volume = osagactx
                     .datastore()
-                    .volume_get(db_snapshot.volume_id)
+                    .volume_checkout(db_snapshot.volume_id)
                     .await
                     .map_err(ActionError::action_failed)?;
 
@@ -365,7 +365,7 @@ async fn sdc_regions_ensure(
 
                 let volume = osagactx
                     .datastore()
-                    .volume_get(global_image.volume_id)
+                    .volume_checkout(global_image.volume_id)
                     .await
                     .map_err(ActionError::action_failed)?;
 

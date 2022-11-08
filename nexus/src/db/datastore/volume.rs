@@ -166,21 +166,24 @@ impl DataStore {
         Ok(())
     }
 
-    /// Get a copy of the Volume from the database.
+    /// Checkout a copy of the Volume from the database.
     /// This action (getting a copy) will increase the generation number
     /// of Volumes of the VolumeConstructionRequest::Volume type that have
     /// sub_volumes of the VolumeConstructionRequest::Region type.
     /// This generation number increase is required for Crucible to support
     /// crash consistency.
-    pub async fn volume_get(&self, volume_id: Uuid) -> LookupResult<Volume> {
+    pub async fn volume_checkout(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<Volume> {
         use db::schema::volume::dsl;
 
         #[derive(Debug, thiserror::Error)]
         enum VolumeGetError {
-            #[error("Error during volume_get: {0}")]
+            #[error("Error during volume_checkout: {0}")]
             DieselError(#[from] diesel::result::Error),
 
-            #[error("Serde error during volume_get: {0}")]
+            #[error("Serde error during volume_checkout: {0}")]
             SerdeError(#[from] serde_json::Error),
 
             #[error("Updated {0} database rows, expected {1}")]
