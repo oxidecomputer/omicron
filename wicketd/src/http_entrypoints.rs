@@ -45,7 +45,7 @@ pub fn api() -> WicketdApiDescription {
 }]
 async fn get_inventory(
     rqctx: Arc<RequestContext<ServerContext>>,
-) -> Result<HttpResponseOk<Arc<RackV1Inventory>>, HttpError> {
+) -> Result<HttpResponseOk<RackV1Inventory>, HttpError> {
     match rqctx.context().mgs_handle.get_inventory().await {
         Ok(inventory) => Ok(HttpResponseOk(inventory)),
         Err(_) => {

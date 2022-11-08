@@ -10,7 +10,7 @@ mod mgs;
 
 pub use config::Config;
 pub(crate) use context::ServerContext;
-pub use inventory::RackV1Inventory;
+pub use inventory::{RackV1Inventory, SpId, SpInventory};
 pub(crate) use mgs::{MgsHandle, MgsManager};
 
 use dropshot::ConfigDropshot;

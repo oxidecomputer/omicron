@@ -36,6 +36,7 @@ members = [
     "test-utils",
     "wicket",
     "wicketd",
+    "wicketd-client"
 ]
 
 default-members = [

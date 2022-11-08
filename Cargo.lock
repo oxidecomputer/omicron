@@ -7134,6 +7134,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "wicketd-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-common",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "reqwest",
+ "serde",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "widestring"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
