@@ -322,8 +322,9 @@ impl SledAgent {
             ..Default::default()
         };
 
-        let hardware = HardwareManager::new(&config, parent_log.clone())
-            .map_err(|e| Error::Hardware(e))?;
+        let hardware =
+            HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
+                .map_err(|e| Error::Hardware(e))?;
 
         let services = ServiceManager::new(
             parent_log.clone(),
@@ -369,25 +370,50 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
+    // Observe the current hardware state manually.
+    //
+    // We use this when we're monitoring hardware for the first
+    // time, and if we miss notifications.
+    async fn full_hardware_scan(&self, log: &Logger) {
+        info!(log, "Performing full hardware scan");
+        self.notify_nexus_about_self(log);
+        if self.inner.hardware.is_scrimlet_driver_loaded() {
+            self.ensure_scrimlet_services_active(&log).await;
+        } else {
+            self.ensure_scrimlet_services_deactive(&log).await;
+        }
+    }
+
     async fn monitor(&self, log: Logger) {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.inner.hardware.monitor();
 
-        // Scan the existing system for noteworthy events
-        // that may have happened before we started monitoring
-        if self.inner.hardware.is_scrimlet() {
-            self.ensure_scrimlet_services_active(&log).await;
-        }
+        // Scan the system manually for events we have have missed
+        // before we started monitoring.
+        self.full_hardware_scan(&log).await;
 
         // Rely on monitoring for tracking all future updates.
         loop {
-            let update = hardware_updates.recv().await.unwrap();
-            match update {
-                crate::hardware::HardwareUpdate::TofinoLoaded => {
-                    self.ensure_scrimlet_services_active(&log).await;
+            use tokio::sync::broadcast::error::RecvError;
+            match hardware_updates.recv().await {
+                Ok(update) => match update {
+                    crate::hardware::HardwareUpdate::TofinoDeviceChange => {
+                        self.notify_nexus_about_self(&log);
+                    }
+                    crate::hardware::HardwareUpdate::TofinoLoaded => {
+                        self.ensure_scrimlet_services_active(&log).await;
+                    }
+                    crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                        self.ensure_scrimlet_services_deactive(&log).await;
+                    }
+                },
+                Err(RecvError::Lagged(count)) => {
+                    warn!(log, "Hardware monitor missed {count} messages");
+                    self.full_hardware_scan(&log).await;
                 }
-                crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                    self.ensure_scrimlet_services_deactive(&log).await;
+                Err(RecvError::Closed) => {
+                    warn!(log, "Hardware monitor receiver closed; exiting");
+                    return;
                 }
             }
         }

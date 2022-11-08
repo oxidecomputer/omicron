@@ -2,44 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use slog::Logger;
-use tokio::sync::broadcast;
-
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
         mod illumos;
-        use illumos::*;
+        pub(crate) use illumos::*;
     } else {
         mod non_illumos;
-        use non_illumos::*;
-    }
-}
-
-/// A platform-independent interface for interacting with the underlying hardware.
-pub(crate) struct HardwareManager {
-    _log: Logger,
-    inner: Hardware,
-}
-
-impl HardwareManager {
-    pub fn new(
-        config: &crate::config::Config,
-        log: Logger,
-    ) -> Result<Self, String> {
-        let log = log.new(o!("component" => "HardwareManager"));
-        Ok(Self {
-            _log: log.clone(),
-            inner: Hardware::new(log, config.stub_scrimlet)?,
-        })
-    }
-
-    pub fn is_scrimlet(&self) -> bool {
-        self.inner.is_scrimlet()
-    }
-
-    // Monitors the underlying hardware for updates.
-    pub fn monitor(&self) -> broadcast::Receiver<HardwareUpdate> {
-        self.inner.monitor()
+        pub(crate) use non_illumos::*;
     }
 }
 
@@ -52,6 +21,7 @@ impl HardwareManager {
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum HardwareUpdate {
+    TofinoDeviceChange,
     TofinoLoaded,
     TofinoUnloaded,
     // TODO: Notify about disks being added / removed, etc.

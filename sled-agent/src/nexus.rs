@@ -77,6 +77,13 @@ impl NexusRequestQueue {
     /// Creates a new request queue, along with a worker which executes
     /// any incoming tasks.
     pub fn new() -> Self {
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
+        // In the future, this should basically just be a wrapper around a
+        // generation number, and we shouldn't be serializing requests to Nexus.
+        //
+        // In the meanwhile, we're using an unbounded_channel for simplicity, so
+        // that we don't need to cope with dropped notifications /
+        // retransmissions.
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let _worker = tokio::spawn(async move {

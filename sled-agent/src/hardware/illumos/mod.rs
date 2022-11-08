@@ -66,17 +66,6 @@ impl HardwareView {
     }
 }
 
-/// A representation of the underlying hardware.
-///
-/// This structure provides interfaces for both querying and for receiving new
-/// events.
-pub struct Hardware {
-    log: Logger,
-    inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<super::HardwareUpdate>,
-    _worker: JoinHandle<()>,
-}
-
 const TOFINO_SUBSYSTEM_VID: i32 = 0x1d1c;
 const TOFINO_SUBSYSTEM_ID: i32 = 0x100;
 
@@ -109,30 +98,32 @@ fn poll_device_tree(
 
     // After inspecting the device tree, diff with the old view, and provide
     // necessary updates.
-    let tofino_update = {
+    let mut updates = vec![];
+    {
         let mut inner = inner.lock().unwrap();
         match inner.tofino {
-            TofinoView::Real(TofinoSnapshot { driver_loaded, .. }) => {
-                // Identify if we have an update to perform
-                let tofino_update =
-                    match (driver_loaded, polled_hw.tofino.driver_loaded) {
-                        (false, true) => {
-                            Some(super::HardwareUpdate::TofinoLoaded)
-                        }
-                        (true, false) => {
-                            Some(super::HardwareUpdate::TofinoUnloaded)
-                        }
-                        _ => None,
-                    };
+            TofinoView::Real(TofinoSnapshot { driver_loaded, exists }) => {
+                use super::HardwareUpdate::*;
+                // Identify if the Tofino device changed power states.
+                if exists != polled_hw.tofino.exists {
+                    updates.push(TofinoDeviceChange);
+                }
+
+                // Identify if the Tofino driver was recently loaded/unloaded.
+                match (driver_loaded, polled_hw.tofino.driver_loaded) {
+                    (false, true) => updates.push(TofinoLoaded),
+                    (true, false) => updates.push(TofinoUnloaded),
+                    _ => (),
+                };
+
                 // Update our view of the underlying hardware
                 inner.tofino = TofinoView::Real(polled_hw.tofino);
-                tofino_update
             }
-            TofinoView::Stub { .. } => None,
+            TofinoView::Stub { .. } => (),
         }
     };
 
-    if let Some(update) = tofino_update {
+    for update in updates.into_iter() {
         info!(log, "Update from polling device tree: {:?}", update);
         let _ = tx.send(update);
     }
@@ -153,13 +144,36 @@ async fn hardware_tracking_task(
     }
 }
 
-impl Hardware {
-    /// Creates a new representation of the underlying hardware, and initialize
+/// A representation of the underlying hardware.
+///
+/// This structure provides interfaces for both querying and for receiving new
+/// events.
+pub struct HardwareManager {
+    log: Logger,
+    inner: Arc<Mutex<HardwareView>>,
+    tx: broadcast::Sender<super::HardwareUpdate>,
+    _worker: JoinHandle<()>,
+}
+
+impl HardwareManager {
+    /// Creates a new representation of the underlying hardware, and initializes
     /// a task which periodically updates that representation.
+    ///
+    /// Arguments:
+    /// - `stub_scrimlet`: Identifies if we should ignore the attached Tofino
+    /// device, and assume the device is a scrimlet (true) or gimlet (false).
+    /// If this argument is not supplied, we assume the device is a gimlet until
+    /// device scanning informs us otherwise.
     pub fn new(
         log: Logger,
         stub_scrimlet: Option<bool>,
     ) -> Result<Self, String> {
+        let log = log.new(o!("component" => "HardwareManager"));
+
+        // The size of the broadcast channel is arbitrary, but bounded.
+        // If the channel fills up, old notifications will be dropped, and the
+        // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
+        // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
         let hw = match stub_scrimlet {
             None => HardwareView::new(),
@@ -188,6 +202,16 @@ impl Hardware {
         let inner = self.inner.lock().unwrap();
         match inner.tofino {
             TofinoView::Real(TofinoSnapshot { exists, .. }) => exists,
+            TofinoView::Stub { active } => active,
+        }
+    }
+
+    pub fn is_scrimlet_driver_loaded(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        match inner.tofino {
+            TofinoView::Real(TofinoSnapshot { driver_loaded, .. }) => {
+                driver_loaded
+            }
             TofinoView::Stub { active } => active,
         }
     }
