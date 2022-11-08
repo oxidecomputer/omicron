@@ -198,7 +198,6 @@ impl Drop for RunningState {
 
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
-    addr: SocketAddr,
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
     port_tickets: Option<Vec<PortTicket>>,
@@ -313,7 +312,7 @@ impl InstanceInner {
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { addr, client, running_zone, port_tickets } = setup;
+        let PropolisSetup { client, running_zone, port_tickets } = setup;
 
         let nics = running_zone
             .opte_ports()
@@ -360,8 +359,9 @@ impl InstanceInner {
         result?;
 
         // Monitor propolis for state changes in the background.
+        let monitor_client = client.clone();
         let monitor_task = Some(tokio::task::spawn(async move {
-            let r = instance.monitor_state_task(addr).await;
+            let r = instance.monitor_state_task(monitor_client).await;
             let log = &instance.inner.lock().await.log;
             match r {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
@@ -712,7 +712,6 @@ impl Instance {
         wait_for_http_server(&inner.log, &client).await?;
 
         Ok(PropolisSetup {
-            addr: server_addr,
             client,
             running_zone,
             port_tickets: Some(port_tickets),
@@ -768,15 +767,10 @@ impl Instance {
     // Monitors propolis until explicitly told to disconnect.
     //
     // Intended to be spawned in a tokio task within [`Instance::start`].
-    async fn monitor_state_task(&self, addr: SocketAddr) -> Result<(), Error> {
-        // We use a custom client builder here because the default progenitor
-        // one has a timeout of 15s but we want to be able to wait indefinitely.
-        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
-        let client = PropolisClient::new_with_client(
-            &format!("http://{}", addr),
-            reqwest_client,
-        );
-
+    async fn monitor_state_task(
+        &self,
+        client: Arc<PropolisClient>,
+    ) -> Result<(), Error> {
         let mut gen = 0;
         loop {
             // State monitoring always returns the most recent state/gen pair
