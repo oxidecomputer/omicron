@@ -4929,9 +4929,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.34.0-beta.16"
+version = "0.35.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a47850d2711f53330077c1ca72f7f326ec1658b68add7dbc22c384731b6adb"
+checksum = "ebd7b1ea9ca57d5b152426d8825c35d836cc436bd6835dabc70cf68b9a50ffe5"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4958,6 +4958,7 @@ dependencies = [
  "subtle",
  "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
