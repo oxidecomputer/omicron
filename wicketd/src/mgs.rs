@@ -5,9 +5,10 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
-use crate::RackV1Inventory;
+use crate::{RackV1Inventory, SpId, SpInventory};
 use gateway_client::types::SpInfo;
 use slog::{debug, info, o, warn, Logger};
+use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -73,8 +74,7 @@ pub struct MgsManager {
     tx: mpsc::Sender<MgsRequest>,
     rx: mpsc::Receiver<MgsRequest>,
     mgs_client: gateway_client::Client,
-    // Remove the need to copy a potentially sizeable amount of data
-    inventory: Arc<RackV1Inventory>,
+    inventory: RackV1Inventory,
 }
 
 impl MgsManager {
@@ -96,7 +96,7 @@ impl MgsManager {
             client,
             log.clone(),
         );
-        let inventory = Arc::new(RackV1Inventory::default());
+        let inventory = RackV1Inventory::default();
         MgsManager { log, tx, rx, mgs_client, inventory }
     }
 
@@ -106,15 +106,13 @@ impl MgsManager {
 
     pub async fn run(mut self) {
         let mgs_client = self.mgs_client;
-        let mut inventory_rx = poll_inventory(&self.log, mgs_client).await;
+        let mut inventory_rx = poll_sps(&self.log, mgs_client).await;
 
         loop {
             tokio::select! {
                 // Poll MGS inventory
                 Some(sps) = inventory_rx.recv() => {
-                    self.inventory = Arc::new(RackV1Inventory {
-                        sps: sps.into_iter().map(|sp| (sp, vec![])).collect()
-                    });
+                    self.update_inventory(sps);
                 }
 
                 // Handle requests from clients
@@ -129,9 +127,36 @@ impl MgsManager {
             }
         }
     }
+    // For the latest set of sps returned from MGS:
+    //  1. Update their state if it has changed
+    //  2. Remove any SPs in our current inventory that aren't in the new state
+    fn update_inventory(&mut self, sps: Vec<SpInfo>) {
+        let keys: BTreeSet<SpId> = self.inventory.keys();
+        let new_keys: BTreeSet<SpId> =
+            sps.iter().map(|sp| sp.info.id.into()).collect();
+
+        let removed: Vec<_> = keys.difference(&new_keys);
+        for id in removed {
+            self.inventory.sps.remove(id);
+        }
+
+        for sp in sps.into_iter() {
+            let state = sp.state;
+            let id: SpId = sp.info.id.into();
+            let ignition = sp.info.details;
+
+            self.inventory
+                .sps
+                .entry(id)
+                .and_modify(|curr| {
+                    // TODO: Update curr if there is a change in state
+                })
+                .or_insert(SpInventory::new(ignition, state));
+        }
+    }
 }
 
-pub async fn poll_inventory(
+async fn poll_sps(
     log: &Logger,
     client: gateway_client::Client,
 ) -> mpsc::Receiver<Vec<SpInfo>> {
