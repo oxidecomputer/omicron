@@ -398,6 +398,10 @@ impl SledAgent {
             match hardware_updates.recv().await {
                 Ok(update) => match update {
                     crate::hardware::HardwareUpdate::TofinoDeviceChange => {
+                        // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
+                        //
+                        // This won't block on Nexus responding; it may take while before
+                        // Nexus actually comes online.
                         self.notify_nexus_about_self(&log);
                     }
                     crate::hardware::HardwareUpdate::TofinoLoaded => {
@@ -420,12 +424,6 @@ impl SledAgent {
     }
 
     async fn ensure_scrimlet_services_active(&self, log: &Logger) {
-        // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
-        //
-        // This won't block on Nexus responding; it may take while before
-        // Nexus actually comes online.
-        self.notify_nexus_about_self(log);
-
         // TODO(https://github.com/oxidecomputer/omicron/issues/823): Launch the switch zone, with
         // Dendrite, MGS, and any other services we want to enable.
         warn!(log, "Activating scrimlet services not yet implemented");
