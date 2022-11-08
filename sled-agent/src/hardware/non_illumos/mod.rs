@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use tokio::sync::broadcast;
 
 struct HardwareInner {
-    is_scrimlet: bool,
+    stub_scrimlet: bool,
 }
 
 /// A simulated representation of the underlying hardware.
@@ -21,13 +21,17 @@ pub struct Hardware {
 }
 
 impl Hardware {
-    pub fn new(log: Logger, is_scrimlet: bool) -> Result<Self, String> {
+    pub fn new(
+        log: Logger,
+        stub_scrimlet: Option<bool>,
+    ) -> Result<Self, String> {
         let (tx, _) = broadcast::channel(1024);
-        Ok(Self { log, inner: Mutex::new(HardwareInner { is_scrimlet }), tx })
+        let stub_scrimlet = stub_scrimlet.unwrap_or(false);
+        Ok(Self { log, inner: Mutex::new(HardwareInner { stub_scrimlet }), tx })
     }
 
     pub fn is_scrimlet(&self) -> bool {
-        self.inner.lock().unwrap().is_scrimlet
+        self.inner.lock().unwrap().stub_scrimlet
     }
 
     pub fn monitor(&self) -> broadcast::Receiver<super::HardwareUpdate> {

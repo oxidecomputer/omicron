@@ -21,7 +21,7 @@ pub struct Config {
     pub log: ConfigLogging,
     /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
     /// if set to false).
-    pub force_scrimlet: Option<bool>,
+    pub stub_scrimlet: Option<bool>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".

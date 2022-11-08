@@ -26,16 +26,11 @@ impl HardwareManager {
         config: &crate::config::Config,
         log: Logger,
     ) -> Result<Self, String> {
-        // Unless explicitly specified, we assume this device is a Gimlet until
-        // told otherwise.
-        let is_scrimlet = if let Some(is_scrimlet) = config.force_scrimlet {
-            is_scrimlet
-        } else {
-            false
-        };
-
         let log = log.new(o!("component" => "HardwareManager"));
-        Ok(Self { _log: log.clone(), inner: Hardware::new(log, is_scrimlet)? })
+        Ok(Self {
+            _log: log.clone(),
+            inner: Hardware::new(log, config.stub_scrimlet)?,
+        })
     }
 
     pub fn is_scrimlet(&self) -> bool {
@@ -54,9 +49,10 @@ impl HardwareManager {
 /// These updates should generally be "non-opinionated" - the higher
 /// layers of the sled agent can make the call to ignore these updates
 /// or not.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum HardwareUpdate {
     TofinoLoaded,
+    TofinoUnloaded,
     // TODO: Notify about disks being added / removed, etc.
 }

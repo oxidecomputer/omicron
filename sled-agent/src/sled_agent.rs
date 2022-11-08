@@ -386,6 +386,9 @@ impl SledAgent {
                 crate::hardware::HardwareUpdate::TofinoLoaded => {
                     self.ensure_scrimlet_services_active(&log).await;
                 }
+                crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                    self.ensure_scrimlet_services_deactive(&log).await;
+                }
             }
         }
     }
@@ -399,6 +402,12 @@ impl SledAgent {
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/823): Launch the switch zone, with
         // Dendrite, MGS, and any other services we want to enable.
+        warn!(log, "Activating scrimlet services not yet implemented");
+    }
+
+    async fn ensure_scrimlet_services_deactive(&self, log: &Logger) {
+        // TODO(https://github.com/oxidecomputer/omicron/issues/823): Terminate the switch zone.
+        warn!(log, "Deactivating scrimlet services not yet implemented");
     }
 
     pub fn id(&self) -> Uuid {

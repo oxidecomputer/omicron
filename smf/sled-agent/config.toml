@@ -6,9 +6,10 @@ id = "fb0f7546-4d46-40ca-9d56-cbb810684ca7"
 #
 # If this is set to "true", the sled agent treats itself as a scrimlet.
 # If this is set to "false", the sled agent treats itself as a gimlet.
-# If this is unset, the sled automatically detects whether or not it is a
-# scrimlet.
-# force_scrimlet = true
+# If this is unset:
+# - On illumos, the sled automatically detects whether or not it is a scrimlet.
+# - On all other platforms, the sled assumes it is a gimlet.
+# stub_scrimlet = true
 
 # A file-backed zpool can be manually created with the following:
 # # truncate -s 10GB testpool.vdev
