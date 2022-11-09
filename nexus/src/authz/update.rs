@@ -9,7 +9,7 @@ use oso::Oso;
 use oso::PolarValue;
 use oso::ToPolar;
 
-type Version = String;
+type Version = i64;
 
 /// Updatable components.
 #[derive(Clone, Debug, PartialEq)]
@@ -175,13 +175,15 @@ impl oso::PolarClass for Reboot {
 fn plan_update(
     oso: &Oso,
     resource: impl ToPolar,
-    from: &str,
-    to: &str,
+    from: &Version,
+    to: &Version,
 ) -> Result<Vec<PolarValue>> {
     let plan = PolarValue::Variable("plan".to_string());
     let mut plans = Vec::<PolarValue>::new();
-    let mut query =
-        oso.query_rule("update", (resource.to_polar(), from, to, plan))?;
+    let mut query = oso.query_rule(
+        "update",
+        (resource.to_polar(), from.to_polar(), to.to_polar(), plan),
+    )?;
     loop {
         match query.next() {
             Some(Ok(result)) => {
@@ -207,12 +209,9 @@ mod test {
         let logctx = dev::test_setup_log("test_trivial_update_plan");
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
+        assert_eq!(plan_update(&oso, "foo", &0, &1).expect("plans"), vec![]);
         assert_eq!(
-            plan_update(&oso, "foo", "foo", "bar").expect("plans"),
-            vec![]
-        );
-        assert_eq!(
-            plan_update(&oso, "foo", "foo", "foo").expect("plans"),
+            plan_update(&oso, "foo", &0, &0).expect("plans"),
             vec![PolarValue::List(vec![])]
         );
         logctx.cleanup_successful();
@@ -223,10 +222,10 @@ mod test {
         let logctx = dev::test_setup_log("test_simple_update_plan");
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
-        let h = HubrisImage::new("foo".to_string());
-        let u = Update::new(h.clone(), "foo".to_string(), "bar".to_string());
-        let r = Reboot::new(h.clone(), "bar".to_string());
-        match &plan_update(&oso, h, "foo", "bar").expect("plans").as_slice() {
+        let h = HubrisImage::new(0);
+        let u = Update::new(h.clone(), 0, 1);
+        let r = Reboot::new(h.clone(), 1);
+        match &plan_update(&oso, h, &0, &1).expect("plans").as_slice() {
             [PolarValue::List(plan)] => match plan.as_slice() {
                 [PolarValue::List(plan)] => match plan.as_slice() {
                     [PolarValue::Instance(x), PolarValue::Instance(y)] => {
@@ -249,14 +248,14 @@ mod test {
         let logctx = dev::test_setup_log("test_compound_update_plan");
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
-        let h = HubrisImage::new("foo".to_string());
-        let u = Update::new(h.clone(), "foo".to_string(), "bar".to_string());
-        let r = Reboot::new(h.clone(), "bar".to_string());
+        let h = HubrisImage::new(0);
+        let u = Update::new(h.clone(), 0, 1);
+        let r = Reboot::new(h.clone(), 1);
         let c = CompoundComponent(vec![
             Component::RoT(h.clone()),
             Component::SP(h.clone()),
         ]);
-        match &plan_update(&oso, c, "foo", "bar").expect("plans").as_slice() {
+        match &plan_update(&oso, c, &0, &1).expect("plans").as_slice() {
             [PolarValue::List(plan)] => match plan.as_slice() {
                 [PolarValue::List(plan0), PolarValue::List(plan1)] => {
                     match (plan0.as_slice(), plan1.as_slice()) {

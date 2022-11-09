@@ -5,12 +5,12 @@ update(_resource, from, from, []);
 ?= update("foo", "foo", "foo", []);
 ?= not update("foo", "foo", "bar", []);
 
-# Recursive update case: update each sub-component.
-# E.g., to update a rack, update each of its sleds;
-# to update a sled, update each of its RoT & SP.
-update(resource: CompoundComponent, from, to, plan) if
-  #to > from and
-  #resource.version = from and
+# Recursive update case: update each sub-component to a newer version.
+# E.g., to update a rack, update each of its sleds; to update a sled,
+# update its RoT, SP, etc.
+update(resource: CompoundComponent, from: Integer, to: Integer, plan) if
+  to > from and
+  resource.version = from and
   update_components(resource.components, from, to, plan);
 
 # Handle sub-components one at a time.
