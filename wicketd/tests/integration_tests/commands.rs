@@ -15,16 +15,16 @@ use omicron_test_utils::dev::test_cmds::{
 use openapiv3::OpenAPI;
 use subprocess::Exec;
 
-// name of mgs executable
+// name of wicketd executable
 const CMD_WICKETD: &str = env!("CARGO_BIN_EXE_wicketd");
 
-fn path_to_mgs() -> PathBuf {
+fn path_to_wicketd() -> PathBuf {
     path_to_executable(CMD_WICKETD)
 }
 
 #[test]
 fn test_wicketd_openapi() {
-    let exec = Exec::cmd(path_to_mgs()).arg("openapi");
+    let exec = Exec::cmd(path_to_wicketd()).arg("openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
     assert_contents("tests/output/cmd-wicketd-openapi-stderr", &stderr_text);
