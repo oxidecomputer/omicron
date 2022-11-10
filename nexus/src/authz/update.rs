@@ -12,11 +12,12 @@ use oso::ToPolar;
 type Version = i64;
 
 /// Updatable components.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Component {
+    Host(Image),
     PSC(CompoundComponent),
-    RoT(HubrisImage),
-    SP(HubrisImage),
+    RoT(Image),
+    SP(Image),
     Gimlet(CompoundComponent),
     Scrimlet(CompoundComponent),
     Sidecar(CompoundComponent),
@@ -26,7 +27,7 @@ pub enum Component {
 impl Component {
     fn components(&self) -> Vec<Component> {
         match self {
-            Self::RoT(_) | Self::SP(_) => vec![],
+            Self::Host(_) | Self::RoT(_) | Self::SP(_) => vec![],
             Self::PSC(cc)
             | Self::Gimlet(cc)
             | Self::Scrimlet(cc)
@@ -35,9 +36,10 @@ impl Component {
         }
     }
 
-    fn image(&self) -> Option<HubrisImage> {
+    fn image(&self) -> Option<Image> {
         match self {
-            Self::RoT(h) | Self::SP(h) => Some(h.clone()),
+            Self::Host(i) => Some(i.clone()),
+            Self::RoT(i) | Self::SP(i) => Some(i.clone()),
             Self::PSC(_)
             | Self::Gimlet(_)
             | Self::Scrimlet(_)
@@ -48,7 +50,8 @@ impl Component {
 
     fn version(&self) -> Version {
         match self {
-            Self::RoT(h) | Self::SP(h) => h.version(),
+            Self::Host(i) => i.version(),
+            Self::RoT(i) | Self::SP(i) => i.version(),
             Self::PSC(cc)
             | Self::Gimlet(cc)
             | Self::Scrimlet(cc)
@@ -70,7 +73,7 @@ impl oso::PolarClass for Component {
 
 /// Describes an updatable component with sub-components,
 /// like a `Gimlet` or a `Rack`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompoundComponent(Vec<Component>);
 
 impl CompoundComponent {
@@ -100,6 +103,59 @@ impl oso::PolarClass for CompoundComponent {
     }
 }
 
+/// Describes an updatable processor image.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Image {
+    Host(HostImage),
+    Hubris(HubrisImage),
+}
+
+impl Image {
+    fn components(&self) -> Vec<Component> {
+        vec![]
+    }
+
+    fn version(&self) -> Version {
+        match self {
+            Self::Host(i) => i.version(),
+            Self::Hubris(i) => i.version(),
+        }
+    }
+}
+
+impl oso::PolarClass for Image {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("version", Self::version)
+    }
+}
+
+/// Describes an updatable, multi-phase host processor image.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostImage {
+    version: Version,
+    //phase1, phase2, phase?_tramp, ...
+}
+
+impl HostImage {
+    fn new(version: Version) -> Self {
+        Self { version }
+    }
+
+    fn version(&self) -> Version {
+        self.version.clone()
+    }
+}
+
+impl oso::PolarClass for HostImage {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::ClassBuilder::with_constructor(Self::new)
+            .with_equality_check()
+            .add_attribute_getter("version", Self::version)
+    }
+}
+
 /// Describes an updatable Hubris image.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HubrisImage {
@@ -111,10 +167,6 @@ impl HubrisImage {
         Self { version }
     }
 
-    fn components(&self) -> Vec<Component> {
-        vec![]
-    }
-
     fn version(&self) -> Version {
         self.version.clone()
     }
@@ -124,22 +176,27 @@ impl oso::PolarClass for HubrisImage {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::ClassBuilder::with_constructor(Self::new)
             .with_equality_check()
-            .add_attribute_getter("components", Self::components)
             .add_attribute_getter("version", Self::version)
     }
 }
 
-/// Describes a Hubris update being planned or executed.
+/// Describes an update being planned or executed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Update {
-    image: HubrisImage,
+    component: Component,
+    image: Image,
     from: Version,
     to: Version,
 }
 
 impl Update {
-    fn new(image: HubrisImage, from: Version, to: Version) -> Self {
-        Self { image, from, to }
+    fn new(
+        component: Component,
+        image: Image,
+        from: Version,
+        to: Version,
+    ) -> Self {
+        Self { component, image, from, to }
     }
 }
 
@@ -152,13 +209,14 @@ impl oso::PolarClass for Update {
 /// Describes a planned reboot of some component.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reboot {
-    image: HubrisImage,
+    component: Component,
+    image: Image,
     into: Version,
 }
 
 impl Reboot {
-    fn new(image: HubrisImage, into: Version) -> Self {
-        Self { image, into }
+    fn new(component: Component, image: Image, into: Version) -> Self {
+        Self { component, image, into }
     }
 }
 
@@ -168,13 +226,13 @@ impl oso::PolarClass for Reboot {
     }
 }
 
-/// Produce a list of plans for updating `resource` from version `from`
+/// Produce a list of plans for updating `component` from version `from`
 /// to `to` that is consistent with the (already loaded into `oso`) Polar
 /// update policy (see `update.polar`). Works by querying the `update`
 /// rule with an unbound `plan` variable and accumulating the results.
 fn plan_update(
     oso: &Oso,
-    resource: impl ToPolar,
+    component: impl ToPolar,
     from: &Version,
     to: &Version,
 ) -> Result<Vec<PolarValue>> {
@@ -182,7 +240,7 @@ fn plan_update(
     let mut plans = Vec::<PolarValue>::new();
     let mut query = oso.query_rule(
         "update",
-        (resource.to_polar(), from.to_polar(), to.to_polar(), plan),
+        (component.to_polar(), from.to_polar(), to.to_polar(), plan),
     )?;
     loop {
         match query.next() {
@@ -223,16 +281,18 @@ mod test {
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
         let h = HubrisImage::new(0);
-        let u = Update::new(h.clone(), 0, 1);
-        let r = Reboot::new(h.clone(), 1);
-        match &plan_update(&oso, h, &0, &1).expect("plans").as_slice() {
+        let i = Image::Hubris(h);
+        let sp = Component::SP(i.clone());
+        let update = Update::new(sp.clone(), i.clone(), 0, 1);
+        let reboot = Reboot::new(sp.clone(), i.clone(), 1);
+        match &plan_update(&oso, sp, &0, &1).expect("plans").as_slice() {
             [PolarValue::List(plan)] => match plan.as_slice() {
                 [PolarValue::List(plan)] => match plan.as_slice() {
                     [PolarValue::Instance(x), PolarValue::Instance(y)] => {
                         let x: &Update = x.downcast(None).unwrap();
                         let y: &Reboot = y.downcast(None).unwrap();
-                        assert_eq!(&u, x);
-                        assert_eq!(&r, y);
+                        assert_eq!(&update, x);
+                        assert_eq!(&reboot, y);
                     }
                     _ => assert!(false),
                 },
@@ -249,12 +309,14 @@ mod test {
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
         let h = HubrisImage::new(0);
-        let u = Update::new(h.clone(), 0, 1);
-        let r = Reboot::new(h.clone(), 1);
-        let c = CompoundComponent(vec![
-            Component::RoT(h.clone()),
-            Component::SP(h.clone()),
-        ]);
+        let i = Image::Hubris(h);
+        let sp = Component::SP(i.clone());
+        let rot = Component::RoT(i.clone());
+        let update_sp = Update::new(sp.clone(), i.clone(), 0, 1);
+        let reboot_sp = Reboot::new(sp.clone(), i.clone(), 1);
+        let update_rot = Update::new(rot.clone(), i.clone(), 0, 1);
+        let reboot_rot = Reboot::new(rot.clone(), i.clone(), 1);
+        let c = CompoundComponent(vec![sp.clone(), rot.clone()]);
         match &plan_update(&oso, c, &0, &1).expect("plans").as_slice() {
             [PolarValue::List(plan)] => match plan.as_slice() {
                 [PolarValue::List(plan0), PolarValue::List(plan1)] => {
@@ -271,10 +333,10 @@ mod test {
                                 let y: &Reboot = y.downcast(None).unwrap();
                                 let z: &Update = z.downcast(None).unwrap();
                                 let w: &Reboot = w.downcast(None).unwrap();
-                                assert_eq!(&u, x);
-                                assert_eq!(&r, y);
-                                assert_eq!(&u, z);
-                                assert_eq!(&r, w);
+                                assert_eq!(&update_sp, x);
+                                assert_eq!(&reboot_sp, y);
+                                assert_eq!(&update_rot, z);
+                                assert_eq!(&reboot_rot, w);
                             }
                             _ => assert!(false),
                         },

@@ -1,5 +1,5 @@
 # Base update case: any version trivially updates to itself.
-update(_resource, from, from, []);
+update(_component, from, from, []);
 
 # Unit tests: update anything trivially, but not arbitrarily.
 ?= update("foo", "foo", "foo", []);
@@ -8,10 +8,10 @@ update(_resource, from, from, []);
 # Recursive update case: update each sub-component to a newer version.
 # E.g., to update a rack, update each of its sleds; to update a sled,
 # update its RoT, SP, etc.
-update(resource: CompoundComponent, from: Integer, to: Integer, plan) if
+update(component: CompoundComponent, from: Integer, to: Integer, plan) if
   to > from and
-  resource.version = from and
-  update_components(resource.components, from, to, plan);
+  component.version = from and
+  update_components(component.components, from, to, plan);
 
 # Handle sub-components one at a time.
 update_components([], _from, _to, []);
@@ -20,11 +20,11 @@ update_components([first, *rest], from, to, [plan1, *rest_plan]) if
   update_components(rest, from, to, rest_plan);
 
 # Handle components with images.
-update(resource: Component, from, to, plan) if
-  image in resource.image and
-  update(image, from, to, plan);
+update(component: Component, from, to, plan) if
+  image in component.image and
+  update_image(component, image, from, to, plan);
 
-# Update a Hubris image and reboot into the new one.
-update(resource: HubrisImage, from, to, plan) if
-  plan = [[new Update(resource, from, to),
-           new Reboot(resource, to)]];
+# Update an image and reboot into the new one.
+update_image(component: Component, image: Image, from, to, plan) if
+  plan = [[new Update(component, image, from, to),
+           new Reboot(component, image, to)]];

@@ -11,7 +11,9 @@ use super::context::AuthorizedResource;
 use super::roles::RoleSet;
 use super::update::Component;
 use super::update::CompoundComponent;
+use super::update::HostImage;
 use super::update::HubrisImage;
+use super::update::Image;
 use super::update::Reboot;
 use super::update::Update;
 use super::Authz;
@@ -125,7 +127,9 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         // Update classes
         Component::get_polar_class(),
         CompoundComponent::get_polar_class(),
+        HostImage::get_polar_class(),
         HubrisImage::get_polar_class(),
+        Image::get_polar_class(),
         Update::get_polar_class(),
         Reboot::get_polar_class(),
     ];

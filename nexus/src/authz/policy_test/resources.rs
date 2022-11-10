@@ -292,7 +292,9 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::actor::AuthenticatedActor::get_polar_class(),
         authz::update::Component::get_polar_class(),
         authz::update::CompoundComponent::get_polar_class(),
+        authz::update::HostImage::get_polar_class(),
         authz::update::HubrisImage::get_polar_class(),
+        authz::update::Image::get_polar_class(),
         authz::update::Reboot::get_polar_class(),
         authz::update::Update::get_polar_class(),
         // Resources whose behavior should be identical to an existing type
