@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! API for controlling a single instance.
+//! API for allocating and managing data links.
 
 use crate::illumos::dladm::{
     CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
@@ -54,13 +54,13 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     pub fn new_control(
         &self,
         mac: Option<MacAddr>,
-    ) -> Result<Vnic, CreateVnicError> {
+    ) -> Result<Link, CreateVnicError> {
         let allocator = self.new_superscope("Control");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
         Dladm::create_vnic(&self.data_link, &name, mac, None)?;
-        Ok(Vnic { name, deleted: false, kind: VnicKind::OxideControl })
+        Ok(Link { name, deleted: false, kind: LinkKind::OxideControlVnic })
     }
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
@@ -82,22 +82,23 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     }
 }
 
-/// Represents the kind of a VNIC, such as whether it's for guest networking or
+/// Represents the kind of a Link, such as whether it's for guest networking or
 /// communicating with Oxide services.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum VnicKind {
-    OxideControl,
-    Guest,
+pub enum LinkKind {
+    Physical,
+    OxideControlVnic,
+    GuestVnic,
 }
 
-impl VnicKind {
+impl LinkKind {
     /// Infer the kind from a VNIC's name, if this one the sled agent can
     /// manage, and `None` otherwise.
     pub fn from_name(name: &str) -> Option<Self> {
         if name.starts_with(VNIC_PREFIX) {
-            Some(VnicKind::OxideControl)
+            Some(LinkKind::OxideControlVnic)
         } else if name.starts_with(VNIC_PREFIX_GUEST) {
-            Some(VnicKind::Guest)
+            Some(LinkKind::GuestVnic)
         } else {
             None
         }
@@ -106,7 +107,7 @@ impl VnicKind {
 
 #[derive(thiserror::Error, Debug)]
 #[error("VNIC with name '{0}' is not valid for sled agent management")]
-pub struct InvalidVnicKind(String);
+pub struct InvalidLinkKind(String);
 
 /// Represents an allocated VNIC on the system.
 /// The VNIC is de-allocated when it goes out of scope.
@@ -115,30 +116,41 @@ pub struct InvalidVnicKind(String);
 /// another process in the global zone could also modify / destroy
 /// the VNIC while this object is alive.
 #[derive(Debug)]
-pub struct Vnic {
+pub struct Link {
     name: String,
     deleted: bool,
-    kind: VnicKind,
+    kind: LinkKind,
 }
 
-impl Vnic {
+impl Link {
     /// Takes ownership of an existing VNIC.
     pub fn wrap_existing<S: AsRef<str>>(
         name: S,
-    ) -> Result<Self, InvalidVnicKind> {
-        match VnicKind::from_name(name.as_ref()) {
-            Some(kind) => Ok(Vnic {
+    ) -> Result<Self, InvalidLinkKind> {
+        match LinkKind::from_name(name.as_ref()) {
+            Some(kind) => Ok(Self {
                 name: name.as_ref().to_owned(),
                 deleted: false,
                 kind,
             }),
-            None => Err(InvalidVnicKind(name.as_ref().to_owned())),
+            None => Err(InvalidLinkKind(name.as_ref().to_owned())),
+        }
+    }
+
+    /// Wraps a physical nic in a Link structure.
+    ///
+    /// It is the caller's responsibility to ensure this is a physical link.
+    pub fn wrap_physical<S: AsRef<str>>(name: S) -> Self {
+        Link {
+            name: name.as_ref().to_owned(),
+            deleted: false,
+            kind: LinkKind::Physical,
         }
     }
 
     /// Deletes a NIC (if it has not already been deleted).
     pub fn delete(&mut self) -> Result<(), DeleteVnicError> {
-        if self.deleted {
+        if self.deleted || self.kind == LinkKind::Physical {
             Ok(())
         } else {
             self.deleted = true;
@@ -150,16 +162,16 @@ impl Vnic {
         &self.name
     }
 
-    pub fn kind(&self) -> VnicKind {
+    pub fn kind(&self) -> LinkKind {
         self.kind
     }
 }
 
-impl Drop for Vnic {
+impl Drop for Link {
     fn drop(&mut self) {
         let r = self.delete();
         if let Err(e) = r {
-            eprintln!("Failed to delete VNIC: {}", e);
+            eprintln!("Failed to delete Link: {}", e);
         }
     }
 }

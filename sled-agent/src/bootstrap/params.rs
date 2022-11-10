@@ -6,13 +6,13 @@
 
 use super::trust_quorum::SerializableShareDistribution;
 use macaddr::MacAddr6;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
+use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::serde_as;
 use serde_with::DeserializeAs;
 use serde_with::PickFirst;
 use std::borrow::Cow;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information about the internet gateway used for externally-facing services.
@@ -76,6 +76,16 @@ pub struct SledAgentRequest {
     // must come after non-table fields.
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+}
+
+impl SledAgentRequest {
+    pub fn sled_address(&self) -> SocketAddrV6 {
+        address::get_sled_address(self.subnet)
+    }
+
+    pub fn switch_ip(&self) -> Ipv6Addr {
+        address::get_switch_zone_address(self.subnet)
+    }
 }
 
 // We intentionally DO NOT derive `Debug` or `Serialize`; both provide avenues
