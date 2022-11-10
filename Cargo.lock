@@ -7095,6 +7095,8 @@ dependencies = [
  "crossterm",
  "futures",
  "hex",
+ "omicron-common",
+ "reqwest",
  "semver 1.0.14",
  "serde",
  "serde_json",
@@ -7108,6 +7110,7 @@ dependencies = [
  "tokio",
  "toml",
  "tui",
+ "wicketd-client",
 ]
 
 [[package]]
