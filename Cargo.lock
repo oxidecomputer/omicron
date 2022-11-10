@@ -709,13 +709,13 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.18"
+version = "4.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "335867764ed2de42325fafe6d18b8af74ba97ee0c590fa016f157535b42ab04b"
+checksum = "91b9970d7505127a162fdaa9b96428d28a479ba78c9ec7550a63a5d9863db682"
 dependencies = [
  "atty",
  "bitflags",
- "clap_derive 4.0.18",
+ "clap_derive 4.0.21",
  "clap_lex 0.3.0",
  "once_cell",
  "strsim",
@@ -737,9 +737,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.0.18"
+version = "4.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16a1b0f6422af32d5da0c58e2703320f379216ee70198241c84173a8c5ac28f3"
+checksum = "0177313f9f02afc995627906bbd8967e2be069f5261954222dac78290c2b9014"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -1948,7 +1948,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "futures",
  "gateway-client",
  "libc",
@@ -1968,7 +1968,7 @@ dependencies = [
  "chrono",
  "futures",
  "omicron-common",
- "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
  "reqwest",
  "schemars",
  "serde",
@@ -2520,7 +2520,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3271,7 +3271,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -3287,7 +3287,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.18",
+ "clap 4.0.22",
  "dropshot",
  "expectorate",
  "futures",
@@ -3325,7 +3325,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
- "clap 4.0.18",
+ "clap 4.0.22",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3409,7 +3409,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "futures",
  "hex",
  "indicatif",
@@ -3447,7 +3447,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.0.18",
+ "clap 4.0.22",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -3509,7 +3509,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "dropshot",
  "expectorate",
  "futures",
@@ -3769,7 +3769,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.18",
+ "clap 4.0.22",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3800,7 +3800,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.0.18",
+ "clap 4.0.22",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4387,10 +4387,25 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
+dependencies = [
+ "anyhow",
+ "clap 4.0.22",
+ "openapiv3",
+ "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
+ "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
+ "progenitor-macro 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "progenitor"
+version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "openapiv3",
  "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
@@ -4405,7 +4420,7 @@ version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "openapiv3",
  "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
@@ -4417,6 +4432,20 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+]
+
+[[package]]
+name = "progenitor-client"
+version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
 dependencies = [
  "bytes",
@@ -4445,6 +4474,28 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
+dependencies = [
+ "getopts",
+ "heck 0.4.0",
+ "indexmap",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustfmt-wrapper",
+ "schemars",
+ "serde",
+ "serde_json",
+ "syn",
+ "thiserror",
+ "typify 0.0.11-dev",
+ "unicode-ident",
+]
+
+[[package]]
+name = "progenitor-impl"
+version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
 dependencies = [
  "getopts",
@@ -4460,7 +4511,7 @@ dependencies = [
  "serde_json",
  "syn",
  "thiserror",
- "typify",
+ "typify 0.0.10",
  "unicode-ident",
 ]
 
@@ -4482,8 +4533,23 @@ dependencies = [
  "serde_json",
  "syn",
  "thiserror",
- "typify",
+ "typify 0.0.10",
  "unicode-ident",
+]
+
+[[package]]
+name = "progenitor-macro"
+version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
+dependencies = [
+ "openapiv3",
+ "proc-macro2",
+ "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
+ "quote",
+ "serde",
+ "serde_json",
+ "serde_tokenstream",
+ "syn",
 ]
 
 [[package]]
@@ -5830,7 +5896,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.0.18",
+ "clap 4.0.22",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -6673,8 +6739,17 @@ version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e8486352f3c946e69f983558cfc09b295250b01e01b381ec67a05a812d01d63"
 dependencies = [
- "typify-impl",
- "typify-macro",
+ "typify-impl 0.0.10",
+ "typify-macro 0.0.10",
+]
+
+[[package]]
+name = "typify"
+version = "0.0.11-dev"
+source = "git+https://github.com/oxidecomputer/typify#311e3589ca8c28162281b604c27304be89967d49"
+dependencies = [
+ "typify-impl 0.0.11-dev",
+ "typify-macro 0.0.11-dev",
 ]
 
 [[package]]
@@ -6682,6 +6757,24 @@ name = "typify-impl"
 version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7624d0b911df6e2bbf34a236f76281f93b294cdde1d4df1dbdb748e5a7fefa5"
+dependencies = [
+ "heck 0.4.0",
+ "log",
+ "proc-macro2",
+ "quote",
+ "regress",
+ "rustfmt-wrapper",
+ "schemars",
+ "serde_json",
+ "syn",
+ "thiserror",
+ "unicode-ident",
+]
+
+[[package]]
+name = "typify-impl"
+version = "0.0.11-dev"
+source = "git+https://github.com/oxidecomputer/typify#311e3589ca8c28162281b604c27304be89967d49"
 dependencies = [
  "heck 0.4.0",
  "log",
@@ -6709,7 +6802,22 @@ dependencies = [
  "serde_json",
  "serde_tokenstream",
  "syn",
- "typify-impl",
+ "typify-impl 0.0.10",
+]
+
+[[package]]
+name = "typify-macro"
+version = "0.0.11-dev"
+source = "git+https://github.com/oxidecomputer/typify#311e3589ca8c28162281b604c27304be89967d49"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_tokenstream",
+ "syn",
+ "typify-impl 0.0.11-dev",
 ]
 
 [[package]]
@@ -7091,7 +7199,7 @@ name = "wicket"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.18",
+ "clap 4.0.22",
  "crossterm",
  "futures",
  "hex",
@@ -7114,7 +7222,7 @@ dependencies = [
 name = "wicketd"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.18",
+ "clap 4.0.22",
  "dropshot",
  "expectorate",
  "futures",
