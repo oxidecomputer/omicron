@@ -158,7 +158,7 @@ impl Dladm {
 
     /// Creates a VNIC on top of the etherstub.
     ///
-    /// This VNIC is not tracked like [`crate::illumos::vnic::Vnic`], because
+    /// This VNIC is not tracked like [`crate::illumos::link::Link`], because
     /// it is expected to exist for the lifetime of the sled.
     pub fn ensure_etherstub_vnic(
         source: &Etherstub,
