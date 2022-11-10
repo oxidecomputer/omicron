@@ -314,7 +314,8 @@ impl ServiceManager {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
                 config,
-                // TODO: Load the switch zone if it already exists?
+                // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+                // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SwitchZone::Disabled),
                 zones: Mutex::new(vec![]),
                 vnic_allocator: VnicAllocator::new("Service", etherstub),
