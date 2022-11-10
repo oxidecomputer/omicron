@@ -191,6 +191,10 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         }
     }
 
+    pub async fn size(&self) -> usize {
+        self.objects.lock().await.len()
+    }
+
     /// Body of the background task (one per `SimObject`) that simulates
     /// asynchronous transitions.  Each time we read a message from the object's
     /// channel, we sleep for a bit and then invoke `poke()` to complete whatever

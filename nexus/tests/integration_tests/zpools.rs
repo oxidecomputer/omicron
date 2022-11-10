@@ -8,8 +8,11 @@ use omicron_common::api::external::ByteCount;
 use omicron_nexus::internal_api::params::ZpoolPutRequest;
 use uuid::Uuid;
 
-use nexus_test_utils::{ControlPlaneTestContext, SLED_AGENT_UUID};
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // Tests the "normal" case of zpool_put: inserting a known Zpool.
 //

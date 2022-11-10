@@ -8,7 +8,6 @@ use nexus_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::Name;
 use omicron_nexus::authz::SiloRole;
@@ -16,6 +15,9 @@ use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 use std::str::FromStr;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // TODO-coverage verify that deleting a Silo deletes all the users and their
 // password hashes

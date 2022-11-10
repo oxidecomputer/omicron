@@ -30,10 +30,12 @@ hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
 lazy_static = "1.4.0"
-libc = "0.2.137"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
+# Not under "dev-dependencies"; these also need to be implemented for
+# integration tests.
+nexus-test-interface = { path = "test-interface" }
 num-integer = "0.1.45"
 # must match samael's crate!
 openssl = "0.10"
@@ -56,7 +58,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "2.0.1"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
-steno = "0.2"
+steno = "0.3"
 tempfile = "3.3"
 thiserror = "1.0"
 tokio-tungstenite = "0.17.2"
@@ -127,8 +129,10 @@ itertools = "0.10.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
+omicron-sled-agent = { path = "../sled-agent" }
 openapiv3 = "1.0"
-regex = "1.6.0"
+petgraph = "0.6.2"
+regex = "1.7.0"
 subprocess = "0.2.9"
 term = "0.7"
 httptest = "0.15.4"

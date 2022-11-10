@@ -5,7 +5,6 @@
 //! Tests for authz policy not covered in the set of unauthorized tests
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -19,6 +18,9 @@ use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
 use uuid::Uuid;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // Test that a user cannot read other user's SSH keys
 #[nexus_test]

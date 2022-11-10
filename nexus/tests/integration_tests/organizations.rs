@@ -10,8 +10,10 @@ use http::StatusCode;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, objects_list_page_authz,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
