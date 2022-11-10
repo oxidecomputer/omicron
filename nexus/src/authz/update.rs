@@ -18,7 +18,8 @@ pub enum Component {
     PSC(CompoundComponent),
     RoT(Image),
     SP(Image),
-    Gimlet(CompoundComponent),
+    Gemini(CompoundComponent), // SP, RoT
+    Gimlet(CompoundComponent), // SP, RoT, Host
     Scrimlet(CompoundComponent),
     Sidecar(CompoundComponent),
     Rack(CompoundComponent),
@@ -29,6 +30,7 @@ impl Component {
         match self {
             Self::Host(_) | Self::RoT(_) | Self::SP(_) => vec![],
             Self::PSC(cc)
+            | Self::Gemini(cc)
             | Self::Gimlet(cc)
             | Self::Scrimlet(cc)
             | Self::Sidecar(cc)
@@ -41,6 +43,7 @@ impl Component {
             Self::Host(i) => Some(i.clone()),
             Self::RoT(i) | Self::SP(i) => Some(i.clone()),
             Self::PSC(_)
+            | Self::Gemini(_)
             | Self::Gimlet(_)
             | Self::Scrimlet(_)
             | Self::Sidecar(_)
@@ -53,6 +56,7 @@ impl Component {
             Self::Host(i) => i.version(),
             Self::RoT(i) | Self::SP(i) => i.version(),
             Self::PSC(cc)
+            | Self::Gemini(cc)
             | Self::Gimlet(cc)
             | Self::Scrimlet(cc)
             | Self::Sidecar(cc)
@@ -183,10 +187,10 @@ impl oso::PolarClass for HubrisImage {
 /// Describes an update being planned or executed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Update {
-    component: Component,
-    image: Image,
-    from: Version,
-    to: Version,
+    pub component: Component,
+    pub image: Image,
+    pub from: Version,
+    pub to: Version,
 }
 
 impl Update {
@@ -209,14 +213,14 @@ impl oso::PolarClass for Update {
 /// Describes a planned reboot of some component.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reboot {
-    component: Component,
-    image: Image,
-    into: Version,
+    pub component: Component,
+    pub image: Image,
+    pub to: Version,
 }
 
 impl Reboot {
-    fn new(component: Component, image: Image, into: Version) -> Self {
-        Self { component, image, into }
+    fn new(component: Component, image: Image, to: Version) -> Self {
+        Self { component, image, to }
     }
 }
 
@@ -267,6 +271,7 @@ mod test {
         let logctx = dev::test_setup_log("test_trivial_update_plan");
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
+
         assert_eq!(plan_update(&oso, "foo", &0, &1).expect("plans"), vec![]);
         assert_eq!(
             plan_update(&oso, "foo", &0, &0).expect("plans"),
@@ -280,6 +285,7 @@ mod test {
         let logctx = dev::test_setup_log("test_simple_update_plan");
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
+
         let h = HubrisImage::new(0);
         let i = Image::Hubris(h);
         let sp = Component::SP(i.clone());
@@ -308,6 +314,7 @@ mod test {
         let logctx = dev::test_setup_log("test_compound_update_plan");
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
+
         let h = HubrisImage::new(0);
         let i = Image::Hubris(h);
         let sp = Component::SP(i.clone());
@@ -316,8 +323,8 @@ mod test {
         let reboot_sp = Reboot::new(sp.clone(), i.clone(), 1);
         let update_rot = Update::new(rot.clone(), i.clone(), 0, 1);
         let reboot_rot = Reboot::new(rot.clone(), i.clone(), 1);
-        let c = CompoundComponent(vec![sp.clone(), rot.clone()]);
-        match &plan_update(&oso, c, &0, &1).expect("plans").as_slice() {
+        let gemini = Component::Gemini(CompoundComponent(vec![sp, rot]));
+        match &plan_update(&oso, gemini, &0, &1).expect("plans").as_slice() {
             [PolarValue::List(plan)] => match plan.as_slice() {
                 [PolarValue::List(plan0), PolarValue::List(plan1)] => {
                     match (plan0.as_slice(), plan1.as_slice()) {
@@ -337,6 +344,75 @@ mod test {
                                 assert_eq!(&reboot_sp, y);
                                 assert_eq!(&update_rot, z);
                                 assert_eq!(&reboot_rot, w);
+                            }
+                            _ => assert!(false),
+                        },
+                        _ => assert!(false),
+                    }
+                }
+                _ => assert!(false),
+            },
+            _ => assert!(false),
+        }
+        logctx.cleanup_successful();
+    }
+
+    fn make_gimlet(version: Version) -> Component {
+        let h = HubrisImage::new(version);
+        let i = Image::Hubris(h);
+        let rot = Component::RoT(i.clone());
+        let sp = Component::SP(i.clone());
+        let hi = Image::Host(HostImage { version });
+        let host = Component::Host(hi);
+        Component::Gimlet(CompoundComponent::new(vec![rot, sp, host]))
+    }
+
+    #[test]
+    fn test_gimlet_update_plan() {
+        let logctx = dev::test_setup_log("test_gimlet_update_plan");
+        let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
+        let oso = oso_init.oso;
+
+        let gimlet = make_gimlet(0);
+        match &plan_update(&oso, gimlet, &0, &1).expect("plans").as_slice() {
+            [PolarValue::List(plan)] => match plan.as_slice() {
+                [PolarValue::List(plan0), PolarValue::List(plan1), PolarValue::List(plan2)] => {
+                    match (plan0.as_slice(), plan1.as_slice(), plan2.as_slice())
+                    {
+                        (
+                            [PolarValue::List(actions0)],
+                            [PolarValue::List(actions1)],
+                            [PolarValue::List(actions2)],
+                        ) => match (
+                            actions0.as_slice(),
+                            actions1.as_slice(),
+                            actions2.as_slice(),
+                        ) {
+                            (
+                                [PolarValue::Instance(x), PolarValue::Instance(y)],
+                                [PolarValue::Instance(z), PolarValue::Instance(w)],
+                                [PolarValue::Instance(u), PolarValue::Instance(v)],
+                            ) => {
+                                let x: &Update = x.downcast(None).unwrap();
+                                let y: &Reboot = y.downcast(None).unwrap();
+                                let z: &Update = z.downcast(None).unwrap();
+                                let w: &Reboot = w.downcast(None).unwrap();
+                                let u: &Update = u.downcast(None).unwrap();
+                                let v: &Reboot = v.downcast(None).unwrap();
+                                assert_eq!(x.to, 1);
+                                assert_eq!(y.to, 1);
+                                assert_eq!(z.to, 1);
+                                assert_eq!(w.to, 1);
+                                assert_eq!(u.to, 1);
+                                assert_eq!(v.to, 1);
+
+                                use Component::*;
+                                assert!(matches!(x.component, RoT(_)));
+                                assert!(matches!(y.component, RoT(_)));
+                                assert!(matches!(z.component, SP(_)));
+                                assert!(matches!(w.component, SP(_)));
+                                assert!(matches!(u.component, Host(_)));
+                                assert!(matches!(v.component, Host(_)));
                             }
                             _ => assert!(false),
                         },

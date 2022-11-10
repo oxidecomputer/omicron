@@ -8,9 +8,10 @@ update(_component, from, from, []);
 # Recursive update case: update each sub-component to a newer version.
 # E.g., to update a rack, update each of its sleds; to update a sled,
 # update its RoT, SP, etc.
-update(component: CompoundComponent, from: Integer, to: Integer, plan) if
+update(component: Component, from: Integer, to: Integer, plan) if
   to > from and
   component.version = from and
+  not component.components = [] and
   update_components(component.components, from, to, plan);
 
 # Handle sub-components one at a time.
