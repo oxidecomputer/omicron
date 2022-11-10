@@ -58,7 +58,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "2.0.1"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
-steno = { git = "https://github.com/oxidecomputer/steno", rev = "4cebb996217453b79896b53c9c2026007f2e69e8" }
+steno = "0.3"
 tempfile = "3.3"
 thiserror = "1.0"
 tokio-tungstenite = "0.17.2"
@@ -132,7 +132,7 @@ omicron-test-utils = { path = "../test-utils" }
 omicron-sled-agent = { path = "../sled-agent" }
 openapiv3 = "1.0"
 petgraph = "0.6.2"
-regex = "1.6.0"
+regex = "1.7.0"
 subprocess = "0.2.9"
 term = "0.7"
 httptest = "0.15.4"
