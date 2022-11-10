@@ -12,11 +12,11 @@ use oxide_client::types::{
 use oxide_client::{
     ClientDisksExt, ClientInstancesExt, ClientSessionExt, ClientSystemExt,
 };
+use russh::{client::Session, ChannelMsg, Disconnect};
+use russh_keys::key::{KeyPair, PublicKey};
+use russh_keys::PublicKeyBase64;
 use std::sync::Arc;
 use std::time::Duration;
-use thrussh::{client::Session, ChannelMsg, Disconnect};
-use thrussh_keys::key::{KeyPair, PublicKey};
-use thrussh_keys::PublicKeyBase64;
 use tokio::time::sleep;
 
 #[tokio::test]
@@ -157,9 +157,9 @@ async fn instance_launch() -> Result<()> {
         PublicKey::parse(b"ssh-ed25519", &base64::decode(host_key)?)?;
 
     eprintln!("connecting ssh");
-    let mut session = thrussh::client::connect(
+    let mut session = russh::client::connect(
         Default::default(),
-        (ip_addr, 22),
+        (ip_addr, 22).into(),
         SshClient { host_key },
     )
     .await?;
@@ -253,7 +253,7 @@ struct SshClient {
     host_key: PublicKey,
 }
 
-impl thrussh::client::Handler for SshClient {
+impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
     type FutureUnit = Ready<Result<(Self, Session)>>;
     type FutureBool = Ready<Result<(Self, bool)>>;

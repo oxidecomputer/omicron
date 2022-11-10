@@ -514,7 +514,8 @@ impl super::Nexus {
 
         let mut disk_reqs = vec![];
         for (i, disk) in disks.iter().enumerate() {
-            let volume = self.db_datastore.volume_get(disk.volume_id).await?;
+            let volume =
+                self.db_datastore.volume_checkout(disk.volume_id).await?;
             let gen: i64 = (&disk.runtime_state.gen.0).into();
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
