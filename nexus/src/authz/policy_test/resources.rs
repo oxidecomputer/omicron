@@ -291,7 +291,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::actor::AnyActor::get_polar_class(),
         authz::actor::AuthenticatedActor::get_polar_class(),
         authz::update::Component::get_polar_class(),
-        authz::update::CompoundComponent::get_polar_class(),
         authz::update::HostImage::get_polar_class(),
         authz::update::HubrisImage::get_polar_class(),
         authz::update::Image::get_polar_class(),

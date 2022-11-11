@@ -11,18 +11,24 @@ use oso::ToPolar;
 
 type Version = i64;
 
-/// Updatable components.
+/// A list of updatable components.
+pub type Components = Vec<Component>;
+
+/// An individual updatable component.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Component {
+    // Atomic components
     Host(Image),
-    PSC(CompoundComponent),
     RoT(Image),
     SP(Image),
-    Gemini(CompoundComponent), // SP, RoT
-    Gimlet(CompoundComponent), // SP, RoT, Host
-    Scrimlet(CompoundComponent),
-    Sidecar(CompoundComponent),
-    Rack(CompoundComponent),
+
+    // Compound components
+    PSC(Components),      // RoT, SP
+    Gemini(Components),   // RoT, SP
+    Gimlet(Components),   // RoT, SP, Host
+    Scrimlet(Components), // same as Gimlet
+    Sidecar(Components),  // RoT, SP, (Tofino)
+    Rack(Components),     // PSC, Sidecars, Scrimlets, Gimlets
 }
 
 impl Component {
@@ -34,7 +40,7 @@ impl Component {
             | Self::Gimlet(cc)
             | Self::Scrimlet(cc)
             | Self::Sidecar(cc)
-            | Self::Rack(cc) => cc.components(),
+            | Self::Rack(cc) => cc.clone(),
         }
     }
 
@@ -60,7 +66,11 @@ impl Component {
             | Self::Gimlet(cc)
             | Self::Scrimlet(cc)
             | Self::Sidecar(cc)
-            | Self::Rack(cc) => cc.version(),
+            | Self::Rack(cc) => cc
+                .iter()
+                .max_by_key(|c| c.version())
+                .expect("sub-components")
+                .version(),
         }
     }
 }
@@ -71,38 +81,6 @@ impl oso::PolarClass for Component {
             .with_equality_check()
             .add_attribute_getter("components", Self::components)
             .add_attribute_getter("image", Self::image)
-            .add_attribute_getter("version", Self::version)
-    }
-}
-
-/// Describes an updatable component with sub-components,
-/// like a `Gimlet` or a `Rack`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompoundComponent(Vec<Component>);
-
-impl CompoundComponent {
-    fn new(components: Vec<Component>) -> Self {
-        Self(components)
-    }
-
-    fn components(&self) -> Vec<Component> {
-        self.0.clone()
-    }
-
-    fn version(&self) -> Version {
-        self.0
-            .iter()
-            .max_by_key(|c| c.version())
-            .expect("sub-components")
-            .version()
-    }
-}
-
-impl oso::PolarClass for CompoundComponent {
-    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::ClassBuilder::with_constructor(Self::new)
-            .with_equality_check()
-            .add_attribute_getter("components", Self::components)
             .add_attribute_getter("version", Self::version)
     }
 }
@@ -323,7 +301,7 @@ mod test {
         let reboot_sp = Reboot::new(sp.clone(), i.clone(), 1);
         let update_rot = Update::new(rot.clone(), i.clone(), 0, 1);
         let reboot_rot = Reboot::new(rot.clone(), i.clone(), 1);
-        let gemini = Component::Gemini(CompoundComponent(vec![sp, rot]));
+        let gemini = Component::Gemini(vec![rot, sp]);
         match &plan_update(&oso, gemini, &0, &1).expect("plans").as_slice() {
             [PolarValue::List(plan)] => match plan.as_slice() {
                 [PolarValue::List(plan0), PolarValue::List(plan1)] => {
@@ -340,10 +318,10 @@ mod test {
                                 let y: &Reboot = y.downcast(None).unwrap();
                                 let z: &Update = z.downcast(None).unwrap();
                                 let w: &Reboot = w.downcast(None).unwrap();
-                                assert_eq!(&update_sp, x);
-                                assert_eq!(&reboot_sp, y);
-                                assert_eq!(&update_rot, z);
-                                assert_eq!(&reboot_rot, w);
+                                assert_eq!(&update_rot, x);
+                                assert_eq!(&reboot_rot, y);
+                                assert_eq!(&update_sp, z);
+                                assert_eq!(&reboot_sp, w);
                             }
                             _ => assert!(false),
                         },
@@ -357,14 +335,53 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    fn make_gimlet(version: Version) -> Component {
+    fn make_gemini(version: Version) -> Component {
         let h = HubrisImage::new(version);
         let i = Image::Hubris(h);
         let rot = Component::RoT(i.clone());
         let sp = Component::SP(i.clone());
-        let hi = Image::Host(HostImage { version });
-        let host = Component::Host(hi);
-        Component::Gimlet(CompoundComponent::new(vec![rot, sp, host]))
+        Component::Gemini(vec![rot, sp])
+    }
+
+    fn make_gimlet(version: Version, scrimlet: bool) -> Component {
+        let mut components = make_gemini(version).components();
+        let host = Component::Host(Image::Host(HostImage { version }));
+        components.push(host);
+        if scrimlet {
+            Component::Scrimlet(components)
+        } else {
+            Component::Gimlet(components)
+        }
+    }
+
+    fn make_psc(version: Version) -> Component {
+        let components = make_gemini(version).components();
+        Component::PSC(components)
+    }
+
+    fn make_sidecar(version: Version) -> Component {
+        let components = make_gemini(version).components();
+        Component::Sidecar(components)
+    }
+
+    /// The number of top-level rack components. Does not include
+    /// sub-components, such as individual SPs or RoTs.
+    const RACK_COMPONENTS: usize = 35;
+
+    fn make_rack(version: Version) -> Component {
+        let mut cc: Components = Vec::with_capacity(RACK_COMPONENTS);
+        cc.push(make_psc(version));
+        for _ in 0..2 {
+            cc.push(make_sidecar(version));
+        }
+        for _ in 0..2 {
+            cc.push(make_gimlet(version, true));
+        }
+        for _ in 2..32 {
+            cc.push(make_gimlet(version, false))
+        }
+        assert_eq!(cc.len(), RACK_COMPONENTS);
+        Component::Rack(cc)
     }
 
     #[test]
@@ -373,7 +390,7 @@ mod test {
         let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
         let oso = oso_init.oso;
 
-        let gimlet = make_gimlet(0);
+        let gimlet = make_gimlet(0, false);
         match &plan_update(&oso, gimlet, &0, &1).expect("plans").as_slice() {
             [PolarValue::List(plan)] => match plan.as_slice() {
                 [PolarValue::List(plan0), PolarValue::List(plan1), PolarValue::List(plan2)] => {
@@ -424,5 +441,18 @@ mod test {
             _ => assert!(false),
         }
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_rack_update_plan() {
+        let logctx = dev::test_setup_log("test_rack_update_plan");
+        let oso_init = make_omicron_oso(&logctx.log).expect("oso init");
+        let oso = oso_init.oso;
+
+        let rack = make_rack(0);
+        match &plan_update(&oso, rack, &0, &1).expect("plans").as_slice() {
+            [PolarValue::List(plan)] => assert_eq!(plan.len(), RACK_COMPONENTS),
+            _ => assert!(false),
+        }
     }
 }
