@@ -46,5 +46,8 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
-    derives = [schemars::JsonSchema]
+    derives = [schemars::JsonSchema],
+    adjustments = {
+        "SpIdentifier" = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] }
+    }
 );

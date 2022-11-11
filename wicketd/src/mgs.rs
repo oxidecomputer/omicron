@@ -5,8 +5,8 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
-use crate::{RackV1Inventory, SpId, SpInventory};
-use gateway_client::types::SpInfo;
+use crate::{RackV1Inventory, SpInventory};
+use gateway_client::types::{SpIdentifier, SpInfo};
 use slog::{debug, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
@@ -132,11 +132,11 @@ impl MgsManager {
 //  1. Update their state if it has changed
 //  2. Remove any SPs in our current inventory that aren't in the new state
 fn update_inventory(inventory: &mut RackV1Inventory, sps: Vec<SpInfo>) {
-    let new_keys: BTreeSet<SpId> =
+    let new_keys: BTreeSet<SpIdentifier> =
         sps.iter().map(|sp| sp.info.id.clone().into()).collect();
 
     // Remove all keys that are not in the latest update
-    let mut new_inventory: BTreeMap<SpId, SpInventory> = inventory
+    let mut new_inventory: BTreeMap<SpIdentifier, SpInventory> = inventory
         .sps
         .iter()
         .filter_map(|sp| {
@@ -152,7 +152,7 @@ fn update_inventory(inventory: &mut RackV1Inventory, sps: Vec<SpInfo>) {
     // or add any new ones.
     for sp in sps.into_iter() {
         let state = sp.details;
-        let id: SpId = sp.info.id.into();
+        let id: SpIdentifier = sp.info.id.into();
         let ignition = sp.info.details;
 
         new_inventory

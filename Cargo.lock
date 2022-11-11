@@ -1968,7 +1968,7 @@ dependencies = [
  "chrono",
  "futures",
  "omicron-common",
- "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
+ "progenitor 0.2.1-dev",
  "reqwest",
  "schemars",
  "serde",
@@ -4387,14 +4387,13 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
 dependencies = [
  "anyhow",
  "clap 4.0.22",
  "openapiv3",
- "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
- "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
- "progenitor-macro 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
+ "progenitor-client 0.2.1-dev",
+ "progenitor-impl 0.2.1-dev",
+ "progenitor-macro 0.2.1-dev",
  "serde",
  "serde_json",
 ]
@@ -4432,7 +4431,6 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4474,7 +4472,6 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
 dependencies = [
  "getopts",
  "heck 0.4.0",
@@ -4540,11 +4537,10 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=ajd#2cacf461f839d699fa441f940be3e28641229a73"
 dependencies = [
  "openapiv3",
  "proc-macro2",
- "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=ajd)",
+ "progenitor-impl 0.2.1-dev",
  "quote",
  "serde",
  "serde_json",
@@ -6746,7 +6742,6 @@ dependencies = [
 [[package]]
 name = "typify"
 version = "0.0.11-dev"
-source = "git+https://github.com/oxidecomputer/typify#311e3589ca8c28162281b604c27304be89967d49"
 dependencies = [
  "typify-impl 0.0.11-dev",
  "typify-macro 0.0.11-dev",
@@ -6774,7 +6769,6 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.11-dev"
-source = "git+https://github.com/oxidecomputer/typify#311e3589ca8c28162281b604c27304be89967d49"
 dependencies = [
  "heck 0.4.0",
  "log",
@@ -6808,7 +6802,6 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.11-dev"
-source = "git+https://github.com/oxidecomputer/typify#311e3589ca8c28162281b604c27304be89967d49"
 dependencies = [
  "proc-macro2",
  "quote",

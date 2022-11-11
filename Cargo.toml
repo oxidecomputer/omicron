@@ -123,8 +123,8 @@ panic = "abort"
 #
 #[patch."https://github.com/oxidecomputer/progenitor"]
 #progenitor = { path = "../progenitor/progenitor" }
-#[patch."https://github.com/oxidecomputer/typify"]
-#typify = { path = "../typify/typify" }
+[patch."https://github.com/oxidecomputer/typify"]
+typify = { path = "../typify/typify" }
 
 #
 # We maintain a fork of pq-sys to address upstream issues.  See the
