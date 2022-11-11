@@ -61,11 +61,11 @@ output.type = "zone"
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
 
 [package.internal-dns]
-service_name = "internal-dns"
+service_name = "internal_dns"
 source.type = "local"
 source.rust.binary_names = ["dnsadm", "dns-server"]
 source.rust.release = true
-source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal-dns" } ]
+source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal_dns" } ]
 output.type = "zone"
 
 [package.omicron-gateway]
@@ -161,6 +161,10 @@ source.sha256 = "208ae10a61f834608378eb135e4b6e5993dc363019b8fba75465b6ea5506b63
 output.type = "zone"
 output.intermediate_only = true
 
+# To package and install the asic variant of the switch, do:
+#
+# $ cargo run --release -p omicron-package -- -t switch_variant=asic package
+# $ pfexec ./target/release/omicron-package -t switch_variant=asic install
 [package.switch-asic]
 service_name = "switch"
 only_for_targets.switch_variant = "asic"
@@ -168,6 +172,12 @@ source.type = "composite"
 source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
 output.type = "zone"
 
+# To package and install the stub variant of the switch, do the following:
+#
+# - Set the sled agent's configuration option "stub_scrimlet" to "true"
+# - Run the following:
+# $ cargo run --release -p omicron-package -- -t switch_variant=stub package
+# $ pfexec ./target/release/omicron-package -t switch_variant=stub install
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch_variant = "stub"

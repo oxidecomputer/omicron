@@ -10,7 +10,7 @@ use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
-use crate::params::{ServiceType, ServiceZoneRequest};
+use crate::params::{ServiceType, ServiceZoneRequest, ZoneType};
 use internal_dns_client::multiclient::{DnsError, Updater as DnsUpdater};
 use omicron_common::address::{
     get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
@@ -316,7 +316,7 @@ impl ServiceInner {
                     let dns_addr = dns_subnet.dns_address().ip();
                     request.dns_services.push(ServiceZoneRequest {
                         id: Uuid::new_v4(),
-                        zone_name: "internal-dns".to_string(),
+                        zone_type: ZoneType::InternalDNS,
                         addresses: vec![dns_addr],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
                         services: vec![ServiceType::InternalDns {

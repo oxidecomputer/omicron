@@ -7,7 +7,7 @@
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
 use crate::hardware::HardwareManager;
-use crate::illumos::vnic::VnicKind;
+use crate::illumos::link::LinkKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
@@ -16,14 +16,18 @@ use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
-    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, VpcFirewallRule,
+    DatasetKind, DendriteAsic, DiskStateRequested, InstanceHardware,
+    InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData, ServiceEnsureBody, ServiceType,
+    ServiceZoneRequest, VpcFirewallRule, ZoneType,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use dropshot::HttpError;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use omicron_common::address::{
+    get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
+};
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
@@ -32,7 +36,7 @@ use omicron_common::backoff::{
     internal_service_policy_with_max, retry_notify, BackoffError,
 };
 use slog::Logger;
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -152,8 +156,13 @@ struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
 
-    // Sled underlay address
-    addr: SocketAddrV6,
+    // The sled's initial configuration
+    config: Config,
+
+    // Subnet of the Sled's underlay.
+    //
+    // The Sled Agent's address can be derived from this value.
+    subnet: Ipv6Subnet<SLED_PREFIX>,
 
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
@@ -174,6 +183,16 @@ struct SledAgentInner {
     nexus_request_queue: NexusRequestQueue,
 }
 
+impl SledAgentInner {
+    fn sled_address(&self) -> SocketAddrV6 {
+        get_sled_address(self.subnet)
+    }
+
+    fn switch_ip(&self) -> Ipv6Addr {
+        get_switch_zone_address(self.subnet)
+    }
+}
+
 #[derive(Clone)]
 pub struct SledAgent {
     inner: Arc<SledAgentInner>,
@@ -185,7 +204,6 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
-        sled_address: SocketAddrV6,
         request: SledAgentRequest,
     ) -> Result<SledAgent, Error> {
         let id = config.id;
@@ -223,6 +241,7 @@ impl SledAgent {
         // should be removed once the Sled Agent is initialized with a
         // RSS-provided IP address. In the meantime, we use one from the
         // configuration file.
+        let sled_address = request.sled_address();
         Zones::ensure_has_global_zone_v6_address(
             etherstub_vnic.clone(),
             *sled_address.ip(),
@@ -340,7 +359,8 @@ impl SledAgent {
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id,
-                addr: sled_address,
+                config: config.clone(),
+                subnet: request.subnet,
                 storage,
                 instances,
                 hardware,
@@ -424,14 +444,34 @@ impl SledAgent {
     }
 
     async fn ensure_scrimlet_services_active(&self, log: &Logger) {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/823): Launch the switch zone, with
-        // Dendrite, MGS, and any other services we want to enable.
-        warn!(log, "Activating scrimlet services not yet implemented");
+        info!(log, "Ensuring scrimlet services (enabling services)");
+
+        let services = match self.inner.config.stub_scrimlet {
+            Some(_) => {
+                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
+            }
+            None => {
+                vec![
+                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
+                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                ]
+            }
+        };
+
+        let request = ServiceZoneRequest {
+            id: Uuid::new_v4(),
+            zone_type: ZoneType::Switch,
+            addresses: vec![self.inner.switch_ip()],
+            gz_addresses: vec![],
+            services,
+        };
+
+        self.inner.services.ensure_switch(Some(request)).await;
     }
 
     async fn ensure_scrimlet_services_deactive(&self, log: &Logger) {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/823): Terminate the switch zone.
-        warn!(log, "Deactivating scrimlet services not yet implemented");
+        info!(log, "Ensuring scrimlet services (disabling services)");
+        self.inner.services.ensure_switch(None).await;
     }
 
     pub fn id(&self) -> Uuid {
@@ -442,7 +482,7 @@ impl SledAgent {
     fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
-        let sled_address = self.inner.addr;
+        let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let log = log.clone();
         let fut = async move {
@@ -511,7 +551,7 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
-        self.inner.services.ensure(requested_services).await?;
+        self.inner.services.ensure_persistent(requested_services).await?;
         Ok(())
     }
 
@@ -692,7 +732,7 @@ async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
                   log,
                   "Deleting existing VNIC";
                     "vnic_name" => &vnic,
-                    "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
+                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
                 );
                 Dladm::delete_vnic(&vnic)
             })

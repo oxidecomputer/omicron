@@ -10,7 +10,7 @@ use super::sled_agent::SledAgent;
 use crate::bootstrap::params::SledAgentRequest;
 use crate::nexus::LazyNexusClient;
 use slog::Logger;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -33,13 +33,13 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: Logger,
-        addr: SocketAddrV6,
         request: SledAgentRequest,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
 
+        let addr = request.sled_address();
         let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip())
             .map_err(|e| e.to_string())?;
 
@@ -47,7 +47,6 @@ impl Server {
             &config,
             log.clone(),
             lazy_nexus_client.clone(),
-            addr,
             request,
         )
         .await

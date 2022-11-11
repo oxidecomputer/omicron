@@ -20,7 +20,7 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
-use omicron_common::address::{get_sled_address, Ipv6Subnet};
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -234,7 +234,7 @@ impl Agent {
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
-        let sled_address = get_sled_address(request.subnet);
+        let sled_address = request.sled_address();
 
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
@@ -276,7 +276,6 @@ impl Agent {
         let server = SledServer::start(
             &self.sled_config,
             self.parent_log.clone(),
-            sled_address,
             request.clone(),
         )
         .await
