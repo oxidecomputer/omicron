@@ -385,6 +385,7 @@ impl InstalledZone {
         devices: &[zone::Device],
         opte_ports: Vec<Port>,
         link: Option<Link>,
+        limit_priv: Vec<String>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
             InstallZoneError::CreateVnic { zone: zone_name.to_string(), err }
@@ -408,6 +409,7 @@ impl InstalledZone {
             &datasets,
             &devices,
             net_device_names,
+            limit_priv,
         )
         .map_err(|err| InstallZoneError::InstallZone {
             zone: full_zone_name.to_string(),
