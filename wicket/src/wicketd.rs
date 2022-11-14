@@ -13,7 +13,7 @@ use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::RackV1Inventory;
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_secs(5);
-const WICKETD_TIMEOUT_MS: u32 = 1000; // 3 sec
+const WICKETD_TIMEOUT_MS: u32 = 1000;
 
 // Assume that these requests are periodic on the order of seconds or the
 // result of human interaction. In either case, this buffer should be plenty

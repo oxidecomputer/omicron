@@ -79,7 +79,7 @@ pub struct Sp {
 }
 
 // XXX: Eventually a Sled will have a host component, and SPs will have
-// `SpComponentInfo` (device inventory) [derive(Debug)]
+// `SpComponentInfo` (device inventory)
 #[derive(Debug)]
 pub enum Component {
     Sled(Sp),
