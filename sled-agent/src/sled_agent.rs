@@ -259,17 +259,15 @@ impl SledAgent {
         // Currently, we're removing these zones. In the future, we should
         // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
         // to leave the running Zones intact).
-        let zones = Zones::get()?;
+        let zones = Zones::get().await?;
         stream::iter(zones)
             .zip(stream::iter(std::iter::repeat(log.clone())))
             .map(Ok::<_, crate::zone::AdmError>)
             .try_for_each_concurrent(
                 None,
-                |(zone, log)| async {
-                    tokio::task::spawn_blocking(move || {
-                        warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-                        Zones::halt_and_remove_logged(&log, zone.name())
-                    }).await.unwrap()
+                |(zone, log)| async move {
+                    warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
+                    Zones::halt_and_remove_logged(&log, zone.name()).await
                 }
             ).await?;
 

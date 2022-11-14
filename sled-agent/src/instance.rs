@@ -743,7 +743,7 @@ impl Instance {
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&inner.log, &zname).unwrap();
+        Zones::halt_and_remove_logged(&inner.log, &zname).await.unwrap();
 
         // Remove ourselves from the instance manager's map of instances.
         let running_state = inner.running_state.as_mut().unwrap();

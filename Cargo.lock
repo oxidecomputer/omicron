@@ -7438,22 +7438,23 @@ dependencies = [
 
 [[package]]
 name = "zone"
-version = "0.1.8"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3596bbc963cd9dbaa69b02e349af4d061c56c41d211ba64150a2cedb2f722707"
+checksum = "b0545a42fbd7a81245726d54a0146cb4fd93882ebb6da50d60acf2e37394f198"
 dependencies = [
  "itertools",
  "thiserror",
+ "tokio",
  "zone_cfg_derive",
 ]
 
 [[package]]
 name = "zone_cfg_derive"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61ac2a898023d86613a7efa7a4195e4b75240009e559acb17ddd7fa876d19527"
+checksum = "ef224b009d070d3b1adb9e375fcf8ec2f1948a412c3bbf8755c0ef4e3f91ef94"
 dependencies = [
- "heck 0.3.3",
+ "heck 0.4.0",
  "proc-macro-error",
  "proc-macro2",
  "quote",
