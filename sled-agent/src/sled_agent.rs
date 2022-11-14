@@ -452,6 +452,7 @@ impl SledAgent {
             }
             None => {
                 vec![
+                    ServiceType::ManagementGatewayService,
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                 ]

@@ -1461,6 +1461,20 @@
           {
             "type": "object",
             "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "management_gateway_service"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "asic": {
                 "$ref": "#/components/schemas/DendriteAsic"
               },
