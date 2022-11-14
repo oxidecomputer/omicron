@@ -207,6 +207,7 @@ impl Zones {
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         vnics: Vec<String>,
+        limit_priv: Vec<String>,
     ) -> Result<(), AdmError> {
         if let Some(zone) = Self::find(zone_name)? {
             info!(
@@ -244,6 +245,10 @@ impl Zones {
             .set_path(&path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
+        if !limit_priv.is_empty() {
+            let limit_priv = std::collections::BTreeSet::from_iter(limit_priv);
+            cfg.get_global().set_limitpriv(limit_priv);
+        }
 
         for dataset in datasets {
             cfg.add_dataset(&dataset);

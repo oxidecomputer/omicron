@@ -132,14 +132,14 @@ only_for_targets.switch_variant = "stub"
 #
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
-#   1b. cargo build --features=tofino_stub
-#   1c. cargo xtask dist -o
+#   1b. cargo build --features=tofino_stub --release
+#   1c. cargo xtask dist -o -r --features tofino_stub
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
-source.sha256 = "e05d33dc5d3deafae7d618c45b019c87ddd97e7a1fff11fa3ffb7593a3e10eaf"
+source.commit = "77e1268141aab830966b18526cffab8f458a28f9"
+source.sha256 = "76bab69b6a712e3da11de4aba044c90d86b6d374c8ece9ddda98ef2087541276"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -150,14 +150,14 @@ only_for_targets.switch_variant = "asic"
 #
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
-#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
-#   1c. cargo xtask dist -o
+#   1b. cargo build --features=tofino_asic --release
+#   1c. cargo xtask dist -o -r --features tofino_asic
 # 2. Copy the output zone image from dendrite/out to omicron/out
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
-source.sha256 = "208ae10a61f834608378eb135e4b6e5993dc363019b8fba75465b6ea5506b635"
+source.commit = "77e1268141aab830966b18526cffab8f458a28f9"
+source.sha256 = "a402001c2e531af4d8b2416a546d5daacb50c69fb81009c6c5cb74aaad7066ac"
 output.type = "zone"
 output.intermediate_only = true
 

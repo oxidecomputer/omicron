@@ -489,6 +489,7 @@ async fn ensure_running_zone(
                 &[],
                 vec![],
                 None,
+                vec![],
             )
             .await?;
 

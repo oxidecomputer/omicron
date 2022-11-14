@@ -463,12 +463,26 @@ impl ServiceManager {
         Ok(None)
     }
 
+    // Check the services intended to run in the zone to determine whether any
+    // additional privileges need to be enabled for the zone.
+    fn privs_needed(&self, req: &ServiceZoneRequest) -> Vec<String> {
+        let mut needed = Vec::new();
+        for svc in &req.services {
+            if let ServiceType::Tfport { .. } = svc {
+                needed.push("default".to_string());
+                needed.push("sys_dl_config".to_string());
+            }
+        }
+        needed
+    }
+
     async fn initialize_zone(
         &self,
         request: &ServiceZoneRequest,
     ) -> Result<RunningZone, Error> {
         let device_names = self.devices_needed(request)?;
         let link = self.link_needed(request)?;
+        let limit_priv = self.privs_needed(request);
 
         let devices: Vec<zone::Device> = device_names
             .iter()
@@ -487,6 +501,7 @@ impl ServiceManager {
             // opte_ports=
             vec![],
             link,
+            limit_priv,
         )
         .await?;
 
@@ -707,17 +722,30 @@ impl ServiceManager {
                     info!(self.inner.log, "Setting up dendrite service");
 
                     let address = request.addresses[0];
-                    smfh.setprop("config/asic", asic)?;
                     smfh.setprop(
                         "config/address",
                         &format!("[{}]:{}", address, DENDRITE_PORT,),
                     )?;
+                    match *asic {
+                        DendriteAsic::TofinoAsic => smfh.setprop(
+                            "config/port_config",
+                            "/opt/oxide/dendrite/misc/sidecar_config.toml",
+                        )?,
+                        DendriteAsic::TofinoStub => smfh.setprop(
+                            "config/port_config",
+                            "/opt/oxide/dendrite/misc/model_config.toml",
+                        )?,
+                        DendriteAsic::Softnpu => {}
+                    };
                     smfh.refresh()?;
                 }
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
                     smfh.setprop("config/pkt_source", pkt_source)?;
+                    let address = request.addresses[0];
+                    smfh.setprop("config/host", &format!("[{}]", address))?;
+                    smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
                     smfh.refresh()?;
                 }
             }
@@ -950,7 +978,7 @@ mod test {
         );
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
-        install_ctx.expect().return_once(|_, name, _, _, _, _| {
+        install_ctx.expect().return_once(|_, name, _, _, _, _, _| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
