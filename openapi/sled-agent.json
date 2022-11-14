@@ -1525,15 +1525,15 @@
               "$ref": "#/components/schemas/ServiceType"
             }
           },
-          "zone_name": {
-            "type": "string"
+          "zone_type": {
+            "$ref": "#/components/schemas/ZoneType"
           }
         },
         "required": [
           "addresses",
           "id",
           "services",
-          "zone_name"
+          "zone_type"
         ]
       },
       "Slot": {
@@ -1833,6 +1833,16 @@
         },
         "required": [
           "rules"
+        ]
+      },
+      "ZoneType": {
+        "description": "The type of zone which may be requested from Sled Agent",
+        "type": "string",
+        "enum": [
+          "internal_dns",
+          "nexus",
+          "oximeter",
+          "switch"
         ]
       }
     }

@@ -61,11 +61,11 @@ output.type = "zone"
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
 
 [package.internal-dns]
-service_name = "internal-dns"
+service_name = "internal_dns"
 source.type = "local"
 source.rust.binary_names = ["dnsadm", "dns-server"]
 source.rust.release = true
-source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal-dns" } ]
+source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal_dns" } ]
 output.type = "zone"
 
 [package.omicron-gateway]
@@ -92,10 +92,10 @@ service_name = "crucible"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "5aa4e86eccb2763ef23e03dfccbe5b55c006a367"
+source.commit = "bc3e63078c2ba0ec909638436dc60c97f3427454"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "f9949062f8a06f43dc0002d3c82a174ccafac84a4666b625bfff914d37643641"
+source.sha256 = "c11668fb5c4e9be8bdb9a95d346f8f63d110931fe12d1d44d8125ebe62b2fb91"
 output.type = "zone"
 
 # Refer to
@@ -161,6 +161,10 @@ source.sha256 = "208ae10a61f834608378eb135e4b6e5993dc363019b8fba75465b6ea5506b63
 output.type = "zone"
 output.intermediate_only = true
 
+# To package and install the asic variant of the switch, do:
+#
+# $ cargo run --release -p omicron-package -- -t switch_variant=asic package
+# $ pfexec ./target/release/omicron-package -t switch_variant=asic install
 [package.switch-asic]
 service_name = "switch"
 only_for_targets.switch_variant = "asic"
@@ -168,6 +172,12 @@ source.type = "composite"
 source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
 output.type = "zone"
 
+# To package and install the stub variant of the switch, do the following:
+#
+# - Set the sled agent's configuration option "stub_scrimlet" to "true"
+# - Run the following:
+# $ cargo run --release -p omicron-package -- -t switch_variant=stub package
+# $ pfexec ./target/release/omicron-package -t switch_variant=stub install
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch_variant = "stub"

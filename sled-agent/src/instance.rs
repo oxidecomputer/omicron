@@ -6,11 +6,11 @@
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::dladm::Etherstub;
+use crate::illumos::link::VnicAllocator;
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;

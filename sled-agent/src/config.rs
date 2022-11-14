@@ -19,6 +19,9 @@ pub struct Config {
     pub id: Uuid,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
+    /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
+    /// if set to false).
+    pub stub_scrimlet: Option<bool>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".

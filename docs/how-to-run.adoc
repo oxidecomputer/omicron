@@ -172,13 +172,14 @@ be set as a default route for the Nexus zone.
 | Service                    | Endpoint
 | Sled Agent: Bootstrap      | Derived from MAC address of physical data link.
 | Sled Agent: Dropshot API   | `[fd00:1122:3344:0101::1]:12345`
-| Cockroach DB               | `[fd00:1122:3344:0101::2]:32221`
-| Nexus: Internal API        | `[fd00:1122:3344:0101::3]:12221`
-| Oximeter                   | `[fd00:1122:3344:0101::4]:12223`
-| Clickhouse                 | `[fd00:1122:3344:0101::5]:8123`
-| Crucible Downstairs 1      | `[fd00:1122:3344:0101::6]:32345`
-| Crucible Downstairs 2      | `[fd00:1122:3344:0101::7]:32345`
-| Crucible Downstairs 3      | `[fd00:1122:3344:0101::8]:32345`
+| Switch Zone                | `[fd00:1122:3344:0101::2]`
+| Cockroach DB               | `[fd00:1122:3344:0101::3]:32221`
+| Nexus: Internal API        | `[fd00:1122:3344:0101::4]:12221`
+| Oximeter                   | `[fd00:1122:3344:0101::5]:12223`
+| Clickhouse                 | `[fd00:1122:3344:0101::6]:8123`
+| Crucible Downstairs 1      | `[fd00:1122:3344:0101::7]:32345`
+| Crucible Downstairs 2      | `[fd00:1122:3344:0101::8]:32345`
+| Crucible Downstairs 3      | `[fd00:1122:3344:0101::9]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | Nexus: External API        | `192.168.1.20:80`
 | Internet Gateway           | None, but can be set in `smf/sled-agent/config-rss.toml`

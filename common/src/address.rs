@@ -53,7 +53,7 @@ const DNS_ADDRESS_INDEX: usize = 1;
 const GZ_ADDRESS_INDEX: usize = 2;
 
 /// The maximum number of addresses per sled reserved for RSS.
-pub const RSS_RESERVED_ADDRESSES: u16 = 10;
+pub const RSS_RESERVED_ADDRESSES: u16 = 16;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(
@@ -136,6 +136,7 @@ impl ReservedRackSubnet {
 }
 
 const SLED_AGENT_ADDRESS_INDEX: usize = 1;
+const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 
 /// Return the sled agent address for a subnet.
 ///
@@ -144,6 +145,15 @@ pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
     let sled_agent_ip =
         sled_subnet.net().iter().nth(SLED_AGENT_ADDRESS_INDEX).unwrap();
     SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
+}
+
+/// Return the switch zone address for a subnet.
+///
+/// This address will come from the second address of the [`SLED_PREFIX`] subnet.
+pub fn get_switch_zone_address(
+    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+) -> Ipv6Addr {
+    sled_subnet.net().iter().nth(SWITCH_ZONE_ADDRESS_INDEX).unwrap()
 }
 
 /// Returns a sled subnet within a rack subnet.
