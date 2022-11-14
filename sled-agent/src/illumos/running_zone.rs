@@ -135,7 +135,7 @@ impl RunningZone {
         // Boot the zone.
         info!(zone.log, "Zone booting");
 
-        Zones::boot(&zone.name)?;
+        Zones::boot(&zone.name).await?;
 
         // Wait for the network services to come online, so future
         // requests to create addresses can operate immediately.
@@ -250,6 +250,7 @@ impl RunningZone {
         addrtype: AddressRequest,
     ) -> Result<Self, GetZoneError> {
         let zone_info = Zones::get()
+            .await
             .map_err(|err| GetZoneError::GetZones {
                 prefix: zone_prefix.to_string(),
                 err,
@@ -310,14 +311,18 @@ impl RunningZone {
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        match Zones::halt_and_remove_logged(&self.inner.log, self.name()) {
-            Ok(()) => {
-                info!(self.inner.log, "Stopped and uninstalled zone")
+        let log = self.inner.log.clone();
+        let name = self.name().to_string();
+        tokio::task::spawn(async move {
+            match Zones::halt_and_remove_logged(&log, &name).await {
+                Ok(()) => {
+                    info!(log, "Stopped and uninstalled zone")
+                }
+                Err(e) => {
+                    warn!(log, "Failed to stop zone: {}", e)
+                }
             }
-            Err(e) => {
-                warn!(self.inner.log, "Failed to stop zone: {}", e)
-            }
-        }
+        });
     }
 }
 
@@ -409,6 +414,7 @@ impl InstalledZone {
             &devices,
             net_device_names,
         )
+        .await
         .map_err(|err| InstallZoneError::InstallZone {
             zone: full_zone_name.to_string(),
             image_path: zone_image_path.clone(),
