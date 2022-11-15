@@ -175,8 +175,7 @@
           }
         ]
       },
-      "SpId": {
-        "description": "A local type we can use as a key to a BTreeMap.\n\nThis maps directly to `gateway_client::types::SpIdentifer`, but we create a separate type because the progenitor generated type doesn't derive Ord/PartialOrd.",
+      "SpIdentifier": {
         "type": "object",
         "properties": {
           "slot": {
@@ -264,13 +263,14 @@
         "type": "object",
         "properties": {
           "components": {
+            "nullable": true,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SpComponentInfo"
             }
           },
           "id": {
-            "$ref": "#/components/schemas/SpId"
+            "$ref": "#/components/schemas/SpIdentifier"
           },
           "ignition": {
             "$ref": "#/components/schemas/SpIgnition"
@@ -280,7 +280,6 @@
           }
         },
         "required": [
-          "components",
           "id",
           "ignition",
           "state"

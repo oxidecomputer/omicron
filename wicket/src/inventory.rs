@@ -6,7 +6,9 @@
 
 use anyhow::anyhow;
 use std::collections::BTreeMap;
-use wicketd_client::types::{RackV1Inventory, SpIgnition, SpState, SpType};
+use wicketd_client::types::{
+    RackV1Inventory, SpComponentInfo, SpIgnition, SpState, SpType,
+};
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.
@@ -34,7 +36,11 @@ impl Inventory {
         for sp in inventory.sps {
             let i = sp.id.slot;
             let type_ = sp.id.type_;
-            let sp = Sp { ignition: sp.ignition, state: sp.state };
+            let sp = Sp {
+                ignition: sp.ignition,
+                state: sp.state,
+                components: sp.components,
+            };
 
             // Validate and get a ComponentId
             let (id, component) = match type_ {
@@ -76,10 +82,10 @@ impl Inventory {
 pub struct Sp {
     ignition: SpIgnition,
     state: SpState,
+    components: Option<Vec<SpComponentInfo>>,
 }
 
-// XXX: Eventually a Sled will have a host component, and SPs will have
-// `SpComponentInfo` (device inventory)
+// XXX: Eventually a Sled will have a host component.
 #[derive(Debug)]
 pub enum Component {
     Sled(Sp),

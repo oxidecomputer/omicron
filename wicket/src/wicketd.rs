@@ -5,7 +5,7 @@
 //! Code for talking to wicketd
 
 use crate::Event;
-use slog::{o, warn, Logger};
+use slog::{debug, o, warn, Logger};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
@@ -97,7 +97,7 @@ impl WicketdManager {
 async fn poll_inventory(
     log: &Logger,
     client: wicketd_client::Client,
-    _inventory: RackV1Inventory,
+    mut inventory: RackV1Inventory,
 ) -> mpsc::Receiver<RackV1Inventory> {
     let log = log.clone();
 
@@ -113,11 +113,11 @@ async fn poll_inventory(
             match client.get_inventory().await {
                 Ok(val) => {
                     let new_inventory = val.into_inner();
-                    // TODO: We need the derive enhancements for progenitor to implement PartialEq/Eq
-                    //if new_inventory != inventory {
-                    //  inventory = new_inventory;
-                    //}
-                    let _ = tx.send(new_inventory).await;
+                    if new_inventory != inventory {
+                        inventory = new_inventory;
+                        let _ = tx.send(inventory.clone()).await;
+                        debug!(log, "No change to inventory");
+                    }
                 }
                 Err(e) => {
                     warn!(log, "{e}");

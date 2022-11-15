@@ -5,8 +5,10 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
-use crate::{RackV1Inventory, SpId, SpInventory};
-use gateway_client::types::SpInfo;
+use crate::{RackV1Inventory, SpInventory};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
+use gateway_client::types::{SpComponentList, SpIdentifier, SpInfo};
 use slog::{debug, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
@@ -14,7 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
-const MGS_TIMEOUT_MS: u32 = 3000; // 3 sec
+const MGS_TIMEOUT_MS: u32 = 3000;
 
 // We support:
 //   * One outstanding query request from wicket
@@ -110,8 +112,8 @@ impl MgsManager {
         loop {
             tokio::select! {
                 // Poll MGS inventory
-                Some(sps) = inventory_rx.recv() => {
-                    update_inventory(&mut self.inventory, sps);
+                Some(inventory) = inventory_rx.recv() => {
+                    self.inventory = inventory;
                 }
 
                 // Handle requests from clients
@@ -128,60 +130,104 @@ impl MgsManager {
     }
 }
 
+type InventoryMap = BTreeMap<SpIdentifier, SpInventory>;
+
 // For the latest set of sps returned from MGS:
 //  1. Update their state if it has changed
 //  2. Remove any SPs in our current inventory that aren't in the new state
-fn update_inventory(inventory: &mut RackV1Inventory, sps: Vec<SpInfo>) {
-    let new_keys: BTreeSet<SpId> =
+//
+// Return `true` if inventory was updated, `false` otherwise
+async fn update_inventory(
+    log: &Logger,
+    inventory: &mut InventoryMap,
+    sps: Vec<SpInfo>,
+    client: &gateway_client::Client,
+) -> bool {
+    let new_keys: BTreeSet<SpIdentifier> =
         sps.iter().map(|sp| sp.info.id.clone().into()).collect();
 
-    // Remove all keys that are not in the latest update
-    let mut new_inventory: BTreeMap<SpId, SpInventory> = inventory
-        .sps
-        .iter()
-        .filter_map(|sp| {
-            if new_keys.contains(&sp.id) {
-                Some((sp.id, sp.clone()))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let old_inventory_len = inventory.len();
 
-    // Update any existing SPs that have changed state
-    // or add any new ones.
+    // Remove all keys that are not in the latest update
+    inventory.retain(|k, _| new_keys.contains(k));
+
+    // Did we remove any keys?
+    let mut inventory_changed = inventory.len() != old_inventory_len;
+
+    // Update any existing SPs that have changed state or add any new ones. For
+    // each of these, keep track so we can fetch their ComponentInfo.
+    let mut to_fetch: Vec<SpIdentifier> = vec![];
     for sp in sps.into_iter() {
         let state = sp.details;
-        let id: SpId = sp.info.id.into();
+        let id: SpIdentifier = sp.info.id.into();
         let ignition = sp.info.details;
 
-        new_inventory
+        inventory
             .entry(id)
             .and_modify(|curr| {
-                // TODO: // Reset the components only if the state changes.
-                // This is blocked waiting on some small progenitor changes
-                // that will allow us to derive Eq/PartialEq, etc...
-                //if curr.state != state {
-                // Clear the components, so we can refetch them. We don't know
-                // if the actual component has changed or if it has been upgraded, etc..
-                //  curr.components = vec![];
-                //}
+                if curr.state != state || curr.components.is_none() {
+                    to_fetch.push(id);
+                }
                 curr.state = state.clone();
                 curr.ignition = ignition.clone();
             })
-            .or_insert(SpInventory::new(id, ignition, state));
+            .or_insert_with(|| {
+                to_fetch.push(id);
+                SpInventory::new(id, ignition, state)
+            });
     }
-    inventory.sps = new_inventory.into_values().collect();
+
+    // Create futures to fetch `SpComponentInfo` for each SP concurrently
+    let component_stream = to_fetch
+        .into_iter()
+        .map(|id| async move {
+            let client = client.clone();
+            (id, client.sp_component_list(id.type_, id.slot).await)
+        })
+        .collect::<FuturesUnordered<_>>();
+
+    // Execute the futures
+    let responses: BTreeMap<SpIdentifier, SpComponentList> = component_stream
+        .filter_map(|(id, res)| async move {
+            match res {
+                Ok(val) => Some((id, val.into_inner())),
+                Err(err) => {
+                    warn!(
+                        log,
+                        "Failed to get component list for sp: {id:?}, {err})"
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+        .await;
+
+    if !responses.is_empty() {
+        inventory_changed = true;
+    }
+
+    // Fill in the components for each given SpIdentifier
+    for (id, sp_component_list) in responses {
+        inventory.get_mut(&id).unwrap().components =
+            Some(sp_component_list.components);
+    }
+
+    inventory_changed
 }
 
 async fn poll_sps(
     log: &Logger,
     client: gateway_client::Client,
-) -> mpsc::Receiver<Vec<SpInfo>> {
+) -> mpsc::Receiver<RackV1Inventory> {
     let log = log.clone();
 
     // We only want one outstanding inventory request at a time
     let (tx, rx) = mpsc::channel(1);
+
+    // This is a BTreeMap version of inventory that we maintain for the lifetime
+    // of the process.
+    let mut inventory = InventoryMap::default();
 
     tokio::spawn(async move {
         let mut ticker = interval(MGS_POLL_INTERVAL);
@@ -190,8 +236,19 @@ async fn poll_sps(
             ticker.tick().await;
             match client.sp_list(Some(MGS_TIMEOUT_MS)).await {
                 Ok(val) => {
-                    // TODO: Get components for each sp
-                    let _ = tx.send(val.into_inner()).await;
+                    if update_inventory(
+                        &log,
+                        &mut inventory,
+                        val.into_inner(),
+                        &client,
+                    )
+                    .await
+                    {
+                        let inventory = RackV1Inventory {
+                            sps: inventory.values().cloned().collect(),
+                        };
+                        let _ = tx.send(inventory).await;
+                    }
                 }
                 Err(e) => {
                     warn!(log, "{e}");
