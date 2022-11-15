@@ -116,6 +116,7 @@ async fn poll_inventory(
                     if new_inventory != inventory {
                         inventory = new_inventory;
                         let _ = tx.send(inventory.clone()).await;
+                    } else {
                         debug!(log, "No change to inventory");
                     }
                 }
