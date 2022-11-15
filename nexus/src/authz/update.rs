@@ -15,6 +15,7 @@ type Version = i64;
 pub type Components = Vec<Component>;
 
 /// An individual updatable component.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Component {
     // Atomic components
@@ -86,6 +87,7 @@ impl oso::PolarClass for Component {
 }
 
 /// Describes an updatable processor image.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Image {
     Host(HostImage),
@@ -93,10 +95,6 @@ pub enum Image {
 }
 
 impl Image {
-    fn components(&self) -> Vec<Component> {
-        vec![]
-    }
-
     fn version(&self) -> Version {
         match self {
             Self::Host(i) => i.version(),
@@ -126,7 +124,7 @@ impl HostImage {
     }
 
     fn version(&self) -> Version {
-        self.version.clone()
+        self.version
     }
 }
 
@@ -150,7 +148,7 @@ impl HubrisImage {
     }
 
     fn version(&self) -> Version {
-        self.version.clone()
+        self.version
     }
 }
 
@@ -212,6 +210,7 @@ impl oso::PolarClass for Reboot {
 /// to `to` that is consistent with the (already loaded into `oso`) Polar
 /// update policy (see `update.polar`). Works by querying the `update`
 /// rule with an unbound `plan` variable and accumulating the results.
+#[allow(dead_code)]
 fn plan_update(
     oso: &Oso,
     component: impl ToPolar,
