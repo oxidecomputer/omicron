@@ -7158,6 +7158,7 @@ dependencies = [
  "omicron-common",
  "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
+ "schemars",
  "serde",
  "slog",
  "uuid",
