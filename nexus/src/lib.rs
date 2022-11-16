@@ -66,23 +66,24 @@ pub fn run_openapi_internal() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Packages up a [`Nexus`], running both external and internal HTTP API servers
-/// wired up to Nexus
-pub struct Server {
+/// A partially-initialized Nexus server, which exposes an internal interface,
+/// but is not ready to receive external requests.
+pub struct InternalServer<'a> {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
-    /// dropshot servers for external API
-    pub http_servers_external: Vec<dropshot::HttpServer<Arc<ServerContext>>>,
     /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+
+    config: &'a Config,
+    log: Logger,
 }
 
-impl Server {
+impl<'a> InternalServer<'a> {
     /// Start a nexus server.
     pub async fn start(
-        config: &Config,
+        config: &'a Config,
         log: &Logger,
-    ) -> Result<Server, String> {
+    ) -> Result<InternalServer<'a>, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
 
@@ -101,6 +102,32 @@ impl Server {
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
         let http_server_internal = server_starter_internal.start();
+
+        Ok(Self { apictx, http_server_internal, config, log })
+    }
+}
+
+/// Packages up a [`Nexus`], running both external and internal HTTP API servers
+/// wired up to Nexus
+pub struct Server {
+    /// shared state used by API request handlers
+    pub apictx: Arc<ServerContext>,
+    /// dropshot servers for external API
+    pub http_servers_external: Vec<dropshot::HttpServer<Arc<ServerContext>>>,
+    /// dropshot server for internal API
+    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+}
+
+impl Server {
+    pub async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
+        let apictx = internal.apictx;
+        let http_server_internal = internal.http_server_internal;
+        let log = internal.log;
+        let config = internal.config;
+
+        // Wait until RSS handoff completes.
+        let opctx = apictx.nexus.opctx_for_service_balancer();
+        apictx.nexus.await_rack_initialization(&opctx).await;
 
         // Launch the external server(s).
         let http_servers_external = config
@@ -165,9 +192,33 @@ impl Server {
 #[async_trait::async_trait]
 impl nexus_test_interface::NexusServer for Server {
     async fn start_and_populate(config: &Config, log: &Logger) -> Self {
-        let server = Server::start(config, log).await.unwrap();
-        server.apictx.nexus.wait_for_populate().await.unwrap();
-        server
+        let internal_server =
+            InternalServer::start(config, &log).await.unwrap();
+        internal_server.apictx.nexus.wait_for_populate().await.unwrap();
+
+        // Perform the "handoff from RSS".
+        //
+        // However, RSS isn't running, so we'll do the handoff ourselves.
+        let opctx = internal_server.apictx.nexus.opctx_for_service_balancer();
+        internal_server
+            .apictx
+            .nexus
+            .rack_initialize(
+                &opctx,
+                config.deployment.rack_id,
+                // NOTE: In the context of this test utility, we arguably do have an
+                // instance of CRDB and Nexus running. However, as this info isn't
+                // necessary for most tests, we pass no information here.
+                internal_api::params::RackInitializationRequest {
+                    services: vec![],
+                    datasets: vec![],
+                },
+            )
+            .await
+            .expect("Could not initialize rack");
+
+        // Start the Nexus external API.
+        Server::start(internal_server).await.unwrap()
     }
 
     fn get_http_servers_external(&self) -> Vec<SocketAddr> {
@@ -206,7 +257,8 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     } else {
         debug!(log, "registered DTrace probes");
     }
-    let server = Server::start(config, &log).await?;
+    let internal_server = InternalServer::start(config, &log).await?;
+    let server = Server::start(internal_server).await?;
     server.register_as_producer().await;
     server.wait_for_finish().await
 }
