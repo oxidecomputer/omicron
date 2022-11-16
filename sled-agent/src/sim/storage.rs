@@ -15,9 +15,7 @@ use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
 use futures::lock::Mutex;
-use nexus_client::types::{
-    ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest,
-};
+use nexus_client::types::{ByteCount, ZpoolPutRequest};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -328,7 +326,7 @@ impl CrucibleData {
 ///
 /// Contains both the data and the HTTP server.
 pub struct CrucibleServer {
-    server: dropshot::HttpServer<Arc<CrucibleData>>,
+    _server: dropshot::HttpServer<Arc<CrucibleData>>,
     data: Arc<CrucibleData>,
 }
 
@@ -354,11 +352,7 @@ impl CrucibleServer {
         .start();
         info!(&log, "Created Simulated Crucible Server"; "address" => server.local_addr());
 
-        CrucibleServer { server, data }
-    }
-
-    fn address(&self) -> SocketAddr {
-        self.server.local_addr()
+        CrucibleServer { _server: server, data }
     }
 
     pub fn data(&self) -> Arc<CrucibleData> {
@@ -464,7 +458,7 @@ impl Storage {
     /// Adds a Dataset to the sled's simulated storage and notifies Nexus.
     pub async fn insert_dataset(&mut self, zpool_id: Uuid, dataset_id: Uuid) {
         // Update our local data
-        let dataset = self
+        let _ = self
             .zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
@@ -476,16 +470,6 @@ impl Storage {
             );
 
         self.next_crucible_port += 100;
-
-        // Notify Nexus
-        let request = DatasetPutRequest {
-            address: dataset.address().to_string(),
-            kind: DatasetKind::Crucible,
-        };
-        self.nexus_client
-            .dataset_put(&zpool_id, &dataset_id, &request)
-            .await
-            .expect("Failed to notify Nexus about new Dataset");
     }
 
     pub async fn get_dataset(

@@ -7,9 +7,8 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    DatasetPutRequest, DatasetPutResponse, OximeterInfo,
-    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
-    ZpoolPutResponse,
+    OximeterInfo, RackInitializationRequest, SledAgentStartupInfo,
+    ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -40,7 +39,6 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(sled_agent_put)?;
         api.register(rack_initialization_complete)?;
         api.register(zpool_put)?;
-        api.register(dataset_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_volume_remove_read_only_parent)?;
@@ -138,37 +136,6 @@ async fn zpool_put(
     let pi = pool_info.into_inner();
     nexus.upsert_zpool(path.zpool_id, path.sled_id, pi).await?;
     Ok(HttpResponseOk(ZpoolPutResponse {}))
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct DatasetPathParam {
-    zpool_id: Uuid,
-    dataset_id: Uuid,
-}
-
-/// Report that a dataset within a pool has come online.
-#[endpoint {
-     method = PUT,
-     path = "/zpools/{zpool_id}/dataset/{dataset_id}",
- }]
-async fn dataset_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<DatasetPathParam>,
-    info: TypedBody<DatasetPutRequest>,
-) -> Result<HttpResponseOk<DatasetPutResponse>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let info = info.into_inner();
-    nexus
-        .upsert_dataset(
-            path.dataset_id,
-            path.zpool_id,
-            info.address,
-            info.kind.into(),
-        )
-        .await?;
-    Ok(HttpResponseOk(DatasetPutResponse { reservation: None, quota: None }))
 }
 
 /// Path parameters for Instance requests (internal API)

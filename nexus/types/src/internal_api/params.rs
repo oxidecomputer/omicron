@@ -100,25 +100,6 @@ pub struct DatasetPutRequest {
     pub kind: DatasetKind,
 }
 
-/// Describes which ZFS properties should be set for a particular allocated
-/// dataset.
-// TODO: This could be useful for indicating quotas, or
-// for Nexus instructing the Sled Agent "what to format, and where".
-//
-// For now, the Sled Agent is a bit more proactive about allocation
-// decisions - see the "storage manager" section of the Sled Agent for
-// more details. Nexus, in response, merely advises minimums/maximums
-// for dataset sizes.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DatasetPutResponse {
-    /// A minimum reservation size for a filesystem.
-    /// Refer to ZFS native properties for more detail.
-    pub reservation: Option<ByteCount>,
-    /// A maximum quota on filesystem usage.
-    /// Refer to ZFS native properties for more detail.
-    pub quota: Option<ByteCount>,
-}
-
 /// Describes the purpose of the service.
 #[derive(
     Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,

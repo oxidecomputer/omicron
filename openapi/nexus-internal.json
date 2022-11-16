@@ -398,62 +398,6 @@
           }
         }
       }
-    },
-    "/zpools/{zpool_id}/dataset/{dataset_id}": {
-      "put": {
-        "summary": "Report that a dataset within a pool has come online.",
-        "operationId": "dataset_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetPutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetPutResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
     }
   },
   "components": {
@@ -751,30 +695,6 @@
           "address",
           "kind"
         ]
-      },
-      "DatasetPutResponse": {
-        "description": "Describes which ZFS properties should be set for a particular allocated dataset.",
-        "type": "object",
-        "properties": {
-          "quota": {
-            "nullable": true,
-            "description": "A maximum quota on filesystem usage. Refer to ZFS native properties for more detail.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          },
-          "reservation": {
-            "nullable": true,
-            "description": "A minimum reservation size for a filesystem. Refer to ZFS native properties for more detail.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          }
-        }
       },
       "Datum": {
         "description": "A `Datum` is a single sampled data point from a metric.",

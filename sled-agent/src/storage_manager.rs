@@ -15,7 +15,7 @@ use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
-use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
+use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use schemars::JsonSchema;
@@ -667,59 +667,12 @@ impl StorageWorker {
         );
     }
 
-    // Adds a "notification to nexus" to `nexus_notifications`,
-    // informing it about the addition of `datasets` to `pool_id`.
-    fn add_datasets_notify(
-        &self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
-        datasets: Vec<(Uuid, SocketAddrV6, DatasetKind)>,
-        pool_id: Uuid,
-    ) {
-        let lazy_nexus_client = self.lazy_nexus_client.clone();
-        let notify_nexus = move || {
-            let lazy_nexus_client = lazy_nexus_client.clone();
-            let datasets = datasets.clone();
-            async move {
-                let nexus = lazy_nexus_client.get().await.map_err(|e| {
-                    backoff::BackoffError::transient(e.to_string())
-                })?;
-
-                for (id, address, kind) in datasets {
-                    let request = DatasetPutRequest {
-                        address: address.to_string(),
-                        kind: kind.into(),
-                    };
-                    nexus.dataset_put(&pool_id, &id, &request).await.map_err(
-                        |e| backoff::BackoffError::transient(e.to_string()),
-                    )?;
-                }
-                Ok(())
-            }
-        };
-        let log = self.log.clone();
-        let log_post_failure = move |_, delay| {
-            warn!(
-                log,
-                "failed to notify nexus about datasets, will retry in {:?}", delay;
-            );
-        };
-        nexus_notifications.push_back(
-            backoff::retry_notify(
-                backoff::internal_service_policy(),
-                notify_nexus,
-                log_post_failure,
-            )
-            .boxed(),
-        );
-    }
-
     // TODO: a lot of these functions act on the `FuturesOrdered` - should
     // that just be a part of the "worker" struct?
 
     // Attempts to add a dataset within a zpool, according to `request`.
     async fn add_dataset(
         &self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
         request: &NewFilesystemRequest,
     ) -> Result<(), Error> {
         info!(self.log, "add_dataset: {:?}", request);
@@ -765,12 +718,6 @@ impl StorageWorker {
             message: format!("Failed writing config to {path:?} for pool {pool_name}, dataset: {id}"),
             err,
         })?;
-
-        self.add_datasets_notify(
-            nexus_notifications,
-            vec![(id, dataset_info.address, dataset_info.kind)],
-            pool.id(),
-        );
 
         Ok(())
     }
@@ -865,21 +812,15 @@ impl StorageWorker {
                         }
                     }
 
-                    // Notify Nexus of the zpool and all datasets within.
+                    // Notify Nexus of the zpool.
                     self.add_zpool_notify(
                         &mut nexus_notifications,
                         pool.id(),
                         size,
                     );
-
-                    self.add_datasets_notify(
-                        &mut nexus_notifications,
-                        datasets,
-                        pool.id(),
-                    );
                 },
                 Some(request) = self.new_filesystems_rx.recv() => {
-                    let result = self.add_dataset(&mut nexus_notifications, &request).await;
+                    let result = self.add_dataset(&request).await;
                     let _ = request.responder.send(result);
                 }
             }
