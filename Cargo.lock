@@ -2993,6 +2993,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "hex",
+ "internal-dns-client",
  "ipnetwork",
  "macaddr",
  "newtype_derive",

@@ -255,11 +255,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "title": "Array_of_ServicePutRequest",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ServicePutRequest"
-                }
+                "$ref": "#/components/schemas/RackInitializationRequest"
               }
             }
           },
@@ -702,6 +698,27 @@
         "required": [
           "start_time",
           "value"
+        ]
+      },
+      "DatasetCreateRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request": {
+            "$ref": "#/components/schemas/DatasetPutRequest"
+          },
+          "zpool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "request",
+          "zpool_id"
         ]
       },
       "DatasetKind": {
@@ -1800,6 +1817,27 @@
           }
         ]
       },
+      "RackInitializationRequest": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetCreateRequest"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServicePutRequest"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "services"
+        ]
+      },
       "Sample": {
         "description": "A concrete type representing a single, timestamped measurement from a timeseries.",
         "type": "object",
@@ -1832,13 +1870,90 @@
       },
       "ServiceKind": {
         "description": "Describes the purpose of the service.",
-        "type": "string",
-        "enum": [
-          "internal_d_n_s",
-          "nexus",
-          "oximeter",
-          "dendrite",
-          "tfport"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_d_n_s"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "external_address": {
+                    "type": "string",
+                    "format": "ip"
+                  }
+                },
+                "required": [
+                  "external_address"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dendrite"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tfport"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "ServicePutRequest": {

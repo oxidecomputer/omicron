@@ -8,7 +8,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
-use crate::internal_api::params::ServicePutRequest;
+use crate::internal_api::params::RackInitializationRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -57,12 +57,13 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        services: Vec<ServicePutRequest>,
+        request: RackInitializationRequest,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         // Convert from parameter -> DB type.
-        let services: Vec<_> = services
+        let services: Vec<_> = request
+            .services
             .into_iter()
             .map(|svc| {
                 db::model::Service::new(
@@ -74,10 +75,54 @@ impl super::Nexus {
             })
             .collect();
 
+        // TODO: If nexus, add a pool?
+
+        let datasets: Vec<_> = request
+            .datasets
+            .into_iter()
+            .map(|dataset| {
+                db::model::Dataset::new(
+                    dataset.dataset_id,
+                    dataset.zpool_id,
+                    dataset.request.address,
+                    dataset.request.kind.into(),
+                )
+            })
+            .collect();
+
         self.db_datastore
-            .rack_set_initialized(opctx, rack_id, services)
+            .rack_set_initialized(opctx, rack_id, services, datasets)
             .await?;
 
         Ok(())
+    }
+
+    /// Awaits the initialization of the rack.
+    ///
+    /// This will occur by either:
+    /// 1. RSS invoking the internal API, handing off responsibility, or
+    /// 2. Re-reading a value from the DB, if the rack has already been
+    ///    initialized.
+    ///
+    /// See RFD 278 for additional context.
+    pub async fn await_rack_initialization(&self, opctx: &OpContext) {
+        loop {
+            let result = self.rack_lookup(&opctx, &self.rack_id).await;
+            match result {
+                Ok(rack) => {
+                    if rack.initialized {
+                        return;
+                    }
+                    info!(
+                        self.log,
+                        "Still waiting for rack initialization: {:?}", rack
+                    );
+                }
+                Err(e) => {
+                    warn!(self.log, "Cannot look up rack: {}", e);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
     }
 }

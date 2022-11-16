@@ -8,7 +8,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_nexus::internal_api::params::{
     DatasetKind, DatasetPutRequest, ZpoolPutRequest,
 };
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 use nexus_test_utils::SLED_AGENT_UUID;
@@ -39,8 +39,7 @@ async fn test_dataset_put_success(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let address =
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+    let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
     let kind = DatasetKind::Crucible;
     let request = DatasetPutRequest { address, kind };
     let dataset_id = Uuid::new_v4();
@@ -72,8 +71,7 @@ async fn test_dataset_put_bad_zpool_returns_not_found(
     let dataset_put_url =
         format!("/zpools/{}/dataset/{}", zpool_id, dataset_id);
 
-    let address =
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+    let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
     let kind = DatasetKind::Crucible;
     let request = DatasetPutRequest { address, kind };
 
