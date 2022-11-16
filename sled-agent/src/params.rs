@@ -4,7 +4,7 @@
 
 use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
-    DENDRITE_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
@@ -372,6 +372,7 @@ pub enum ServiceType {
     Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
+    ManagementGatewayService,
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
 }
@@ -382,6 +383,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Nexus { .. } => write!(f, "nexus"),
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
+            ServiceType::ManagementGatewayService => write!(f, "mgs"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
         }
@@ -404,6 +406,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
                 }
             }
             St::Oximeter => AutoSt::Oximeter,
+            St::ManagementGatewayService => AutoSt::ManagementGatewayService,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
         }
@@ -486,6 +489,9 @@ impl ServiceZoneRequest {
             }
             ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
             ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceType::ManagementGatewayService => {
+                SRV::Service(ServiceName::ManagementGatewayService)
+            }
             ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
             ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
         }
@@ -501,6 +507,9 @@ impl ServiceZoneRequest {
             }
             ServiceType::Oximeter => {
                 Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
+            }
+            ServiceType::ManagementGatewayService => {
+                Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
             }
             ServiceType::Dendrite { .. } => {
                 Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))

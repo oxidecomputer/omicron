@@ -38,6 +38,7 @@ use crate::params::{
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -715,6 +716,17 @@ impl ServiceManager {
                     smfh.setprop(
                         "config/address",
                         &format!("[{}]:{}", address, OXIMETER_PORT),
+                    )?;
+                    smfh.refresh()?;
+                }
+                ServiceType::ManagementGatewayService => {
+                    info!(self.inner.log, "Setting up MGS service");
+
+                    let address = request.addresses[0];
+                    smfh.setprop("config/id", request.id)?;
+                    smfh.setprop(
+                        "config/address",
+                        &format!("[{}]:{}", address, MGS_PORT),
                     )?;
                     smfh.refresh()?;
                 }
