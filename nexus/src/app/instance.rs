@@ -53,6 +53,22 @@ use uuid::Uuid;
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
 impl super::Nexus {
+    pub async fn instance_lookup_id(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> LookupResult<Uuid> {
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::Read)
+            .await?;
+        return Ok(authz_instance.id());
+    }
+
     pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -243,20 +259,15 @@ impl super::Nexus {
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_id: &Uuid,
     ) -> DeleteResult {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(*instance_id)
+            .lookup_for(authz::Action::Delete)
+            .await?;
 
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)

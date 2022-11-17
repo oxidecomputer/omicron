@@ -138,7 +138,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
-        api.register(instance_lookup)?;
+        api.register(instance_view_v1)?;
         api.register(instance_view_by_id)?;
         api.register(instance_delete)?;
         api.register(instance_migrate)?;
@@ -2098,10 +2098,10 @@ struct InstanceLookupQueryParam {
 
 #[endpoint {
     method = GET,
-    path = "/instances/{instance}",
+    path = "/v1/instances/{instance}",
     tags = ["instances"],
 }]
-async fn instance_lookup(
+async fn instance_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceLookupQueryParam>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2113,7 +2113,7 @@ async fn instance_lookup(
     let instance_ident = &path.instance;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance = match instance_ident {
+        let instance_id = match instance_ident {
             NameOrId::Name(name) => {
                 let organization_name =
                     query.organization_name.ok_or_else(|| {
@@ -2127,7 +2127,7 @@ async fn instance_lookup(
                     }
                 })?;
                 nexus
-                    .instance_fetch(
+                    .instance_lookup_id(
                         &opctx,
                         &organization_name,
                         &project_name,
@@ -2135,8 +2135,9 @@ async fn instance_lookup(
                     )
                     .await?
             }
-            NameOrId::Id(id) => nexus.instance_fetch_by_id(&opctx, id).await?,
+            NameOrId::Id(id) => *id,
         };
+        let instance = nexus.instance_fetch_by_id(&opctx, &instance_id).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2203,6 +2204,53 @@ async fn instance_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = DELETE,
+    path = "/v1/instances/{instance}",
+    tags = ["instances"],
+}]
+async fn instance_delete_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<InstanceLookupQueryParam>,
+    path_params: Path<InstanceLookupPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let instance_ident = &path.instance;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_id = match instance_ident {
+            NameOrId::Name(name) => {
+                let organization_name =
+                    query.organization_name.ok_or_else(|| {
+                        Error::InvalidRequest { message: "organization_name is required when using instance name".to_string() }
+                    })?;
+                let project_name = query.project_name.ok_or_else(|| {
+                    Error::InvalidRequest {
+                        message:
+                            "project_name is required when using instance name"
+                                .to_string(),
+                    }
+                })?;
+                nexus
+                    .instance_lookup_id(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &Name(name.clone()),
+                    )
+                    .await?
+            }
+            NameOrId::Id(id) => *id,
+        };
+        nexus.project_destroy_instance(&opctx, &instance_id).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete an instance
 #[endpoint {
     method = DELETE,
@@ -2221,14 +2269,15 @@ async fn instance_delete(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_destroy_instance(
+        let instance_id = nexus
+            .instance_lookup_id(
                 &opctx,
                 &organization_name,
                 &project_name,
                 &instance_name,
             )
             .await?;
+        nexus.project_destroy_instance(&opctx, &instance_id).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
