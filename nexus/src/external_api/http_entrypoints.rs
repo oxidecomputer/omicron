@@ -2083,12 +2083,16 @@ async fn instance_create(
 /// Path parameters for Instance requests. Name is temporary.
 #[derive(Deserialize, JsonSchema)]
 struct InstanceLookupPathParam {
+    /// If Name is provided `organization_name` and `project_name` query parameters must also be present.
+    /// Otherwise they should be omitted.
     instance: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct InstanceLookupQueryParam {
+    /// Should only be specified if `instance` path param is a name
     organization_name: Option<Name>,
+    /// Should only be specified if `instance` path param is a name
     project_name: Option<Name>,
 }
 
@@ -2107,21 +2111,6 @@ async fn instance_lookup(
     let path = path_params.into_inner();
     let query = query_params.into_inner();
     let instance_ident = &path.instance;
-    let instance_id = match &path.instance {
-        NameOrId::Id(id) => {}
-        NameOrId::Name(name) => {
-            let opctx = OpContext::for_external_api(&rqctx).await?;
-            let instance = nexus
-                .instance_lookup(
-                    &opctx,
-                    &query.organization_name,
-                    &query.project_name,
-                    &name,
-                )
-                .await?;
-            instance.id()
-        }
-    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = match instance_ident {
