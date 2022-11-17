@@ -326,7 +326,7 @@ impl CrucibleData {
 ///
 /// Contains both the data and the HTTP server.
 pub struct CrucibleServer {
-    _server: dropshot::HttpServer<Arc<CrucibleData>>,
+    server: dropshot::HttpServer<Arc<CrucibleData>>,
     data: Arc<CrucibleData>,
 }
 
@@ -352,7 +352,11 @@ impl CrucibleServer {
         .start();
         info!(&log, "Created Simulated Crucible Server"; "address" => server.local_addr());
 
-        CrucibleServer { _server: server, data }
+        CrucibleServer { server, data }
+    }
+
+    fn address(&self) -> SocketAddr {
+        self.server.local_addr()
     }
 
     pub fn data(&self) -> Arc<CrucibleData> {
@@ -455,10 +459,14 @@ impl Storage {
             .expect("Failed to notify Nexus about new Zpool");
     }
 
-    /// Adds a Dataset to the sled's simulated storage and notifies Nexus.
-    pub async fn insert_dataset(&mut self, zpool_id: Uuid, dataset_id: Uuid) {
+    /// Adds a Dataset to the sled's simulated storage.
+    pub async fn insert_dataset(
+        &mut self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+    ) -> SocketAddr {
         // Update our local data
-        let _ = self
+        let dataset = self
             .zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
@@ -470,6 +478,8 @@ impl Storage {
             );
 
         self.next_crucible_port += 100;
+
+        dataset.address()
     }
 
     pub async fn get_dataset(

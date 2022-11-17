@@ -11,6 +11,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use nexus_test_interface::NexusServer;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -434,7 +435,9 @@ impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
 
     // Creates fake physical storage, an organization, and a project.
-    pub async fn new<N>(cptestctx: &ControlPlaneTestContext<N>) -> Self {
+    pub async fn new<N: NexusServer>(
+        cptestctx: &ControlPlaneTestContext<N>,
+    ) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
 
         let mut disk_test = Self { sled_agent, zpools: vec![] };
@@ -442,14 +445,18 @@ impl DiskTest {
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
         for _ in 0..3 {
             disk_test
-                .add_zpool_with_dataset(Self::DEFAULT_ZPOOL_SIZE_GIB)
+                .add_zpool_with_dataset(cptestctx, Self::DEFAULT_ZPOOL_SIZE_GIB)
                 .await;
         }
 
         disk_test
     }
 
-    pub async fn add_zpool_with_dataset(&mut self, gibibytes: u32) {
+    pub async fn add_zpool_with_dataset<N: NexusServer>(
+        &mut self,
+        cptestctx: &ControlPlaneTestContext<N>,
+        gibibytes: u32,
+    ) {
         let zpool = TestZpool {
             id: Uuid::new_v4(),
             size: ByteCount::from_gibibytes_u32(gibibytes),
@@ -459,7 +466,10 @@ impl DiskTest {
         self.sled_agent.create_zpool(zpool.id, zpool.size.to_bytes()).await;
 
         for dataset in &zpool.datasets {
-            self.sled_agent.create_crucible_dataset(zpool.id, dataset.id).await;
+            let address = self
+                .sled_agent
+                .create_crucible_dataset(zpool.id, dataset.id)
+                .await;
 
             // By default, regions are created immediately.
             let crucible = self
@@ -469,6 +479,19 @@ impl DiskTest {
             crucible
                 .set_create_callback(Box::new(|_| RegionState::Created))
                 .await;
+
+            let address = match address {
+                std::net::SocketAddr::V6(addr) => addr,
+                _ => panic!("Unsupported address type: {address} "),
+            };
+
+            cptestctx
+                .server
+                .upsert_crucible_dataset(dataset.id, zpool.id, address)
+                .await;
+
+            // TODO: Upsert dataset??
+            //            cptestctx.name
         }
 
         self.zpools.push(zpool);

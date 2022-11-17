@@ -33,8 +33,9 @@ pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -230,6 +231,24 @@ impl nexus_test_interface::NexusServer for Server {
 
     fn get_http_server_internal(&self) -> SocketAddr {
         self.http_server_internal.local_addr()
+    }
+
+    async fn upsert_crucible_dataset(
+        &self,
+        id: Uuid,
+        zpool_id: Uuid,
+        address: SocketAddrV6,
+    ) {
+        self.apictx
+            .nexus
+            .upsert_dataset(
+                id,
+                zpool_id,
+                address,
+                crate::db::model::DatasetKind::Crucible,
+            )
+            .await
+            .unwrap();
     }
 
     async fn close(mut self) {

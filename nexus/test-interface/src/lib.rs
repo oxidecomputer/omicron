@@ -34,7 +34,8 @@
 use async_trait::async_trait;
 use omicron_common::nexus_config::Config;
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
+use uuid::Uuid;
 
 #[async_trait]
 pub trait NexusServer {
@@ -42,5 +43,33 @@ pub trait NexusServer {
 
     fn get_http_servers_external(&self) -> Vec<SocketAddr>;
     fn get_http_server_internal(&self) -> SocketAddr;
+
+    // Previously, as a dataset was created (within the sled agent),
+    // we'd use an internal API from Nexus to record that the dataset
+    // now exists. In other words, Sled Agent was in control, by telling
+    // Nexus when it should record persistent information about datasets.
+    //
+    // However, as of https://github.com/oxidecomputer/omicron/pull/1954,
+    // control over dataset provisioning is shifting to Nexus. There is
+    // a short window where RSS controls dataset provisioning, but afterwards,
+    // Nexus should be calling the shots on "when to provision datasets".
+    //
+    // For test purposes, we have many situations where we want to carve up
+    // zpools and datasets precisely for disk-based tests. As a result, we
+    // *want* tests (namely, an entity outside of Nexus) to have this control.
+    //
+    // This test-based API provides one such mechanism of control.
+    //
+    // TODO: In the future, we *could* re-structure our tests to more rigorously
+    // use the "RackInitializationRequest" handoff, but this would require
+    // creating all our Zpools and Datasets before performing handoff to Nexus.
+    // However, doing so would let us remove this test-only API.
+    async fn upsert_crucible_dataset(
+        &self,
+        id: Uuid,
+        zpool_id: Uuid,
+        address: SocketAddrV6,
+    );
+
     async fn close(self);
 }

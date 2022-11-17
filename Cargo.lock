@@ -3044,6 +3044,7 @@ dependencies = [
  "dropshot",
  "omicron-common",
  "slog",
+ "uuid",
 ]
 
 [[package]]
