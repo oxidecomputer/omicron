@@ -138,16 +138,16 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
-        api.register(instance_view_v1)?;
         api.register(instance_view_by_id)?;
         api.register(instance_delete)?;
-        api.register(instance_delete_v1)?;
         api.register(instance_migrate)?;
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
+        api.register(v1_instance_view)?;
+        api.register(v1_instance_delete)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -2102,7 +2102,7 @@ struct InstanceLookupQueryParam {
     path = "/v1/instances/{instance}",
     tags = ["instances"],
 }]
-async fn instance_view_v1(
+async fn v1_instance_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceLookupQueryParam>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2210,7 +2210,7 @@ async fn instance_view_by_id(
     path = "/v1/instances/{instance}",
     tags = ["instances"],
 }]
-async fn instance_delete_v1(
+async fn v1_instance_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceLookupQueryParam>,
     path_params: Path<InstanceLookupPathParam>,

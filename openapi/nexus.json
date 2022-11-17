@@ -7659,7 +7659,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "instance_view_v1",
+        "operationId": "v1_instance_view",
         "parameters": [
           {
             "in": "query",
@@ -7713,7 +7713,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "instance_delete_v1",
+        "operationId": "v1_instance_delete",
         "parameters": [
           {
             "in": "query",
