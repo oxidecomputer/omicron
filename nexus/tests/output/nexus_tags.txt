@@ -29,12 +29,12 @@ API operations found with tag "instances"
 OPERATION ID                             URL PATH
 instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
 instance_delete                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
+instance_delete_v1                       /v1/instances/{instance}
 instance_disk_attach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
 instance_disk_detach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
 instance_external_ip_list                /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
-instance_lookup                          /instances/{instance}
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 instance_network_interface_create        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interface_delete        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
@@ -49,6 +49,7 @@ instance_start                           /organizations/{organization_name}/proj
 instance_stop                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 instance_view_by_id                      /by-id/instances/{id}
+instance_view_v1                         /v1/instances/{instance}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH

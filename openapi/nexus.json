@@ -590,59 +590,6 @@
         "x-dropshot-pagination": true
       }
     },
-    "/instances/{instance}": {
-      "get": {
-        "tags": [
-          "instances"
-        ],
-        "operationId": "instance_lookup",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "organization_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
-            "in": "path",
-            "name": "instance",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/login": {
       "post": {
         "tags": [
@@ -7706,6 +7653,109 @@
         },
         "x-dropshot-pagination": true
       }
+    },
+    "/v1/instances/{instance}": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "instance_view_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization_name",
+            "description": "Should only be specified if `instance` path param is a name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "description": "Should only be specified if `instance` path param is a name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "If Name is provided `organization_name` and `project_name` query parameters must also be present. Otherwise they should be omitted.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "instance_delete_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization_name",
+            "description": "Should only be specified if `instance` path param is a name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "description": "Should only be specified if `instance` path param is a name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "If Name is provided `organization_name` and `project_name` query parameters must also be present. Otherwise they should be omitted.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12828,17 +12878,6 @@
           }
         ]
       },
-      "NameOrId": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/Name"
-          },
-          {
-            "type": "string",
-            "format": "uuid"
-          }
-        ]
-      },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
         "oneOf": [
@@ -12886,6 +12925,17 @@
           "read_bytes",
           "write",
           "write_bytes"
+        ]
+      },
+      "NameOrId": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Name"
+          },
+          {
+            "type": "string",
+            "format": "uuid"
+          }
         ]
       }
     }
