@@ -335,8 +335,6 @@ struct AddressBumpAllocator {
     last_addr: Ipv6Addr,
 }
 
-// TODO: Testable?
-// TODO: Could exist in another file?
 impl AddressBumpAllocator {
     fn new(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
         Self { last_addr: get_switch_zone_address(subnet) }
@@ -350,5 +348,63 @@ impl AddressBumpAllocator {
         }
         self.last_addr = Ipv6Addr::from(segments);
         Some(self.last_addr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
+    const EXPECTED_USABLE_ADDRESSES: u16 =
+        RSS_RESERVED_ADDRESSES - EXPECTED_RESERVED_ADDRESSES;
+
+    #[test]
+    fn bump_allocator_basics() {
+        let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
+        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+
+        let mut allocator = AddressBumpAllocator::new(subnet);
+        assert_eq!(
+            allocator.next().unwrap(),
+            Ipv6Addr::new(
+                0xfd00,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                EXPECTED_RESERVED_ADDRESSES + 1
+            ),
+        );
+        assert_eq!(
+            allocator.next().unwrap(),
+            Ipv6Addr::new(
+                0xfd00,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                EXPECTED_RESERVED_ADDRESSES + 2
+            ),
+        );
+    }
+
+    #[test]
+    fn bump_allocator_exhaustion() {
+        let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
+        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+
+        let mut allocator = AddressBumpAllocator::new(subnet);
+        for i in 0..EXPECTED_USABLE_ADDRESSES {
+            assert!(
+                allocator.next().is_some(),
+                "Could not allocate {i}-th address"
+            );
+        }
+        assert!(allocator.next().is_none(), "Expected allocation to fail");
     }
 }
