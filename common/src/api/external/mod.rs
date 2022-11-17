@@ -270,24 +270,24 @@ impl Name {
 
 #[derive(Serialize, Deserialize)]
 #[serde(try_from = "String")]
-pub enum ResourceIdentifier {
+pub enum NameOrId {
     Name(Name),
     Id(Uuid),
 }
 
-impl TryFrom<String> for ResourceIdentifier {
+impl TryFrom<String> for NameOrId {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if let Ok(id) = Uuid::parse_str(&value) {
-            Ok(ResourceIdentifier::Id(id))
+            Ok(NameOrId::Id(id))
         } else {
-            Ok(ResourceIdentifier::Name(Name::try_from(value)?))
+            Ok(NameOrId::Name(Name::try_from(value)?))
         }
     }
 }
 
-impl JsonSchema for ResourceIdentifier {
+impl JsonSchema for NameOrId {
     fn schema_name() -> String {
         "ResourceIdentifier".to_string()
     }

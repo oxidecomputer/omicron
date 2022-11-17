@@ -60,8 +60,8 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::NetworkInterface;
-use omicron_common::api::external::ResourceIdentifier;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
@@ -2083,7 +2083,7 @@ async fn instance_create(
 /// Path parameters for Instance requests. Name is temporary.
 #[derive(Deserialize, JsonSchema)]
 struct InstanceLookupPathParam {
-    instance: ResourceIdentifier,
+    instance: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -2107,10 +2107,25 @@ async fn instance_lookup(
     let path = path_params.into_inner();
     let query = query_params.into_inner();
     let instance_ident = &path.instance;
+    let instance_id = match &path.instance {
+        NameOrId::Id(id) => {}
+        NameOrId::Name(name) => {
+            let opctx = OpContext::for_external_api(&rqctx).await?;
+            let instance = nexus
+                .instance_lookup(
+                    &opctx,
+                    &query.organization_name,
+                    &query.project_name,
+                    &name,
+                )
+                .await?;
+            instance.id()
+        }
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance = match instance_ident {
-            ResourceIdentifier::Name(name) => {
+            NameOrId::Name(name) => {
                 let organization_name =
                     query.organization_name.ok_or_else(|| {
                         Error::InvalidRequest { message: "organization_name is required when using instance name".to_string() }
@@ -2131,9 +2146,7 @@ async fn instance_lookup(
                     )
                     .await?
             }
-            ResourceIdentifier::Id(id) => {
-                nexus.instance_fetch_by_id(&opctx, id).await?
-            }
+            NameOrId::Id(id) => nexus.instance_fetch_by_id(&opctx, id).await?,
         };
         Ok(HttpResponseOk(instance.into()))
     };
