@@ -483,13 +483,12 @@ impl ServiceInner {
                         ServiceType::Oximeter => {
                             NexusTypes::ServiceKind::Oximeter
                         }
-                        // TODO TODO TODO
-                        ServiceType::ManagementGatewayService => todo!(),
-                        ServiceType::Dendrite { .. } => {
-                            NexusTypes::ServiceKind::Dendrite
+                        _ => {
+                            return Err(SetupServiceError::BadConfig(format!(
+                                "RSS should not request service of type: {}",
+                                svc
+                            )));
                         }
-                        // TODO TODO TODO
-                        ServiceType::Tfport { .. } => todo!(),
                     };
 
                     services.push(NexusTypes::ServicePutRequest {
