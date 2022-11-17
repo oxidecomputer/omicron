@@ -85,11 +85,10 @@ pub enum PlanError {
 pub struct Plan {
     pub rack_id: Uuid,
     pub sleds: HashMap<SocketAddrV6, SledAgentRequest>,
-    // TODO: Consider putting the rack subnet here? This may be operator-driven
-    // in the future, so it should exist in the "plan".
-    //
-    // TL;DR: The more we decouple rom "rss-config.toml", the easier it'll be to
-    // switch to an operator-driven interface.
+
+    // Store the provided RSS configuration as part of the sled plan; if it
+    // changes after reboot, we need to know.
+    pub config: Config,
 }
 
 impl Plan {
@@ -151,7 +150,7 @@ impl Plan {
             sleds.insert(addr, allocation);
         }
 
-        let plan = Self { rack_id, sleds };
+        let plan = Self { rack_id, sleds, config: config.clone() };
 
         // Once we've constructed a plan, write it down to durable storage.
         let serialized_plan =

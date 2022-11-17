@@ -586,6 +586,11 @@ impl ServiceInner {
             let sled_plan = SledPlan::load(&self.log)
                 .await?
                 .expect("Sled plan should exist if completed marker exists");
+            if &sled_plan.config != config {
+                return Err(SetupServiceError::BadConfig(
+                    "Configuration changed".to_string(),
+                ));
+            }
             let service_plan = ServicePlan::load(&self.log)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
@@ -622,8 +627,9 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            SledPlan::create(&self.log, &config, addrs).await?
+            SledPlan::create(&self.log, config, addrs).await?
         };
+        let config = &plan.config;
 
         // Generate our rack secret, unless we're in the single-sled case.
         let mut maybe_rack_secret_shares = generate_rack_secret(
