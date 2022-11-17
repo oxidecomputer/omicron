@@ -590,6 +590,59 @@
         "x-dropshot-pagination": true
       }
     },
+    "/instances/{instance}": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "instance_lookup",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceIdentifier"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/login": {
       "post": {
         "tags": [
@@ -12772,6 +12825,17 @@
             "enum": [
               "id_ascending"
             ]
+          }
+        ]
+      },
+      "ResourceIdentifier": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Name"
+          },
+          {
+            "type": "string",
+            "format": "uuid"
           }
         ]
       },

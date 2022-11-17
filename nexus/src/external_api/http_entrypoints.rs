@@ -61,6 +61,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NetworkInterface;
+use omicron_common::api::external::ResourceIdentifier;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
@@ -137,6 +138,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
+        api.register(instance_lookup)?;
         api.register(instance_view_by_id)?;
         api.register(instance_delete)?;
         api.register(instance_migrate)?;
@@ -2074,6 +2076,66 @@ async fn instance_create(
             )
             .await?;
         Ok(HttpResponseCreated(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Instance requests. Name is temporary.
+#[derive(Deserialize, JsonSchema)]
+struct InstanceLookupPathParam {
+    instance: ResourceIdentifier,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct InstanceLookupQueryParam {
+    organization_name: Option<Name>,
+    project_name: Option<Name>,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance}",
+    tags = ["instances"],
+}]
+async fn instance_lookup(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<InstanceLookupQueryParam>,
+    path_params: Path<InstanceLookupPathParam>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let instance_ident = &path.instance;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance = match instance_ident {
+            ResourceIdentifier::Name(name) => {
+                let organization_name =
+                    query.organization_name.ok_or_else(|| {
+                        Error::InvalidRequest { message: "organization_name is required when using instance name".to_string() }
+                    })?;
+                let project_name = query.project_name.ok_or_else(|| {
+                    Error::InvalidRequest {
+                        message:
+                            "project_name is required when using instance name"
+                                .to_string(),
+                    }
+                })?;
+                nexus
+                    .instance_fetch(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &Name(name.clone()),
+                    )
+                    .await?
+            }
+            ResourceIdentifier::Id(id) => {
+                nexus.instance_fetch_by_id(&opctx, id).await?
+            }
+        };
+        Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

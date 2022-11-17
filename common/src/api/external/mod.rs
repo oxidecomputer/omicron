@@ -268,6 +268,47 @@ impl Name {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub enum ResourceIdentifier {
+    Name(Name),
+    Id(Uuid),
+}
+
+impl TryFrom<String> for ResourceIdentifier {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(ResourceIdentifier::Id(id))
+        } else {
+            Ok(ResourceIdentifier::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl JsonSchema for ResourceIdentifier {
+    fn schema_name() -> String {
+        "ResourceIdentifier".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    gen.subschema_for::<Name>(),
+                    gen.subschema_for::<Uuid>(),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// Name for a built-in role
 #[derive(
     Clone,
