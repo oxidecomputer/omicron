@@ -618,7 +618,7 @@
             "name": "instance",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/ResourceIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             },
             "style": "simple"
           }
@@ -12828,7 +12828,7 @@
           }
         ]
       },
-      "ResourceIdentifier": {
+      "NameOrId": {
         "oneOf": [
           {
             "$ref": "#/components/schemas/Name"
