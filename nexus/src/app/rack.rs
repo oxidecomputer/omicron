@@ -75,7 +75,7 @@ impl super::Nexus {
             })
             .collect();
 
-        // TODO: If nexus, add a pool?
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1958): If nexus, add a pool?
 
         let datasets: Vec<_> = request
             .datasets

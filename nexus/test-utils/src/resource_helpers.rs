@@ -489,9 +489,6 @@ impl DiskTest {
                 .server
                 .upsert_crucible_dataset(dataset.id, zpool.id, address)
                 .await;
-
-            // TODO: Upsert dataset??
-            //            cptestctx.name
         }
 
         self.zpools.push(zpool);
