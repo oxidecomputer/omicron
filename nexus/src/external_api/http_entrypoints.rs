@@ -141,6 +141,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_view_v1)?;
         api.register(instance_view_by_id)?;
         api.register(instance_delete)?;
+        api.register(instance_delete_v1)?;
         api.register(instance_migrate)?;
         api.register(instance_reboot)?;
         api.register(instance_start)?;

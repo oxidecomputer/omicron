@@ -268,8 +268,8 @@ impl Name {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(try_from = "String")]
+#[derive(Serialize, Deserialize, Display, Debug)]
+#[display("{0}")]
 pub enum NameOrId {
     Name(Name),
     Id(Uuid),
@@ -289,7 +289,7 @@ impl TryFrom<String> for NameOrId {
 
 impl JsonSchema for NameOrId {
     fn schema_name() -> String {
-        "ResourceIdentifier".to_string()
+        "NameOrId".to_string()
     }
 
     fn json_schema(
