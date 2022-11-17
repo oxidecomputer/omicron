@@ -2,7 +2,58 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Rack Setup Service implementation
+//! Rack Setup Service (RSS) implementation
+//!
+//! RSS triggers the initialization of:
+//! - Sled Agents (giving them underlay addresses)
+//! - Trust Quorum (coordinating between Sled Agents)
+//! - Services (such as internal DNS, CRDB, Nexus)
+//! - DNS records for those services
+//! - Handoff to Nexus, for control of Control Plane management
+//!
+//! # Phases and Configuration Files
+//!
+//! Rack setup occurs in distinct phases which are denoted by the prescence of
+//! configuration files.
+//!
+//! - /var/oxide/rss-sled-plan.toml (Sled Plan)
+//! - /var/oxide/rss-service-plan.toml (Service Plan)
+//! - /var/oxide/rss-plan-completed.marker (Plan Execution Complete)
+//!
+//! ## Sled Plan
+//!
+//! When RSS starts, it presumably is executing on a single sled, and must
+//! communicate with other sleds on the bootstrap network to discover neighbors.
+//! RSS uses the bootstrap network to identify peers, assign them subnets and
+//! UUIDs, and initialize a trust quorum. Once RSS decides these values
+//! (see: [crate::rack_setup::plan::sled] for more details) it commits them
+//! to a local file as the "Sled Plan", before sending requests.
+//!
+//! As a result, restarting RSS should result in retransmission of the same
+//! values, as long as the same configuration file is used.
+//!
+//! ## Service Plan
+//!
+//! After the trust quorum is established and Sled Agents are executing across
+//! the rack, RSS can make the call on "what services should run where",
+//! ensuring the minimal set of services necessary to execute Nexus are
+//! operational (see: [crate::rack_setup::plan::service]). Critically,
+//! these include:
+//! - Internal DNS: Necessary so internal services can discover each other
+//! - CockroachDB: Necessary for Nexus to operate
+//! - Nexus itself
+//!
+//! Once the distribution of these services is decided (which sled should run
+//! what service? On what zpools should CockroachDB be provisioned?) it is
+//! committed to the Service Plan, and executed.
+//!
+//! ## Execution Complete
+//!
+//! Once the both the Sled and Service plans have finished execution, handoff of
+//! control to Nexus can occur. <https://rfd.shared.oxide.computer/rfd/0278>
+//! covers this in more detail, but in short, RSS creates a "marker" file after
+//! completing execution, and unconditionally calls the "handoff to Nexus" API
+//! thereafter.
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
@@ -142,14 +193,9 @@ impl RackSetupService {
     }
 }
 
-fn rss_plan_path() -> PathBuf {
-    std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-plan.toml")
-}
-
 fn rss_completed_plan_path() -> PathBuf {
     std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-plan-completed.toml")
+        .join("rss-plan-completed.marker")
 }
 
 // Describes the options when awaiting for peers.
@@ -724,14 +770,10 @@ impl ServiceInner {
 
         info!(self.log, "Finished setting up services");
 
-        // Finally, make sure the configuration is saved so we don't inject
-        // the requests on the next iteration.
-        let plan_path = rss_plan_path();
-        tokio::fs::rename(&plan_path, &rss_completed_plan_path).await.map_err(
+        // Finally, mark that we've completed executing the plans.
+        tokio::fs::File::create(&rss_completed_plan_path).await.map_err(
             |err| SetupServiceError::Io {
-                message: format!(
-                    "renaming {plan_path:?} to {rss_completed_plan_path:?}"
-                ),
+                message: format!("creating {rss_completed_plan_path:?}"),
                 err,
             },
         )?;
