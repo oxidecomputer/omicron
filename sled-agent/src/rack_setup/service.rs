@@ -25,9 +25,8 @@
 //! When RSS starts, it presumably is executing on a single sled, and must
 //! communicate with other sleds on the bootstrap network to discover neighbors.
 //! RSS uses the bootstrap network to identify peers, assign them subnets and
-//! UUIDs, and initialize a trust quorum. Once RSS decides these values
-//! (see: [crate::rack_setup::plan::sled] for more details) it commits them
-//! to a local file as the "Sled Plan", before sending requests.
+//! UUIDs, and initialize a trust quorum. Once RSS decides these values it
+//! commits them to a local file as the "Sled Plan", before sending requests.
 //!
 //! As a result, restarting RSS should result in retransmission of the same
 //! values, as long as the same configuration file is used.
@@ -37,8 +36,7 @@
 //! After the trust quorum is established and Sled Agents are executing across
 //! the rack, RSS can make the call on "what services should run where",
 //! ensuring the minimal set of services necessary to execute Nexus are
-//! operational (see: [crate::rack_setup::plan::service]). Critically,
-//! these include:
+//! operational. Critically, these include:
 //! - Internal DNS: Necessary so internal services can discover each other
 //! - CockroachDB: Necessary for Nexus to operate
 //! - Nexus itself
