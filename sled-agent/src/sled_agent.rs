@@ -16,10 +16,9 @@ use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
-    DatasetKind, DendriteAsic, DiskStateRequested, InstanceHardware,
-    InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData, ServiceEnsureBody, ServiceType,
-    ServiceZoneRequest, VpcFirewallRule, ZoneType,
+    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
+    InstanceRuntimeStateRequested, InstanceSerialConsoleData, ServiceEnsureBody,
+    VpcFirewallRule,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -157,7 +156,7 @@ struct SledAgentInner {
     id: Uuid,
 
     // The sled's initial configuration
-    config: Config,
+    _config: Config,
 
     // Subnet of the Sled's underlay.
     //
@@ -188,6 +187,8 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1961): Use this
+    #[allow(dead_code)]
     fn switch_ip(&self) -> Ipv6Addr {
         get_switch_zone_address(self.subnet)
     }
@@ -357,7 +358,7 @@ impl SledAgent {
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id,
-                config: config.clone(),
+                _config: config.clone(),
                 subnet: request.subnet,
                 storage,
                 instances,
@@ -431,38 +432,6 @@ impl SledAgent {
                 }
             }
         }
-    }
-
-    async fn ensure_scrimlet_services_active(&self, log: &Logger) {
-        info!(log, "Ensuring scrimlet services (enabling services)");
-
-        let services = match self.inner.config.stub_scrimlet {
-            Some(_) => {
-                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
-            }
-            None => {
-                vec![
-                    ServiceType::ManagementGatewayService,
-                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
-                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
-                ]
-            }
-        };
-
-        let request = ServiceZoneRequest {
-            id: Uuid::new_v4(),
-            zone_type: ZoneType::Switch,
-            addresses: vec![self.inner.switch_ip()],
-            gz_addresses: vec![],
-            services,
-        };
-
-        self.inner.services.ensure_switch(Some(request)).await;
-    }
-
-    async fn ensure_scrimlet_services_deactive(&self, log: &Logger) {
-        info!(log, "Ensuring scrimlet services (disabling services)");
-        self.inner.services.ensure_switch(None).await;
     }
 
     pub fn id(&self) -> Uuid {

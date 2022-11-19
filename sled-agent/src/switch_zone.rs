@@ -68,6 +68,8 @@ impl SwitchZoneManager {
         Self {
             inner: Arc::new(SwitchZoneManagerInner {
                 log: log.clone(),
+                // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+                // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SwitchZone::Disabled),
                 vnic_allocator: VnicAllocator::new("Switch", etherstub),
                 stub_scrimlet,

@@ -199,6 +199,7 @@ impl HardwareMonitor {
     // Stops the task from executing, and grabs the switch zone, if it exists.
     //
     // TODO: Do we want this?
+    #[allow(dead_code)]
     async fn stop(self) -> Result<SwitchZoneManager, BootstrapError> {
         let _ = self.exit_tx.send(());
         self.handle.await.expect("Hardware monitor panicked")
@@ -219,6 +220,7 @@ pub(crate) struct Agent {
 
     rss: Mutex<Option<RssHandle>>,
     // TODO: How should we be keeping track of this task?
+    #[allow(dead_code)]
     hardware_monitor: Mutex<Option<HardwareMonitor>>,
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,

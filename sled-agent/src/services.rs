@@ -56,9 +56,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::oneshot;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 // The filename of ServiceManager's internal storage.
@@ -171,34 +169,10 @@ impl Default for Config {
     }
 }
 
-struct Task {
-    // A signal for the initializer task to terminate
-    exit_tx: oneshot::Sender<()>,
-    // A task repeatedly trying to initialize the zone
-    initializer: JoinHandle<()>,
-}
-
-// Describes the Switch Zone state.
-enum SwitchZone {
-    // The switch zone is not currently running.
-    Disabled,
-    // The Zone is still initializing - it may be awaiting the initialization
-    // of certain links.
-    Initializing {
-        // The request for the zone
-        request: ServiceZoneRequest,
-        // A background task
-        worker: Option<Task>,
-    },
-    // The Zone is currently running.
-    Running(RunningZone),
-}
-
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
     config: Config,
-    switch_zone: Mutex<SwitchZone>,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator<Etherstub>,
     physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
@@ -240,9 +214,6 @@ impl ServiceManager {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
                 config,
-                // TODO(https://github.com/oxidecomputer/omicron/issues/725):
-                // Load the switch zone if it already exists?
-                switch_zone: Mutex::new(SwitchZone::Disabled),
                 zones: Mutex::new(vec![]),
                 vnic_allocator: VnicAllocator::new("Service", etherstub),
                 physical_link_vnic_allocator: VnicAllocator::new(
@@ -792,90 +763,6 @@ impl ServiceManager {
             .map_err(|err| Error::Io { path: config_path.clone(), err })?;
 
         Ok(())
-    }
-
-    pub async fn ensure_switch(&self, request: Option<ServiceZoneRequest>) {
-        let log = &self.inner.log;
-        let mut switch_zone = self.inner.switch_zone.lock().await;
-
-        match (&mut *switch_zone, request) {
-            (SwitchZone::Disabled, Some(request)) => {
-                info!(log, "Enabling switch zone (new)");
-                let mgr = self.clone();
-                let (exit_tx, exit_rx) = oneshot::channel();
-                *switch_zone = SwitchZone::Initializing {
-                    request,
-                    worker: Some(Task {
-                        exit_tx,
-                        initializer: tokio::task::spawn(async move {
-                            mgr.initialize_switch_zone(exit_rx).await
-                        }),
-                    }),
-                };
-            }
-            (SwitchZone::Initializing { .. }, Some(_)) => {
-                info!(log, "Enabling switch zone (already underway)");
-            }
-            (SwitchZone::Running(_), Some(_)) => {
-                info!(log, "Enabling switch zone (already complete)");
-            }
-            (SwitchZone::Disabled, None) => {
-                info!(log, "Disabling switch zone (already complete)");
-            }
-            (SwitchZone::Initializing { worker, .. }, None) => {
-                info!(log, "Disabling switch zone (was initializing)");
-                let worker = worker
-                    .take()
-                    .expect("Initializing without background task");
-                // If this succeeds, we told the background task to exit
-                // successfully. If it fails, the background task already
-                // exited.
-                let _ = worker.exit_tx.send(());
-                worker
-                    .initializer
-                    .await
-                    .expect("Switch initializer task panicked");
-                *switch_zone = SwitchZone::Disabled;
-            }
-            (SwitchZone::Running(_), None) => {
-                info!(log, "Disabling switch zone (was running)");
-                *switch_zone = SwitchZone::Disabled;
-            }
-        }
-    }
-
-    async fn initialize_switch_zone(&self, mut exit_rx: oneshot::Receiver<()>) {
-        loop {
-            {
-                let mut switch_zone = self.inner.switch_zone.lock().await;
-                match &*switch_zone {
-                    SwitchZone::Initializing { request, .. } => {
-                        match self.initialize_zone(&request).await {
-                            Ok(zone) => {
-                                *switch_zone = SwitchZone::Running(zone);
-                                return;
-                            }
-                            Err(err) => {
-                                warn!(
-                                    self.inner.log,
-                                    "Failed to initialize switch zone: {err}"
-                                );
-                            }
-                        }
-                    }
-                    _ => return,
-                }
-            }
-
-            tokio::select! {
-                // If we've been told to stop trying, bail.
-                _ = &mut exit_rx => return,
-
-                // Poll for the device every second - this timeout is somewhat
-                // arbitrary, but we probably don't want to use backoff here.
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => (),
-            };
-        }
     }
 }
 
