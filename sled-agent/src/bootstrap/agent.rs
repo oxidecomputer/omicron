@@ -16,9 +16,11 @@ use super::trust_quorum::{
 };
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
-use crate::illumos::dladm::{self, Dladm, PhysicalLink};
+use crate::hardware::HardwareManager;
+use crate::illumos::dladm::{self, Dladm, Etherstub, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
+use crate::switch_zone::SwitchZoneManager;
 use crate::sp::SpHandle;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
@@ -34,6 +36,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 /// Initial octet of IPv6 for bootstrap addresses.
 pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
@@ -53,6 +57,9 @@ pub enum BootstrapError {
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
+
+    #[error("Error monitoring hardware: {0}")]
+    Hardware(String),
 
     #[error("Error starting sled agent: {0}")]
     SledError(String),
@@ -76,6 +83,128 @@ impl From<BootstrapError> for ExternalError {
     }
 }
 
+// Represents the bootstrap agent's view into hardware.
+//
+// The bootstrap agent is responsible for launching the switch zone, which it
+// can do once it has detected that the corresponding driver has loaded.
+struct HardwareMonitorWorker {
+    log: Logger,
+    exit_rx: oneshot::Receiver<()>,
+    hardware: HardwareManager,
+    switch: SwitchZoneManager,
+}
+
+impl HardwareMonitorWorker {
+    fn new(
+        log: Logger,
+        exit_rx: oneshot::Receiver<()>,
+        hardware: HardwareManager,
+        switch: SwitchZoneManager
+    ) -> Self {
+        Self {
+            log,
+            exit_rx,
+            hardware,
+            switch,
+        }
+    }
+
+    async fn run(
+        mut self,
+    ) -> Result<SwitchZoneManager, BootstrapError> {
+        // Start monitoring the hardware for changes
+        let mut hardware_updates = self.hardware.monitor();
+
+        // Scan the system manually for events we have have missed
+        // before we started monitoring.
+        self.full_hardware_scan().await;
+
+        // Rely on monitoring for tracking all future updates.
+        loop {
+            use tokio::sync::broadcast::error::RecvError;
+
+            tokio::select! {
+                _ = &mut self.exit_rx => return Ok(self.switch),
+                update = hardware_updates.recv() => {
+                    match update {
+                        Ok(update) => match update {
+                            crate::hardware::HardwareUpdate::TofinoLoaded => {
+                                self.switch.ensure_scrimlet_services_active().await;
+                            }
+                            crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                                self.switch.ensure_scrimlet_services_deactive().await;
+                            }
+                            _ => continue,
+                        },
+                        Err(RecvError::Lagged(count)) => {
+                            warn!(self.log, "Hardware monitor missed {count} messages");
+                            self.full_hardware_scan().await;
+                        }
+                        Err(RecvError::Closed) => {
+                            warn!(self.log, "Hardware monitor receiver closed; exiting");
+                            return Err(BootstrapError::Hardware("Hardware monitor closed".to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Observe the current hardware state manually.
+    //
+    // We use this when we're monitoring hardware for the first
+    // time, and if we miss notifications.
+    async fn full_hardware_scan(&self) {
+        info!(self.log, "Performing full hardware scan");
+        if self.hardware.is_scrimlet_driver_loaded() {
+            self.switch.ensure_scrimlet_services_active().await;
+        } else {
+            self.switch.ensure_scrimlet_services_deactive().await;
+        }
+    }
+}
+
+// The client-side of a connection to a HardwareMonitorWorker which runs in a
+// tokio task.
+//
+// Once created, the bootstrap agent monitors hardware to initialize (or
+// terminate) the switch zone when requested.
+struct HardwareMonitor {
+    exit_tx: oneshot::Sender<()>,
+    handle: JoinHandle<Result<SwitchZoneManager, BootstrapError>>,
+}
+
+impl HardwareMonitor {
+    // Spawns a new task which monitors for hardware and launches the switch
+    // zone if the necessary Tofino drivers are detected.
+    fn new(log: &Logger, sled_config: &SledConfig, etherstub: Etherstub) -> Result<Self, BootstrapError> {
+        let (exit_tx, exit_rx) = oneshot::channel();
+        let hardware =
+            HardwareManager::new(log.clone(), sled_config.stub_scrimlet)
+                .map_err(|e| BootstrapError::Hardware(e))?;
+
+        let switch_zone_manager = SwitchZoneManager::new(log, etherstub, sled_config.stub_scrimlet);
+        let worker = HardwareMonitorWorker::new(log.clone(), exit_rx, hardware, switch_zone_manager);
+
+        let handle = tokio::spawn(async move {
+            worker.run().await
+        });
+
+        Ok(Self {
+            exit_tx,
+            handle,
+        })
+    }
+
+    // Stops the task from executing, and grabs the switch zone, if it exists.
+    //
+    // TODO: Do we want this?
+    async fn stop(self) -> Result<SwitchZoneManager, BootstrapError> {
+        let _ = self.exit_tx.send(());
+        self.handle.await.expect("Hardware monitor panicked")
+    }
+}
+
 /// The entity responsible for bootstrapping an Oxide rack.
 pub(crate) struct Agent {
     /// Debug log
@@ -89,6 +218,8 @@ pub(crate) struct Agent {
     share: Mutex<Option<ShareDistribution>>,
 
     rss: Mutex<Option<RssHandle>>,
+    // TODO: How should we be keeping track of this task?
+    hardware_monitor: Mutex<Option<HardwareMonitor>>,
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
@@ -182,12 +313,37 @@ impl Agent {
         let ddmd_client = DdmAdminClient::new(log.clone())?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(address));
 
+        /*
+        let etherstub =
+            Dladm::ensure_etherstub().map_err(|e| Error::Etherstub(e))?;
+        let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
+            .map_err(|e| Error::EtherstubVnic(e))?;
+
+        // Before we start creating zones, we need to ensure that the
+        // necessary ZFS and Zone resources are ready.
+        Zfs::ensure_zoned_filesystem(
+            ZONE_ZFS_DATASET,
+            Mountpoint::Path(std::path::PathBuf::from(
+                ZONE_ZFS_DATASET_MOUNTPOINT,
+            )),
+            // do_format=
+            true,
+        )?;
+        */
+
+        // TODO:
+        // - Start the HardwareManager here?
+        // - Pass it to the sled agent once we spin that up?
+
+        let hardware_monitor = HardwareMonitor::new(&ba_log, &sled_config, etherstub)?;
+
         let agent = Agent {
             log: ba_log,
             parent_log: log,
             address,
             share: Mutex::new(None),
             rss: Mutex::new(None),
+            hardware_monitor: Mutex::new(Some(hardware_monitor)),
             sled_agent: Mutex::new(None),
             sled_config,
             sp,

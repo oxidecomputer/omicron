@@ -35,6 +35,7 @@ use crate::illumos::zone::AddressRequest;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
 };
+use crate::smf_helper::SmfHelper;
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::DENDRITE_PORT;
@@ -82,6 +83,9 @@ pub enum Error {
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
+
+    #[error("Failed to issue SMF command: {0}")]
+    SmfCommand(#[from] crate::smf_helper::Error),
 
     #[error("Failed to do '{intent}' by running command in zone: {err}")]
     ZoneCommand {
@@ -164,93 +168,6 @@ impl Default for Config {
                     .join(format!("var/svc/manifest/site/{}", svc_name))
             }),
         }
-    }
-}
-
-struct SmfHelper<'t> {
-    running_zone: &'t RunningZone,
-    service_name: String,
-    smf_name: String,
-    default_smf_name: String,
-}
-
-impl<'t> SmfHelper<'t> {
-    fn new(running_zone: &'t RunningZone, service: &ServiceType) -> Self {
-        let service_name = service.to_string();
-        let smf_name = format!("svc:/system/illumos/{}", service);
-        let default_smf_name = format!("{}:default", smf_name);
-
-        SmfHelper { running_zone, service_name, smf_name, default_smf_name }
-    }
-
-    fn import_manifest(&self) -> Result<(), Error> {
-        self.running_zone
-            .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
-                "import",
-                &format!(
-                    "/var/svc/manifest/site/{}/manifest.xml",
-                    self.service_name
-                ),
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: "importing manifest".to_string(),
-                err,
-            })?;
-        Ok(())
-    }
-
-    fn setprop<P, V>(&self, prop: P, val: V) -> Result<(), Error>
-    where
-        P: ToString,
-        V: ToString,
-    {
-        self.running_zone
-            .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
-                "-s",
-                &self.smf_name,
-                "setprop",
-                &format!("{}={}", prop.to_string(), val.to_string()),
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: format!("set {} smf property", prop.to_string()),
-                err,
-            })?;
-        Ok(())
-    }
-
-    fn refresh(&self) -> Result<(), Error> {
-        self.running_zone
-            .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
-                "-s",
-                &self.default_smf_name,
-                "refresh",
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: format!(
-                    "Refresh SMF manifest {}",
-                    self.default_smf_name
-                ),
-                err,
-            })?;
-        Ok(())
-    }
-
-    fn enable(&self) -> Result<(), Error> {
-        self.running_zone
-            .run_cmd(&[
-                crate::illumos::zone::SVCADM,
-                "enable",
-                "-t",
-                &self.default_smf_name,
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: format!("Enable {} service", self.default_smf_name),
-                err,
-            })?;
-        Ok(())
     }
 }
 
@@ -394,7 +311,6 @@ impl ServiceManager {
     // Check the services intended to run in the zone to determine whether any
     // physical devices need to be mapped into the zone when it is created.
     fn devices_needed(
-        &self,
         req: &ServiceZoneRequest,
     ) -> Result<Vec<String>, Error> {
         let mut devices = vec![];
@@ -466,7 +382,7 @@ impl ServiceManager {
 
     // Check the services intended to run in the zone to determine whether any
     // additional privileges need to be enabled for the zone.
-    fn privs_needed(&self, req: &ServiceZoneRequest) -> Vec<String> {
+    fn privs_needed(req: &ServiceZoneRequest) -> Vec<String> {
         let mut needed = Vec::new();
         for svc in &req.services {
             if let ServiceType::Tfport { .. } = svc {
@@ -481,9 +397,9 @@ impl ServiceManager {
         &self,
         request: &ServiceZoneRequest,
     ) -> Result<RunningZone, Error> {
-        let device_names = self.devices_needed(request)?;
+        let device_names = Self::devices_needed(request)?;
         let link = self.link_needed(request)?;
-        let limit_priv = self.privs_needed(request);
+        let limit_priv = Self::privs_needed(request);
 
         let devices: Vec<zone::Device> = device_names
             .iter()

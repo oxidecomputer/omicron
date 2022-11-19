@@ -395,11 +395,6 @@ impl SledAgent {
     async fn full_hardware_scan(&self, log: &Logger) {
         info!(log, "Performing full hardware scan");
         self.notify_nexus_about_self(log);
-        if self.inner.hardware.is_scrimlet_driver_loaded() {
-            self.ensure_scrimlet_services_active(&log).await;
-        } else {
-            self.ensure_scrimlet_services_deactive(&log).await;
-        }
     }
 
     async fn monitor(&self, log: Logger) {
@@ -422,12 +417,9 @@ impl SledAgent {
                         // Nexus actually comes online.
                         self.notify_nexus_about_self(&log);
                     }
-                    crate::hardware::HardwareUpdate::TofinoLoaded => {
-                        self.ensure_scrimlet_services_active(&log).await;
-                    }
-                    crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                        self.ensure_scrimlet_services_deactive(&log).await;
-                    }
+                    // TODO: ?
+                    crate::hardware::HardwareUpdate::TofinoLoaded => todo!("..."),
+                    crate::hardware::HardwareUpdate::TofinoUnloaded => todo!("..."),
                 },
                 Err(RecvError::Lagged(count)) => {
                     warn!(log, "Hardware monitor missed {count} messages");
