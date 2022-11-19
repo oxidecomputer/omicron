@@ -18,6 +18,23 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ProjectSelector {
+    ProjectId { project_id: Uuid },
+    ProjectAndOrgId { project_name: Name, organization_id: Uuid },
+    ProjectAndOrg { project_name: Name, organization_name: Name },
+    None {},
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectQuery {
+    /// Should only be specified if `instance` path param is a name
+    pub organization_name: Option<Name>,
+    /// Should only be specified if `instance` path param is a name
+    pub project_name: Option<Name>,
+}
+
 // Silos
 
 /// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)

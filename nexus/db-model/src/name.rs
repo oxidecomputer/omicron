@@ -63,3 +63,13 @@ where
         String::from_sql(bytes)?.parse().map(Name).map_err(|e| e.into())
     }
 }
+
+/// Newtype wrapper around [external::NameOrId]. This type isn't actually
+/// stored in the database, but exists as a convenience for the API.
+#[derive(JsonSchema, Serialize, Deserialize, RefCast)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct NameOrId(pub external::NameOrId);
+
+NewtypeFrom! { () pub struct NameOrId(external::NameOrId); }
+NewtypeDeref! { () pub struct NameOrId(external::NameOrId); }

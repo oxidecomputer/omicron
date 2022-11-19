@@ -18,6 +18,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
+use crate::db::model::NameOrId;
 use crate::external_api::shared;
 use crate::ServerContext;
 use dropshot::ApiDescription;
@@ -60,7 +61,6 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -2042,6 +2042,7 @@ async fn instance_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+
 /// Create an instance
 // TODO-correctness This is supposed to be async.  Is that right?  We can create
 // the instance immediately -- it's just not booted yet.  Maybe the boot
@@ -2090,11 +2091,9 @@ struct InstanceLookupPathParam {
 }
 
 #[derive(Deserialize, JsonSchema)]
-struct InstanceLookupQueryParam {
-    /// Should only be specified if `instance` path param is a name
-    organization_name: Option<Name>,
-    /// Should only be specified if `instance` path param is a name
-    project_name: Option<Name>,
+struct InstanceQueryParams {
+    #[serde(flatten)]
+    selector: params::ProjectSelector,
 }
 
 #[endpoint {
@@ -2104,40 +2103,18 @@ struct InstanceLookupQueryParam {
 }]
 async fn v1_instance_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceLookupQueryParam>,
+    query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let instance_ident = &path.instance;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = match instance_ident {
-            NameOrId::Name(name) => {
-                let organization_name =
-                    query.organization_name.ok_or_else(|| {
-                        Error::InvalidRequest { message: "organization_name is required when using instance name".to_string() }
-                    })?;
-                let project_name = query.project_name.ok_or_else(|| {
-                    Error::InvalidRequest {
-                        message:
-                            "project_name is required when using instance name"
-                                .to_string(),
-                    }
-                })?;
-                nexus
-                    .instance_lookup_id(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &Name(name.clone()),
-                    )
-                    .await?
-            }
-            NameOrId::Id(id) => *id,
-        };
+        let instance_id = nexus
+            .instance_lookup_id(&opctx, path.instance.into(), query.selector)
+            .await?;
         let instance = nexus.instance_fetch_by_id(&opctx, &instance_id).await?;
         Ok(HttpResponseOk(instance.into()))
     };
@@ -2212,40 +2189,18 @@ async fn instance_view_by_id(
 }]
 async fn v1_instance_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceLookupQueryParam>,
+    query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let instance_ident = &path.instance;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = match instance_ident {
-            NameOrId::Name(name) => {
-                let organization_name =
-                    query.organization_name.ok_or_else(|| {
-                        Error::InvalidRequest { message: "organization_name is required when using instance name".to_string() }
-                    })?;
-                let project_name = query.project_name.ok_or_else(|| {
-                    Error::InvalidRequest {
-                        message:
-                            "project_name is required when using instance name"
-                                .to_string(),
-                    }
-                })?;
-                nexus
-                    .instance_lookup_id(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &Name(name.clone()),
-                    )
-                    .await?
-            }
-            NameOrId::Id(id) => *id,
-        };
+        let instance_id = nexus
+            .instance_lookup_id(&opctx, path.instance.into(), query.selector)
+            .await?;
         nexus.project_destroy_instance(&opctx, &instance_id).await?;
         Ok(HttpResponseDeleted())
     };
@@ -2270,12 +2225,25 @@ async fn instance_delete(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+
+        // TODO: Clean this up
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
+                omicron_common::api::external::NameOrId::Name(
+                    omicron_common::api::external::Name::from(
+                        instance_name.clone(),
+                    ),
+                ),
+                params::ProjectSelector::ProjectAndOrg {
+                    project_name: omicron_common::api::external::Name::from(
+                        project_name.clone(),
+                    ),
+                    organization_name:
+                        omicron_common::api::external::Name::from(
+                            organization_name.clone(),
+                        ),
+                },
             )
             .await?;
         nexus.project_destroy_instance(&opctx, &instance_id).await?;

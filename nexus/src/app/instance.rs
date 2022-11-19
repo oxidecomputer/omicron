@@ -32,6 +32,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
@@ -56,17 +57,54 @@ impl super::Nexus {
     pub async fn instance_lookup_id(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance: NameOrId,
+        project_selector: params::ProjectSelector,
     ) -> LookupResult<Uuid> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::Read)
-            .await?;
-        return Ok(authz_instance.id());
+        match instance {
+            NameOrId::Id(id) => Ok(id),
+            NameOrId::Name(name) => match project_selector {
+                params::ProjectSelector::ProjectId { project_id } => {
+                    let (.., authz_instance) =
+                        LookupPath::new(opctx, &self.db_datastore)
+                            .project_id(project_id)
+                            .instance_name(&Name(name.clone()))
+                            .lookup_for(authz::Action::Read)
+                            .await?;
+                    Ok(authz_instance.id())
+                }
+                params::ProjectSelector::ProjectAndOrgId {
+                    project_name,
+                    organization_id,
+                } => {
+                    let (.., authz_instance) =
+                        LookupPath::new(opctx, &self.db_datastore)
+                            .organization_id(organization_id)
+                            .project_name(&Name(project_name))
+                            .instance_name(&Name(name.clone()))
+                            .lookup_for(authz::Action::Read)
+                            .await?;
+                    Ok(authz_instance.id())
+                }
+                params::ProjectSelector::ProjectAndOrg {
+                    project_name,
+                    organization_name,
+                } => {
+                    let (.., authz_instance) =
+                        LookupPath::new(opctx, &self.db_datastore)
+                            .organization_name(&Name(organization_name))
+                            .project_name(&Name(project_name))
+                            .instance_name(&Name(name.clone()))
+                            .lookup_for(authz::Action::Read)
+                            .await?;
+                    Ok(authz_instance.id())
+                }
+                params::ProjectSelector::None {} => {
+                    Err(Error::InvalidRequest {
+                        message: "When looking up an instance by name, the path to the instance must be provided via query paramaters".to_string()
+                    })
+                }
+            },
+        }
     }
 
     pub async fn project_create_instance(

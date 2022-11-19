@@ -7663,8 +7663,33 @@
         "parameters": [
           {
             "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "organization_name",
-            "description": "Should only be specified if `instance` path param is a name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -7673,7 +7698,6 @@
           {
             "in": "query",
             "name": "project_name",
-            "description": "Should only be specified if `instance` path param is a name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -7682,7 +7706,7 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is provided `organization_name` and `project_name` query parameters must also be present. Otherwise they should be omitted.",
+            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7717,8 +7741,33 @@
         "parameters": [
           {
             "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
             "name": "organization_name",
-            "description": "Should only be specified if `instance` path param is a name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -7727,7 +7776,6 @@
           {
             "in": "query",
             "name": "project_name",
-            "description": "Should only be specified if `instance` path param is a name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -7736,7 +7784,7 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is provided `organization_name` and `project_name` query parameters must also be present. Otherwise they should be omitted.",
+            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
