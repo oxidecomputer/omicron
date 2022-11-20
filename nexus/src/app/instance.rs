@@ -32,7 +32,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
@@ -57,66 +56,73 @@ impl super::Nexus {
     pub async fn instance_lookup_id(
         &self,
         opctx: &OpContext,
-        instance: NameOrId,
-        project_selector: params::ProjectSelector,
+        instance_selector: params::InstanceSelector,
     ) -> LookupResult<Uuid> {
-        match instance {
-            NameOrId::Id(id) => Ok(id),
-            NameOrId::Name(name) => match project_selector {
-                params::ProjectSelector::ProjectId { project_id } => {
-                    let (.., authz_instance) =
-                        LookupPath::new(opctx, &self.db_datastore)
-                            .project_id(project_id)
-                            .instance_name(&Name(name.clone()))
-                            .lookup_for(authz::Action::Read)
-                            .await?;
-                    Ok(authz_instance.id())
-                }
-                params::ProjectSelector::ProjectAndOrgId {
-                    project_name,
-                    organization_id,
-                } => {
-                    let (.., authz_instance) =
-                        LookupPath::new(opctx, &self.db_datastore)
-                            .organization_id(organization_id)
-                            .project_name(&Name(project_name))
-                            .instance_name(&Name(name.clone()))
-                            .lookup_for(authz::Action::Read)
-                            .await?;
-                    Ok(authz_instance.id())
-                }
-                params::ProjectSelector::ProjectAndOrg {
-                    project_name,
-                    organization_name,
-                } => {
-                    let (.., authz_instance) =
-                        LookupPath::new(opctx, &self.db_datastore)
-                            .organization_name(&Name(organization_name))
-                            .project_name(&Name(project_name))
-                            .instance_name(&Name(name.clone()))
-                            .lookup_for(authz::Action::Read)
-                            .await?;
-                    Ok(authz_instance.id())
-                }
-                params::ProjectSelector::None {} => {
-                    Err(Error::InvalidRequest {
-                        message: "When looking up an instance by name, the path to the instance must be provided via query paramaters".to_string()
-                    })
-                }
-            },
+        match instance_selector {
+            params::InstanceSelector::InstanceId { instance_id } => {
+                Ok(instance_id)
+            }
+            params::InstanceSelector::InstanceAndProjectId {
+                instance_name,
+                project_id,
+            } => {
+                let (.., authz_instance) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .project_id(project_id)
+                        .instance_name(&Name(instance_name.clone()))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_instance.id())
+            }
+            params::InstanceSelector::InstanceProjectAndOrgId {
+                instance_name,
+                project_name,
+                organization_id,
+            } => {
+                let (.., authz_instance) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_id(organization_id)
+                        .project_name(&Name(project_name))
+                        .instance_name(&Name(instance_name.clone()))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_instance.id())
+            }
+            params::InstanceSelector::InstanceProjectAndOrg {
+                instance_name,
+                project_name,
+                organization_name,
+            } => {
+                let (.., authz_instance) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_name(&Name(organization_name))
+                        .project_name(&Name(project_name))
+                        .instance_name(&Name(instance_name.clone()))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_instance.id())
+            }
+            params::InstanceSelector::None {} => Err(Error::InvalidRequest {
+                message: "
+                    Unable to resolve instance. Expected one of
+                        - instance_id
+                        - instance_name, project_id
+                        - instance_name, project_name, organization_id
+                        - instance_name, project_name, organization_name
+                    "
+                .to_string(),
+            }),
         }
     }
 
     pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_id: &Uuid,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
+            .project_id(*project_id)
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
@@ -187,8 +193,6 @@ impl super::Nexus {
 
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            organization_name: organization_name.clone().into(),
-            project_name: project_name.clone().into(),
             project_id: authz_project.id(),
             create_params: params.clone(),
         };

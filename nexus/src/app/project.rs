@@ -24,6 +24,48 @@ use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl super::Nexus {
+    pub async fn project_lookup_id(
+        &self,
+        opctx: &OpContext,
+        project_selector: params::ProjectSelector,
+    ) -> LookupResult<Uuid> {
+        match project_selector {
+            params::ProjectSelector::ProjectId { project_id } => Ok(project_id),
+            params::ProjectSelector::ProjectAndOrgId {
+                project_name,
+                organization_id,
+            } => {
+                let (.., authz_project) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_id(organization_id)
+                        .project_name(&Name(project_name))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_project.id())
+            }
+            params::ProjectSelector::ProjectAndOrg {
+                project_name,
+                organization_name,
+            } => {
+                let (.., authz_project) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_name(&Name(organization_name))
+                        .project_name(&Name(project_name))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_project.id())
+            }
+            params::ProjectSelector::None {} => Err(Error::InvalidRequest {
+                message: "
+                    Unable to resolve project. Expected one of
+                        - project_id
+                        - project_name, organization_id
+                        - project_name, organization_name
+                    "
+                .to_string(),
+            }),
+        }
+    }
     pub async fn project_create(
         &self,
         opctx: &OpContext,

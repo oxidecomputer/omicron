@@ -147,6 +147,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
         api.register(v1_instance_view)?;
+        api.register(v1_instance_create)?;
         api.register(v1_instance_delete)?;
 
         // Project-scoped images API
@@ -2042,6 +2043,31 @@ async fn instance_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = POST,
+    path = "/v1/instances",
+    tags = ["instances"],
+}]
+async fn v1_instance_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<InstanceQueryParams>,
+    new_instance: TypedBody<params::InstanceCreate>,
+) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let new_instance_params = &new_instance.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_id =
+            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let instance = nexus
+            .project_create_instance(&opctx, &project_id, &new_instance_params)
+            .await?;
+        Ok(HttpResponseCreated(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 
 /// Create an instance
 // TODO-correctness This is supposed to be async.  Is that right?  We can create
@@ -2069,24 +2095,32 @@ async fn instance_create(
     let new_instance_params = &new_instance.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance = nexus
-            .project_create_instance(
+        let project_id = nexus
+            .project_lookup_id(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &new_instance_params,
+                params::ProjectSelector::ProjectAndOrg {
+                    project_name: project_name.clone().into(),
+                    organization_name: organization_name.clone().into(),
+                },
             )
+            .await?;
+        let instance = nexus
+            .project_create_instance(&opctx, &project_id, &new_instance_params)
             .await?;
         Ok(HttpResponseCreated(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Instance requests. Name is temporary.
+/// Path parameters for Instance requests
 #[derive(Deserialize, JsonSchema)]
 struct InstanceLookupPathParam {
-    /// If Name is provided `organization_name` and `project_name` query parameters must also be present.
-    /// Otherwise they should be omitted.
+    /// If Name is used to reference the instance you must also include one of the following qualifiers as query parameters:
+    /// - `project_id`
+    /// - `project_name`, `organization_id`
+    /// - `project_name`, `organization_name`
+    ///
+    /// If Id is used the above qualifiers are will be ignored
     instance: NameOrId,
 }
 
@@ -2113,7 +2147,10 @@ async fn v1_instance_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_id = nexus
-            .instance_lookup_id(&opctx, path.instance.into(), query.selector)
+            .instance_lookup_id(
+                &opctx,
+                query.selector.to_instance_selector(path.instance.into()),
+            )
             .await?;
         let instance = nexus.instance_fetch_by_id(&opctx, &instance_id).await?;
         Ok(HttpResponseOk(instance.into()))
@@ -2199,7 +2236,10 @@ async fn v1_instance_delete(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_id = nexus
-            .instance_lookup_id(&opctx, path.instance.into(), query.selector)
+            .instance_lookup_id(
+                &opctx,
+                query.selector.to_instance_selector(path.instance.into()),
+            )
             .await?;
         nexus.project_destroy_instance(&opctx, &instance_id).await?;
         Ok(HttpResponseDeleted())
@@ -2226,16 +2266,13 @@ async fn instance_delete(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
 
-        // TODO: Clean this up
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                omicron_common::api::external::NameOrId::Name(
-                    omicron_common::api::external::Name::from(
+                params::InstanceSelector::InstanceProjectAndOrg {
+                    instance_name: omicron_common::api::external::Name::from(
                         instance_name.clone(),
                     ),
-                ),
-                params::ProjectSelector::ProjectAndOrg {
                     project_name: omicron_common::api::external::Name::from(
                         project_name.clone(),
                     ),

@@ -7654,6 +7654,86 @@
         "x-dropshot-pagination": true
       }
     },
+    "/v1/instances": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "v1_instance_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/instances/{instance}": {
       "get": {
         "tags": [

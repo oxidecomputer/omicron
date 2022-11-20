@@ -8,7 +8,7 @@ use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -27,12 +27,62 @@ pub enum ProjectSelector {
     None {},
 }
 
+impl ProjectSelector {
+    pub fn to_instance_selector(self, instance: NameOrId) -> InstanceSelector {
+        match instance {
+            NameOrId::Id(instance_id) => {
+                InstanceSelector::InstanceId { instance_id }
+            }
+            NameOrId::Name(instance_name) => match self {
+                ProjectSelector::ProjectId { project_id } => {
+                    InstanceSelector::InstanceAndProjectId {
+                        instance_name,
+                        project_id,
+                    }
+                }
+                ProjectSelector::ProjectAndOrgId {
+                    project_name,
+                    organization_id,
+                } => InstanceSelector::InstanceProjectAndOrgId {
+                    instance_name,
+                    project_name,
+                    organization_id,
+                },
+                ProjectSelector::ProjectAndOrg {
+                    project_name,
+                    organization_name,
+                } => InstanceSelector::InstanceProjectAndOrg {
+                    instance_name,
+                    project_name,
+                    organization_name,
+                },
+                ProjectSelector::None {} => InstanceSelector::None {},
+            },
+        }
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
-pub struct ProjectQuery {
-    /// Should only be specified if `instance` path param is a name
-    pub organization_name: Option<Name>,
-    /// Should only be specified if `instance` path param is a name
-    pub project_name: Option<Name>,
+#[serde(untagged)]
+pub enum InstanceSelector {
+    InstanceId {
+        instance_id: Uuid,
+    },
+    InstanceAndProjectId {
+        instance_name: Name,
+        project_id: Uuid,
+    },
+    InstanceProjectAndOrgId {
+        instance_name: Name,
+        project_name: Name,
+        organization_id: Uuid,
+    },
+    InstanceProjectAndOrg {
+        instance_name: Name,
+        project_name: Name,
+        organization_name: Name,
+    },
+    None {},
 }
 
 // Silos
