@@ -19,7 +19,7 @@ slog-term = "2.7"
 slog-async = "2.7"
 slog-envlogger = "2.2"
 tempdir = "0.3"
-tokio = { version = "1.21", features = [ "full" ] }
+tokio = { version = "1.22", features = [ "full" ] }
 toml = "0.5"
 trust-dns-proto = "0.22"
 trust-dns-server = "0.22"
