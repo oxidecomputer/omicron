@@ -166,21 +166,6 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
 
-    // Monitor for the switch service
-    // TODO TODO TODO
-    //
-    // When we do the transfer, how are we setting the IP on a switch zone which
-    // may already exist? Do we need to restart the zone? (Probably yes,
-    // actually...)
-    //
-    // - SwitchZoneManager can be *told* to enable/disable the switch zone,
-    // but it needs to be told explicitly. We need the sled agent to also have
-    // a hardware monitor.
-    //
-    //
-    // TODO: We definitely need to update the SMF configs for the zone, to deal
-    // with launching services that might not have IP addresses
-
     // Component of Sled Agent responsible for monitoring hardware.
     hardware: HardwareManager,
 

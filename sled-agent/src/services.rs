@@ -391,8 +391,6 @@ impl ServiceManager {
             match svc {
                 ServiceType::Nexus { .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
-                    //
-                    //
                     match self
                         .inner
                         .sled_info
