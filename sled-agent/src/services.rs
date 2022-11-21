@@ -27,7 +27,7 @@
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::common::underlay;
-use crate::illumos::dladm::{Etherstub, EtherstubVnic, PhysicalLink};
+use crate::illumos::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use crate::illumos::link::{Link, VnicAllocator};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
@@ -36,9 +36,10 @@ use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
 use crate::smf_helper::SmfHelper;
-use crate::switch_zone::SwitchZoneManager;
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -357,7 +358,24 @@ impl ServiceManager {
     // Check the services intended to run in the zone to determine whether any
     // physical devices need to be mapped into the zone when it is created.
     fn devices_needed(req: &ServiceZoneRequest) -> Result<Vec<String>, Error> {
-        SwitchZoneManager::devices_needed(req).map_err(Error::SwitchZone)
+        let mut devices = vec![];
+        for svc in &req.services {
+            match svc {
+                ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
+                    // When running on a real sidecar, we need the /dev/tofino
+                    // device to talk to the tofino ASIC.
+                    devices.push("/dev/tofino".to_string());
+                }
+                _ => (),
+            }
+        }
+
+        for dev in &devices {
+            if !Path::new(dev).exists() {
+                return Err(Error::MissingDevice { device: dev.to_string() });
+            }
+        }
+        Ok(devices)
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -369,12 +387,6 @@ impl ServiceManager {
         &self,
         req: &ServiceZoneRequest,
     ) -> Result<Option<Link>, Error> {
-        if let Some(link) =
-            SwitchZoneManager::link_needed(req).map_err(Error::SwitchZone)?
-        {
-            return Ok(Some(link));
-        }
-
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. } => {
@@ -397,6 +409,21 @@ impl ServiceManager {
                         }
                     }
                 }
+                ServiceType::Tfport { pkt_source } => {
+                    // The tfport service requires a MAC device to/from which sidecar
+                    // packets may be multiplexed.  If the link isn't present, don't
+                    // bother trying to start the zone.
+                    match Dladm::verify_link(pkt_source) {
+                        Ok(link) => {
+                            return Ok(Some(link));
+                        }
+                        Err(_) => {
+                            return Err(Error::MissingDevice {
+                                device: pkt_source.to_string(),
+                            });
+                        }
+                    }
+                }
                 _ => (),
             }
         }
@@ -406,7 +433,14 @@ impl ServiceManager {
     // Check the services intended to run in the zone to determine whether any
     // additional privileges need to be enabled for the zone.
     fn privs_needed(req: &ServiceZoneRequest) -> Vec<String> {
-        SwitchZoneManager::privs_needed(req)
+        let mut needed = Vec::new();
+        for svc in &req.services {
+            if let ServiceType::Tfport { .. } = svc {
+                needed.push("default".to_string());
+                needed.push("sys_dl_config".to_string());
+            }
+        }
+        needed
     }
 
     async fn initialize_zone(
@@ -665,16 +699,49 @@ impl ServiceManager {
                     )?;
                     smfh.refresh()?;
                 }
-                // These services may also be started by the bootstrap agent.
-                ServiceType::ManagementGatewayService
-                | ServiceType::Dendrite { .. }
-                | ServiceType::Tfport { .. } => {
-                    SwitchZoneManager::launch_service(
-                        &self.inner.log,
-                        &smfh,
-                        service,
-                        request,
-                    )?;
+
+                ServiceType::ManagementGatewayService => {
+                    info!(self.inner.log, "Setting up MGS service");
+                    smfh.setprop("config/id", request.id)?;
+                    if let Some(address) = request.addresses.get(0) {
+                        smfh.setprop(
+                            "config/address",
+                            &format!("[{}]:{}", address, MGS_PORT),
+                        )?;
+                    }
+                    smfh.refresh()?;
+                }
+                ServiceType::Dendrite { asic } => {
+                    info!(self.inner.log, "Setting up dendrite service");
+
+                    if let Some(address) = request.addresses.get(0) {
+                        smfh.setprop(
+                            "config/address",
+                            &format!("[{}]:{}", address, DENDRITE_PORT),
+                        )?;
+                    }
+                    match *asic {
+                        DendriteAsic::TofinoAsic => smfh.setprop(
+                            "config/port_config",
+                            "/opt/oxide/dendrite/misc/sidecar_config.toml",
+                        )?,
+                        DendriteAsic::TofinoStub => smfh.setprop(
+                            "config/port_config",
+                            "/opt/oxide/dendrite/misc/model_config.toml",
+                        )?,
+                        DendriteAsic::Softnpu => {}
+                    };
+                    smfh.refresh()?;
+                }
+                ServiceType::Tfport { pkt_source } => {
+                    info!(self.inner.log, "Setting up tfport service");
+
+                    smfh.setprop("config/pkt_source", pkt_source)?;
+                    if let Some(address) = request.addresses.get(0) {
+                        smfh.setprop("config/host", &format!("[{}]", address))?;
+                    }
+                    smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
+                    smfh.refresh()?;
                 }
             }
 
