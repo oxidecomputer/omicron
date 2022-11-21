@@ -17,10 +17,12 @@ use super::trust_quorum::{
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::hardware::HardwareManager;
-use crate::illumos::dladm::{self, Dladm, Etherstub, PhysicalLink};
+use crate::illumos::dladm::{
+    self, Dladm, Etherstub, EtherstubVnic, PhysicalLink,
+};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
-use crate::switch_zone::SwitchZoneManager;
+use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
@@ -35,8 +37,8 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::Mutex;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 /// Initial octet of IPv6 for bootstrap addresses.
@@ -63,6 +65,9 @@ pub enum BootstrapError {
 
     #[error("Error starting sled agent: {0}")]
     SledError(String),
+
+    #[error("Error from service manager: {0}")]
+    ServiceManager(#[from] crate::services::Error),
 
     #[error("Error deserializing toml from {path}: {err}")]
     Toml { path: PathBuf, err: toml::de::Error },
@@ -91,7 +96,7 @@ struct HardwareMonitorWorker {
     log: Logger,
     exit_rx: oneshot::Receiver<()>,
     hardware: HardwareManager,
-    switch: SwitchZoneManager,
+    services: ServiceManager,
 }
 
 impl HardwareMonitorWorker {
@@ -99,19 +104,12 @@ impl HardwareMonitorWorker {
         log: Logger,
         exit_rx: oneshot::Receiver<()>,
         hardware: HardwareManager,
-        switch: SwitchZoneManager
+        services: ServiceManager,
     ) -> Self {
-        Self {
-            log,
-            exit_rx,
-            hardware,
-            switch,
-        }
+        Self { log, exit_rx, hardware, services }
     }
 
-    async fn run(
-        mut self,
-    ) -> Result<SwitchZoneManager, BootstrapError> {
+    async fn run(mut self) -> Result<ServiceManager, BootstrapError> {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.hardware.monitor();
 
@@ -124,15 +122,16 @@ impl HardwareMonitorWorker {
             use tokio::sync::broadcast::error::RecvError;
 
             tokio::select! {
-                _ = &mut self.exit_rx => return Ok(self.switch),
+                _ = &mut self.exit_rx => return Ok(self.services),
                 update = hardware_updates.recv() => {
                     match update {
                         Ok(update) => match update {
                             crate::hardware::HardwareUpdate::TofinoLoaded => {
-                                self.switch.ensure_scrimlet_services_active().await;
+                                let switch_ip = None;
+                                self.services.activate_switch(switch_ip).await;
                             }
                             crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                                self.switch.ensure_scrimlet_services_deactive().await;
+                                self.services.deactivate_switch().await;
                             }
                             _ => continue,
                         },
@@ -157,9 +156,10 @@ impl HardwareMonitorWorker {
     async fn full_hardware_scan(&self) {
         info!(self.log, "Performing full hardware scan");
         if self.hardware.is_scrimlet_driver_loaded() {
-            self.switch.ensure_scrimlet_services_active().await;
+            let switch_ip = None;
+            self.services.activate_switch(switch_ip).await;
         } else {
-            self.switch.ensure_scrimlet_services_deactive().await;
+            self.services.deactivate_switch().await;
         }
     }
 }
@@ -171,36 +171,45 @@ impl HardwareMonitorWorker {
 // terminate) the switch zone when requested.
 struct HardwareMonitor {
     exit_tx: oneshot::Sender<()>,
-    handle: JoinHandle<Result<SwitchZoneManager, BootstrapError>>,
+    handle: JoinHandle<Result<ServiceManager, BootstrapError>>,
 }
 
 impl HardwareMonitor {
     // Spawns a new task which monitors for hardware and launches the switch
     // zone if the necessary Tofino drivers are detected.
-    fn new(log: &Logger, sled_config: &SledConfig, etherstub: Etherstub) -> Result<Self, BootstrapError> {
+    async fn new(
+        log: &Logger,
+        sled_config: &SledConfig,
+        etherstub: Etherstub,
+        etherstub_vnic: EtherstubVnic,
+    ) -> Result<Self, BootstrapError> {
         let (exit_tx, exit_rx) = oneshot::channel();
         let hardware =
             HardwareManager::new(log.clone(), sled_config.stub_scrimlet)
                 .map_err(|e| BootstrapError::Hardware(e))?;
 
-        let switch_zone_manager = SwitchZoneManager::new(log, etherstub, sled_config.stub_scrimlet);
-        let worker = HardwareMonitorWorker::new(log.clone(), exit_rx, hardware, switch_zone_manager);
+        let service_manager = ServiceManager::new(
+            log.clone(),
+            etherstub.clone(),
+            etherstub_vnic.clone(),
+            sled_config.stub_scrimlet,
+        )
+        .await?;
 
-        let handle = tokio::spawn(async move {
-            worker.run().await
-        });
+        let worker = HardwareMonitorWorker::new(
+            log.clone(),
+            exit_rx,
+            hardware,
+            service_manager,
+        );
 
-        Ok(Self {
-            exit_tx,
-            handle,
-        })
+        let handle = tokio::spawn(async move { worker.run().await });
+
+        Ok(Self { exit_tx, handle })
     }
 
-    // Stops the task from executing, and grabs the switch zone, if it exists.
-    //
-    // TODO: Do we want this?
-    #[allow(dead_code)]
-    async fn stop(self) -> Result<SwitchZoneManager, BootstrapError> {
+    // Stops the task from executing, and grabs the service manager.
+    async fn stop(self) -> Result<ServiceManager, BootstrapError> {
         let _ = self.exit_tx.send(());
         self.handle.await.expect("Hardware monitor panicked")
     }
@@ -219,8 +228,9 @@ pub(crate) struct Agent {
     share: Mutex<Option<ShareDistribution>>,
 
     rss: Mutex<Option<RssHandle>>,
-    // TODO: How should we be keeping track of this task?
-    #[allow(dead_code)]
+
+    // TODO: Could use an enum here; we move the HardwareMonitor *into* the sled
+    // agent. It's either/or?
     hardware_monitor: Mutex<Option<HardwareMonitor>>,
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,
@@ -304,7 +314,7 @@ impl Agent {
             })?;
 
         Zones::ensure_has_global_zone_v6_address(
-            etherstub_vnic,
+            etherstub_vnic.clone(),
             address,
             "bootstrap6",
         )
@@ -336,8 +346,22 @@ impl Agent {
         // TODO:
         // - Start the HardwareManager here?
         // - Pass it to the sled agent once we spin that up?
+        //
+        // TODO:
+        // - So the sled agent is the entity which can assign the switch
+        // address...
+        // - ... when we perform the handoff, we can stop monitoring, and...
+        //      - if the switch zone exists, assign an IP
+        //      - if the switch zone doesn't exist, monitor as usual on the
+        //      sled agent side of things?
 
-        let hardware_monitor = HardwareMonitor::new(&ba_log, &sled_config, etherstub)?;
+        let hardware_monitor = HardwareMonitor::new(
+            &ba_log,
+            &sled_config,
+            etherstub,
+            etherstub_vnic,
+        )
+        .await?;
 
         let agent = Agent {
             log: ba_log,
@@ -430,11 +454,24 @@ impl Agent {
             *self.share.lock().await = Some(share);
         }
 
+        // TODO: TRANSFER OF CONTROL HERE - Stop the worker, grab the
+        // HardwareManager and ServiceManager, and give them to the sled!
+        //
+        // NOTE: We can return them through the error if we fail?
+        // TODO: Better error handling?
+        let hardware_monitor =
+            self.hardware_monitor.lock().await.take().expect("Already taken?");
+        let service_manager = hardware_monitor
+            .stop()
+            .await
+            .expect("Failed to stop hardware monitor");
+
         // Server does not exist, initialize it.
         let server = SledServer::start(
             &self.sled_config,
             self.parent_log.clone(),
             request.clone(),
+            service_manager,
         )
         .await
         .map_err(|e| {

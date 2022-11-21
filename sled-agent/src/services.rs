@@ -22,24 +22,23 @@
 //! To accomplish this, the following interfaces are exposed:
 //! - [ServiceManager::ensure_persistent] exposes an API to request a set of
 //! services that should persist beyond reboot.
-//! - [ServiceManager::ensure_switch] exposes an API to specifically enable
+//! - [ServiceManager::ensure_switch_zone] exposes an API to specifically enable
 //! or disable the switch zone.
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::common::underlay;
-use crate::illumos::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
+use crate::illumos::dladm::{Etherstub, EtherstubVnic, PhysicalLink};
 use crate::illumos::link::{Link, VnicAllocator};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{
-    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
+    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
 use crate::smf_helper::SmfHelper;
+use crate::switch_zone::SwitchZoneManager;
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::DENDRITE_PORT;
-use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -48,6 +47,7 @@ use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
 use omicron_common::postgres_config::PostgresConfigWithUrl;
+use once_cell::sync::OnceCell;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -56,7 +56,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 // The filename of ServiceManager's internal storage.
@@ -81,6 +83,12 @@ pub enum Error {
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
+
+    #[error("Sled Agent not initialized yet")]
+    SledAgentNotReady,
+
+    #[error("Switch zone error: {0}")]
+    SwitchZone(anyhow::Error),
 
     #[error("Failed to issue SMF command: {0}")]
     SmfCommand(#[from] crate::smf_helper::Error),
@@ -169,18 +177,49 @@ impl Default for Config {
     }
 }
 
+struct Task {
+    // A signal for the initializer task to terminate
+    exit_tx: oneshot::Sender<()>,
+    // A task repeatedly trying to initialize the zone
+    initializer: JoinHandle<()>,
+}
+
+// Describes the Switch Zone state.
+enum SwitchZone {
+    // The switch zone is not currently running.
+    Disabled,
+    // The Zone is still initializing - it may be awaiting the initialization
+    // of certain links.
+    Initializing {
+        // The request for the zone
+        request: ServiceZoneRequest,
+        // A background task
+        worker: Option<Task>,
+    },
+    // The Zone is currently running.
+    Running(RunningZone),
+}
+
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
-    config: Config,
+    switch_zone: Mutex<SwitchZone>,
+    stub_scrimlet: Option<bool>,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator<Etherstub>,
-    physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
     underlay_vnic: EtherstubVnic,
-    underlay_address: Ipv6Addr,
-    rack_id: Uuid,
     ddmd_client: DdmAdminClient,
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
+    sled_info: OnceCell<SledAgentInfo>,
+}
+
+// Late-binding information, only known once the sled agent is up and
+// operational.
+struct SledAgentInfo {
+    config: Config,
+    physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
+    underlay_address: Ipv6Addr,
+    rack_id: Uuid,
 }
 
 #[derive(Clone)]
@@ -189,33 +228,57 @@ pub struct ServiceManager {
 }
 
 impl ServiceManager {
-    /// Creates a service manager, which returns once all requested services
-    /// have been started.
+    /// Creates a service manager.
     ///
     /// Args:
     /// - `log`: The logger
     /// - `etherstub`: An etherstub on which to allocate VNICs.
     /// - `underlay_vnic`: The underlay's VNIC in the Global Zone.
-    /// - `config_path`: An optional path to a configuration file to store
-    /// the record of services. By default, [`default_services_config_path`]
-    /// is used.
+    /// - `stub_scrimlet`: TODO DOCS
     pub async fn new(
         log: Logger,
         etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
-        underlay_address: Ipv6Addr,
-        config: Config,
-        physical_link: PhysicalLink,
-        rack_id: Uuid,
+        stub_scrimlet: Option<bool>,
+        //        _underlay_address: Ipv6Addr,
+        //        _config: Config,
+        //        physical_link: PhysicalLink,
+        //        _rack_id: Uuid,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
         let mgr = Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
-                config,
+                // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+                // Load the switch zone if it already exists?
+                switch_zone: Mutex::new(SwitchZone::Disabled),
+                stub_scrimlet,
                 zones: Mutex::new(vec![]),
                 vnic_allocator: VnicAllocator::new("Service", etherstub),
+                underlay_vnic,
+                ddmd_client: DdmAdminClient::new(log)?,
+                advertised_prefixes: Mutex::new(HashSet::new()),
+                sled_info: OnceCell::new(),
+            }),
+        };
+        Ok(mgr)
+    }
+
+    /// Loads services from the services manager, and returns once all requested
+    /// services have been started.
+    // TODO: When invoking - this is an opportunity to notify the switch zone??
+    pub async fn sled_agent_started(
+        &self,
+        config: Config,
+        physical_link: PhysicalLink,
+        underlay_address: Ipv6Addr,
+        rack_id: Uuid,
+    ) -> Result<(), Error> {
+        self.inner
+            .sled_info
+            .set(SledAgentInfo {
+                config,
                 physical_link_vnic_allocator: VnicAllocator::new(
                     "Public",
                     // NOTE: Right now, we only use a connection to one of the Chelsio
@@ -223,18 +286,16 @@ impl ServiceManager {
                     // connections.
                     physical_link,
                 ),
-                underlay_vnic,
                 underlay_address,
                 rack_id,
-                ddmd_client: DdmAdminClient::new(log)?,
-                advertised_prefixes: Mutex::new(HashSet::new()),
-            }),
-        };
+            })
+            .map_err(|_| "already set".to_string())
+            .expect("Sled Agent should only start once");
 
-        let config_path = mgr.services_config_path();
+        let config_path = self.services_config_path()?;
         if config_path.exists() {
             info!(
-                &mgr.inner.log,
+                &self.inner.log,
                 "Sled services found at {}; loading",
                 config_path.to_string_lossy()
             );
@@ -247,24 +308,28 @@ impl ServiceManager {
                 path: config_path.clone(),
                 err,
             })?;
-            let mut existing_zones = mgr.inner.zones.lock().await;
-            mgr.initialize_services_locked(&mut existing_zones, &cfg.services)
+            let mut existing_zones = self.inner.zones.lock().await;
+            self.initialize_services_locked(&mut existing_zones, &cfg.services)
                 .await?;
         } else {
             info!(
-                &mgr.inner.log,
+                &self.inner.log,
                 "No sled services found at {}",
                 config_path.to_string_lossy()
             );
         }
 
-        Ok(mgr)
+        Ok(())
     }
 
     // Returns either the path to the explicitly provided config path, or
     // chooses the default one.
-    fn services_config_path(&self) -> PathBuf {
-        self.inner.config.all_svcs_config_path.clone()
+    fn services_config_path(&self) -> Result<PathBuf, Error> {
+        if let Some(info) = self.inner.sled_info.get() {
+            Ok(info.config.all_svcs_config_path.clone())
+        } else {
+            Err(Error::SledAgentNotReady)
+        }
     }
 
     // Advertise the /64 prefix of `address`, unless we already have.
@@ -281,27 +346,8 @@ impl ServiceManager {
 
     // Check the services intended to run in the zone to determine whether any
     // physical devices need to be mapped into the zone when it is created.
-    fn devices_needed(
-        req: &ServiceZoneRequest,
-    ) -> Result<Vec<String>, Error> {
-        let mut devices = vec![];
-        for svc in &req.services {
-            match svc {
-                ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
-                    // When running on a real sidecar, we need the /dev/tofino
-                    // device to talk to the tofino ASIC.
-                    devices.push("/dev/tofino".to_string());
-                }
-                _ => (),
-            }
-        }
-
-        for dev in &devices {
-            if !Path::new(dev).exists() {
-                return Err(Error::MissingDevice { device: dev.to_string() });
-            }
-        }
-        Ok(devices)
+    fn devices_needed(req: &ServiceZoneRequest) -> Result<Vec<String>, Error> {
+        SwitchZoneManager::devices_needed(req).map_err(Error::SwitchZone)
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -313,27 +359,23 @@ impl ServiceManager {
         &self,
         req: &ServiceZoneRequest,
     ) -> Result<Option<Link>, Error> {
+        if let Some(link) =
+            SwitchZoneManager::link_needed(req).map_err(Error::SwitchZone)?
+        {
+            return Ok(Some(link));
+        }
+
         for svc in &req.services {
             match svc {
-                ServiceType::Tfport { pkt_source } => {
-                    // The tfport service requires a MAC device to/from which sidecar
-                    // packets may be multiplexed.  If the link isn't present, don't
-                    // bother trying to start the zone.
-                    match Dladm::verify_link(pkt_source) {
-                        Ok(link) => {
-                            return Ok(Some(link));
-                        }
-                        Err(_) => {
-                            return Err(Error::MissingDevice {
-                                device: pkt_source.to_string(),
-                            });
-                        }
-                    }
-                }
                 ServiceType::Nexus { .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
+                    //
+                    //
                     match self
                         .inner
+                        .sled_info
+                        .get()
+                        .ok_or_else(|| Error::SledAgentNotReady)?
                         .physical_link_vnic_allocator
                         .new_control(None)
                     {
@@ -354,16 +396,18 @@ impl ServiceManager {
     // Check the services intended to run in the zone to determine whether any
     // additional privileges need to be enabled for the zone.
     fn privs_needed(req: &ServiceZoneRequest) -> Vec<String> {
-        let mut needed = Vec::new();
-        for svc in &req.services {
-            if let ServiceType::Tfport { .. } = svc {
-                needed.push("default".to_string());
-                needed.push("sys_dl_config".to_string());
-            }
-        }
-        needed
+        SwitchZoneManager::privs_needed(req)
     }
 
+    // TODO: Notes on where "self" is used here...
+    // - "link_needed(...)" -- may access
+    //   "self.inner.physical_link_vnic_allocator" for a Nexus VNIC
+    // - Installing the zone accessess "self.inner.vnic_allocator"
+    // - Advertising prefixes may access "self.inner.ddmd_client"
+    // - If no GZ addresses is supplied, we use "self.inner.underlay_address"
+    // for the gateway (... plus, we add a route).
+    // - The rest appears to be service-specific.
+    //
     async fn initialize_zone(
         &self,
         request: &ServiceZoneRequest,
@@ -439,7 +483,7 @@ impl ServiceManager {
             self.advertise_prefix_of_address(addr).await;
         }
 
-        let gateway = if !request.gz_addresses.is_empty() {
+        let maybe_gateway = if !request.gz_addresses.is_empty() {
             // If this service supplies its own GZ address, add a route.
             //
             // This is currently being used for the DNS service.
@@ -448,14 +492,21 @@ impl ServiceManager {
             // can be supplied - now that we're actively using it, we
             // aren't really handling the "many GZ addresses" case, and it
             // doesn't seem necessary now.
-            request.gz_addresses[0]
+            Some(request.gz_addresses[0])
+        } else if let Some(info) = self.inner.sled_info.get() {
+            // If the service has not supplied a GZ address, simply add
+            // a route to the sled's underlay address.
+            Some(info.underlay_address)
         } else {
-            self.inner.underlay_address
+            // If the underlay doesn't exist, no routing occurs.
+            None
         };
 
-        running_zone.add_default_route(gateway).await.map_err(|err| {
-            Error::ZoneCommand { intent: "Adding Route".to_string(), err }
-        })?;
+        if let Some(gateway) = maybe_gateway {
+            running_zone.add_default_route(gateway).await.map_err(|err| {
+                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
+            })?;
+        }
 
         for service in &request.services {
             // TODO: Related to
@@ -469,6 +520,13 @@ impl ServiceManager {
             match &service {
                 ServiceType::Nexus { internal_ip, external_ip } => {
                     info!(self.inner.log, "Setting up Nexus service");
+
+                    let sled_info =
+                        if let Some(info) = self.inner.sled_info.get() {
+                            info
+                        } else {
+                            return Err(Error::SledAgentNotReady);
+                        };
 
                     // The address of Nexus' external interface is a special
                     // case; it may be an IPv4 address.
@@ -485,7 +543,7 @@ impl ServiceManager {
                         // If requested, create a default route back through
                         // the internet gateway.
                         if let Some(ref gateway) =
-                            self.inner.config.gateway_address
+                            sled_info.config.gateway_address
                         {
                             running_zone
                                 .add_default_route4(*gateway)
@@ -504,7 +562,7 @@ impl ServiceManager {
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
                         id: request.id,
-                        rack_id: self.inner.rack_id,
+                        rack_id: sled_info.rack_id,
 
                         // Request two dropshot servers: One for HTTP (port 80),
                         // one for HTTPS (port 443).
@@ -526,7 +584,7 @@ impl ServiceManager {
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                            self.inner.underlay_address,
+                            sled_info.underlay_address,
                         ),
                         // TODO: Switch to inferring this URL by DNS.
                         database: nexus_config::Database::FromUrl {
@@ -537,7 +595,7 @@ impl ServiceManager {
                     };
 
                     // Copy the partial config file to the expected location.
-                    let config_dir = (self.inner.config.get_svc_config_dir)(
+                    let config_dir = (sled_info.config.get_svc_config_dir)(
                         running_zone.name(),
                         &request.zone_type.to_string(),
                     );
@@ -606,46 +664,16 @@ impl ServiceManager {
                     )?;
                     smfh.refresh()?;
                 }
-                ServiceType::ManagementGatewayService => {
-                    info!(self.inner.log, "Setting up MGS service");
-
-                    let address = request.addresses[0];
-                    smfh.setprop("config/id", request.id)?;
-                    smfh.setprop(
-                        "config/address",
-                        &format!("[{}]:{}", address, MGS_PORT),
+                // These services may also be started by the bootstrap agent.
+                ServiceType::ManagementGatewayService
+                | ServiceType::Dendrite { .. }
+                | ServiceType::Tfport { .. } => {
+                    SwitchZoneManager::launch_service(
+                        &self.inner.log,
+                        &smfh,
+                        service,
+                        request,
                     )?;
-                    smfh.refresh()?;
-                }
-                ServiceType::Dendrite { asic } => {
-                    info!(self.inner.log, "Setting up dendrite service");
-
-                    let address = request.addresses[0];
-                    smfh.setprop(
-                        "config/address",
-                        &format!("[{}]:{}", address, DENDRITE_PORT,),
-                    )?;
-                    match *asic {
-                        DendriteAsic::TofinoAsic => smfh.setprop(
-                            "config/port_config",
-                            "/opt/oxide/dendrite/misc/sidecar_config.toml",
-                        )?,
-                        DendriteAsic::TofinoStub => smfh.setprop(
-                            "config/port_config",
-                            "/opt/oxide/dendrite/misc/model_config.toml",
-                        )?,
-                        DendriteAsic::Softnpu => {}
-                    };
-                    smfh.refresh()?;
-                }
-                ServiceType::Tfport { pkt_source } => {
-                    info!(self.inner.log, "Setting up tfport service");
-
-                    smfh.setprop("config/pkt_source", pkt_source)?;
-                    let address = request.addresses[0];
-                    smfh.setprop("config/host", &format!("[{}]", address))?;
-                    smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
-                    smfh.refresh()?;
                 }
             }
 
@@ -705,7 +733,7 @@ impl ServiceManager {
         request: ServiceEnsureBody,
     ) -> Result<(), Error> {
         let mut existing_zones = self.inner.zones.lock().await;
-        let config_path = self.services_config_path();
+        let config_path = self.services_config_path()?;
 
         let services_to_initialize = {
             if config_path.exists() {
@@ -763,6 +791,126 @@ impl ServiceManager {
             .map_err(|err| Error::Io { path: config_path.clone(), err })?;
 
         Ok(())
+    }
+
+    pub async fn activate_switch(&self, switch_ip: Option<Ipv6Addr>) {
+        info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
+
+        let services = match self.inner.stub_scrimlet {
+            Some(_) => {
+                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
+            }
+            None => {
+                vec![
+                    ServiceType::ManagementGatewayService,
+                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
+                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                ]
+            }
+        };
+
+        let addresses =
+            if let Some(ip) = switch_ip { vec![ip] } else { vec![] };
+
+        let request = ServiceZoneRequest {
+            id: Uuid::new_v4(),
+            zone_type: ZoneType::Switch,
+            addresses,
+            gz_addresses: vec![],
+            services,
+        };
+
+        self.ensure_switch_zone(Some(request)).await;
+    }
+
+    pub async fn deactivate_switch(&self) {
+        self.ensure_switch_zone(None).await;
+    }
+
+    async fn ensure_switch_zone(&self, request: Option<ServiceZoneRequest>) {
+        let log = &self.inner.log;
+        let mut switch_zone = self.inner.switch_zone.lock().await;
+
+        match (&mut *switch_zone, request) {
+            (SwitchZone::Disabled, Some(request)) => {
+                info!(log, "Enabling switch zone (new)");
+                let mgr = self.clone();
+                let (exit_tx, exit_rx) = oneshot::channel();
+                *switch_zone = SwitchZone::Initializing {
+                    request,
+                    worker: Some(Task {
+                        exit_tx,
+                        initializer: tokio::task::spawn(async move {
+                            mgr.initialize_zone_loop(exit_rx).await
+                        }),
+                    }),
+                };
+            }
+            (SwitchZone::Initializing { .. }, Some(_)) => {
+                info!(log, "Enabling switch zone (already underway)");
+            }
+            (SwitchZone::Running(_), Some(_)) => {
+                info!(log, "Enabling switch zone (already complete)");
+            }
+            (SwitchZone::Disabled, None) => {
+                info!(log, "Disabling switch zone (already complete)");
+            }
+            (SwitchZone::Initializing { worker, .. }, None) => {
+                info!(log, "Disabling switch zone (was initializing)");
+                let worker = worker
+                    .take()
+                    .expect("Initializing without background task");
+                // If this succeeds, we told the background task to exit
+                // successfully. If it fails, the background task already
+                // exited.
+                let _ = worker.exit_tx.send(());
+                worker
+                    .initializer
+                    .await
+                    .expect("Switch initializer task panicked");
+                *switch_zone = SwitchZone::Disabled;
+            }
+            (SwitchZone::Running(_), None) => {
+                info!(log, "Disabling switch zone (was running)");
+                *switch_zone = SwitchZone::Disabled;
+            }
+        }
+    }
+
+    // Body of a tokio task responsible for running until the switch zone is
+    // inititalized, or it has been told to stop.
+    async fn initialize_zone_loop(&self, mut exit_rx: oneshot::Receiver<()>) {
+        loop {
+            {
+                let mut switch_zone = self.inner.switch_zone.lock().await;
+                match &*switch_zone {
+                    SwitchZone::Initializing { request, .. } => {
+                        match self.initialize_zone(&request).await {
+                            Ok(zone) => {
+                                *switch_zone = SwitchZone::Running(zone);
+                                return;
+                            }
+                            Err(err) => {
+                                warn!(
+                                    self.inner.log,
+                                    "Failed to initialize switch zone: {err}"
+                                );
+                            }
+                        }
+                    }
+                    _ => return,
+                }
+            }
+
+            tokio::select! {
+                // If we've been told to stop trying, bail.
+                _ = &mut exit_rx => return,
+
+                // Poll for the device every second - this timeout is somewhat
+                // arbitrary, but we probably don't want to use backoff here.
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => (),
+            };
+        }
     }
 }
 
@@ -927,9 +1075,15 @@ mod test {
             log,
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
+            None,
+        )
+        .await
+        .unwrap();
+
+        mgr.sled_agent_started(
             test_config.make_config(),
             PhysicalLink("link".to_string()),
+            Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
         .await
@@ -955,9 +1109,15 @@ mod test {
             log,
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
+            None,
+        )
+        .await
+        .unwrap();
+
+        mgr.sled_agent_started(
             test_config.make_config(),
             PhysicalLink("link".to_string()),
+            Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
         .await
@@ -985,9 +1145,15 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
+            None,
+        )
+        .await
+        .unwrap();
+
+        mgr.sled_agent_started(
             test_config.make_config(),
             PhysicalLink("link".to_string()),
+            Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
         .await
@@ -1004,13 +1170,20 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
+            None,
+        )
+        .await
+        .unwrap();
+
+        mgr.sled_agent_started(
             test_config.make_config(),
             PhysicalLink("link".to_string()),
+            Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
         .await
         .unwrap();
+
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -1030,13 +1203,19 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
+            None,
+        )
+        .await
+        .unwrap();
+        mgr.sled_agent_started(
             test_config.make_config(),
             PhysicalLink("link".to_string()),
+            Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
         .await
         .unwrap();
+
         let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
@@ -1051,13 +1230,19 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
-            config,
+            None,
+        )
+        .await
+        .unwrap();
+        mgr.sled_agent_started(
+            test_config.make_config(),
             PhysicalLink("link".to_string()),
+            Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
         .await
         .unwrap();
+
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();

@@ -17,8 +17,8 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, InstanceSerialConsoleData, ServiceEnsureBody,
-    VpcFirewallRule,
+    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
+    ServiceEnsureBody, VpcFirewallRule,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -169,6 +169,31 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
 
+    // Monitor for the switch service
+    // TODO TODO TODO
+    //
+    // When we do the transfer, how are we setting the IP on a switch zone which
+    // may already exist? Do we need to restart the zone? (Probably yes,
+    // actually...)
+    //
+    // - SwitchZoneManager can be *told* to enable/disable the switch zone,
+    // but it needs to be told explicitly. We need the sled agent to also have
+    // a hardware monitor.
+    //
+    //
+    // SwitchZoneManager sorta has two halves - a portion for "helper" functions
+    // shared by the ServiceManager, and a portion which is responsible for
+    // actually launching zones...
+    // TODO: The current wrapping of it means I don't *think* we'd ever do the
+    // correct handoff to the ServiceManager... but we should??? Gotta keep
+    // refactoring....
+    // - Ideas: Maybe the "ServiceManager" logic for initializing a zone based
+    // on "ServiceZoneRequest" can be re-used -- we can just do certain
+    // operations depending on whether or not addresses exist??
+    //
+    // TODO: We definitely need to update the SMF configs for the zone, to deal
+    // with launching services that might not have IP addresses
+
     // Component of Sled Agent responsible for monitoring hardware.
     hardware: HardwareManager,
 
@@ -206,6 +231,7 @@ impl SledAgent {
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
         request: SledAgentRequest,
+        services: ServiceManager,
     ) -> Result<SledAgent, Error> {
         let id = config.id;
 
@@ -344,16 +370,14 @@ impl SledAgent {
             HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
                 .map_err(|e| Error::Hardware(e))?;
 
-        let services = ServiceManager::new(
-            parent_log.clone(),
-            etherstub.clone(),
-            etherstub_vnic.clone(),
-            *sled_address.ip(),
-            svc_config,
-            config.get_link()?,
-            request.rack_id,
-        )
-        .await?;
+        services
+            .sled_agent_started(
+                svc_config,
+                config.get_link()?,
+                *sled_address.ip(),
+                request.rack_id,
+            )
+            .await?;
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -383,7 +407,7 @@ impl SledAgent {
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
         tokio::spawn(async move {
-            sa.monitor(log).await;
+            sa.monitor_task(log).await;
         });
 
         Ok(sled_agent)
@@ -396,9 +420,16 @@ impl SledAgent {
     async fn full_hardware_scan(&self, log: &Logger) {
         info!(log, "Performing full hardware scan");
         self.notify_nexus_about_self(log);
+
+        if self.inner.hardware.is_scrimlet_driver_loaded() {
+            let switch_ip = Some(self.inner.switch_ip());
+            self.inner.services.activate_switch(switch_ip).await;
+        } else {
+            self.inner.services.deactivate_switch().await;
+        }
     }
 
-    async fn monitor(&self, log: Logger) {
+    async fn monitor_task(&self, log: Logger) {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.inner.hardware.monitor();
 
@@ -418,9 +449,13 @@ impl SledAgent {
                         // Nexus actually comes online.
                         self.notify_nexus_about_self(&log);
                     }
-                    // TODO: ?
-                    crate::hardware::HardwareUpdate::TofinoLoaded => todo!("..."),
-                    crate::hardware::HardwareUpdate::TofinoUnloaded => todo!("..."),
+                    crate::hardware::HardwareUpdate::TofinoLoaded => {
+                        let switch_ip = Some(self.inner.switch_ip());
+                        self.inner.services.activate_switch(switch_ip).await;
+                    }
+                    crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                        self.inner.services.deactivate_switch().await;
+                    }
                 },
                 Err(RecvError::Lagged(count)) => {
                     warn!(log, "Hardware monitor missed {count} messages");
