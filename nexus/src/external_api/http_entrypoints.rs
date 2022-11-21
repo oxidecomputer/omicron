@@ -146,6 +146,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
+        api.register(v1_instance_list)?;
         api.register(v1_instance_view)?;
         api.register(v1_instance_create)?;
         api.register(v1_instance_delete)?;
@@ -2003,6 +2004,50 @@ async fn disk_metrics_list(
 
 // Instances
 
+#[derive(Deserialize, JsonSchema)]
+struct InstanceListQueryParams {
+    #[serde(flatten)]
+    pagination: PaginatedByName,
+    #[serde(flatten)]
+    selector: params::ProjectSelector,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/instances",
+    tags = ["instances"],
+}]
+async fn v1_instance_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<InstanceListQueryParams>,
+) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_id =
+            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let instances = nexus
+            .project_list_instances(
+                &opctx,
+                project_id,
+                &data_page_params_for(&rqctx, &query.pagination)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query.pagination,
+            instances,
+            &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List instances
 #[endpoint {
     method = GET,
@@ -2022,11 +2067,19 @@ async fn instance_list(
     let project_name = &path.project_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_id = nexus
+            .project_lookup_id(
+                &opctx,
+                params::ProjectSelector::ProjectAndOrg {
+                    project_name: project_name.clone().into(),
+                    organization_name: organization_name.clone().into(),
+                },
+            )
+            .await?;
         let instances = nexus
             .project_list_instances(
                 &opctx,
-                &organization_name,
-                &project_name,
+                project_id,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
