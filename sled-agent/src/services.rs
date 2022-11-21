@@ -22,8 +22,8 @@
 //! To accomplish this, the following interfaces are exposed:
 //! - [ServiceManager::ensure_persistent] exposes an API to request a set of
 //! services that should persist beyond reboot.
-//! - [ServiceManager::ensure_switch_zone] exposes an API to specifically enable
-//! or disable the switch zone.
+//! - [ServiceManager::activate_switch] exposes an API to specifically enable
+//! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::common::underlay;
@@ -184,6 +184,16 @@ struct Task {
     initializer: JoinHandle<()>,
 }
 
+impl Task {
+    async fn stop(self) {
+        // If this succeeds, we told the background task to exit
+        // successfully. If it fails, the background task already
+        // exited.
+        let _ = self.exit_tx.send(());
+        self.initializer.await.expect("Switch initializer task panicked");
+    }
+}
+
 // Describes the Switch Zone state.
 enum SwitchZone {
     // The switch zone is not currently running.
@@ -193,11 +203,16 @@ enum SwitchZone {
     Initializing {
         // The request for the zone
         request: ServiceZoneRequest,
-        // A background task
+        // A background task which keeps looping until the zone is initialized
         worker: Option<Task>,
     },
     // The Zone is currently running.
-    Running(RunningZone),
+    Running {
+        // The original request for the zone
+        request: ServiceZoneRequest,
+        // The currently running zone
+        zone: RunningZone,
+    },
 }
 
 /// Manages miscellaneous Sled-local services.
@@ -234,16 +249,12 @@ impl ServiceManager {
     /// - `log`: The logger
     /// - `etherstub`: An etherstub on which to allocate VNICs.
     /// - `underlay_vnic`: The underlay's VNIC in the Global Zone.
-    /// - `stub_scrimlet`: TODO DOCS
+    /// - `stub_scrimlet`: Identifies how to launch the switch zone.
     pub async fn new(
         log: Logger,
         etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
         stub_scrimlet: Option<bool>,
-        //        _underlay_address: Ipv6Addr,
-        //        _config: Config,
-        //        physical_link: PhysicalLink,
-        //        _rack_id: Uuid,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -267,7 +278,6 @@ impl ServiceManager {
 
     /// Loads services from the services manager, and returns once all requested
     /// services have been started.
-    // TODO: When invoking - this is an opportunity to notify the switch zone??
     pub async fn sled_agent_started(
         &self,
         config: Config,
@@ -399,15 +409,6 @@ impl ServiceManager {
         SwitchZoneManager::privs_needed(req)
     }
 
-    // TODO: Notes on where "self" is used here...
-    // - "link_needed(...)" -- may access
-    //   "self.inner.physical_link_vnic_allocator" for a Nexus VNIC
-    // - Installing the zone accessess "self.inner.vnic_allocator"
-    // - Advertising prefixes may access "self.inner.ddmd_client"
-    // - If no GZ addresses is supplied, we use "self.inner.underlay_address"
-    // for the gateway (... plus, we add a route).
-    // - The rest appears to be service-specific.
-    //
     async fn initialize_zone(
         &self,
         request: &ServiceZoneRequest,
@@ -793,6 +794,7 @@ impl ServiceManager {
         Ok(())
     }
 
+    /// Ensures that a switch zone exists with the provided IP adddress.
     pub async fn activate_switch(&self, switch_ip: Option<Ipv6Addr>) {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
 
@@ -823,10 +825,32 @@ impl ServiceManager {
         self.ensure_switch_zone(Some(request)).await;
     }
 
+    /// Ensures that no switch zone is active.
     pub async fn deactivate_switch(&self) {
         self.ensure_switch_zone(None).await;
     }
 
+    // Forcefully initialize a switch zone.
+    //
+    // This is a helper function for "ensure_switch_zone".
+    fn start_switch_zone(
+        self,
+        switch_zone: &mut SwitchZone,
+        request: ServiceZoneRequest,
+    ) {
+        let (exit_tx, exit_rx) = oneshot::channel();
+        *switch_zone = SwitchZone::Initializing {
+            request,
+            worker: Some(Task {
+                exit_tx,
+                initializer: tokio::task::spawn(async move {
+                    self.initialize_zone_loop(exit_rx).await
+                }),
+            }),
+        };
+    }
+
+    // Moves the current state to align with the "request".
     async fn ensure_switch_zone(&self, request: Option<ServiceZoneRequest>) {
         let log = &self.inner.log;
         let mut switch_zone = self.inner.switch_zone.lock().await;
@@ -834,22 +858,27 @@ impl ServiceManager {
         match (&mut *switch_zone, request) {
             (SwitchZone::Disabled, Some(request)) => {
                 info!(log, "Enabling switch zone (new)");
-                let mgr = self.clone();
-                let (exit_tx, exit_rx) = oneshot::channel();
-                *switch_zone = SwitchZone::Initializing {
-                    request,
-                    worker: Some(Task {
-                        exit_tx,
-                        initializer: tokio::task::spawn(async move {
-                            mgr.initialize_zone_loop(exit_rx).await
-                        }),
-                    }),
-                };
+                self.clone().start_switch_zone(&mut switch_zone, request);
+            }
+            (
+                SwitchZone::Initializing { request, worker },
+                Some(new_request),
+            ) if request.addresses != new_request.addresses => {
+                worker.take().unwrap().stop().await;
+                self.clone().start_switch_zone(&mut switch_zone, new_request);
+                info!(log, "Re-enabling previously-initializing switch zone (new address)");
             }
             (SwitchZone::Initializing { .. }, Some(_)) => {
                 info!(log, "Enabling switch zone (already underway)");
             }
-            (SwitchZone::Running(_), Some(_)) => {
+            (SwitchZone::Running { request, zone }, Some(new_request))
+                if request.addresses != new_request.addresses =>
+            {
+                info!(log, "Re-enabling running switch zone (new address)");
+                zone.stop().await.unwrap();
+                self.clone().start_switch_zone(&mut switch_zone, new_request);
+            }
+            (SwitchZone::Running { .. }, Some(_)) => {
                 info!(log, "Enabling switch zone (already complete)");
             }
             (SwitchZone::Disabled, None) => {
@@ -857,21 +886,12 @@ impl ServiceManager {
             }
             (SwitchZone::Initializing { worker, .. }, None) => {
                 info!(log, "Disabling switch zone (was initializing)");
-                let worker = worker
-                    .take()
-                    .expect("Initializing without background task");
-                // If this succeeds, we told the background task to exit
-                // successfully. If it fails, the background task already
-                // exited.
-                let _ = worker.exit_tx.send(());
-                worker
-                    .initializer
-                    .await
-                    .expect("Switch initializer task panicked");
+                worker.take().unwrap().stop().await;
                 *switch_zone = SwitchZone::Disabled;
             }
-            (SwitchZone::Running(_), None) => {
+            (SwitchZone::Running { zone, .. }, None) => {
                 info!(log, "Disabling switch zone (was running)");
+                zone.stop().await.unwrap();
                 *switch_zone = SwitchZone::Disabled;
             }
         }
@@ -887,7 +907,10 @@ impl ServiceManager {
                     SwitchZone::Initializing { request, .. } => {
                         match self.initialize_zone(&request).await {
                             Ok(zone) => {
-                                *switch_zone = SwitchZone::Running(zone);
+                                *switch_zone = SwitchZone::Running {
+                                    request: request.clone(),
+                                    zone,
+                                };
                                 return;
                             }
                             Err(err) => {

@@ -21,6 +21,10 @@ use slog::Logger;
 use std::path::Path;
 
 // TODO TODO TODO COLLAPSE THESE METHODS INTO SERVICES.RS
+//
+// These are a relic of a prior attempt at implementting the switch zone outside
+// the service manager (... which resulted in an unfortunate amount of code
+// duplication).
 
 /// A wrapper around the Switch Zone, with methods to enable or disable it.
 #[derive(Clone)]

@@ -97,6 +97,7 @@ pub enum GetZoneError {
 
 /// Represents a running zone.
 pub struct RunningZone {
+    running: bool,
     inner: InstalledZone,
 }
 
@@ -147,7 +148,7 @@ impl RunningZone {
             }
         })?;
 
-        Ok(RunningZone { inner: zone })
+        Ok(RunningZone { running: true, inner: zone })
     }
 
     pub async fn ensure_address(
@@ -290,6 +291,7 @@ impl RunningZone {
             .expect("Failed to wrap valid control VNIC");
 
         Ok(Self {
+            running: true,
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
                 name: zone_name.to_string(),
@@ -307,22 +309,39 @@ impl RunningZone {
     pub fn opte_ports(&self) -> &[Port] {
         &self.inner.opte_ports
     }
+
+    /// Halts and removes the zone, awaiting its termination.
+    ///
+    /// Allows callers to synchronously stop a zone, and inspect an error.
+    pub async fn stop(&mut self) -> Result<(), String> {
+        if self.running {
+            self.running = false;
+            let log = self.inner.log.clone();
+            let name = self.name().to_string();
+            Zones::halt_and_remove_logged(&log, &name)
+                .await
+                .map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        let log = self.inner.log.clone();
-        let name = self.name().to_string();
-        tokio::task::spawn(async move {
-            match Zones::halt_and_remove_logged(&log, &name).await {
-                Ok(()) => {
-                    info!(log, "Stopped and uninstalled zone")
+        if self.running {
+            let log = self.inner.log.clone();
+            let name = self.name().to_string();
+            tokio::task::spawn(async move {
+                match Zones::halt_and_remove_logged(&log, &name).await {
+                    Ok(()) => {
+                        info!(log, "Stopped and uninstalled zone")
+                    }
+                    Err(e) => {
+                        warn!(log, "Failed to stop zone: {}", e)
+                    }
                 }
-                Err(e) => {
-                    warn!(log, "Failed to stop zone: {}", e)
-                }
-            }
-        });
+            });
+        }
     }
 }
 

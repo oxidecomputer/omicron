@@ -155,9 +155,6 @@ struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
 
-    // The sled's initial configuration
-    _config: Config,
-
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
@@ -181,16 +178,6 @@ struct SledAgentInner {
     // a hardware monitor.
     //
     //
-    // SwitchZoneManager sorta has two halves - a portion for "helper" functions
-    // shared by the ServiceManager, and a portion which is responsible for
-    // actually launching zones...
-    // TODO: The current wrapping of it means I don't *think* we'd ever do the
-    // correct handoff to the ServiceManager... but we should??? Gotta keep
-    // refactoring....
-    // - Ideas: Maybe the "ServiceManager" logic for initializing a zone based
-    // on "ServiceZoneRequest" can be re-used -- we can just do certain
-    // operations depending on whether or not addresses exist??
-    //
     // TODO: We definitely need to update the SMF configs for the zone, to deal
     // with launching services that might not have IP addresses
 
@@ -212,8 +199,6 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1961): Use this
-    #[allow(dead_code)]
     fn switch_ip(&self) -> Ipv6Addr {
         get_switch_zone_address(self.subnet)
     }
@@ -382,7 +367,6 @@ impl SledAgent {
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id,
-                _config: config.clone(),
                 subnet: request.subnet,
                 storage,
                 instances,
