@@ -8154,6 +8154,195 @@
         }
       }
     },
+    "/v1/instances/{instance}/serial-console": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "v1_instance_serial_console",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "from_start",
+            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "max_bytes",
+            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "most_recent",
+            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/serial-console/stream": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "v1_instance_serial_console_stream",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project_name",
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-dropshot-websocket": {}
+      }
+    },
     "/v1/instances/{instance}/start": {
       "post": {
         "tags": [

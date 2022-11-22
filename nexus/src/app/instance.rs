@@ -268,22 +268,6 @@ impl super::Nexus {
     pub async fn instance_fetch(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-    ) -> LookupResult<db::model::Instance> {
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .fetch()
-            .await?;
-        Ok(db_instance)
-    }
-
-    pub async fn instance_fetch_by_id(
-        &self,
-        opctx: &OpContext,
         instance_id: &Uuid,
     ) -> LookupResult<db::model::Instance> {
         let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
@@ -1147,19 +1131,10 @@ impl super::Nexus {
     pub(crate) async fn instance_serial_console_data(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_id: &Uuid,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let db_instance = self
-            .instance_fetch(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
+        let db_instance = self.instance_fetch(opctx, instance_id).await?;
 
         let sa = self.instance_sled(&db_instance).await?;
         let data = sa
@@ -1183,18 +1158,9 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         conn: dropshot::WebsocketConnection,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_id: &Uuid,
     ) -> Result<(), Error> {
-        let instance = self
-            .instance_fetch(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
+        let instance = self.instance_fetch(opctx, instance_id).await?;
         let ip_addr = instance
             .runtime_state
             .propolis_ip

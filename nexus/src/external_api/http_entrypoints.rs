@@ -154,6 +154,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(v1_instance_reboot)?;
         api.register(v1_instance_start)?;
         api.register(v1_instance_stop)?;
+        api.register(v1_instance_serial_console)?;
+        api.register(v1_instance_serial_console_stream)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -2209,7 +2211,7 @@ async fn v1_instance_view(
                 query.selector.to_instance_selector(path.instance.into()),
             )
             .await?;
-        let instance = nexus.instance_fetch_by_id(&opctx, &instance_id).await?;
+        let instance = nexus.instance_fetch(&opctx, &instance_id).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2241,14 +2243,24 @@ async fn instance_view(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance = nexus
-            .instance_fetch(
+        let instance_id = nexus
+            .instance_lookup_id(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
+                params::InstanceSelector::InstanceProjectAndOrg {
+                    instance_name: omicron_common::api::external::Name::from(
+                        instance_name.clone(),
+                    ),
+                    project_name: omicron_common::api::external::Name::from(
+                        project_name.clone(),
+                    ),
+                    organization_name:
+                        omicron_common::api::external::Name::from(
+                            organization_name.clone(),
+                        ),
+                },
             )
             .await?;
+        let instance = nexus.instance_fetch(&opctx, &instance_id).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2270,7 +2282,7 @@ async fn instance_view_by_id(
     let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance = nexus.instance_fetch_by_id(&opctx, id).await?;
+        let instance = nexus.instance_fetch(&opctx, id).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2640,6 +2652,49 @@ async fn instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceSerialConsoleParams {
+    #[serde(flatten)]
+    selector: params::ProjectSelector,
+
+    #[serde(flatten)]
+    pub console_params: params::InstanceSerialConsoleRequest,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/serial-console",
+    tags = ["instances"],
+}]
+async fn v1_instance_serial_console(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<InstanceSerialConsoleParams>,
+) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_id = nexus
+            .instance_lookup_id(
+                &opctx,
+                query.selector.to_instance_selector(path.instance.into()),
+            )
+            .await?;
+        let console = nexus
+            .instance_serial_console_data(
+                &opctx,
+                &instance_id,
+                &query.console_params,
+            )
+            .await?;
+        Ok(HttpResponseOk(console.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Fetch an instance's serial console
 #[endpoint {
     method = GET,
@@ -2659,18 +2714,59 @@ async fn instance_serial_console(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_id = nexus
+            .instance_lookup_id(
+                &opctx,
+                params::InstanceSelector::InstanceProjectAndOrg {
+                    instance_name: omicron_common::api::external::Name::from(
+                        instance_name.clone(),
+                    ),
+                    project_name: omicron_common::api::external::Name::from(
+                        project_name.clone(),
+                    ),
+                    organization_name:
+                        omicron_common::api::external::Name::from(
+                            organization_name.clone(),
+                        ),
+                },
+            )
+            .await?;
         let data = nexus
             .instance_serial_console_data(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
+                &instance_id,
                 &query_params.into_inner(),
             )
             .await?;
         Ok(HttpResponseOk(data))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[channel {
+    protocol = WEBSOCKETS,
+    path = "/v1/instances/{instance}/serial-console/stream",
+    tags = ["instances"],
+}]
+async fn v1_instance_serial_console_stream(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    conn: WebsocketConnection,
+    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<InstanceQueryParams>,
+) -> WebsocketChannelResult {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let opctx = OpContext::for_external_api(&rqctx).await?;
+    let instance_id = nexus
+        .instance_lookup_id(
+            &opctx,
+            query.selector.to_instance_selector(path.instance.into()),
+        )
+        .await?;
+    nexus.instance_serial_console_stream(&opctx, conn, &instance_id).await?;
+    Ok(())
 }
 
 /// Connect to an instance's serial console
@@ -2691,15 +2787,23 @@ async fn instance_serial_console_stream(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let opctx = OpContext::for_external_api(&rqctx).await?;
-    nexus
-        .instance_serial_console_stream(
+    let instance_id = nexus
+        .instance_lookup_id(
             &opctx,
-            conn,
-            organization_name,
-            project_name,
-            instance_name,
+            params::InstanceSelector::InstanceProjectAndOrg {
+                instance_name: omicron_common::api::external::Name::from(
+                    instance_name.clone(),
+                ),
+                project_name: omicron_common::api::external::Name::from(
+                    project_name.clone(),
+                ),
+                organization_name: omicron_common::api::external::Name::from(
+                    organization_name.clone(),
+                ),
+            },
         )
         .await?;
+    nexus.instance_serial_console_stream(&opctx, conn, &instance_id).await?;
     Ok(())
 }
 
