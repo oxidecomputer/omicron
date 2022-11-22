@@ -385,9 +385,7 @@ impl super::Nexus {
     pub async fn instance_reboot(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
         // To implement reboot, we issue a call to the sled agent to set a
         // runtime state of "reboot". We cannot simply stop the Instance and
@@ -402,9 +400,7 @@ impl super::Nexus {
         // running.
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
+                .instance_id(instance_id)
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
