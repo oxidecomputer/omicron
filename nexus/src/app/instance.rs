@@ -325,15 +325,11 @@ impl super::Nexus {
     pub async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_id: Uuid,
         params: params::InstanceMigrate,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
+            .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await?;
 
