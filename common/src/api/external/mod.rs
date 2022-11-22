@@ -268,9 +268,8 @@ impl Name {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(try_from = "String")]
-
+#[derive(Serialize, Deserialize, Display)]
+#[display("{0}")]
 pub enum NameOrId {
     Name(Name),
     Id(Uuid),
