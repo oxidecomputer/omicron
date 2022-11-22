@@ -7724,14 +7724,6 @@
               "$ref": "#/components/schemas/Name"
             },
             "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
           }
         ],
         "responses": {
@@ -7789,14 +7781,6 @@
           {
             "in": "query",
             "name": "organization_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -7875,14 +7859,6 @@
             "style": "form"
           },
           {
-            "in": "query",
-            "name": "project_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
             "in": "path",
             "name": "instance",
             "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
@@ -7953,14 +7929,6 @@
             "style": "form"
           },
           {
-            "in": "query",
-            "name": "project_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
             "in": "path",
             "name": "instance",
             "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
@@ -8020,14 +7988,6 @@
           {
             "in": "query",
             "name": "organization_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -8110,14 +8070,6 @@
           {
             "in": "query",
             "name": "organization_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -8240,14 +8192,6 @@
               "$ref": "#/components/schemas/Name"
             },
             "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
           }
         ],
         "responses": {
@@ -8320,14 +8264,6 @@
               "$ref": "#/components/schemas/Name"
             },
             "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
           }
         ],
         "responses": {
@@ -8380,14 +8316,6 @@
           {
             "in": "query",
             "name": "organization_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },
@@ -8460,14 +8388,6 @@
           {
             "in": "query",
             "name": "organization_name",
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project_name",
             "schema": {
               "$ref": "#/components/schemas/Name"
             },

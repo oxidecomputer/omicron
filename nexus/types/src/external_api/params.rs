@@ -21,9 +21,19 @@ use uuid::Uuid;
 #[derive(Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ProjectSelector {
-    ProjectId { project_id: Uuid },
-    ProjectAndOrgId { project_name: Name, organization_id: Uuid },
-    ProjectAndOrg { project_name: Name, organization_name: Name },
+    ProjectId {
+        project_id: Uuid,
+    },
+    ProjectAndOrgId {
+        project_name: Name,
+        organization_id: Uuid,
+    },
+    ProjectAndOrg {
+        // FIXME: There's a bug in schemars or serde which causes project_name to be emitted twice
+        #[schemars(skip)]
+        project_name: Name,
+        organization_name: Name,
+    },
     None {},
 }
 
@@ -73,12 +83,17 @@ pub enum InstanceSelector {
         project_id: Uuid,
     },
     InstanceProjectAndOrgId {
+        // FIXME: There's a bug in schemars or serde which causes instance_name to be emitted multiple times
+        #[schemars(skip)]
         instance_name: Name,
         project_name: Name,
         organization_id: Uuid,
     },
     InstanceProjectAndOrg {
+        #[schemars(skip)]
         instance_name: Name,
+        // FIXME: There's a bug in schemars or serde which causes project_name to be emitted multiple times
+        #[schemars(skip)]
         project_name: Name,
         organization_name: Name,
     },
