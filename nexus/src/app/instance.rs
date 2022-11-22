@@ -421,15 +421,11 @@ impl super::Nexus {
     pub async fn instance_start(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
+                .instance_id(instance_id)
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {

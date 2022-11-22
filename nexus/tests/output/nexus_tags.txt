@@ -53,6 +53,7 @@ v1_instance_delete                       /v1/instances/{instance}
 v1_instance_list                         /v1/instances
 v1_instance_migrate                      /v1/instances/{instance}/migrate
 v1_instance_reboot                       /v1/instances/{instance}/reboot
+v1_instance_start                        /v1/instances/{instance}/start
 v1_instance_view                         /v1/instances/{instance}
 
 API operations found with tag "login"
