@@ -153,6 +153,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(v1_instance_migrate)?;
         api.register(v1_instance_reboot)?;
         api.register(v1_instance_start)?;
+        api.register(v1_instance_stop)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -2570,6 +2571,34 @@ async fn instance_start(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/stop",
+    tags = ["instances"],
+}]
+async fn v1_instance_stop(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<InstanceQueryParams>,
+    path_params: Path<InstanceLookupPathParam>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_id = nexus
+            .instance_lookup_id(
+                &opctx,
+                query.selector.to_instance_selector(path.instance.into()),
+            )
+            .await?;
+        let instance = nexus.instance_stop(&opctx, instance_id).await?;
+        Ok(HttpResponseOk(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Halt an instance
 #[endpoint {
     method = POST,
@@ -2588,14 +2617,24 @@ async fn instance_stop(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance = nexus
-            .instance_stop(
+        let instance_id = nexus
+            .instance_lookup_id(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
+                params::InstanceSelector::InstanceProjectAndOrg {
+                    instance_name: omicron_common::api::external::Name::from(
+                        instance_name.clone(),
+                    ),
+                    project_name: omicron_common::api::external::Name::from(
+                        project_name.clone(),
+                    ),
+                    organization_name:
+                        omicron_common::api::external::Name::from(
+                            organization_name.clone(),
+                        ),
+                },
             )
             .await?;
+        let instance = nexus.instance_stop(&opctx, instance_id).await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
