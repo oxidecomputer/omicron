@@ -32,7 +32,7 @@ version = "2.7"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.tokio]
-version = "1.21"
+version = "1.22"
 features = [ "full" ]
 
 [[bin]]
