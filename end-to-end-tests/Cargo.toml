@@ -12,7 +12,7 @@ omicron-sled-agent = { path = "../sled-agent" }
 omicron-test-utils = { path = "../test-utils" }
 oxide-client = { path = "../oxide-client" }
 rand = "0.8.5"
-reqwest = { version = "0.11.11", default-features = false }
+reqwest = { version = "0.11.13", default-features = false }
 russh = "0.35.0-beta.2"
 russh-keys = "0.22.0"
 tokio = { version = "1.20.0", features = ["macros", "rt-multi-thread"] }
