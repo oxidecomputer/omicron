@@ -271,8 +271,8 @@ impl Name {
 #[derive(Serialize, Deserialize, Display)]
 #[display("{0}")]
 pub enum NameOrId {
-    Name(Name),
     Id(Uuid),
+    Name(Name),
 }
 
 impl TryFrom<String> for NameOrId {
