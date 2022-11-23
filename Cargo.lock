@@ -709,9 +709,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.24"
+version = "4.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60494cedb60cb47462c0ff7be53de32c0e42a6fc2c772184554fa12bd9489c03"
+checksum = "2148adefda54e14492fb9bddcc600b4344c5d1a3123bd666dcb939c6f0e0e57e"
 dependencies = [
  "atty",
  "bitflags",
@@ -1948,7 +1948,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "futures",
  "gateway-client",
  "libc",
@@ -2530,7 +2530,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3281,7 +3281,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -3297,7 +3297,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.24",
+ "clap 4.0.26",
  "dropshot",
  "expectorate",
  "futures",
@@ -3335,7 +3335,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
- "clap 4.0.24",
+ "clap 4.0.26",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3419,7 +3419,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "futures",
  "hex",
  "indicatif",
@@ -3457,7 +3457,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.0.24",
+ "clap 4.0.26",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -3520,7 +3520,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "dropshot",
  "expectorate",
  "futures",
@@ -3780,7 +3780,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.24",
+ "clap 4.0.26",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3811,7 +3811,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.0.24",
+ "clap 4.0.26",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4401,7 +4401,7 @@ version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#4b5cef4b105f351c74d14acae5e0b4d69313afb2"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "openapiv3",
  "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
@@ -4416,7 +4416,7 @@ version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor#4b5cef4b105f351c74d14acae5e0b4d69313afb2"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "openapiv3",
  "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
@@ -5841,7 +5841,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.0.24",
+ "clap 4.0.26",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -7099,7 +7099,7 @@ name = "wicket"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.24",
+ "clap 4.0.26",
  "crossterm",
  "futures",
  "hex",
@@ -7125,7 +7125,7 @@ dependencies = [
 name = "wicketd"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.24",
+ "clap 4.0.26",
  "dropshot",
  "expectorate",
  "futures",
