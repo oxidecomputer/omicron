@@ -64,7 +64,7 @@ thiserror = "1.0"
 tokio-tungstenite = "0.17.2"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
-usdt = "0.3.1"
+usdt = "0.3.4"
 
 authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
