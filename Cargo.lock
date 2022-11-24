@@ -1470,7 +1470,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#f579165d4b820831031eaa7ef5e59fe1d8398f75"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b623d8b3a7d9851d94d0705ec1ffd8a76d5539bb"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1510,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#f579165d4b820831031eaa7ef5e59fe1d8398f75"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b623d8b3a7d9851d94d0705ec1ffd8a76d5539bb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2478,9 +2478,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "1.9.1"
+version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a35a97730320ffe8e2d410b5d3b69279b98d2c14bdb8b70ea89ecf7888d41e"
+checksum = "1885e79c1fc4b10f0e172c475f458b7f7b93061064d98c3293e98c5ba0c8b399"
 dependencies = [
  "autocfg",
  "hashbrown",
