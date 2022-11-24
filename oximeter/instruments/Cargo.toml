@@ -10,7 +10,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main",
 futures = "0.3.25"
 oximeter = { path = "../oximeter" }
 http = { version = "0.2.7", optional = true }
-uuid = { version = "1.2.1", features = [ "v4", "serde" ] }
+uuid = { version = "1.2.2", features = [ "v4", "serde" ] }
 
 [features]
 default = ["http-instruments"]

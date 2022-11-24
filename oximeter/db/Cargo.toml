@@ -23,7 +23,7 @@ slog-async = "2.6"
 slog-term = "2.9"
 thiserror = "1.0.37"
 tokio = { version = "1.22", features = [ "rt-multi-thread", "macros" ] }
-uuid = { version = "1.2.1", features = [ "v4", "serde" ] }
+uuid = { version = "1.2.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
 itertools = "0.10.5"
