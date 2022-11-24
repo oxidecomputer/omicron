@@ -17,7 +17,7 @@ slog-dtrace = "0.2"
 thiserror = "1.0.37"
 tokio-tungstenite = "0.17"
 toml = "0.5.9"
-uuid = "1.2.1"
+uuid = "1.2.2"
 
 omicron-common = { path = "../common" }
 

@@ -30,7 +30,7 @@ thiserror = "1.0"
 tokio = { version = "1.22", features = [ "full" ] }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 toml = "0.5.9"
-uuid = { version = "1.2.1", features = [ "serde", "v4" ] }
+uuid = { version = "1.2.2", features = [ "serde", "v4" ] }
 parse-display = "0.6.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 

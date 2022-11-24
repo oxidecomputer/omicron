@@ -17,7 +17,7 @@ serde = { version = "1.0", features = ["derive"] }
 slog-dtrace = "0.2"
 snafu = "0.7"
 toml = "0.5.9"
-uuid = "1.2.1"
+uuid = "1.2.2"
 
 gateway-client = { path = "../gateway-client" }
 omicron-common = { path = "../common" }
