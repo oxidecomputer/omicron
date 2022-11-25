@@ -270,6 +270,7 @@ impl Name {
 
 #[derive(Serialize, Deserialize, Display)]
 #[display("{0}")]
+#[serde(untagged)]
 pub enum NameOrId {
     Id(Uuid),
     Name(Name),
