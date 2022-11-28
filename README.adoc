@@ -29,25 +29,25 @@ Folks with access to Oxide RFDs may find RFD 48 ("Control Plane Requirements") a
 
 == Build and run
 
-You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
-
-You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
-
-=== Running Omicron
-
 Omicron has two modes of operation: "simulated" and "non-simulated".
 
 The simulated version of Omicron allows the high-level control plane logic to run without
 actually managing any sled-local resources. This version can be executed on Linux, Mac, and illumos.
 This mode of operation is provided for development and testing only.
 
-See: xref:docs/how-to-run-simulated.adoc[].
+To build and run the simulated version of Omicron, see: xref:docs/how-to-run-simulated.adoc[].
 
 The non-simulated version of Omicron actually manages sled-local resources, and may only
 be executed on hosts running Helios.
 This mode of operation will be used in production.
 
-See: xref:docs/how-to-run.adoc[].
+To build and run the non-simulated version of Omicron, see: xref:docs/how-to-run.adoc[].
+
+=== rustfmt and clippy
+
+You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
+
+You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy \-- -D warnings -A clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
 
 == Docker image
 
