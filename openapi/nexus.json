@@ -13597,11 +13597,21 @@
       "NameOrId": {
         "oneOf": [
           {
-            "$ref": "#/components/schemas/Name"
+            "title": "id",
+            "allOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              }
+            ]
           },
           {
-            "type": "string",
-            "format": "uuid"
+            "title": "name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         ]
       }

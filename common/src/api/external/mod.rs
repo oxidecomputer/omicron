@@ -299,8 +299,8 @@ impl JsonSchema for NameOrId {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
-                    gen.subschema_for::<Name>(),
-                    gen.subschema_for::<Uuid>(),
+                    label_schema("id", gen.subschema_for::<Uuid>()),
+                    label_schema("name", gen.subschema_for::<Name>()),
                 ]),
                 ..Default::default()
             })),
