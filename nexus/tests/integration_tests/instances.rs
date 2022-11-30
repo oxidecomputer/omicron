@@ -149,7 +149,7 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let fetched_instance = instance_get(
         &client,
         format!(
-            "/v1/instances/{}?project_id={}",
+            "/v1/instances/{}?project={}",
             instance.identity.name, project.identity.id
         )
         .as_str(),
@@ -161,7 +161,7 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let fetched_instance = instance_get(
         &client,
         format!(
-            "/v1/instances/{}?project_name={}&organization_id={}",
+            "/v1/instances/{}?project={}&organization={}",
             instance.identity.name, project.identity.name, org.identity.id
         )
         .as_str(),
@@ -173,7 +173,7 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let fetched_instance = instance_get(
         &client,
         format!(
-            "/v1/instances/{}?project_name={}&organization_name={}",
+            "/v1/instances/{}?project={}&organization={}",
             instance.identity.name, project.identity.name, org.identity.name
         )
         .as_str(),

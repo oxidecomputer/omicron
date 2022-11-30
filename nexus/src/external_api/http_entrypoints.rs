@@ -18,7 +18,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::model::Name;
-use crate::db::model::NameOrId;
 use crate::external_api::shared;
 use crate::ServerContext;
 use dropshot::ApiDescription;
@@ -61,6 +60,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -2076,9 +2076,11 @@ async fn instance_list(
         let project_id = nexus
             .project_lookup_id(
                 &opctx,
-                params::ProjectSelector::ProjectAndOrg {
-                    project_name: project_name.clone().into(),
-                    organization_name: organization_name.clone().into(),
+                params::ProjectSelector {
+                    project: NameOrId::Name(project_name.clone().into()),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2102,6 +2104,12 @@ async fn instance_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct InstanceCreateParams {
+    #[serde(flatten)]
+    selector: params::ProjectSelector,
+}
+
 #[endpoint {
     method = POST,
     path = "/v1/instances",
@@ -2109,7 +2117,7 @@ async fn instance_list(
 }]
 async fn v1_instance_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceQueryParams>,
+    query_params: Query<InstanceCreateParams>,
     new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2157,9 +2165,11 @@ async fn instance_create(
         let project_id = nexus
             .project_lookup_id(
                 &opctx,
-                params::ProjectSelector::ProjectAndOrg {
-                    project_name: project_name.clone().into(),
-                    organization_name: organization_name.clone().into(),
+                params::ProjectSelector {
+                    project: NameOrId::Name(project_name.clone().into()),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2186,7 +2196,7 @@ struct InstanceLookupPathParam {
 #[derive(Deserialize, JsonSchema)]
 struct InstanceQueryParams {
     #[serde(flatten)]
-    selector: params::ProjectSelector,
+    selector: Option<params::ProjectSelector>,
 }
 
 #[endpoint {
@@ -2208,7 +2218,7 @@ async fn v1_instance_view(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                query.selector.to_instance_selector(path.instance.into()),
+                params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
         let instance = nexus.instance_fetch(&opctx, &instance_id).await?;
@@ -2246,17 +2256,12 @@ async fn instance_view(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                params::InstanceSelector::InstanceProjectAndOrg {
-                    instance_name: omicron_common::api::external::Name::from(
-                        instance_name.clone(),
-                    ),
-                    project_name: omicron_common::api::external::Name::from(
-                        project_name.clone(),
-                    ),
-                    organization_name:
-                        omicron_common::api::external::Name::from(
-                            organization_name.clone(),
-                        ),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2307,7 +2312,7 @@ async fn v1_instance_delete(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                query.selector.to_instance_selector(path.instance.into()),
+                params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
         nexus.project_destroy_instance(&opctx, &instance_id).await?;
@@ -2337,17 +2342,12 @@ async fn instance_delete(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                params::InstanceSelector::InstanceProjectAndOrg {
-                    instance_name: omicron_common::api::external::Name::from(
-                        instance_name.clone(),
-                    ),
-                    project_name: omicron_common::api::external::Name::from(
-                        project_name.clone(),
-                    ),
-                    organization_name:
-                        omicron_common::api::external::Name::from(
-                            organization_name.clone(),
-                        ),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2379,7 +2379,7 @@ async fn v1_instance_migrate(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                query.selector.to_instance_selector(path.instance.into()),
+                params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
         let instance = nexus
@@ -2418,17 +2418,12 @@ async fn instance_migrate(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                params::InstanceSelector::InstanceProjectAndOrg {
-                    instance_name: omicron_common::api::external::Name::from(
-                        instance_name.clone(),
-                    ),
-                    project_name: omicron_common::api::external::Name::from(
-                        project_name.clone(),
-                    ),
-                    organization_name:
-                        omicron_common::api::external::Name::from(
-                            organization_name.clone(),
-                        ),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2463,7 +2458,7 @@ async fn v1_instance_reboot(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                query.selector.to_instance_selector(path.instance.into()),
+                params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
         let instance = nexus.instance_reboot(&opctx, instance_id).await?;
@@ -2493,17 +2488,12 @@ async fn instance_reboot(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                params::InstanceSelector::InstanceProjectAndOrg {
-                    instance_name: omicron_common::api::external::Name::from(
-                        instance_name.clone(),
-                    ),
-                    project_name: omicron_common::api::external::Name::from(
-                        project_name.clone(),
-                    ),
-                    organization_name:
-                        omicron_common::api::external::Name::from(
-                            organization_name.clone(),
-                        ),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2533,7 +2523,7 @@ async fn v1_instance_start(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                query.selector.to_instance_selector(path.instance.into()),
+                params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
         let instance = nexus.instance_start(&opctx, instance_id).await?;
@@ -2563,17 +2553,12 @@ async fn instance_start(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                params::InstanceSelector::InstanceProjectAndOrg {
-                    instance_name: omicron_common::api::external::Name::from(
-                        instance_name.clone(),
-                    ),
-                    project_name: omicron_common::api::external::Name::from(
-                        project_name.clone(),
-                    ),
-                    organization_name:
-                        omicron_common::api::external::Name::from(
-                            organization_name.clone(),
-                        ),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2602,7 +2587,7 @@ async fn v1_instance_stop(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                query.selector.to_instance_selector(path.instance.into()),
+                params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
         let instance = nexus.instance_stop(&opctx, instance_id).await?;
@@ -2632,17 +2617,12 @@ async fn instance_stop(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                params::InstanceSelector::InstanceProjectAndOrg {
-                    instance_name: omicron_common::api::external::Name::from(
-                        instance_name.clone(),
-                    ),
-                    project_name: omicron_common::api::external::Name::from(
-                        project_name.clone(),
-                    ),
-                    organization_name:
-                        omicron_common::api::external::Name::from(
-                            organization_name.clone(),
-                        ),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2655,7 +2635,7 @@ async fn instance_stop(
 #[derive(Deserialize, JsonSchema)]
 pub struct InstanceSerialConsoleParams {
     #[serde(flatten)]
-    selector: params::ProjectSelector,
+    selector: Option<params::ProjectSelector>,
 
     #[serde(flatten)]
     pub console_params: params::InstanceSerialConsoleRequest,
@@ -2680,7 +2660,7 @@ async fn v1_instance_serial_console(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                query.selector.to_instance_selector(path.instance.into()),
+                params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
         let console = nexus
@@ -2717,17 +2697,12 @@ async fn instance_serial_console(
         let instance_id = nexus
             .instance_lookup_id(
                 &opctx,
-                params::InstanceSelector::InstanceProjectAndOrg {
-                    instance_name: omicron_common::api::external::Name::from(
-                        instance_name.clone(),
-                    ),
-                    project_name: omicron_common::api::external::Name::from(
-                        project_name.clone(),
-                    ),
-                    organization_name:
-                        omicron_common::api::external::Name::from(
-                            organization_name.clone(),
-                        ),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
                 },
             )
             .await?;
@@ -2762,7 +2737,7 @@ async fn v1_instance_serial_console_stream(
     let instance_id = nexus
         .instance_lookup_id(
             &opctx,
-            query.selector.to_instance_selector(path.instance.into()),
+            params::InstanceSelector::new(path.instance, &query.selector),
         )
         .await?;
     nexus.instance_serial_console_stream(&opctx, conn, &instance_id).await?;
@@ -2790,16 +2765,12 @@ async fn instance_serial_console_stream(
     let instance_id = nexus
         .instance_lookup_id(
             &opctx,
-            params::InstanceSelector::InstanceProjectAndOrg {
-                instance_name: omicron_common::api::external::Name::from(
-                    instance_name.clone(),
-                ),
-                project_name: omicron_common::api::external::Name::from(
-                    project_name.clone(),
-                ),
-                organization_name: omicron_common::api::external::Name::from(
-                    organization_name.clone(),
-                ),
+            params::InstanceSelector {
+                instance: NameOrId::Name(instance_name.clone().into()),
+                project: Some(NameOrId::Name(project_name.clone().into())),
+                organization: Some(NameOrId::Name(
+                    organization_name.clone().into(),
+                )),
             },
         )
         .await?;

@@ -19,85 +19,31 @@ use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum ProjectSelector {
-    ProjectId {
-        project_id: Uuid,
-    },
-    ProjectAndOrgId {
-        project_name: Name,
-        organization_id: Uuid,
-    },
-    ProjectAndOrg {
-        // FIXME: There's a bug in schemars or serde which causes project_name to be emitted twice
-        #[schemars(skip)]
-        project_name: Name,
-        organization_name: Name,
-    },
-    None {},
-}
-
-impl ProjectSelector {
-    pub fn to_instance_selector(self, instance: NameOrId) -> InstanceSelector {
-        match instance {
-            NameOrId::Id(instance_id) => {
-                InstanceSelector::InstanceId { instance_id }
-            }
-            NameOrId::Name(instance_name) => match self {
-                ProjectSelector::ProjectId { project_id } => {
-                    InstanceSelector::InstanceAndProjectId {
-                        instance_name,
-                        project_id,
-                    }
-                }
-                ProjectSelector::ProjectAndOrgId {
-                    project_name,
-                    organization_id,
-                } => InstanceSelector::InstanceProjectAndOrgId {
-                    instance_name,
-                    project_name,
-                    organization_id,
-                },
-                ProjectSelector::ProjectAndOrg {
-                    project_name,
-                    organization_name,
-                } => InstanceSelector::InstanceProjectAndOrg {
-                    instance_name,
-                    project_name,
-                    organization_name,
-                },
-                ProjectSelector::None {} => InstanceSelector::None {},
-            },
-        }
-    }
+pub struct ProjectSelector {
+    pub project: NameOrId,
+    pub organization: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum InstanceSelector {
-    InstanceId {
-        instance_id: Uuid,
-    },
-    InstanceAndProjectId {
-        instance_name: Name,
-        project_id: Uuid,
-    },
-    InstanceProjectAndOrgId {
-        // FIXME: There's a bug in schemars or serde which causes instance_name to be emitted multiple times
-        #[schemars(skip)]
-        instance_name: Name,
-        project_name: Name,
-        organization_id: Uuid,
-    },
-    InstanceProjectAndOrg {
-        #[schemars(skip)]
-        instance_name: Name,
-        // FIXME: There's a bug in schemars or serde which causes project_name to be emitted multiple times
-        #[schemars(skip)]
-        project_name: Name,
-        organization_name: Name,
-    },
-    None {},
+pub struct InstanceSelector {
+    pub instance: NameOrId,
+    pub project: Option<NameOrId>,
+    pub organization: Option<NameOrId>,
+}
+
+impl InstanceSelector {
+    pub fn new(
+        instance: NameOrId,
+        project_selector: &Option<ProjectSelector>,
+    ) -> InstanceSelector {
+        InstanceSelector {
+            instance,
+            organization: project_selector
+                .as_ref()
+                .and_then(|s| s.organization.clone()),
+            project: project_selector.as_ref().map(|s| s.project.clone()),
+        }
+    }
 }
 
 // Silos
