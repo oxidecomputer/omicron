@@ -22,11 +22,12 @@
 //!
 //! ## Sled Plan
 //!
-//! When RSS starts, it presumably is executing on a single sled, and must
-//! communicate with other sleds on the bootstrap network to discover neighbors.
-//! RSS uses the bootstrap network to identify peers, assign them subnets and
-//! UUIDs, and initialize a trust quorum. Once RSS decides these values it
-//! commits them to a local file as the "Sled Plan", before sending requests.
+//! RSS should start as a service executing on a Sidecar-attached Gimlet
+//! (Scrimlet). It must communicate with other sleds on the bootstrap network to
+//! discover neighbors. RSS uses the bootstrap network to identify peers, assign
+//! them subnets and UUIDs, and initialize a trust quorum. Once RSS decides
+//! these values it commits them to a local file as the "Sled Plan", before
+//! sending requests.
 //!
 //! As a result, restarting RSS should result in retransmission of the same
 //! values, as long as the same configuration file is used.
