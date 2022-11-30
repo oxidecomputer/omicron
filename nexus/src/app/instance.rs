@@ -32,6 +32,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
@@ -59,13 +60,16 @@ impl super::Nexus {
         instance_selector: params::InstanceSelector,
     ) -> LookupResult<Uuid> {
         match instance_selector {
-            params::InstanceSelector::InstanceId { instance_id } => {
-                Ok(instance_id)
+            params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
+                // TODO: 400 if project or organization are present
+                Ok(id)
             }
-            params::InstanceSelector::InstanceAndProjectId {
-                instance_name,
-                project_id,
+            params::InstanceSelector {
+                instance: NameOrId::Name(instance_name),
+                project: Some(NameOrId::Id(project_id)),
+                ..
             } => {
+                // TODO: 400 if organization is present
                 let (.., authz_instance) =
                     LookupPath::new(opctx, &self.db_datastore)
                         .project_id(project_id)
@@ -74,10 +78,10 @@ impl super::Nexus {
                         .await?;
                 Ok(authz_instance.id())
             }
-            params::InstanceSelector::InstanceProjectAndOrgId {
-                instance_name,
-                project_name,
-                organization_id,
+            params::InstanceSelector {
+                instance: NameOrId::Name(instance_name),
+                project: Some(NameOrId::Name(project_name)),
+                organization: Some(NameOrId::Id(organization_id)),
             } => {
                 let (.., authz_instance) =
                     LookupPath::new(opctx, &self.db_datastore)
@@ -88,10 +92,10 @@ impl super::Nexus {
                         .await?;
                 Ok(authz_instance.id())
             }
-            params::InstanceSelector::InstanceProjectAndOrg {
-                instance_name,
-                project_name,
-                organization_name,
+            params::InstanceSelector {
+                instance: NameOrId::Name(instance_name),
+                project: Some(NameOrId::Name(project_name)),
+                organization: Some(NameOrId::Name(organization_name)),
             } => {
                 let (.., authz_instance) =
                     LookupPath::new(opctx, &self.db_datastore)
@@ -102,14 +106,15 @@ impl super::Nexus {
                         .await?;
                 Ok(authz_instance.id())
             }
-            params::InstanceSelector::None {} => Err(Error::InvalidRequest {
+            // TODO: Add a better error message
+            _ => Err(Error::InvalidRequest {
                 message: "
-                    Unable to resolve instance. Expected one of
-                        - instance_id
-                        - instance_name, project_id
-                        - instance_name, project_name, organization_id
-                        - instance_name, project_name, organization_name
-                    "
+                Unable to resolve instance. Expected one of
+                    - instance: Uuid 
+                    - instance: Name, project: Uuid
+                    - instance: Name, project: Name, organization: Uuid
+                    - instance: Name, project: Name, organization: Name
+                "
                 .to_string(),
             }),
         }

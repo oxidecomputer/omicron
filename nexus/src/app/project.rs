@@ -20,6 +20,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
@@ -30,10 +31,13 @@ impl super::Nexus {
         project_selector: params::ProjectSelector,
     ) -> LookupResult<Uuid> {
         match project_selector {
-            params::ProjectSelector::ProjectId { project_id } => Ok(project_id),
-            params::ProjectSelector::ProjectAndOrgId {
-                project_name,
-                organization_id,
+            params::ProjectSelector { project: NameOrId::Id(id), .. } => {
+                // TODO: 400 if organization is present
+                Ok(id)
+            }
+            params::ProjectSelector {
+                project: NameOrId::Name(project_name),
+                organization: Some(NameOrId::Id(organization_id)),
             } => {
                 let (.., authz_project) =
                     LookupPath::new(opctx, &self.db_datastore)
@@ -43,9 +47,9 @@ impl super::Nexus {
                         .await?;
                 Ok(authz_project.id())
             }
-            params::ProjectSelector::ProjectAndOrg {
-                project_name,
-                organization_name,
+            params::ProjectSelector {
+                project: NameOrId::Name(project_name),
+                organization: Some(NameOrId::Name(organization_name)),
             } => {
                 let (.., authz_project) =
                     LookupPath::new(opctx, &self.db_datastore)
@@ -55,12 +59,12 @@ impl super::Nexus {
                         .await?;
                 Ok(authz_project.id())
             }
-            params::ProjectSelector::None {} => Err(Error::InvalidRequest {
+            _ => Err(Error::InvalidRequest {
                 message: "
                     Unable to resolve project. Expected one of
-                        - project_id
-                        - project_name, organization_id
-                        - project_name, organization_name
+                        - project: Uuid
+                        - project: Name, organization: Uuid 
+                        - project: Name, organization: Name
                     "
                 .to_string(),
             }),
