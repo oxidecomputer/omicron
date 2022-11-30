@@ -7659,7 +7659,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_list",
+        "operationId": "instance_list_v1",
         "parameters": [
           {
             "in": "query",
@@ -7733,7 +7733,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_create",
+        "operationId": "instance_create_v1",
         "parameters": [
           {
             "in": "query",
@@ -7788,7 +7788,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_view",
+        "operationId": "instance_view_v1",
         "parameters": [
           {
             "in": "query",
@@ -7840,7 +7840,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_delete",
+        "operationId": "instance_delete_v1",
         "parameters": [
           {
             "in": "query",
@@ -7887,7 +7887,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_migrate",
+        "operationId": "instance_migrate_v1",
         "parameters": [
           {
             "in": "query",
@@ -7951,7 +7951,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_reboot",
+        "operationId": "instance_reboot_v1",
         "parameters": [
           {
             "in": "query",
@@ -8005,7 +8005,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_serial_console",
+        "operationId": "instance_serial_console_v1",
         "parameters": [
           {
             "in": "path",
@@ -8095,7 +8095,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_serial_console_stream",
+        "operationId": "instance_serial_console_stream_v1",
         "parameters": [
           {
             "in": "path",
@@ -8143,7 +8143,7 @@
           "instances"
         ],
         "summary": "Boot an instance",
-        "operationId": "v1_instance_start",
+        "operationId": "instance_start_v1",
         "parameters": [
           {
             "in": "query",
@@ -8197,7 +8197,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "v1_instance_stop",
+        "operationId": "instance_stop_v1",
         "parameters": [
           {
             "in": "query",

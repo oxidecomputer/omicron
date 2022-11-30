@@ -146,16 +146,16 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
-        api.register(v1_instance_list)?;
-        api.register(v1_instance_view)?;
-        api.register(v1_instance_create)?;
-        api.register(v1_instance_delete)?;
-        api.register(v1_instance_migrate)?;
-        api.register(v1_instance_reboot)?;
-        api.register(v1_instance_start)?;
-        api.register(v1_instance_stop)?;
-        api.register(v1_instance_serial_console)?;
-        api.register(v1_instance_serial_console_stream)?;
+        api.register(instance_list_v1)?;
+        api.register(instance_view_v1)?;
+        api.register(instance_create_v1)?;
+        api.register(instance_delete_v1)?;
+        api.register(instance_migrate_v1)?;
+        api.register(instance_reboot_v1)?;
+        api.register(instance_start_v1)?;
+        api.register(instance_stop_v1)?;
+        api.register(instance_serial_console_v1)?;
+        api.register(instance_serial_console_stream_v1)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -2023,7 +2023,7 @@ struct InstanceListQueryParams {
     path = "/v1/instances",
     tags = ["instances"],
 }]
-async fn v1_instance_list(
+async fn instance_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceListQueryParams>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
@@ -2115,7 +2115,7 @@ struct InstanceCreateParams {
     path = "/v1/instances",
     tags = ["instances"],
 }]
-async fn v1_instance_create(
+async fn instance_create_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceCreateParams>,
     new_instance: TypedBody<params::InstanceCreate>,
@@ -2204,7 +2204,7 @@ struct InstanceQueryParams {
     path = "/v1/instances/{instance}",
     tags = ["instances"],
 }]
-async fn v1_instance_view(
+async fn instance_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2298,7 +2298,7 @@ async fn instance_view_by_id(
     path = "/v1/instances/{instance}",
     tags = ["instances"],
 }]
-async fn v1_instance_delete(
+async fn instance_delete_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2363,7 +2363,7 @@ async fn instance_delete(
     path = "/v1/instances/{instance}/migrate",
     tags = ["instances"],
 }]
-async fn v1_instance_migrate(
+async fn instance_migrate_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2444,7 +2444,7 @@ async fn instance_migrate(
     path = "/v1/instances/{instance}/reboot",
     tags = ["instances"],
 }]
-async fn v1_instance_reboot(
+async fn instance_reboot_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2509,7 +2509,7 @@ async fn instance_reboot(
     path = "/v1/instances/{instance}/start",
     tags = ["instances"],
 }]
-async fn v1_instance_start(
+async fn instance_start_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2573,7 +2573,7 @@ async fn instance_start(
     path = "/v1/instances/{instance}/stop",
     tags = ["instances"],
 }]
-async fn v1_instance_stop(
+async fn instance_stop_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<InstanceQueryParams>,
     path_params: Path<InstanceLookupPathParam>,
@@ -2646,7 +2646,7 @@ pub struct InstanceSerialConsoleParams {
     path = "/v1/instances/{instance}/serial-console",
     tags = ["instances"],
 }]
-async fn v1_instance_serial_console(
+async fn instance_serial_console_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstanceLookupPathParam>,
     query_params: Query<InstanceSerialConsoleParams>,
@@ -2723,7 +2723,7 @@ async fn instance_serial_console(
     path = "/v1/instances/{instance}/serial-console/stream",
     tags = ["instances"],
 }]
-async fn v1_instance_serial_console_stream(
+async fn instance_serial_console_stream_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     conn: WebsocketConnection,
     path_params: Path<InstanceLookupPathParam>,
