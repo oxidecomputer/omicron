@@ -443,7 +443,7 @@ impl Oximeter {
             );
         };
         let agent = backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_short(),
             make_agent,
             log_client_failure,
         )
@@ -503,7 +503,7 @@ impl Oximeter {
             );
         };
         backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_short(),
             notify_nexus,
             log_notification_failure,
         )

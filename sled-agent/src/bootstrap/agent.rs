@@ -26,9 +26,7 @@ use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
-use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
-};
+use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::borrow::Cow;
@@ -566,7 +564,7 @@ impl Agent {
     ) -> Result<RackSecret, BootstrapError> {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let rack_secret = retry_notify(
-            internal_service_policy(),
+            retry_policy_short(),
             || async {
                 let other_agents = {
                     // Manually build up a `HashSet` instead of `.collect()`ing

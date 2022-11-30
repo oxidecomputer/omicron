@@ -6,7 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-async-trait = "0.1.58"
+async-trait = "0.1.59"
 clap = { version = "4.0", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3"
@@ -32,7 +32,7 @@ version = "2.7"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.tokio]
-version = "1.21"
+version = "1.22"
 features = [ "full" ]
 
 [[bin]]

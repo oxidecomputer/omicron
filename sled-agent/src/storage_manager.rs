@@ -317,7 +317,7 @@ impl DatasetInfo {
                     warn!(log, "cockroachdb not yet alive");
                 };
                 backoff::retry_notify(
-                    backoff::internal_service_policy(),
+                    backoff::retry_policy_short(),
                     check_health,
                     log_failure,
                 )
@@ -659,7 +659,7 @@ impl StorageWorker {
         };
         nexus_notifications.push_back(
             backoff::retry_notify(
-                backoff::internal_service_policy(),
+                backoff::retry_policy_short(),
                 notify_nexus,
                 log_post_failure,
             )
@@ -705,7 +705,7 @@ impl StorageWorker {
         };
         nexus_notifications.push_back(
             backoff::retry_notify(
-                backoff::internal_service_policy(),
+                backoff::retry_policy_short(),
                 notify_nexus,
                 log_post_failure,
             )

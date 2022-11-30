@@ -10,22 +10,33 @@ pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::Error as BackoffError;
 pub use ::backoff::{backoff::Backoff, ExponentialBackoff, Notify};
 
-/// Return a backoff policy appropriate for retrying internal services
-/// indefinitely.
-pub fn internal_service_policy() -> ::backoff::ExponentialBackoff {
+/// Return a backoff policy for querying internal services which may not be up
+/// for a relatively long amount of time.
+pub fn retry_policy_long() -> ::backoff::ExponentialBackoff {
+    const INITIAL_INTERVAL: Duration = Duration::from_millis(250);
     const MAX_INTERVAL: Duration = Duration::from_secs(60 * 60);
-    internal_service_policy_with_max(MAX_INTERVAL)
+    internal_service_policy_with_max(INITIAL_INTERVAL, MAX_INTERVAL)
 }
 
-pub fn internal_service_policy_with_max(
-    max_duration: Duration,
+/// Return a backoff policy for querying conditions that are expected to
+/// complete in a relatively shorter amount of time than
+/// [retry_policy_long].
+pub fn retry_policy_short() -> ::backoff::ExponentialBackoff {
+    const INITIAL_INTERVAL: Duration = Duration::from_millis(50);
+    const MAX_INTERVAL: Duration = Duration::from_secs(1);
+    internal_service_policy_with_max(INITIAL_INTERVAL, MAX_INTERVAL)
+}
+
+fn internal_service_policy_with_max(
+    initial_interval: Duration,
+    max_interval: Duration,
 ) -> ::backoff::ExponentialBackoff {
-    const INITIAL_INTERVAL: Duration = Duration::from_millis(250);
+    let current_interval = initial_interval;
     ::backoff::ExponentialBackoff {
-        current_interval: INITIAL_INTERVAL,
-        initial_interval: INITIAL_INTERVAL,
+        current_interval,
+        initial_interval,
         multiplier: 2.0,
-        max_interval: max_duration,
+        max_interval,
         max_elapsed_time: None,
         ..backoff::ExponentialBackoff::default()
     }
