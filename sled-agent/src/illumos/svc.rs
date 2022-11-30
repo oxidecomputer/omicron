@@ -32,7 +32,7 @@ mod inner {
 
         let log_notification_failure = |_error, _delay| {};
         backoff::retry_notify(
-            backoff::internal_service_policy_short(),
+            backoff::retry_policy_short(),
             || async {
                 let mut p = smf::Properties::new();
                 let properties = {

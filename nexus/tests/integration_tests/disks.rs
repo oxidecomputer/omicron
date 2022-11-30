@@ -1154,7 +1154,7 @@ async fn query_for_metrics_until_they_exist(
     path: &str,
 ) -> ResultsPage<Measurement> {
     backoff::retry_notify(
-        backoff::internal_service_policy_short(),
+        backoff::retry_policy_short(),
         || async {
             let measurements: ResultsPage<Measurement> =
                 objects_list_page_authz(client, path).await;

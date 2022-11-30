@@ -8,8 +8,8 @@ use ddm_admin_client::types::Ipv6Prefix;
 use ddm_admin_client::Client;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
-use omicron_common::backoff::internal_service_policy_short;
 use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::retry_policy_short;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -65,7 +65,7 @@ impl DdmAdminClient {
         tokio::spawn(async move {
             let prefix =
                 Ipv6Prefix { addr: address.net().network(), mask: SLED_PREFIX };
-            retry_notify(internal_service_policy_short(), || async {
+            retry_notify(retry_policy_short(), || async {
                 info!(
                     me.log, "Sending prefix to ddmd for advertisement";
                     "prefix" => ?prefix,
