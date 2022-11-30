@@ -266,11 +266,11 @@ impl ServiceInner {
             .await?;
         }
 
-        let mut records = HashMap::new();
+        let mut records: HashMap<_, Vec<_>> = HashMap::new();
         for dataset in datasets {
             records
                 .entry(dataset.srv())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((dataset.aaaa(), dataset.address()));
         }
         let records_put = || async {
