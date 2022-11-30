@@ -57,7 +57,9 @@ use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::params::{DatasetEnsureBody, ServiceType, ServiceZoneRequest};
+use crate::params::{
+    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
+};
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -465,11 +467,7 @@ impl ServiceInner {
                 .get(addr)
                 .expect("Sled address in service plan, but not sled plan");
 
-            for zone in service_request
-                .services
-                .iter()
-                .chain(service_request.dns_services.iter())
-            {
+            for zone in &service_request.services {
                 for svc in &zone.services {
                     let kind = match svc {
                         ServiceType::Nexus { external_ip, internal_ip: _ } => {
@@ -691,24 +689,26 @@ impl ServiceInner {
             };
 
         // Set up internal DNS services.
-        futures::future::join_all(
-            service_plan
-                .services
-                .iter()
-                .filter(|(_, services_request)| {
-                    // Only send requests to sleds that are supposed to be running
-                    // DNS services.
-                    !services_request.dns_services.is_empty()
-                })
-                .map(|(sled_address, services_request)| async move {
-                    self.initialize_services(
-                        *sled_address,
-                        &services_request.dns_services,
-                    )
-                    .await?;
-                    Ok(())
-                }),
-        )
+        futures::future::join_all(service_plan.services.iter().map(
+            |(sled_address, services_request)| async move {
+                let dns_services: Vec<_> = services_request
+                    .services
+                    .iter()
+                    .filter_map(|svc| {
+                        if matches!(svc.zone_type, ZoneType::InternalDNS) {
+                            Some(svc.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !dns_services.is_empty() {
+                    self.initialize_services(*sled_address, &dns_services)
+                        .await?;
+                }
+                Ok(())
+            },
+        ))
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
@@ -756,14 +756,11 @@ impl ServiceInner {
                 // This means re-requesting the DNS service, even if it is
                 // already running - this is fine, however, as the receiving
                 // sled agent doesn't modify the already-running service.
-                let all_services = services_request
-                    .services
-                    .iter()
-                    .chain(services_request.dns_services.iter())
-                    .map(|s| s.clone())
-                    .collect::<Vec<_>>();
-
-                self.initialize_services(*sled_address, &all_services).await?;
+                self.initialize_services(
+                    *sled_address,
+                    &services_request.services,
+                )
+                .await?;
                 Ok(())
             },
         ))

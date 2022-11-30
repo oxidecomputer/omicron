@@ -78,10 +78,6 @@ pub struct SledRequest {
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
     pub services: Vec<ServiceZoneRequest>,
-
-    /// DNS Services to be instantiated.
-    #[serde(default, rename = "dns_service")]
-    pub dns_services: Vec<ServiceZoneRequest>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -280,7 +276,7 @@ impl Plan {
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
                 let dns_addr = dns_subnet.dns_address().ip();
-                request.dns_services.push(ServiceZoneRequest {
+                request.services.push(ServiceZoneRequest {
                     id: Uuid::new_v4(),
                     zone_type: ZoneType::InternalDNS,
                     addresses: vec![dns_addr],
