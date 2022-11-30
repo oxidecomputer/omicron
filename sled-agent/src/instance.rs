@@ -114,7 +114,7 @@ async fn wait_for_http_server(
     };
 
     backoff::retry_notify(
-        backoff::internal_service_policy(),
+        backoff::internal_service_policy_short(),
         || async {
             // This request is nonsensical - we don't expect an instance to
             // exist - but getting a response that isn't a connection-based
@@ -610,7 +610,7 @@ impl Instance {
             inner.log, "Adding service"; "smf_name" => &smf_instance_name
         );
         backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::internal_service_policy_short(),
             || async {
                 running_zone
                     .run_cmd(&[

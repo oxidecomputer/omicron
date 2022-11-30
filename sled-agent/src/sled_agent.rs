@@ -33,7 +33,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifact,
 };
 use omicron_common::backoff::{
-    internal_service_policy_with_max, retry_notify, BackoffError,
+    internal_service_policy_short, retry_notify, BackoffError,
 };
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -524,9 +524,7 @@ impl SledAgent {
                 );
             };
             retry_notify(
-                internal_service_policy_with_max(
-                    std::time::Duration::from_secs(1),
-                ),
+                internal_service_policy_short(),
                 notify_nexus,
                 log_notification_failure,
             )
