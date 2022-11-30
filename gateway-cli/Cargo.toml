@@ -12,7 +12,7 @@ libc = "0.2"
 slog-async = "2.6"
 slog-term = "2.9"
 tokio = { version = "1.22", features = [ "rt-multi-thread", "macros", "time" ] }
-tokio-tungstenite = "0.17"
+tokio-tungstenite = "0.18"
 uuid = { version = "1.2", features = [ "v4" ] }
 
 gateway-client = { path = "../gateway-client" }

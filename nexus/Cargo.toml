@@ -61,7 +61,7 @@ slog-dtrace = "0.2"
 steno = "0.3"
 tempfile = "3.3"
 thiserror = "1.0"
-tokio-tungstenite = "0.17.2"
+tokio-tungstenite = "0.18.0"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.4"
