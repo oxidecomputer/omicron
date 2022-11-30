@@ -2015,7 +2015,7 @@ struct InstanceListQueryParams {
     #[serde(flatten)]
     pagination: PaginatedByName,
     #[serde(flatten)]
-    selector: Option<params::ProjectSelector>,
+    selector: params::ProjectSelector,
 }
 
 #[endpoint {
@@ -2032,30 +2032,24 @@ async fn v1_instance_list(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        if let Some(selector) = query.selector {
-            let project_id = nexus.project_lookup_id(&opctx, selector).await?;
-            let instances = nexus
-                .project_list_instances(
-                    &opctx,
-                    project_id,
-                    &data_page_params_for(&rqctx, &query.pagination)?
-                        .map_name(|n| Name::ref_cast(n)),
-                )
-                .await?
-                .into_iter()
-                .map(|i| i.into())
-                .collect();
-            Ok(HttpResponseOk(ScanByName::results_page(
-                &query.pagination,
-                instances,
-                &marker_for_name,
-            )?))
-        } else {
-            Err(HttpError::for_bad_request(
-                Some("missing_param".to_string()),
-                "missing required query parameter: project".to_string(),
-            ))
-        }
+        let project_id =
+            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let instances = nexus
+            .project_list_instances(
+                &opctx,
+                project_id,
+                &data_page_params_for(&rqctx, &query.pagination)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query.pagination,
+            instances,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

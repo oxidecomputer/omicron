@@ -7694,6 +7694,7 @@
           {
             "in": "query",
             "name": "project",
+            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             },
