@@ -193,7 +193,7 @@ impl RackSetupService {
     }
 }
 
-fn rss_completed_plan_path() -> PathBuf {
+fn rss_completed_marker_path() -> PathBuf {
     std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
         .join("rss-plan-completed.marker")
 }
@@ -557,7 +557,7 @@ impl ServiceInner {
     //    outlined in the aforementioned step are created.
     //
     // 5. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
-    //    rack, a marker file is created at "rss_completed_plan_path()". This
+    //    rack, a marker file is created at "rss_completed_marker_path()". This
     //    indicates that the plan executed successfully, and no work remains.
     async fn inject_rack_setup_requests(
         &self,
@@ -570,8 +570,8 @@ impl ServiceInner {
         // Check if a previous RSS plan has completed successfully.
         //
         // If it has, the system should be up-and-running.
-        let rss_completed_plan_path = rss_completed_plan_path();
-        if rss_completed_plan_path.exists() {
+        let rss_completed_marker_path = rss_completed_marker_path();
+        if rss_completed_marker_path.exists() {
             // TODO(https://github.com/oxidecomputer/omicron/issues/724): If the
             // running configuration doesn't match Config, we could try to
             // update things.
@@ -771,9 +771,9 @@ impl ServiceInner {
         info!(self.log, "Finished setting up services");
 
         // Finally, mark that we've completed executing the plans.
-        tokio::fs::File::create(&rss_completed_plan_path).await.map_err(
+        tokio::fs::File::create(&rss_completed_marker_path).await.map_err(
             |err| SetupServiceError::Io {
-                message: format!("creating {rss_completed_plan_path:?}"),
+                message: format!("creating {rss_completed_marker_path:?}"),
                 err,
             },
         )?;
