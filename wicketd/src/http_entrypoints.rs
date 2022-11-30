@@ -62,7 +62,7 @@ async fn get_inventory(
 /// Fetch an artifact from the in-memory cache.
 #[endpoint {
     method = GET,
-    path = "/artifacts/{name}/{version}/{hash}"
+    path = "/artifacts/{name}/{version}"
 }]
 async fn get_artifact(
     rqctx: Arc<RequestContext<ServerContext>>,
@@ -75,3 +75,5 @@ async fn get_artifact(
         }
     }
 }
+
+// TODO: hash verification/fetch artifact by hash?

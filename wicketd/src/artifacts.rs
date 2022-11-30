@@ -18,10 +18,6 @@ pub(crate) struct ArtifactId {
 
     /// The version of the artifact.
     pub(crate) version: String,
-
-    /// A hash of the artifact.
-    /// TODO: is there a hash type?
-    pub(crate) hash: String,
 }
 
 /// The artifact store, used to cache artifacts.
