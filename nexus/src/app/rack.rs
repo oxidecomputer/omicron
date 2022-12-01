@@ -111,6 +111,7 @@ impl super::Nexus {
             match result {
                 Ok(rack) => {
                     if rack.initialized {
+                        info!(self.log, "Rack initialized");
                         return;
                     }
                     info!(
