@@ -1994,13 +1994,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-messages"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ce829adddaff79867ebdd88f3b4550e3658e17f6#ce829adddaff79867ebdd88f3b4550e3658e17f6"
+dependencies = [
+ "bitflags",
+ "hubpack",
+ "serde",
+ "serde-big-array 0.4.1",
+ "serde_repr",
+ "static_assertions",
+ "uuid",
+ "zerocopy 0.6.1",
+]
+
+[[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c1484109c394f45e08018e0f35adc4a136cd207d#c1484109c394f45e08018e0f35adc4a136cd207d"
 dependencies = [
  "backoff",
  "futures",
- "gateway-messages",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=c1484109c394f45e08018e0f35adc4a136cd207d)",
  "once_cell",
  "serde",
  "serde_with",
@@ -3303,7 +3318,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "gateway-messages",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=c1484109c394f45e08018e0f35adc4a136cd207d)",
  "gateway-sp-comms",
  "hex",
  "http",
@@ -5834,7 +5849,7 @@ dependencies = [
  "clap 4.0.26",
  "dropshot",
  "futures",
- "gateway-messages",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=ce829adddaff79867ebdd88f3b4550e3658e17f6)",
  "hex",
  "omicron-common",
  "serde",
