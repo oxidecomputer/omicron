@@ -15,7 +15,9 @@ use internal_dns_client::multiclient::{DnsError, Updater as DnsUpdater};
 use omicron_common::address::{
     get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
 };
-use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
@@ -198,8 +200,12 @@ impl ServiceInner {
             let log_failure = |error, _| {
                 warn!(self.log, "failed to create filesystem"; "error" => ?error);
             };
-            retry_notify(retry_policy_short(), filesystem_put, log_failure)
-                .await?;
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                filesystem_put,
+                log_failure,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -243,7 +249,12 @@ impl ServiceInner {
         let log_failure = |error, _| {
             warn!(self.log, "failed to initialize services"; "error" => ?error);
         };
-        retry_notify(retry_policy_short(), services_put, log_failure).await?;
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            services_put,
+            log_failure,
+        )
+        .await?;
         Ok(())
     }
 
@@ -393,7 +404,7 @@ impl ServiceInner {
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let addrs = retry_notify(
-            retry_policy_short(),
+            retry_policy_internal_service_aggressive(),
             || async {
                 let peer_addrs =
                     ddm_admin_client.peer_addrs().await.map_err(|err| {
@@ -440,7 +451,7 @@ impl ServiceInner {
                 );
             },
         )
-        // `retry_policy_short()` retries indefinitely on transient errors
+        // `retry_policy_internal_service_aggressive()` retries indefinitely on transient errors
         // (the only kind we produce), allowing us to `.unwrap()` without
         // panicking
         .await
