@@ -136,7 +136,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_metrics_list)?;
 
         api.register(disk_list_v1)?;
-        // api.register(disk_create_v1)?;
+        api.register(disk_create_v1)?;
         // api.register(disk_view_v1)?;
         // api.register(disk_delete_v1)?;
         // api.register(disk_metrics_list_v1)?;
@@ -1796,7 +1796,7 @@ async fn ip_pool_service_range_remove(
 // Disks
 
 #[derive(Deserialize, JsonSchema)]
-pub struct DiskQueryParams {
+pub struct DiskListParams {
     #[serde(flatten)]
     selector: params::ProjectSelector,
     #[serde(flatten)]
@@ -1810,7 +1810,7 @@ pub struct DiskQueryParams {
 }]
 async fn disk_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<DiskQueryParams>,
+    query_params: Query<DiskListParams>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1889,7 +1889,39 @@ async fn disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskCreateParams {
+    #[serde(flatten)]
+    selector: params::ProjectSelector,
+}
+
 /// Create a disk
+#[endpoint {
+    method = POST,
+    path = "/disks",
+    tags = ["disks"]
+}]
+async fn disk_create_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<DiskCreateParams>,
+    new_disk: TypedBody<params::DiskCreate>,
+) -> Result<HttpResponseCreated<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let new_disk_params = &new_disk.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_id =
+            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let disk = nexus
+            .project_create_disk(&opctx, &project_id, new_disk_params)
+            .await?;
+        Ok(HttpResponseCreated(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // TODO-correctness See note about instance create.  This should be async.
 #[endpoint {
     method = POST,
@@ -1909,13 +1941,19 @@ async fn disk_create(
     let new_disk_params = &new_disk.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus
-            .project_create_disk(
+        let project_id = nexus
+            .project_lookup_id(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &new_disk_params,
+                params::ProjectSelector {
+                    project: NameOrId::Name(project_name.clone().into()),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
             )
+            .await?;
+        let disk = nexus
+            .project_create_disk(&opctx, &project_id, &new_disk_params)
             .await?;
         Ok(HttpResponseCreated(disk.into()))
     };

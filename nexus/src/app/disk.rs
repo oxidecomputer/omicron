@@ -31,13 +31,11 @@ impl super::Nexus {
     pub async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_id: &Uuid,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
+            .project_id(*project_id)
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
