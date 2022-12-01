@@ -70,6 +70,9 @@ default-members = [
     "oximeter/oximeter-macro-impl",
     "oximeter-client",
     "test-utils",
+    "wicket",
+    "wicketd",
+    "wicketd-client",
 ]
 resolver = "2"
 
