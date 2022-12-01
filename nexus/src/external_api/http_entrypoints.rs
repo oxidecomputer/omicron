@@ -135,6 +135,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
 
+        api.register(disk_list_v1)?;
+        // api.register(disk_create_v1)?;
+        // api.register(disk_view_v1)?;
+        // api.register(disk_delete_v1)?;
+        // api.register(disk_metrics_list_v1)?;
+
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
@@ -1789,6 +1795,50 @@ async fn ip_pool_service_range_remove(
 
 // Disks
 
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskQueryParams {
+    #[serde(flatten)]
+    selector: params::ProjectSelector,
+    #[serde(flatten)]
+    pagination: PaginatedByName,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/disks",
+    tags = ["disks"],
+}]
+async fn disk_list_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<DiskQueryParams>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_id =
+            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let disks = nexus
+            .project_list_disks(
+                &opctx,
+                &project_id,
+                &data_page_params_for(&rqctx, &query.pagination)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|disk| disk.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query.pagination,
+            disks,
+            &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List disks
 #[endpoint {
     method = GET,
@@ -1808,11 +1858,21 @@ async fn disk_list(
     let project_name = &path.project_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_id = nexus
+            .project_lookup_id(
+                &opctx,
+                params::ProjectSelector {
+                    project: NameOrId::Name(project_name.clone().into()),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
+            )
+            .await?;
         let disks = nexus
             .project_list_disks(
                 &opctx,
-                organization_name,
-                project_name,
+                &project_id,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )

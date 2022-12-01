@@ -228,13 +228,11 @@ impl super::Nexus {
     pub async fn project_list_disks(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_id: &Uuid,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
+            .project_id(*project_id)
             .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
