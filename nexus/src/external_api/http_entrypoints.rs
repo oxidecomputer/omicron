@@ -137,7 +137,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(disk_list_v1)?;
         api.register(disk_create_v1)?;
-        // api.register(disk_view_v1)?;
+        api.register(disk_view_v1)?;
         // api.register(disk_delete_v1)?;
         // api.register(disk_metrics_list_v1)?;
 
@@ -1962,6 +1962,52 @@ async fn disk_create(
 
 /// Path parameters for Disk requests
 #[derive(Deserialize, JsonSchema)]
+struct DiskLookupPathParam {
+    /// If Name is used to reference the disk you must also include one of the following qualifiers as query parameters:
+    /// - `project_id`
+    /// - `project_name`, `organization_id`
+    /// - `project_name`, `organization_name`
+    ///
+    /// If Id is used the above qualifiers are will be ignored
+    disk: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct DiskViewParams {
+    #[serde(flatten)]
+    selector: Option<params::ProjectSelector>,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/disks/{disk_name}",
+    tags = ["disks"]
+}]
+async fn disk_view_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DiskLookupPathParam>,
+    query_params: Query<DiskViewParams>,
+) -> Result<HttpResponseOk<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk_id = nexus
+            .disk_lookup_id(
+                &opctx,
+                params::DiskSelector::new(path.disk, &query.selector),
+            )
+            .await?;
+        let disk = nexus.disk_fetch(&opctx, &disk_id).await?;
+        Ok(HttpResponseOk(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Disk requests
+#[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
     organization_name: Name,
     project_name: Name,
@@ -1986,9 +2032,19 @@ async fn disk_view(
     let disk_name = &path.disk_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus
-            .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
+        let disk_id = nexus
+            .disk_lookup_id(
+                &opctx,
+                params::DiskSelector {
+                    disk: NameOrId::Name(disk_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
+            )
             .await?;
+        let disk = nexus.disk_fetch(&opctx, &disk_id).await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2010,7 +2066,7 @@ async fn disk_view_by_id(
     let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus.disk_fetch_by_id(&opctx, id).await?;
+        let disk = nexus.disk_fetch(&opctx, id).await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2086,16 +2142,23 @@ async fn disk_metrics_list(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-
-        // This ensures the user is authorized on Action::Read for this disk
-        let disk = nexus
-            .disk_fetch(&opctx, organization_name, project_name, disk_name)
+        let disk_id = nexus
+            .disk_lookup_id(
+                &opctx,
+                params::DiskSelector {
+                    disk: NameOrId::Name(disk_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
+            )
             .await?;
-        let upstairs_uuid = disk.id();
+
         let result = nexus
             .select_timeseries(
                 &format!("crucible_upstairs:{}", metric_name),
-                &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                &[&format!("upstairs_uuid=={}", disk_id)],
                 query,
                 limit,
             )

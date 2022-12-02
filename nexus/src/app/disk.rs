@@ -20,6 +20,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
@@ -27,6 +28,73 @@ use uuid::Uuid;
 
 impl super::Nexus {
     // Disks
+    pub async fn disk_lookup_id(
+        &self,
+        opctx: &OpContext,
+        disk_selector: params::DiskSelector,
+    ) -> LookupResult<Uuid> {
+        match disk_selector {
+            params::DiskSelector { disk: NameOrId::Id(id), .. } => {
+                let (.., authz_disk) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .disk_id(id)
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_disk.id())
+            }
+            params::DiskSelector {
+                disk: NameOrId::Name(disk_name),
+                project: Some(NameOrId::Id(project_id)),
+                ..
+            } => {
+                let (.., authz_disk) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .project_id(project_id)
+                        .disk_name(&Name(disk_name.clone()))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_disk.id())
+            }
+            params::DiskSelector {
+                disk: NameOrId::Name(disk_name),
+                project: Some(NameOrId::Name(project_name)),
+                organization: Some(NameOrId::Id(organization_id)),
+            } => {
+                let (.., authz_disk) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_id(organization_id)
+                        .project_name(&Name(project_name.clone()))
+                        .disk_name(&Name(disk_name.clone()))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_disk.id())
+            }
+            params::DiskSelector {
+                disk: NameOrId::Name(disk_name),
+                project: Some(NameOrId::Name(project_name)),
+                organization: Some(NameOrId::Name(organization_name)),
+            } => {
+                let (.., authz_disk) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_name(&Name(organization_name.clone()))
+                        .project_name(&Name(project_name.clone()))
+                        .disk_name(&Name(disk_name.clone()))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_disk.id())
+            }
+            _ => Err(Error::InvalidRequest {
+                message: "
+                Unable to resolve disk. Expected one of
+                    - disk: Uuid
+                    - disk: Name, project: Uuid
+                    - disk: Name, project: Name, organization: Uuid
+                    - disk: Name, project: Name, organization: Name
+                "
+                .to_string(),
+            }),
+        }
+    }
 
     pub async fn project_create_disk(
         self: &Arc<Self>,
@@ -239,22 +307,6 @@ impl super::Nexus {
     }
 
     pub async fn disk_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<db::model::Disk> {
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .fetch()
-            .await?;
-        Ok(db_disk)
-    }
-
-    pub async fn disk_fetch_by_id(
         &self,
         opctx: &OpContext,
         disk_id: &Uuid,

@@ -46,6 +46,28 @@ impl InstanceSelector {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskSelector {
+    pub disk: NameOrId,
+    pub project: Option<NameOrId>,
+    pub organization: Option<NameOrId>,
+}
+
+impl DiskSelector {
+    pub fn new(
+        disk: NameOrId,
+        project_selector: &Option<ProjectSelector>,
+    ) -> DiskSelector {
+        DiskSelector {
+            disk,
+            organization: project_selector
+                .as_ref()
+                .and_then(|s| s.organization.clone()),
+            project: project_selector.as_ref().map(|s| s.project.clone()),
+        }
+    }
+}
+
 // Silos
 
 /// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)
