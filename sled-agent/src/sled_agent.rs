@@ -18,7 +18,7 @@ use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, VpcFirewallRule,
+    ServiceEnsureBody, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -201,8 +201,6 @@ impl SledAgent {
         request: SledAgentRequest,
         services: ServiceManager,
     ) -> Result<SledAgent, Error> {
-        let id = config.id;
-
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
         let parent_log = log.clone();
@@ -210,7 +208,7 @@ impl SledAgent {
         // Use "log" for ourself.
         let log = log.new(o!(
             "component" => "SledAgent",
-            "sled_id" => id.to_string(),
+            "sled_id" => request.id.to_string(),
         ));
         info!(&log, "created sled agent");
 
@@ -305,7 +303,7 @@ impl SledAgent {
 
         let storage = StorageManager::new(
             &parent_log,
-            id,
+            request.id,
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
@@ -349,7 +347,7 @@ impl SledAgent {
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
-                id,
+                id: request.id,
                 subnet: request.subnet,
                 storage,
                 instances,
@@ -513,6 +511,12 @@ impl SledAgent {
     ) -> Result<(), Error> {
         self.inner.services.ensure_persistent(requested_services).await?;
         Ok(())
+    }
+
+    /// Gets the sled's current list of all zpools.
+    pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
+        let zpools = self.inner.storage.get_zpools().await?;
+        Ok(zpools)
     }
 
     /// Ensures that a filesystem type exists within the zpool.
