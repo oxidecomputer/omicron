@@ -138,7 +138,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_list_v1)?;
         api.register(disk_create_v1)?;
         api.register(disk_view_v1)?;
-        // api.register(disk_delete_v1)?;
+        api.register(disk_delete_v1)?;
         // api.register(disk_metrics_list_v1)?;
 
         api.register(instance_list)?;
@@ -2075,6 +2075,34 @@ async fn disk_view_by_id(
 /// Delete a disk
 #[endpoint {
     method = DELETE,
+    path = "/disks/{disk}",
+    tags = ["disks"],
+}]
+async fn disk_delete_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DiskLookupPathParam>,
+    query_params: Query<DiskViewParams>,
+) -> Result<HttpResponseOk<()>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk_id = nexus
+            .disk_lookup_id(
+                &opctx,
+                params::DiskSelector::new(path.disk, &query.selector),
+            )
+            .await?;
+        nexus.project_delete_disk(&opctx, &disk_id).await?;
+        Ok(HttpResponseOk(()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
     tags = ["disks"],
 }]
@@ -2090,14 +2118,19 @@ async fn disk_delete(
     let disk_name = &path.disk_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_disk(
+        let disk_id = nexus
+            .disk_lookup_id(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &disk_name,
+                params::DiskSelector {
+                    disk: NameOrId::Name(disk_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
             )
             .await?;
+        nexus.project_delete_disk(&opctx, &disk_id).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

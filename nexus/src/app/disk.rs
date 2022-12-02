@@ -421,14 +421,10 @@ impl super::Nexus {
     pub async fn project_delete_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
+        disk_id: &Uuid,
     ) -> DeleteResult {
         let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
+            .disk_id(disk_id)
             .lookup_for(authz::Action::Delete)
             .await?;
 
