@@ -276,8 +276,8 @@ impl SledAgent {
         &self,
         zpool_id: Uuid,
         dataset_id: Uuid,
-    ) {
-        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await;
+    ) -> SocketAddr {
+        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
     }
 
     /// Returns a crucible dataset within a particular zpool.

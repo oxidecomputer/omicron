@@ -46,13 +46,11 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
-use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -623,9 +621,15 @@ impl ServiceManager {
                         // one for HTTPS (port 443).
                         dropshot_external: vec![
                             dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(*external_ip, 443),
+                                bind_address: SocketAddr::new(
+                                    *external_ip,
+                                    443,
+                                ),
                                 request_body_max_bytes: 1048576,
-                                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
+                                tls: Some(dropshot::ConfigTls {
+                                    cert_file,
+                                    key_file,
+                                }),
                             },
                             dropshot::ConfigDropshot {
                                 bind_address: SocketAddr::new(*external_ip, 80),
@@ -634,19 +638,17 @@ impl ServiceManager {
                             },
                         ],
                         dropshot_internal: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(IpAddr::V6(*internal_ip), NEXUS_INTERNAL_PORT),
+                            bind_address: SocketAddr::new(
+                                IpAddr::V6(*internal_ip),
+                                NEXUS_INTERNAL_PORT,
+                            ),
                             request_body_max_bytes: 1048576,
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             self.inner.underlay_address,
                         ),
-                        // TODO: Switch to inferring this URL by DNS.
-                        database: nexus_config::Database::FromUrl {
-                            url: PostgresConfigWithUrl::from_str(
-                                "postgresql://root@[fd00:1122:3344:0101::3]:32221/omicron?sslmode=disable"
-                            ).unwrap(),
-                        }
+                        database: nexus_config::Database::FromDns,
                     };
 
                     // Copy the partial config file to the expected location.

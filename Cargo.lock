@@ -2993,6 +2993,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "hex",
+ "internal-dns-client",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -3043,6 +3044,7 @@ dependencies = [
  "dropshot",
  "omicron-common",
  "slog",
+ "uuid",
 ]
 
 [[package]]
