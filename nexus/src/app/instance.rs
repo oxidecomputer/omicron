@@ -62,7 +62,12 @@ impl super::Nexus {
         match instance_selector {
             params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
                 // TODO: 400 if project or organization are present
-                Ok(id)
+                let (.., authz_instance) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .instance_id(id)
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_instance.id())
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name),

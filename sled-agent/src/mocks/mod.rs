@@ -6,9 +6,8 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DatasetPutRequest, DatasetPutResponse, DiskRuntimeState,
-    InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
-    ZpoolPutRequest, ZpoolPutResponse,
+    DiskRuntimeState, InstanceRuntimeState, SledAgentStartupInfo,
+    UpdateArtifactKind, ZpoolPutRequest, ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -50,11 +49,5 @@ mock! {
             zpool_id: &Uuid,
             info: &ZpoolPutRequest,
         ) -> Result<ZpoolPutResponse>;
-        pub async fn dataset_put(
-            &self,
-            zpool_id: &Uuid,
-            dataset_id: &Uuid,
-            info: &DatasetPutRequest,
-        ) -> Result<DatasetPutResponse>;
     }
 }

@@ -2,23 +2,84 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Rack Setup Service implementation
+//! Rack Setup Service (RSS) implementation
+//!
+//! RSS triggers the initialization of:
+//! - Sled Agents (giving them underlay addresses)
+//! - Trust Quorum (coordinating between Sled Agents)
+//! - Services (such as internal DNS, CRDB, Nexus)
+//! - DNS records for those services
+//! - Handoff to Nexus, for control of Control Plane management
+//!
+//! # Phases and Configuration Files
+//!
+//! Rack setup occurs in distinct phases which are denoted by the prescence of
+//! configuration files.
+//!
+//! - /var/oxide/rss-sled-plan.toml (Sled Plan)
+//! - /var/oxide/rss-service-plan.toml (Service Plan)
+//! - /var/oxide/rss-plan-completed.marker (Plan Execution Complete)
+//!
+//! ## Sled Plan
+//!
+//! RSS should start as a service executing on a Sidecar-attached Gimlet
+//! (Scrimlet). It must communicate with other sleds on the bootstrap network to
+//! discover neighbors. RSS uses the bootstrap network to identify peers, assign
+//! them subnets and UUIDs, and initialize a trust quorum. Once RSS decides
+//! these values it commits them to a local file as the "Sled Plan", before
+//! sending requests.
+//!
+//! As a result, restarting RSS should result in retransmission of the same
+//! values, as long as the same configuration file is used.
+//!
+//! ## Service Plan
+//!
+//! After the trust quorum is established and Sled Agents are executing across
+//! the rack, RSS can make the call on "what services should run where",
+//! ensuring the minimal set of services necessary to execute Nexus are
+//! operational. Critically, these include:
+//! - Internal DNS: Necessary so internal services can discover each other
+//! - CockroachDB: Necessary for Nexus to operate
+//! - Nexus itself
+//!
+//! Once the distribution of these services is decided (which sled should run
+//! what service? On what zpools should CockroachDB be provisioned?) it is
+//! committed to the Service Plan, and executed.
+//!
+//! ## Execution Complete
+//!
+//! Once the both the Sled and Service plans have finished execution, handoff of
+//! control to Nexus can occur. <https://rfd.shared.oxide.computer/rfd/0278>
+//! covers this in more detail, but in short, RSS creates a "marker" file after
+//! completing execution, and unconditionally calls the "handoff to Nexus" API
+//! thereafter.
 
-use super::config::{HardcodedSledRequest, SetupServiceConfig as Config};
-use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
+use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
-use crate::params::{ServiceType, ServiceZoneRequest, ZoneType};
-use internal_dns_client::multiclient::{DnsError, Updater as DnsUpdater};
-use omicron_common::address::{
-    get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
+use crate::params::{
+    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
-use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
+use crate::rack_setup::plan::service::{
+    Plan as ServicePlan, PlanError as ServicePlanError,
 };
+use crate::rack_setup::plan::sled::{
+    generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
+};
+use internal_dns_client::multiclient::{
+    DnsError, Resolver as DnsResolver, Updater as DnsUpdater,
+};
+use internal_dns_client::names::{ServiceName, SRV};
+use nexus_client::{
+    types as NexusTypes, Client as NexusClient, Error as NexusError,
+};
+use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
+use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
 use serde::{Deserialize, Serialize};
+use sled_agent_client::{
+    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
+};
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
@@ -27,7 +88,9 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::OnceCell;
-use uuid::Uuid;
+
+// The minimum number of sleds to initialize the rack.
+const MINIMUM_SLED_COUNT: usize = 1;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -39,26 +102,32 @@ pub enum SetupServiceError {
         err: std::io::Error,
     },
 
+    #[error("Cannot create plan for sled services: {0}")]
+    ServicePlan(#[from] ServicePlanError),
+
+    #[error("Cannot create plan for sled setup: {0}")]
+    SledPlan(#[from] SledPlanError),
+
+    #[error("Bad configuration for setting up rack: {0}")]
+    BadConfig(String),
+
     #[error("Error initializing sled via sled-agent: {0}")]
     SledInitialization(String),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
-    SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
+    SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
+
+    #[error("Error making HTTP request to Nexus: {0}")]
+    NexusApi(#[from] NexusError<NexusTypes::Error>),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
-
-    #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
 
     #[error("Failed to monitor for peers: {0}")]
     PeerMonitor(#[from] tokio::sync::broadcast::error::RecvError),
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
-
-    #[error("Failed to split rack secret: {0:?}")]
-    SplitRackSecret(vsss_rs::Error),
 
     #[error("Failed to access DNS servers: {0}")]
     Dns(#[from] DnsError),
@@ -68,7 +137,6 @@ pub enum SetupServiceError {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
     initialization_request: SledAgentRequest,
-    services_request: HardcodedSledRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -123,14 +191,9 @@ impl RackSetupService {
     }
 }
 
-fn rss_plan_path() -> std::path::PathBuf {
+fn rss_completed_marker_path() -> PathBuf {
     std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-plan.toml")
-}
-
-fn rss_completed_plan_path() -> std::path::PathBuf {
-    std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-plan-completed.toml")
+        .join("rss-plan-completed.marker")
 }
 
 // Describes the options when awaiting for peers.
@@ -164,8 +227,8 @@ impl ServiceInner {
 
     async fn initialize_datasets(
         &self,
-        sled_address: SocketAddr,
-        datasets: &Vec<crate::params::DatasetEnsureBody>,
+        sled_address: SocketAddrV6,
+        datasets: &Vec<DatasetEnsureBody>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
 
@@ -174,10 +237,10 @@ impl ServiceInner {
             .timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
-        let client = sled_agent_client::Client::new_with_client(
+        let client = SledAgentClient::new_with_client(
             &format!("http://{}", sled_address),
             client,
-            self.log.new(o!("SledAgentClient" => sled_address)),
+            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
 
         info!(self.log, "sending dataset requests...");
@@ -188,31 +251,42 @@ impl ServiceInner {
                     .filesystem_put(&dataset.clone().into())
                     .await
                     .map_err(BackoffError::transient)?;
-                Ok::<
-                    (),
-                    BackoffError<
-                        sled_agent_client::Error<
-                            sled_agent_client::types::Error,
-                        >,
-                    >,
-                >(())
+                Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
             };
             let log_failure = |error, _| {
                 warn!(self.log, "failed to create filesystem"; "error" => ?error);
             };
-            retry_notify(
-                internal_service_policy(),
-                filesystem_put,
-                log_failure,
-            )
-            .await?;
+            retry_notify(retry_policy_short(), filesystem_put, log_failure)
+                .await?;
         }
+
+        let mut records: HashMap<_, Vec<_>> = HashMap::new();
+        for dataset in datasets {
+            records
+                .entry(dataset.srv())
+                .or_default()
+                .push((dataset.aaaa(), dataset.address()));
+        }
+        let records_put = || async {
+            self.dns_servers
+                .get()
+                .expect("DNS servers must be initialized first")
+                .insert_dns_records(&records)
+                .await
+                .map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<DnsError>>(())
+        };
+        let log_failure = |error, _| {
+            warn!(self.log, "failed to set DNS records"; "error" => ?error);
+        };
+        retry_notify(retry_policy_short(), records_put, log_failure).await?;
+
         Ok(())
     }
 
     async fn initialize_services(
         &self,
-        sled_address: SocketAddr,
+        sled_address: SocketAddrV6,
         services: &Vec<ServiceZoneRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
@@ -221,17 +295,17 @@ impl ServiceInner {
             .timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
-        let client = sled_agent_client::Client::new_with_client(
+        let client = SledAgentClient::new_with_client(
             &format!("http://{}", sled_address),
             client,
-            self.log.new(o!("SledAgentClient" => sled_address)),
+            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
 
         info!(self.log, "sending service requests...");
         let services_put = || async {
             info!(self.log, "initializing sled services: {:?}", services);
             client
-                .services_put(&sled_agent_client::types::ServiceEnsureBody {
+                .services_put(&SledAgentTypes::ServiceEnsureBody {
                     services: services
                         .iter()
                         .map(|s| s.clone().into())
@@ -239,156 +313,41 @@ impl ServiceInner {
                 })
                 .await
                 .map_err(BackoffError::transient)?;
-            Ok::<
-                (),
-                BackoffError<
-                    sled_agent_client::Error<sled_agent_client::types::Error>,
-                >,
-            >(())
+            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
         };
         let log_failure = |error, _| {
             warn!(self.log, "failed to initialize services"; "error" => ?error);
         };
-        retry_notify(internal_service_policy(), services_put, log_failure)
-            .await?;
-        Ok(())
-    }
+        retry_notify(retry_policy_short(), services_put, log_failure).await?;
 
-    async fn load_plan(
-        &self,
-    ) -> Result<Option<HashMap<SocketAddrV6, SledAllocation>>, SetupServiceError>
-    {
-        // If we already created a plan for this RSS to allocate
-        // subnets/requests to sleds, re-use that existing plan.
-        let rss_plan_path = rss_plan_path();
-        if rss_plan_path.exists() {
-            info!(self.log, "RSS plan already created, loading from file");
-
-            let plan: std::collections::HashMap<SocketAddrV6, SledAllocation> =
-                toml::from_str(
-                    &tokio::fs::read_to_string(&rss_plan_path).await.map_err(
-                        |err| SetupServiceError::Io {
-                            message: format!(
-                                "Loading RSS plan {rss_plan_path:?}"
-                            ),
-                            err,
-                        },
-                    )?,
-                )
-                .map_err(|err| SetupServiceError::Toml {
-                    path: rss_plan_path,
-                    err,
-                })?;
-            Ok(Some(plan))
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn create_plan(
-        &self,
-        config: &Config,
-        bootstrap_addrs: Vec<Ipv6Addr>,
-    ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
-        let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
-        let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
-        let dns_subnets = reserved_rack_subnet.get_dns_subnets();
-
-        info!(self.log, "dns_subnets: {:#?}", dns_subnets);
-
-        let requests_and_sleds =
-            bootstrap_addrs.map(|(idx, bootstrap_addr)| {
-                // If a sled was explicitly requested from the RSS configuration,
-                // use that. Otherwise, just give it a "default" (empty) set of
-                // services.
-                let mut request = {
-                    if idx < config.requests.len() {
-                        config.requests[idx].clone()
-                    } else {
-                        HardcodedSledRequest::default()
+        // Insert DNS records, if the DNS servers have been initialized
+        if let Some(dns_servers) = self.dns_servers.get() {
+            let mut records = HashMap::new();
+            for zone in services {
+                for service in &zone.services {
+                    if let Some(addr) = zone.address(&service) {
+                        records
+                            .entry(zone.srv(&service))
+                            .or_insert_with(Vec::new)
+                            .push((zone.aaaa(), addr));
                     }
-                };
-
-                // The first enumerated sleds get assigned the additional
-                // responsibility of being internal DNS servers.
-                if idx < dns_subnets.len() {
-                    let dns_subnet = &dns_subnets[idx];
-                    let dns_addr = dns_subnet.dns_address().ip();
-                    request.dns_services.push(ServiceZoneRequest {
-                        id: Uuid::new_v4(),
-                        zone_type: ZoneType::InternalDNS,
-                        addresses: vec![dns_addr],
-                        gz_addresses: vec![dns_subnet.gz_address().ip()],
-                        services: vec![ServiceType::InternalDns {
-                            server_address: SocketAddrV6::new(
-                                dns_addr,
-                                DNS_SERVER_PORT,
-                                0,
-                                0,
-                            ),
-                            dns_address: SocketAddrV6::new(
-                                dns_addr, DNS_PORT, 0, 0,
-                            ),
-                        }],
-                    });
                 }
-
-                (request, (idx, bootstrap_addr))
-            });
-
-        let rack_id = Uuid::new_v4();
-        let allocations = requests_and_sleds.map(|(request, sled)| {
-            let (idx, bootstrap_addr) = sled;
-            info!(
-                self.log,
-                "Creating plan for the sled at {:?}", bootstrap_addr
-            );
-            let bootstrap_addr =
-                SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_PORT, 0, 0);
-            let sled_subnet_index =
-                u8::try_from(idx + 1).expect("Too many peers!");
-            let subnet = config.sled_subnet(sled_subnet_index);
-
-            (
-                bootstrap_addr,
-                SledAllocation {
-                    initialization_request: SledAgentRequest {
-                        id: Uuid::new_v4(),
-                        subnet,
-                        rack_id,
-                        gateway: config.gateway.clone(),
-                    },
-                    services_request: request,
-                },
-            )
-        });
-
-        info!(self.log, "Serializing plan");
-
-        let mut plan = std::collections::HashMap::new();
-        for (addr, allocation) in allocations {
-            plan.insert(addr, allocation);
+            }
+            let records_put = || async {
+                dns_servers
+                    .insert_dns_records(&records)
+                    .await
+                    .map_err(BackoffError::transient)?;
+                Ok::<(), BackoffError<DnsError>>(())
+            };
+            let log_failure = |error, _| {
+                warn!(self.log, "failed to set DNS records"; "error" => ?error);
+            };
+            retry_notify(retry_policy_short(), records_put, log_failure)
+                .await?;
         }
 
-        // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan =
-            toml::Value::try_from(&plan).unwrap_or_else(|e| {
-                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
-            });
-        let plan_str = toml::to_string(&serialized_plan)
-            .expect("Cannot turn config to string");
-
-        info!(self.log, "Plan serialized as: {}", plan_str);
-        let path = rss_plan_path();
-        tokio::fs::write(&path, plan_str).await.map_err(|err| {
-            SetupServiceError::Io {
-                message: format!("Storing RSS plan to {path:?}"),
-                err,
-            }
-        })?;
-        info!(self.log, "Plan written to storage");
-
-        Ok(plan)
+        Ok(())
     }
 
     // Waits for sufficient neighbors to exist so the initial set of requests
@@ -400,10 +359,7 @@ impl ServiceInner {
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let addrs = retry_notify(
-            // TODO-correctness `internal_service_policy()` has potentially-long
-            // exponential backoff, which is probably not what we want. See
-            // https://github.com/oxidecomputer/omicron/issues/1270
-            internal_service_policy(),
+            retry_policy_short(),
             || async {
                 let peer_addrs =
                     ddm_admin_client.peer_addrs().await.map_err(|err| {
@@ -450,13 +406,117 @@ impl ServiceInner {
                 );
             },
         )
-        // `internal_service_policy()` retries indefinitely on transient errors
+        // `retry_policy_short()` retries indefinitely on transient errors
         // (the only kind we produce), allowing us to `.unwrap()` without
         // panicking
         .await
         .unwrap();
 
         Ok(addrs)
+    }
+
+    async fn handoff_to_nexus(
+        &self,
+        config: &Config,
+        sled_plan: &SledPlan,
+        service_plan: &ServicePlan,
+    ) -> Result<(), SetupServiceError> {
+        info!(self.log, "Handing off control to Nexus");
+
+        let resolver = DnsResolver::new(&config.az_subnet())
+            .expect("Failed to create DNS resolver");
+        let ip = resolver
+            .lookup_ip(SRV::Service(ServiceName::Nexus))
+            .await
+            .expect("Failed to lookup IP");
+        let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
+
+        info!(self.log, "Nexus address: {}", nexus_address.to_string());
+
+        let nexus_client = NexusClient::new(
+            &format!("http://{}", nexus_address),
+            self.log.new(o!("component" => "NexusClient")),
+        );
+
+        // Ensure we can quickly look up "Sled Agent Address" -> "UUID of sled".
+        //
+        // We need the ID when passing info to Nexus.
+        let mut id_map = HashMap::new();
+        for (_, sled_request) in sled_plan.sleds.iter() {
+            id_map
+                .insert(get_sled_address(sled_request.subnet), sled_request.id);
+        }
+
+        // Convert all the information we have about services and datasets into
+        // a format which can be processed by Nexus.
+        let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
+        let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
+        for (addr, service_request) in service_plan.services.iter() {
+            let sled_id = *id_map
+                .get(addr)
+                .expect("Sled address in service plan, but not sled plan");
+
+            for zone in &service_request.services {
+                for svc in &zone.services {
+                    let kind = match svc {
+                        ServiceType::Nexus { external_ip, internal_ip: _ } => {
+                            NexusTypes::ServiceKind::Nexus {
+                                external_address: *external_ip,
+                            }
+                        }
+                        ServiceType::InternalDns { .. } => {
+                            NexusTypes::ServiceKind::InternalDNS
+                        }
+                        ServiceType::Oximeter => {
+                            NexusTypes::ServiceKind::Oximeter
+                        }
+                        _ => {
+                            return Err(SetupServiceError::BadConfig(format!(
+                                "RSS should not request service of type: {}",
+                                svc
+                            )));
+                        }
+                    };
+
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id: zone.id,
+                        sled_id,
+                        // TODO: Should this be a vec, or a single value?
+                        address: zone.addresses[0],
+                        kind,
+                    })
+                }
+            }
+
+            for dataset in service_request.datasets.iter() {
+                datasets.push(NexusTypes::DatasetCreateRequest {
+                    zpool_id: dataset.zpool_id,
+                    dataset_id: dataset.id,
+                    request: NexusTypes::DatasetPutRequest {
+                        address: dataset.address.to_string(),
+                        kind: dataset.dataset_kind.clone().into(),
+                    },
+                })
+            }
+        }
+
+        let request =
+            NexusTypes::RackInitializationRequest { services, datasets };
+
+        let notify_nexus = || async {
+            nexus_client
+                .rack_initialization_complete(&sled_plan.rack_id, &request)
+                .await
+                .map_err(BackoffError::transient)
+        };
+        let log_failure = |err, _| {
+            info!(self.log, "Failed to handoff to nexus: {err}");
+        };
+
+        retry_notify(retry_policy_short(), notify_nexus, log_failure).await?;
+
+        info!(self.log, "Handoff to Nexus is complete");
+        Ok(())
     }
 
     // In lieu of having an operator send requests to all sleds via an
@@ -466,19 +526,23 @@ impl ServiceInner {
     // This method has a few distinct phases, identified by files in durable
     // storage:
     //
-    // 1. ALLOCATION PLAN CREATION. When the RSS starts up for the first time,
-    //    it creates an allocation plan to provision subnets and services
-    //    to an initial set of sleds.
+    // 1. SLED ALLOCATION PLAN CREATION. When the RSS starts up for the first
+    //    time, it creates an allocation plan to provision subnets to an initial
+    //    set of sleds.
     //
-    //    This plan is stored at "rss_plan_path()".
-    //
-    // 2. ALLOCATION PLAN EXECUTION. The RSS then carries out this plan, making
+    // 2. SLED ALLOCATION PLAN EXECUTION. The RSS then carries out this plan, making
     //    requests to the sleds enumerated within the "allocation plan".
     //
-    // 3. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
-    //    rack, the "rss_plan_path()" file is renamed to
-    //    "rss_completed_plan_path()". This indicates that the plan executed
-    //    successfully, and no work remains.
+    // 3. SERVICE ALLOCATION PLAN CREATION. Now that Sled Agents are executing
+    //    on their respsective subnets, they can be queried to create an
+    //    allocation plan for services.
+    //
+    // 4. SERVICE ALLOCATION PLAN EXECUTION. RSS requests that the services
+    //    outlined in the aforementioned step are created.
+    //
+    // 5. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
+    //    rack, a marker file is created at "rss_completed_marker_path()". This
+    //    indicates that the plan executed successfully, and no work remains.
     async fn inject_rack_setup_requests(
         &self,
         config: &Config,
@@ -490,8 +554,8 @@ impl ServiceInner {
         // Check if a previous RSS plan has completed successfully.
         //
         // If it has, the system should be up-and-running.
-        let rss_completed_plan_path = rss_completed_plan_path();
-        if rss_completed_plan_path.exists() {
+        let rss_completed_marker_path = rss_completed_marker_path();
+        if rss_completed_marker_path.exists() {
             // TODO(https://github.com/oxidecomputer/omicron/issues/724): If the
             // running configuration doesn't match Config, we could try to
             // update things.
@@ -499,6 +563,19 @@ impl ServiceInner {
                 self.log,
                 "RSS configuration looks like it has already been applied",
             );
+
+            let sled_plan = SledPlan::load(&self.log)
+                .await?
+                .expect("Sled plan should exist if completed marker exists");
+            if &sled_plan.config != config {
+                return Err(SetupServiceError::BadConfig(
+                    "Configuration changed".to_string(),
+                ));
+            }
+            let service_plan = ServicePlan::load(&self.log)
+                .await?
+                .expect("Service plan should exist if completed marker exists");
+            self.handoff_to_nexus(&config, &sled_plan, &service_plan).await?;
             return Ok(());
         } else {
             info!(self.log, "RSS configuration has not been fully applied yet",);
@@ -507,11 +584,13 @@ impl ServiceInner {
         // Wait for either:
         // - All the peers to re-load an old plan (if one exists)
         // - Enough peers to create a new plan (if one does not exist)
-        let maybe_plan = self.load_plan().await?;
-        let expectation = if let Some(plan) = &maybe_plan {
-            PeerExpectation::LoadOldPlan(plan.keys().map(|a| *a.ip()).collect())
+        let maybe_sled_plan = SledPlan::load(&self.log).await?;
+        let expectation = if let Some(plan) = &maybe_sled_plan {
+            PeerExpectation::LoadOldPlan(
+                plan.sleds.keys().map(|a| *a.ip()).collect(),
+            )
         } else {
-            PeerExpectation::CreateNewPlan(config.requests.len())
+            PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
         };
         let addrs = self
             .wait_for_peers(expectation, local_bootstrap_agent.our_address())
@@ -522,15 +601,16 @@ impl ServiceInner {
         //
         // NOTE: This is a "point-of-no-return" -- before sending any requests
         // to neighboring sleds, the plan must be recorded to durable storage.
-        // This way, if the RSS power-cycles, it can idempotently execute the
-        // same allocation plan.
-        let plan = if let Some(plan) = maybe_plan {
+        // This way, if the RSS power-cycles, it can idempotently provide the
+        // same subnets to the same sleds.
+        let plan = if let Some(plan) = maybe_sled_plan {
             info!(self.log, "Re-using existing allocation plan");
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            self.create_plan(config, addrs).await?
+            SledPlan::create(&self.log, config, addrs).await?
         };
+        let config = &plan.config;
 
         // Generate our rack secret, unless we're in the single-sled case.
         let mut maybe_rack_secret_shares = generate_rack_secret(
@@ -549,7 +629,7 @@ impl ServiceInner {
             // addrs, which would remove the need for this assertion.
             assert_eq!(
                 rack_secret_shares.len(),
-                plan.len(),
+                plan.sleds.len(),
                 concat!(
                     "Number of trust quorum members does not match ",
                     "number of sleds in the plan"
@@ -560,11 +640,12 @@ impl ServiceInner {
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
-                plan.iter()
-                    .map(move |(bootstrap_addr, allocation)| {
+                plan.sleds
+                    .iter()
+                    .map(move |(bootstrap_addr, initialization_request)| {
                         (
                             *bootstrap_addr,
-                            allocation.initialization_request.clone(),
+                            initialization_request.clone(),
                             maybe_rack_secret_shares
                                 .as_mut()
                                 .map(|shares| shares.next().unwrap()),
@@ -575,27 +656,43 @@ impl ServiceInner {
             .await
             .map_err(SetupServiceError::SledInitialization)?;
 
-        // Set up internal DNS services.
-        futures::future::join_all(
-            plan.iter()
-                .filter(|(_, allocation)| {
-                    // Only send requests to sleds that are supposed to be running
-                    // DNS services.
-                    !allocation.services_request.dns_services.is_empty()
-                })
-                .map(|(_, allocation)| async move {
-                    let sled_address = SocketAddr::V6(get_sled_address(
-                        allocation.initialization_request.subnet,
-                    ));
+        // Now that sled agents have been initialized, we can create
+        // a service allocation plan.
+        let sled_addresses: Vec<_> = plan
+            .sleds
+            .values()
+            .map(|initialization_request| {
+                get_sled_address(initialization_request.subnet)
+            })
+            .collect();
+        let service_plan =
+            if let Some(plan) = ServicePlan::load(&self.log).await? {
+                plan
+            } else {
+                ServicePlan::create(&self.log, &config, &sled_addresses).await?
+            };
 
-                    self.initialize_services(
-                        sled_address,
-                        &allocation.services_request.dns_services,
-                    )
-                    .await?;
-                    Ok(())
-                }),
-        )
+        // Set up internal DNS services.
+        futures::future::join_all(service_plan.services.iter().map(
+            |(sled_address, services_request)| async move {
+                let dns_services: Vec<_> = services_request
+                    .services
+                    .iter()
+                    .filter_map(|svc| {
+                        if matches!(svc.zone_type, ZoneType::InternalDNS) {
+                            Some(svc.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !dns_services.is_empty() {
+                    self.initialize_services(*sled_address, &dns_services)
+                        .await?;
+                }
+                Ok(())
+            },
+        ))
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
@@ -610,30 +707,16 @@ impl ServiceInner {
             .expect("DNS servers should only be set once");
 
         // Issue the dataset initialization requests to all sleds.
-        futures::future::join_all(plan.values().map(|allocation| async move {
-            let sled_address = SocketAddr::V6(get_sled_address(
-                allocation.initialization_request.subnet,
-            ));
-            self.initialize_datasets(
-                sled_address,
-                &allocation.services_request.datasets,
-            )
-            .await?;
-
-            let mut records = HashMap::new();
-            for dataset in &allocation.services_request.datasets {
-                records
-                    .entry(dataset.srv())
-                    .or_insert_with(Vec::new)
-                    .push((dataset.aaaa(), dataset.address()));
-            }
-            self.dns_servers
-                .get()
-                .expect("DNS servers must be initialized first")
-                .insert_dns_records(&records)
+        futures::future::join_all(service_plan.services.iter().map(
+            |(sled_address, services_request)| async move {
+                self.initialize_datasets(
+                    *sled_address,
+                    &services_request.datasets,
+                )
                 .await?;
-            Ok(())
-        }))
+                Ok(())
+            },
+        ))
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
@@ -642,173 +725,51 @@ impl ServiceInner {
 
         // Issue service initialization requests.
         //
-        // Note that this must happen *after* the dataset initialization,
+        // NOTE: This must happen *after* the dataset initialization,
         // to ensure that CockroachDB has been initialized before Nexus
         // starts.
-        futures::future::join_all(plan.values().map(|allocation| async move {
-            let sled_address = SocketAddr::V6(get_sled_address(
-                allocation.initialization_request.subnet,
-            ));
-
-            let all_zones = allocation
-                .services_request
-                .service_zones
-                .iter()
-                .chain(allocation.services_request.dns_services.iter())
-                .map(|s| s.clone())
-                .collect::<Vec<_>>();
-
-            self.initialize_services(sled_address, &all_zones).await?;
-
-            let mut records = HashMap::new();
-            for zone in &all_zones {
-                for service in &zone.services {
-                    if let Some(addr) = zone.address(service) {
-                        records
-                            .entry(zone.srv(service))
-                            .or_insert_with(Vec::new)
-                            .push((zone.aaaa(), addr))
-                    }
-                }
-            }
-            self.dns_servers
-                .get()
-                .expect("DNS servers must be initialized first")
-                .insert_dns_records(&records)
+        //
+        // If Nexus was more resilient to concurrent initialization
+        // of CRDB, this requirement could be relaxed.
+        futures::future::join_all(service_plan.services.iter().map(
+            |(sled_address, services_request)| async move {
+                // With the current implementation of "initialize_services",
+                // we must provide the set of *all* services that should be
+                // executing on a sled.
+                //
+                // This means re-requesting the DNS service, even if it is
+                // already running - this is fine, however, as the receiving
+                // sled agent doesn't modify the already-running service.
+                self.initialize_services(
+                    *sled_address,
+                    &services_request.services,
+                )
                 .await?;
-            Ok(())
-        }))
+                Ok(())
+            },
+        ))
         .await
         .into_iter()
         .collect::<Result<Vec<()>, SetupServiceError>>()?;
 
         info!(self.log, "Finished setting up services");
 
-        // Finally, make sure the configuration is saved so we don't inject
-        // the requests on the next iteration.
-        let plan_path = rss_plan_path();
-        tokio::fs::rename(&plan_path, &rss_completed_plan_path).await.map_err(
+        // Finally, mark that we've completed executing the plans.
+        tokio::fs::File::create(&rss_completed_marker_path).await.map_err(
             |err| SetupServiceError::Io {
-                message: format!(
-                    "renaming {plan_path:?} to {rss_completed_plan_path:?}"
-                ),
+                message: format!("creating {rss_completed_marker_path:?}"),
                 err,
             },
         )?;
+
+        // At this point, even if we reboot, we must not try to manage sleds,
+        // services, or DNS records.
+        self.handoff_to_nexus(&config, &plan, &service_plan).await?;
 
         // TODO Questions to consider:
         // - What if a sled comes online *right after* this setup? How does
         // it get a /64?
 
         Ok(())
-    }
-}
-
-fn generate_rack_secret<'a>(
-    rack_secret_threshold: usize,
-    member_device_id_certs: &'a [Ed25519Certificate],
-    log: &Logger,
-) -> Result<
-    Option<impl ExactSizeIterator<Item = ShareDistribution> + 'a>,
-    SetupServiceError,
-> {
-    // We do not generate a rack secret if we only have a single sled or if our
-    // config specifies that the threshold for unlock is only a single sled.
-    let total_shares = member_device_id_certs.len();
-    if total_shares <= 1 {
-        info!(log, "Skipping rack secret creation (only one sled present)");
-        return Ok(None);
-    }
-
-    if rack_secret_threshold <= 1 {
-        warn!(
-            log,
-            concat!(
-                "Skipping rack secret creation due to config",
-                " (despite discovery of {} bootstrap agents)"
-            ),
-            total_shares,
-        );
-        return Ok(None);
-    }
-
-    let secret = RackSecret::new();
-    let (shares, verifier) = secret
-        .split(rack_secret_threshold, total_shares)
-        .map_err(SetupServiceError::SplitRackSecret)?;
-
-    Ok(Some(shares.into_iter().map(move |share| ShareDistribution {
-        threshold: rack_secret_threshold,
-        verifier: verifier.clone(),
-        share,
-        member_device_id_certs: member_device_id_certs.to_vec(),
-    })))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use omicron_test_utils::dev::test_setup_log;
-    use sprockets_common::certificates::Ed25519Signature;
-    use sprockets_common::certificates::KeyType;
-
-    fn dummy_certs(n: usize) -> Vec<Ed25519Certificate> {
-        vec![
-            Ed25519Certificate {
-                subject_key_type: KeyType::DeviceId,
-                subject_public_key: sprockets_host::Ed25519PublicKey([0; 32]),
-                signer_key_type: KeyType::Manufacturing,
-                signature: Ed25519Signature([0; 64]),
-            };
-            n
-        ]
-    }
-
-    #[test]
-    fn test_generate_rack_secret() {
-        let logctx = test_setup_log("test_generate_rack_secret");
-
-        // No secret generated if we have <= 1 sled
-        assert!(generate_rack_secret(10, &dummy_certs(1), &logctx.log)
-            .unwrap()
-            .is_none());
-
-        // No secret generated if threshold <= 1
-        assert!(generate_rack_secret(1, &dummy_certs(10), &logctx.log)
-            .unwrap()
-            .is_none());
-
-        // Secret generation fails if threshold > total sleds
-        assert!(matches!(
-            generate_rack_secret(10, &dummy_certs(5), &logctx.log),
-            Err(SetupServiceError::SplitRackSecret(_))
-        ));
-
-        // Secret generation succeeds if threshold <= total shares and both are
-        // > 1, and the returned iterator satifies:
-        //
-        // * total length == total shares
-        // * each share is distinct
-        for total_shares in 2..=32 {
-            for threshold in 2..=total_shares {
-                let certs = dummy_certs(total_shares);
-                let shares =
-                    generate_rack_secret(threshold, &certs, &logctx.log)
-                        .unwrap()
-                        .unwrap();
-
-                assert_eq!(shares.len(), total_shares);
-
-                // `Share` doesn't implement `Hash`, but it's a newtype around
-                // `Vec<u8>` (which does). Unwrap the newtype to check that all
-                // shares are distinct.
-                let shares_set = shares
-                    .map(|share_dist| share_dist.share.0)
-                    .collect::<HashSet<_>>();
-                assert_eq!(shares_set.len(), total_shares);
-            }
-        }
-
-        logctx.cleanup_successful();
     }
 }
