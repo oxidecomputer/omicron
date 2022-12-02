@@ -2,12 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod artifacts;
 mod config;
 mod context;
 mod http_entrypoints;
 mod inventory;
 mod mgs;
 
+use artifacts::ArtifactStore;
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use inventory::{RackV1Inventory, SpInventory};
@@ -58,6 +60,8 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         ..Default::default()
     };
 
+    let artifact_store = ArtifactStore::new(&log);
+
     let mgs_manager = MgsManager::new(&log, config.mgs_addr);
     let mgs_handle = mgs_manager.get_handle();
     tokio::spawn(async move {
@@ -67,7 +71,7 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     let server = dropshot::HttpServerStarter::new(
         &dropshot_config,
         http_entrypoints::api(),
-        ServerContext { mgs_handle },
+        ServerContext { artifact_store, mgs_handle },
         &log.new(o!("component" => "dropshot (wicketd)")),
     )
     .map_err(|err| format!("initializing http server: {}", err))?

@@ -22,9 +22,7 @@ use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
-use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
-};
+use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::borrow::Cow;
@@ -136,7 +134,6 @@ impl Agent {
     ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
-            "server" => sled_config.id.to_string(),
         ));
 
         // We expect this directory to exist - ensure that it does, before any
@@ -241,7 +238,14 @@ impl Agent {
             // Server already exists, return it.
             info!(&self.log, "Sled Agent already loaded");
 
-            if &server.address().ip() != sled_address.ip() {
+            if server.id() != request.id {
+                let err_str = format!(
+                    "Sled Agent already running with UUID {}, but {} was requested",
+                    server.id(),
+                    request.id,
+                );
+                return Err(BootstrapError::SledError(err_str));
+            } else if &server.address().ip() != sled_address.ip() {
                 let err_str = format!(
                     "Sled Agent already running on address {}, but {} was requested",
                     server.address().ip(),
@@ -320,7 +324,7 @@ impl Agent {
         // indicating which kind of address we're advertising).
         self.ddmd_client.advertise_prefix(request.subnet);
 
-        Ok(SledAgentResponse { id: self.sled_config.id })
+        Ok(SledAgentResponse { id: request.id })
     }
 
     /// Communicates with peers, sharing secrets, until the rack has been
@@ -331,7 +335,7 @@ impl Agent {
     ) -> Result<RackSecret, BootstrapError> {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let rack_secret = retry_notify(
-            internal_service_policy(),
+            retry_policy_short(),
             || async {
                 let other_agents = {
                     // Manually build up a `HashSet` instead of `.collect()`ing

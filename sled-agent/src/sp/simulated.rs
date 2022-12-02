@@ -5,7 +5,6 @@
 //! Implementation of a simulated SP / RoT.
 
 use super::SpError;
-use crate::config::Config as SledConfig;
 use crate::illumos::dladm::Dladm;
 use crate::zone::Zones;
 use slog::Logger;
@@ -36,7 +35,6 @@ pub(super) struct SimulatedSp {
 impl SimulatedSp {
     pub(super) async fn start(
         sp_config: &GimletConfig,
-        sled_config: &SledConfig,
         log: &Logger,
     ) -> Result<Self, SpError> {
         // Is our simulated SP going to bind to addresses (acting like
@@ -80,7 +78,6 @@ impl SimulatedSp {
         info!(log, "starting simulated gimlet SP");
         let sp_log = log.new(o!(
             "component" => "sp-sim",
-            "server" => sled_config.id.clone().to_string(),
         ));
         let sp = Arc::new(
             sp_sim::Gimlet::spawn(&sp_config, sp_log)
@@ -92,7 +89,6 @@ impl SimulatedSp {
         info!(log, "starting simulated gimlet RoT");
         let rot_log = log.new(o!(
             "component" => "rot-sim",
-            "server" => sled_config.id.clone().to_string(),
         ));
         let transport =
             SimRotTransport { sp: Arc::clone(&sp), responses: VecDeque::new() };

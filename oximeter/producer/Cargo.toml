@@ -11,11 +11,11 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main",
 nexus-client = { path = "../../nexus-client" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
-reqwest = { version = "0.11.12", features = [ "json" ] }
+reqwest = { version = "0.11.13", features = [ "json" ] }
 schemars = { version = "0.8.10", features = [ "uuid1", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-dtrace = "0.2"
-tokio = "1.21"
+tokio = "1.22"
 thiserror = "1.0.37"
-uuid = { version = "1.2.1", features = [ "v4", "serde" ] }
+uuid = { version = "1.2.2", features = [ "v4", "serde" ] }

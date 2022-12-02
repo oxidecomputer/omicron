@@ -18,10 +18,10 @@ use omicron_zone_package::target::Target;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use slog::debug;
-use slog::info;
 use slog::o;
 use slog::Drain;
 use slog::Logger;
+use slog::{info, warn};
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
@@ -454,7 +454,14 @@ fn get_all_omicron_datasets() -> Result<Vec<String>> {
 }
 
 fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = get_all_omicron_datasets()?;
+    let datasets = match get_all_omicron_datasets() {
+        Err(e) => {
+            warn!(config.log, "Failed to get omicron datasets: {}", e);
+            return Ok(());
+        }
+        Ok(datasets) => datasets,
+    };
+
     if datasets.is_empty() {
         return Ok(());
     }
