@@ -24,13 +24,13 @@ omicron-common = { path = "../common" }
 
 [dependencies.gateway-messages]
 git = "https://github.com/oxidecomputer/management-gateway-service"
-rev = "ce829adddaff79867ebdd88f3b4550e3658e17f6"
+rev = "7eebec9861389ad5973f26206194c0104b31bdb5"
 default-features = false
 features = ["std"]
 
 [dependencies.gateway-sp-comms]
 git = "https://github.com/oxidecomputer/management-gateway-service"
-rev = "ce829adddaff79867ebdd88f3b4550e3658e17f6"
+rev = "7eebec9861389ad5973f26206194c0104b31bdb5"
 
 [dependencies.slog]
 version = "2.7"

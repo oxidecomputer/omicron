@@ -122,6 +122,7 @@ pub enum SpIgnition {
 #[derive(
     Debug,
     Clone,
+    Copy,
     PartialEq,
     Eq,
     PartialOrd,
@@ -130,12 +131,12 @@ pub enum SpIgnition {
     Serialize,
     JsonSchema,
 )]
-#[serde(tag = "system_type")]
+#[serde(tag = "system_type", rename_all = "snake_case")]
 pub enum SpIgnitionSystemType {
     Gimlet,
     Sidecar,
     Psc,
-    Unknown(u16),
+    Unknown { id: u16 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

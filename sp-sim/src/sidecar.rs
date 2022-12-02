@@ -379,6 +379,7 @@ impl SpHandler for Handler {
             "sender" => %sender,
             "port" => ?port,
             "offset" => offset,
+            "state" => ?self.ignition.state,
         );
         Ok(self.ignition.state.clone().into_iter().skip(offset as usize))
     }

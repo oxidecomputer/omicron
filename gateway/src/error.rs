@@ -91,7 +91,6 @@ where
         SpCommsError::SpAddressUnknown(_)
         | SpCommsError::DiscoveryFailed { .. }
         | SpCommsError::Timeout { .. }
-        | SpCommsError::BadIgnitionTarget(_)
         | SpCommsError::LocalIgnitionControllerAddressUnknown
         | SpCommsError::SpCommunicationFailed(_)
         | SpCommsError::UpdateFailed(_) => {

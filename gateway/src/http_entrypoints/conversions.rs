@@ -125,7 +125,7 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Gimlet => Self::Gimlet,
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
-            SystemType::Unknown(id) => Self::Unknown(id),
+            SystemType::Unknown(id) => Self::Unknown { id },
         }
     }
 }
