@@ -100,16 +100,7 @@ pub fn nexus_addr() -> SocketAddr {
         .join("../smf/sled-agent/config-rss.toml");
     if rss_config_path.exists() {
         if let Ok(config) = SetupServiceConfig::from_file(rss_config_path) {
-            for request in config.requests {
-                for zone in request.service_zones {
-                    for service in zone.services {
-                        if let ServiceType::Nexus { external_ip, .. } = service
-                        {
-                            return (external_ip, 80).into();
-                        }
-                    }
-                }
-            }
+            return (config.nexus_external_address, 80).into();
         }
     }
 

@@ -134,7 +134,6 @@ impl Agent {
     ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
-            "server" => sled_config.id.to_string(),
         ));
 
         // We expect this directory to exist - ensure that it does, before any
@@ -239,7 +238,14 @@ impl Agent {
             // Server already exists, return it.
             info!(&self.log, "Sled Agent already loaded");
 
-            if &server.address().ip() != sled_address.ip() {
+            if server.id() != request.id {
+                let err_str = format!(
+                    "Sled Agent already running with UUID {}, but {} was requested",
+                    server.id(),
+                    request.id,
+                );
+                return Err(BootstrapError::SledError(err_str));
+            } else if &server.address().ip() != sled_address.ip() {
                 let err_str = format!(
                     "Sled Agent already running on address {}, but {} was requested",
                     server.address().ip(),
@@ -318,7 +324,7 @@ impl Agent {
         // indicating which kind of address we're advertising).
         self.ddmd_client.advertise_prefix(request.subnet);
 
-        Ok(SledAgentResponse { id: self.sled_config.id })
+        Ok(SledAgentResponse { id: request.id })
     }
 
     /// Communicates with peers, sharing secrets, until the rack has been

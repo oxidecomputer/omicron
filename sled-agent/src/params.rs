@@ -230,6 +230,11 @@ pub struct InstanceSerialConsoleData {
     pub last_byte_offset: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct Zpool {
+    pub id: Uuid,
+}
+
 // The type of networking 'ASIC' the Dendrite service is expected to manage
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
