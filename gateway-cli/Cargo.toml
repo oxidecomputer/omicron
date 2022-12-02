@@ -6,7 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-clap = "4.0.26"
+clap = "4.0.29"
 futures = "0.3.25"
 libc = "0.2"
 slog-async = "2.6"
