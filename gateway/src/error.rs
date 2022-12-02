@@ -7,7 +7,7 @@
 use std::borrow::Borrow;
 
 use dropshot::HttpError;
-use gateway_messages::ResponseError;
+use gateway_messages::SpError;
 use gateway_sp_comms::error::Error as SpCommsError;
 use gateway_sp_comms::error::SpCommunicationError;
 use gateway_sp_comms::error::UpdateError;
@@ -43,25 +43,25 @@ where
             err.to_string(),
         ),
         SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::SerialConsoleAlreadyAttached,
+            SpError::SerialConsoleAlreadyAttached,
         )) => HttpError::for_bad_request(
             Some("SerialConsoleAttached".to_string()),
             err.to_string(),
         ),
         SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::RequestUnsupportedForSp,
+            SpError::RequestUnsupportedForSp,
         )) => HttpError::for_bad_request(
             Some("RequestUnsupportedForSp".to_string()),
             err.to_string(),
         ),
         SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::RequestUnsupportedForComponent,
+            SpError::RequestUnsupportedForComponent,
         )) => HttpError::for_bad_request(
             Some("RequestUnsupportedForComponent".to_string()),
             err.to_string(),
         ),
         SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::InvalidSlotForComponent,
+            SpError::InvalidSlotForComponent,
         )) => HttpError::for_bad_request(
             Some("InvalidSlotForComponent".to_string()),
             err.to_string(),
@@ -73,15 +73,13 @@ where
             )
         }
         SpCommsError::UpdateFailed(UpdateError::Communication(
-            SpCommunicationError::SpError(ResponseError::UpdateSlotBusy),
+            SpCommunicationError::SpError(SpError::UpdateSlotBusy),
         )) => HttpError::for_unavail(
             Some("UpdateSlotBusy".to_string()),
             err.to_string(),
         ),
         SpCommsError::UpdateFailed(UpdateError::Communication(
-            SpCommunicationError::SpError(ResponseError::UpdateInProgress {
-                ..
-            }),
+            SpCommunicationError::SpError(SpError::UpdateInProgress { .. }),
         )) => HttpError::for_unavail(
             Some("UpdateInProgress".to_string()),
             err.to_string(),

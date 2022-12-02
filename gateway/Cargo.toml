@@ -5,6 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+async-trait = "0.1.59"
 clap = { version = "4.0", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.25"
@@ -23,13 +24,13 @@ omicron-common = { path = "../common" }
 
 [dependencies.gateway-messages]
 git = "https://github.com/oxidecomputer/management-gateway-service"
-rev = "c1484109c394f45e08018e0f35adc4a136cd207d"
+rev = "ce829adddaff79867ebdd88f3b4550e3658e17f6"
 default-features = false
 features = ["std"]
 
 [dependencies.gateway-sp-comms]
 git = "https://github.com/oxidecomputer/management-gateway-service"
-rev = "c1484109c394f45e08018e0f35adc4a136cd207d"
+rev = "ce829adddaff79867ebdd88f3b4550e3658e17f6"
 
 [dependencies.slog]
 version = "2.7"
