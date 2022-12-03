@@ -31,7 +31,7 @@ oximeter-producer = { version = "0.1.0", path = "../oximeter/producer" }
 p256 = "0.9.0"
 percent-encoding = "2.2.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e58937fea67aca6bc2d37a3cc50a72291328ae0e", features = [ "generated-migration" ] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b596e72b6b93bc412d675358f782ae7d53f8bf7a", features = [ "generated-migration" ] }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.13", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
