@@ -35,10 +35,10 @@ pub fn get_control_id() -> ControlId {
     ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-/// A control is an interactive object on a [`Screen`].
+/// A control is an interactive object on a [`Screen`](crate::screens::Screen).
 ///
-/// Control's are often the internal state of [`tui::Widget`]s and are used to
-/// manage how the Widgets are drawn.
+/// `Control` instances are often the internal state of [`tui::widgets::Widget`]s
+/// and are used to manage how the Widgets are drawn.
 pub trait Control {
     fn id(&self) -> ControlId;
 

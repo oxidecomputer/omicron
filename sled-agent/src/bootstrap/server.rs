@@ -84,7 +84,6 @@ impl Server {
         info!(log, "detecting (real or simulated) SP");
         let sp = SpHandle::detect(
             config.sp_config.as_ref().map(|c| &c.local_sp),
-            &sled_config,
             &log,
         )
         .await

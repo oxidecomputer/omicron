@@ -36,7 +36,7 @@ pub struct Args {
     pub address: SocketAddrV6,
 }
 
-/// Run an instance of the wicketd [Server]
+/// Run an instance of the wicketd server
 pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     let (drain, registration) = slog_dtrace::with_drain(
         config

@@ -18,7 +18,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::Client as SledAgentClient;
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -126,7 +126,7 @@ impl super::Nexus {
         &self,
         id: Uuid,
         zpool_id: Uuid,
-        address: SocketAddr,
+        address: SocketAddrV6,
         kind: DatasetKind,
     ) -> Result<(), Error> {
         info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string(), "address" => address.to_string());
