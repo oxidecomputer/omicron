@@ -32,7 +32,9 @@ use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
 };
-use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::process::Command;
@@ -520,7 +522,7 @@ impl SledAgent {
                 );
             };
             retry_notify(
-                retry_policy_short(),
+                retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_notification_failure,
             )

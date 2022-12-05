@@ -8,7 +8,7 @@ use omicron_common::backoff;
 use omicron_common::backoff::Backoff;
 
 fn main() {
-    let mut policy = backoff::retry_policy_long();
+    let mut policy = backoff::retry_policy_internal_service();
     let mut total_duration = std::time::Duration::from_secs(0);
     loop {
         let nmin = total_duration.as_secs() / 60;
