@@ -138,8 +138,8 @@ only_for_targets.switch_variant = "stub"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "77e1268141aab830966b18526cffab8f458a28f9"
-source.sha256 = "76bab69b6a712e3da11de4aba044c90d86b6d374c8ece9ddda98ef2087541276"
+source.commit = "557f9e95a7ac213fe9bafdbbc566e85037085429"
+source.sha256 = "0b2291b797d7f3ae1d6b8af04088a0559faad74334b25da4e1f70602a85b828b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -156,8 +156,8 @@ only_for_targets.switch_variant = "asic"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "77e1268141aab830966b18526cffab8f458a28f9"
-source.sha256 = "a402001c2e531af4d8b2416a546d5daacb50c69fb81009c6c5cb74aaad7066ac"
+source.commit = "557f9e95a7ac213fe9bafdbbc566e85037085429"
+source.sha256 = "830d082a96417c910c893bb66dd45a7a2a6b6db3316692b0df9abab509117b58"
 output.type = "zone"
 output.intermediate_only = true
 
