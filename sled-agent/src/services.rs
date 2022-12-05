@@ -699,7 +699,6 @@ impl ServiceManager {
                     )?;
                     smfh.refresh()?;
                 }
-
                 ServiceType::ManagementGatewayService => {
                     info!(self.inner.log, "Setting up MGS service");
                     smfh.setprop("config/id", request.id)?;

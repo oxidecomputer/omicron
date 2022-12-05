@@ -7,6 +7,7 @@
 use super::client::Client as BootstrapAgentClient;
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
+use super::hardware::HardwareMonitor;
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::server::TrustQuorumMembership;
@@ -17,9 +18,7 @@ use super::trust_quorum::{
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::hardware::HardwareManager;
-use crate::illumos::dladm::{
-    self, Dladm, Etherstub, EtherstubVnic, PhysicalLink,
-};
+use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
@@ -37,9 +36,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::oneshot;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 
 /// Initial octet of IPv6 for bootstrap addresses.
 pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
@@ -61,13 +58,10 @@ pub enum BootstrapError {
     DdmError(#[from] DdmError),
 
     #[error("Error monitoring hardware: {0}")]
-    Hardware(String),
+    Hardware(#[from] crate::bootstrap::hardware::Error),
 
     #[error("Error starting sled agent: {0}")]
     SledError(String),
-
-    #[error("Error from service manager: {0}")]
-    ServiceManager(#[from] crate::services::Error),
 
     #[error("Error deserializing toml from {path}: {err}")]
     Toml { path: PathBuf, err: toml::de::Error },
@@ -88,148 +82,15 @@ impl From<BootstrapError> for ExternalError {
     }
 }
 
-// Represents the bootstrap agent's view into hardware.
-//
-// The bootstrap agent is responsible for launching the switch zone, which it
-// can do once it has detected that the corresponding driver has loaded.
-struct HardwareMonitorWorker {
-    log: Logger,
-    exit_rx: oneshot::Receiver<()>,
-    hardware: HardwareManager,
-    services: ServiceManager,
-}
-
-impl HardwareMonitorWorker {
-    fn new(
-        log: Logger,
-        exit_rx: oneshot::Receiver<()>,
-        hardware: HardwareManager,
-        services: ServiceManager,
-    ) -> Self {
-        Self { log, exit_rx, hardware, services }
-    }
-
-    async fn run(
-        mut self,
-    ) -> Result<(HardwareManager, ServiceManager), BootstrapError> {
-        // Start monitoring the hardware for changes
-        let mut hardware_updates = self.hardware.monitor();
-
-        // Scan the system manually for events we have have missed
-        // before we started monitoring.
-        self.full_hardware_scan().await;
-
-        // Rely on monitoring for tracking all future updates.
-        loop {
-            use tokio::sync::broadcast::error::RecvError;
-
-            tokio::select! {
-                _ = &mut self.exit_rx => return Ok((self.hardware, self.services)),
-                update = hardware_updates.recv() => {
-                    match update {
-                        Ok(update) => match update {
-                            crate::hardware::HardwareUpdate::TofinoLoaded => {
-                                let switch_ip = None;
-                                self.services.activate_switch(switch_ip).await;
-                            }
-                            crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                                self.services.deactivate_switch().await;
-                            }
-                            _ => continue,
-                        },
-                        Err(RecvError::Lagged(count)) => {
-                            warn!(self.log, "Hardware monitor missed {count} messages");
-                            self.full_hardware_scan().await;
-                        }
-                        Err(RecvError::Closed) => {
-                            warn!(self.log, "Hardware monitor receiver closed; exiting");
-                            return Err(BootstrapError::Hardware("Hardware monitor closed".to_string()));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Observe the current hardware state manually.
-    //
-    // We use this when we're monitoring hardware for the first
-    // time, and if we miss notifications.
-    async fn full_hardware_scan(&self) {
-        info!(self.log, "Performing full hardware scan");
-        if self.hardware.is_scrimlet_driver_loaded() {
-            let switch_ip = None;
-            self.services.activate_switch(switch_ip).await;
-        } else {
-            self.services.deactivate_switch().await;
-        }
-    }
-}
-
-// The client-side of a connection to a HardwareMonitorWorker which runs in a
-// tokio task.
-//
-// Once created, the bootstrap agent monitors hardware to initialize (or
-// terminate) the switch zone when requested.
-struct HardwareMonitor {
-    exit_tx: oneshot::Sender<()>,
-    handle:
-        JoinHandle<Result<(HardwareManager, ServiceManager), BootstrapError>>,
-}
-
-impl HardwareMonitor {
-    // Spawns a new task which monitors for hardware and launches the switch
-    // zone if the necessary Tofino drivers are detected.
-    async fn new(
-        log: &Logger,
-        sled_config: &SledConfig,
-        etherstub: Etherstub,
-        etherstub_vnic: EtherstubVnic,
-    ) -> Result<Self, BootstrapError> {
-        let hardware =
-            HardwareManager::new(log.clone(), sled_config.stub_scrimlet)
-                .map_err(|e| BootstrapError::Hardware(e))?;
-
-        let service_manager = ServiceManager::new(
-            log.clone(),
-            etherstub.clone(),
-            etherstub_vnic.clone(),
-            sled_config.stub_scrimlet,
-        )
-        .await?;
-
-        Ok(Self::start(log, hardware, service_manager))
-    }
-
-    // Starts a hardware monitoring task
-    fn start(
-        log: &Logger,
-        hardware: HardwareManager,
-        services: ServiceManager,
-    ) -> Self {
-        let (exit_tx, exit_rx) = oneshot::channel();
-        let worker = HardwareMonitorWorker::new(
-            log.clone(),
-            exit_rx,
-            hardware,
-            services,
-        );
-        let handle = tokio::spawn(async move { worker.run().await });
-
-        Self { exit_tx, handle }
-    }
-
-    // Stops the task from executing
-    async fn stop(
-        self,
-    ) -> Result<(HardwareManager, ServiceManager), BootstrapError> {
-        let _ = self.exit_tx.send(());
-        self.handle.await.expect("Hardware monitor panicked")
-    }
-}
-
+// Describes the view of the sled agent from the perspective of the bootstrap
+// agent.
 enum SledAgentState {
+    // Either we're in the "before" stage, and we're monitoring for hardware,
+    // waiting for the sled agent to be requested...
     Before(Option<HardwareMonitor>),
+    // ... or we're in the "after" stage, and the sled agent is running. In this
+    // case, the responsibility for monitoring hardware should be transferred to
+    // the sled agent.
     After(SledServer),
 }
 
