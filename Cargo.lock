@@ -5085,7 +5085,7 @@ dependencies = [
 [[package]]
 name = "rustix"
 version = "0.36.4"
-source = "git+https://github.com/bytecodealliance/rustix?rev=779e2119e0517d36c01d38451aa8c1304d3bac60#779e2119e0517d36c01d38451aa8c1304d3bac60"
+source = "git+https://github.com/bytecodealliance/rustix?rev=99a903ed202432244deb66de7d826262d552aba8#99a903ed202432244deb66de7d826262d552aba8"
 dependencies = [
  "bitflags",
  "errno",
