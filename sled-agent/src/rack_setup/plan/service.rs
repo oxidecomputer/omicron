@@ -12,7 +12,9 @@ use omicron_common::address::{
     get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DNS_PORT,
     DNS_SERVER_PORT, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
-use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -161,8 +163,12 @@ impl Plan {
         let log_failure = |error, _| {
             warn!(log, "failed to get zpools"; "error" => ?error);
         };
-        let zpools =
-            retry_notify(retry_policy_short(), get_zpools, log_failure).await?;
+        let zpools = retry_notify(
+            retry_policy_internal_service_aggressive(),
+            get_zpools,
+            log_failure,
+        )
+        .await?;
 
         Ok(zpools)
     }
