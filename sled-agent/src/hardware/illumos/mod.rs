@@ -2,14 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use illumos_devinfo::DevInfo;
+use crate::hardware::{Disk, DiskVariant, HardwareUpdate};
+use illumos_devinfo::{DevInfo, Node};
 use slog::Logger;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 // A snapshot of information about the underlying Tofino device
+#[derive(Copy, Clone)]
 struct TofinoSnapshot {
     exists: bool,
     driver_loaded: bool,
@@ -24,11 +28,12 @@ impl TofinoSnapshot {
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
+    disks: HashSet<Disk>,
 }
 
 impl HardwareSnapshot {
     fn new() -> Self {
-        Self { tofino: TofinoSnapshot::new() }
+        Self { tofino: TofinoSnapshot::new(), disks: HashSet::new() }
     }
 }
 
@@ -53,57 +58,30 @@ enum TofinoView {
 // which services are currently executing.
 struct HardwareView {
     tofino: TofinoView,
-    // TODO: Add U.2s, M.2s, other devices.
+    disks: HashSet<Disk>,
 }
 
 impl HardwareView {
     fn new() -> Self {
-        Self { tofino: TofinoView::Real(TofinoSnapshot::new()) }
-    }
-
-    fn new_stub_tofino(active: bool) -> Self {
-        Self { tofino: TofinoView::Stub { active } }
-    }
-}
-
-const TOFINO_SUBSYSTEM_VID: i32 = 0x1d1c;
-const TOFINO_SUBSYSTEM_ID: i32 = 0x100;
-
-fn node_name(subsystem_vid: i32, subsystem_id: i32) -> String {
-    format!("pci{subsystem_vid:x},{subsystem_id:x}")
-}
-
-// Performs a single walk of the device info tree, updating our view of hardware
-// and sending notifications to any subscribers.
-fn poll_device_tree(
-    log: &Logger,
-    inner: &Arc<Mutex<HardwareView>>,
-    tx: &broadcast::Sender<super::HardwareUpdate>,
-) -> Result<(), String> {
-    // Construct a view of hardware by walking the device tree.
-    let mut device_info = DevInfo::new().map_err(|e| e.to_string())?;
-    let mut node_walker = device_info.walk_node();
-    let mut polled_hw = HardwareSnapshot::new();
-    while let Some(node) =
-        node_walker.next().transpose().map_err(|e| e.to_string())?
-    {
-        if node.node_name()
-            == node_name(TOFINO_SUBSYSTEM_VID, TOFINO_SUBSYSTEM_ID)
-        {
-            polled_hw.tofino.exists = true;
-            polled_hw.tofino.driver_loaded =
-                node.driver_name().as_deref() == Some("tofino");
+        Self {
+            tofino: TofinoView::Real(TofinoSnapshot::new()),
+            disks: HashSet::new(),
         }
     }
 
-    // After inspecting the device tree, diff with the old view, and provide
-    // necessary updates.
-    let mut updates = vec![];
-    {
-        let mut inner = inner.lock().unwrap();
-        match inner.tofino {
+    fn new_stub_tofino(active: bool) -> Self {
+        Self { tofino: TofinoView::Stub { active }, disks: HashSet::new() }
+    }
+
+    // Updates our view of the Tofino switch against a snapshot.
+    fn update_tofino(
+        &mut self,
+        polled_hw: &HardwareSnapshot,
+        updates: &mut Vec<HardwareUpdate>,
+    ) {
+        match self.tofino {
             TofinoView::Real(TofinoSnapshot { driver_loaded, exists }) => {
-                use super::HardwareUpdate::*;
+                use HardwareUpdate::*;
                 // Identify if the Tofino device changed power states.
                 if exists != polled_hw.tofino.exists {
                     updates.push(TofinoDeviceChange);
@@ -117,10 +95,122 @@ fn poll_device_tree(
                 };
 
                 // Update our view of the underlying hardware
-                inner.tofino = TofinoView::Real(polled_hw.tofino);
+                self.tofino = TofinoView::Real(polled_hw.tofino);
             }
             TofinoView::Stub { .. } => (),
         }
+    }
+
+    // Updates our view of block devices against a snapshot.
+    fn update_blkdev(
+        &mut self,
+        polled_hw: &HardwareSnapshot,
+        updates: &mut Vec<HardwareUpdate>,
+    ) {
+        // In old set, not in new set.
+        let removed = self.disks.difference(&polled_hw.disks);
+        // In new set, not in old set.
+        let added = polled_hw.disks.difference(&self.disks);
+
+        use HardwareUpdate::*;
+        for disk in removed {
+            updates.push(DiskRemoved(disk.clone()));
+        }
+        for disk in added {
+            updates.push(DiskAdded(disk.clone()));
+        }
+
+        self.disks = polled_hw.disks.clone();
+    }
+}
+
+const TOFINO_SUBSYSTEM_VID: i32 = 0x1d1c;
+const TOFINO_SUBSYSTEM_ID: i32 = 0x100;
+
+fn node_name(subsystem_vid: i32, subsystem_id: i32) -> String {
+    format!("pci{subsystem_vid:x},{subsystem_id:x}")
+}
+
+fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
+    match slot {
+        0x00..=0x09 => Some(DiskVariant::U2),
+        0x11..=0x12 => Some(DiskVariant::M2),
+        _ => None,
+    }
+}
+
+fn poll_tofino_node(polled_hw: &mut HardwareSnapshot, node: &Node<'_>) {
+    if node.node_name() == node_name(TOFINO_SUBSYSTEM_VID, TOFINO_SUBSYSTEM_ID)
+    {
+        polled_hw.tofino.exists = true;
+        polled_hw.tofino.driver_loaded =
+            node.driver_name().as_deref() == Some("tofino");
+    }
+}
+
+fn poll_blkdev_node(
+    polled_hw: &mut HardwareSnapshot,
+    original_node: &Node<'_>,
+) -> Result<(), String> {
+    if let Some(driver_name) = original_node.driver_name() {
+        if driver_name == "blkdev" {
+            let devfs_path =
+                original_node.devfs_path().map_err(|e| e.to_string())?;
+            let node = original_node;
+            while let Some(ref node) = node.parent() {
+                if let Some(Ok(slot_prop)) =
+                    node.props().into_iter().find(|prop| {
+                        if let Ok(prop) = prop {
+                            prop.name() == "physical-slot#".to_string()
+                        } else {
+                            false
+                        }
+                    })
+                {
+                    let slot = slot_prop
+                        .as_i64()
+                        .ok_or("Expected i64 slot".to_string())?;
+                    let variant = slot_to_disk_variant(slot)
+                        .ok_or("Device not found".to_string())?;
+
+                    polled_hw.disks.insert(Disk {
+                        devfs_path: PathBuf::from(devfs_path),
+                        slot,
+                        variant,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// Performs a single walk of the device info tree, updating our view of hardware
+// and sending notifications to any subscribers.
+fn poll_device_tree(
+    log: &Logger,
+    inner: &Arc<Mutex<HardwareView>>,
+    tx: &broadcast::Sender<HardwareUpdate>,
+) -> Result<(), String> {
+    // Construct a view of hardware by walking the device tree.
+    let mut device_info = DevInfo::new().map_err(|e| e.to_string())?;
+    let mut node_walker = device_info.walk_node();
+    let mut polled_hw = HardwareSnapshot::new();
+    while let Some(node) =
+        node_walker.next().transpose().map_err(|e| e.to_string())?
+    {
+        poll_tofino_node(&mut polled_hw, &node);
+        poll_blkdev_node(&mut polled_hw, &node)?;
+    }
+
+    // After inspecting the device tree, diff with the old view, and provide
+    // necessary updates.
+    let mut updates = vec![];
+    {
+        let mut inner = inner.lock().unwrap();
+        inner.update_tofino(&polled_hw, &mut updates);
+        inner.update_blkdev(&polled_hw, &mut updates);
     };
 
     for update in updates.into_iter() {
@@ -134,7 +224,7 @@ fn poll_device_tree(
 async fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<super::HardwareUpdate>,
+    tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
         if let Err(err) = poll_device_tree(&log, &inner, &tx) {
@@ -151,7 +241,7 @@ async fn hardware_tracking_task(
 pub struct HardwareManager {
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<super::HardwareUpdate>,
+    tx: broadcast::Sender<HardwareUpdate>,
     _worker: JoinHandle<()>,
 }
 
@@ -216,7 +306,7 @@ impl HardwareManager {
         }
     }
 
-    pub fn monitor(&self) -> broadcast::Receiver<super::HardwareUpdate> {
+    pub fn monitor(&self) -> broadcast::Receiver<HardwareUpdate> {
         info!(self.log, "Monitoring for hardware updates");
         self.tx.subscribe()
         // TODO: Do we want to send initial messages, based on the existing

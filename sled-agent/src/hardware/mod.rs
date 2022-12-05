@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::path::PathBuf;
+
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
         mod illumos;
@@ -24,5 +26,19 @@ pub enum HardwareUpdate {
     TofinoDeviceChange,
     TofinoLoaded,
     TofinoUnloaded,
-    // TODO: Notify about disks being added / removed, etc.
+    DiskAdded(Disk),
+    DiskRemoved(Disk),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Disk {
+    devfs_path: PathBuf,
+    slot: i64,
+    variant: DiskVariant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiskVariant {
+    U2,
+    M2,
 }
