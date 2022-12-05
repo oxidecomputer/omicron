@@ -199,8 +199,9 @@ impl Agent {
         let ddmd_client = DdmAdminClient::new(log.clone())?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(address));
 
-        // TODO: Do we need to initialize ZFS and Zone resources before we can
-        // safely launch the switch zone? See: Zfs::ensure_zoned_filesystem.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1934):
+        // Initialize ZFS and Zone resources before we can safely launch the
+        // switch zone. See: Zfs::ensure_zoned_filesystem.
 
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
