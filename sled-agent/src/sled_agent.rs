@@ -19,7 +19,7 @@ use crate::params::{
     DatasetKind, DendriteAsic, DiskStateRequested, InstanceHardware,
     InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData, ServiceEnsureBody, ServiceType,
-    ServiceZoneRequest, VpcFirewallRule, ZoneType,
+    ServiceZoneRequest, VpcFirewallRule, ZoneType, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -32,7 +32,9 @@ use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
 };
-use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::process::Command;
@@ -204,8 +206,6 @@ impl SledAgent {
         lazy_nexus_client: LazyNexusClient,
         request: SledAgentRequest,
     ) -> Result<SledAgent, Error> {
-        let id = config.id;
-
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
         let parent_log = log.clone();
@@ -213,7 +213,7 @@ impl SledAgent {
         // Use "log" for ourself.
         let log = log.new(o!(
             "component" => "SledAgent",
-            "sled_id" => id.to_string(),
+            "sled_id" => request.id.to_string(),
         ));
         info!(&log, "created sled agent");
 
@@ -308,7 +308,7 @@ impl SledAgent {
 
         let storage = StorageManager::new(
             &parent_log,
-            id,
+            request.id,
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
@@ -354,7 +354,7 @@ impl SledAgent {
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
-                id,
+                id: request.id,
                 config: config.clone(),
                 subnet: request.subnet,
                 storage,
@@ -522,7 +522,7 @@ impl SledAgent {
                 );
             };
             retry_notify(
-                retry_policy_short(),
+                retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_notification_failure,
             )
@@ -548,6 +548,12 @@ impl SledAgent {
     ) -> Result<(), Error> {
         self.inner.services.ensure_persistent(requested_services).await?;
         Ok(())
+    }
+
+    /// Gets the sled's current list of all zpools.
+    pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
+        let zpools = self.inner.storage.get_zpools().await?;
+        Ok(zpools)
     }
 
     /// Ensures that a filesystem type exists within the zpool.

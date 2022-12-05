@@ -9,3 +9,4 @@ async-trait = "0.1.56"
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" , features = [ "usdt-probes" ] }
 omicron-common = { path = "../../common" }
 slog = { version = "2.7" }
+uuid = { version = "1.2.1", features = [ "serde", "v4" ] }
