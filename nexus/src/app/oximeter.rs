@@ -172,7 +172,7 @@ impl super::Nexus {
             );
         };
         backoff::retry_notify(
-            backoff::retry_policy_long(),
+            backoff::retry_policy_internal_service(),
             register,
             log_registration_failure,
         ).await
