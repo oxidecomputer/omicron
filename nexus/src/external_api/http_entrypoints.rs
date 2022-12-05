@@ -139,7 +139,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_create_v1)?;
         api.register(disk_view_v1)?;
         api.register(disk_delete_v1)?;
-        // api.register(disk_metrics_list_v1)?;
+        api.register(disk_metrics_list_v1)?;
 
         api.register(instance_list)?;
         api.register(instance_create)?;
@@ -2146,6 +2146,57 @@ pub enum DiskMetricName {
     ReadBytes,
     Write,
     WriteBytes,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskMetricsPaginationParams {
+    #[serde(flatten)]
+    pagination:
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+
+    #[serde(flatten)]
+    selector: Option<params::ProjectSelector>,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/disks/{disk}/metrics/{metric_name}",
+    tags = ["disks"],
+}]
+async fn disk_metrics_list_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<MetricsPathParam<DiskLookupPathParam, DiskMetricName>>,
+    query_params: Query<DiskMetricsPaginationParams>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let metric_name = path.metric_name;
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query.pagination)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk_id = nexus
+            .disk_lookup_id(
+                &opctx,
+                params::DiskSelector::new(path.inner.disk, &query.selector),
+            )
+            .await?;
+
+        let result = nexus
+            .select_timeseries(
+                &format!("crucible_upstairs:{}", metric_name),
+                &[&format!("upstairs_uuid=={}", disk_id)],
+                query.pagination,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch disk metrics

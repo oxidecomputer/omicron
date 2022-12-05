@@ -424,7 +424,7 @@ impl super::Nexus {
         disk_id: &Uuid,
     ) -> DeleteResult {
         let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(disk_id)
+            .disk_id(*disk_id)
             .lookup_for(authz::Action::Delete)
             .await?;
 
