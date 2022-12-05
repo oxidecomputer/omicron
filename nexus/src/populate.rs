@@ -100,7 +100,7 @@ async fn populate(
 ) -> Result<(), String> {
     for p in *ALL_POPULATORS {
         let db_result = backoff::retry_notify(
-            backoff::retry_policy_long(),
+            backoff::retry_policy_internal_service(),
             || async {
                 p.populate(opctx, datastore, args).await.map_err(|error| {
                     match &error {

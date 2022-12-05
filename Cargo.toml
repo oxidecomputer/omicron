@@ -134,3 +134,8 @@ panic = "abort"
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
+
+# Pick up the fix for https://github.com/bytecodealliance/rustix/pull/468.
+[patch.crates-io.rustix]
+git = 'https://github.com/bytecodealliance/rustix'
+rev = '779e2119e0517d36c01d38451aa8c1304d3bac60'

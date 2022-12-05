@@ -75,7 +75,9 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
-use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -256,8 +258,12 @@ impl ServiceInner {
             let log_failure = |error, _| {
                 warn!(self.log, "failed to create filesystem"; "error" => ?error);
             };
-            retry_notify(retry_policy_short(), filesystem_put, log_failure)
-                .await?;
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                filesystem_put,
+                log_failure,
+            )
+            .await?;
         }
 
         let mut records: HashMap<_, Vec<_>> = HashMap::new();
@@ -279,7 +285,12 @@ impl ServiceInner {
         let log_failure = |error, _| {
             warn!(self.log, "failed to set DNS records"; "error" => ?error);
         };
-        retry_notify(retry_policy_short(), records_put, log_failure).await?;
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            records_put,
+            log_failure,
+        )
+        .await?;
 
         Ok(())
     }
@@ -318,7 +329,12 @@ impl ServiceInner {
         let log_failure = |error, _| {
             warn!(self.log, "failed to initialize services"; "error" => ?error);
         };
-        retry_notify(retry_policy_short(), services_put, log_failure).await?;
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            services_put,
+            log_failure,
+        )
+        .await?;
 
         // Insert DNS records, if the DNS servers have been initialized
         if let Some(dns_servers) = self.dns_servers.get() {
@@ -343,8 +359,12 @@ impl ServiceInner {
             let log_failure = |error, _| {
                 warn!(self.log, "failed to set DNS records"; "error" => ?error);
             };
-            retry_notify(retry_policy_short(), records_put, log_failure)
-                .await?;
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                records_put,
+                log_failure,
+            )
+            .await?;
         }
 
         Ok(())
@@ -359,7 +379,7 @@ impl ServiceInner {
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let addrs = retry_notify(
-            retry_policy_short(),
+            retry_policy_internal_service_aggressive(),
             || async {
                 let peer_addrs =
                     ddm_admin_client.peer_addrs().await.map_err(|err| {
@@ -406,7 +426,7 @@ impl ServiceInner {
                 );
             },
         )
-        // `retry_policy_short()` retries indefinitely on transient errors
+        // `retry_policy_internal_service_aggressive()` retries indefinitely on transient errors
         // (the only kind we produce), allowing us to `.unwrap()` without
         // panicking
         .await
@@ -513,7 +533,12 @@ impl ServiceInner {
             info!(self.log, "Failed to handoff to nexus: {err}");
         };
 
-        retry_notify(retry_policy_short(), notify_nexus, log_failure).await?;
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            notify_nexus,
+            log_failure,
+        )
+        .await?;
 
         info!(self.log, "Handoff to Nexus is complete");
         Ok(())

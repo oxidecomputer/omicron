@@ -13,7 +13,7 @@ use crate::sp::SpHandle;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use omicron_common::backoff::retry_notify;
-use omicron_common::backoff::retry_policy_short;
+use omicron_common::backoff::retry_policy_local;
 use omicron_common::backoff::BackoffError;
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
@@ -101,7 +101,7 @@ async fn initialize_sled_agent(
     let log_failure = |error, _| {
         warn!(log, "failed to start sled agent"; "error" => ?error);
     };
-    retry_notify(retry_policy_short(), sled_agent_initialize, log_failure)
+    retry_notify(retry_policy_local(), sled_agent_initialize, log_failure)
         .await?;
     info!(log, "Peer agent initialized"; "peer" => %bootstrap_addr);
     Ok(())
