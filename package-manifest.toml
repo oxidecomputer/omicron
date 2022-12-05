@@ -161,16 +161,23 @@ source.sha256 = "a402001c2e531af4d8b2416a546d5daacb50c69fb81009c6c5cb74aaad7066a
 output.type = "zone"
 output.intermediate_only = true
 
-# To package and install the asic variant of the switch, do:
+[package.dendrite-softnpu]
+service_name = "dendrite"
+only_for_targets.switch_variant = "softnpu"
+# To manually override the package source:
 #
-# $ cargo run --release -p omicron-package -- -t switch_variant=asic package
-# $ pfexec ./target/release/omicron-package -t switch_variant=asic install
-[package.switch-asic]
-service_name = "switch"
-only_for_targets.switch_variant = "asic"
-source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
+# 1. Build the zone image manually
+#   1a. cd <dendrite tree>
+#   1b. cargo build --features=tofino_asic --release
+#   1c. cargo xtask dist -o -r --features tofino_asic
+# 2. Copy the output zone image from dendrite/out to omicron/out
+# 3. Use source.type = "manual" instead of "prebuilt"
+source.type = "prebuilt"
+source.repo = "dendrite"
+source.commit = "77e1268141aab830966b18526cffab8f458a28f9"
+source.sha256 = "938d5aa2f48b40b5f0e91c2402bdd7ca6b017b12f9a74f901496acd048dee5fd"
 output.type = "zone"
+output.intermediate_only = true
 
 # To package and install the stub variant of the switch, do the following:
 #
@@ -183,4 +190,29 @@ service_name = "switch"
 only_for_targets.switch_variant = "stub"
 source.type = "composite"
 source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz" ]
+output.type = "zone"
+
+# To package and install the asic variant of the switch, do:
+#
+# $ cargo run --release -p omicron-package -- -t switch_variant=asic package
+# $ pfexec ./target/release/omicron-package -t switch_variant=asic install
+[package.switch-asic]
+service_name = "switch"
+only_for_targets.switch_variant = "asic"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
+output.type = "zone"
+
+# TODO(https://github.com/oxidecomputer/omicron/issues/1832): Add instructions
+# for setting up Soft NPU
+#
+# To package and install the softnpu variant of the switch, do the following:
+#
+# $ cargo run --release -p omicron-package -- -t switch_variant=softnpu package
+# $ pfexec ./target/release/omicron-package -t switch_variant=softnpu install
+[package.switch-softnpu]
+service_name = "switch"
+only_for_targets.switch_variant = "softnpu"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-softnpu.tar.gz" ]
 output.type = "zone"
