@@ -168,8 +168,8 @@ only_for_targets.switch_variant = "softnpu"
 #
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
-#   1b. cargo build --features=tofino_asic --release
-#   1c. cargo xtask dist -o -r --features tofino_asic
+#   1b. cargo build --features=tofino_softnpu --release
+#   1c. cargo xtask dist -o -r --features tofino_softnpu
 # 2. Copy the output zone image from dendrite/out to omicron/out
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
