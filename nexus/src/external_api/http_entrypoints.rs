@@ -2642,7 +2642,7 @@ pub struct InstanceSerialConsoleParams {
 }
 
 #[endpoint {
-    method = POST,
+    method = GET,
     path = "/v1/instances/{instance}/serial-console",
     tags = ["instances"],
 }]
