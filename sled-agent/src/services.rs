@@ -720,10 +720,13 @@ impl ServiceManager {
                         )?;
                     }
                     match *asic {
-                        DendriteAsic::TofinoAsic => smfh.setprop(
-                            "config/port_config",
-                            "/opt/oxide/dendrite/misc/sidecar_config.toml",
-                        )?,
+                        DendriteAsic::TofinoAsic => {
+                            smfh.setprop(
+                                "config/port_config",
+                                "/opt/oxide/dendrite/misc/sidecar_config.toml",
+                            )?;
+                            smfh.setprop("config/board_rev", "rev_a")?;
+                        }
                         DendriteAsic::TofinoStub => smfh.setprop(
                             "config/port_config",
                             "/opt/oxide/dendrite/misc/model_config.toml",
