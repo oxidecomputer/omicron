@@ -63,10 +63,14 @@ impl HardwareMonitorWorker {
                         Ok(update) => match update {
                             crate::hardware::HardwareUpdate::TofinoLoaded => {
                                 let switch_ip = None;
-                                self.services.activate_switch(switch_ip).await;
+                                if let Err(e) = self.services.activate_switch(switch_ip).await {
+                                    warn!(self.log, "Failed to activate switch: {e}");
+                                }
                             }
                             crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                                self.services.deactivate_switch().await;
+                                if let Err(e) = self.services.deactivate_switch().await {
+                                    warn!(self.log, "Failed to deactivate switch: {e}");
+                                }
                             }
                             _ => continue,
                         },
@@ -92,9 +96,13 @@ impl HardwareMonitorWorker {
         info!(self.log, "Performing full hardware scan");
         if self.hardware.is_scrimlet_driver_loaded() {
             let switch_ip = None;
-            self.services.activate_switch(switch_ip).await;
+            if let Err(e) = self.services.activate_switch(switch_ip).await {
+                warn!(self.log, "Failed to activate switch: {e}");
+            }
         } else {
-            self.services.deactivate_switch().await;
+            if let Err(e) = self.services.deactivate_switch().await {
+                warn!(self.log, "Failed to deactivate switch: {e}");
+            }
         }
     }
 }

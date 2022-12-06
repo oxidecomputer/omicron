@@ -861,7 +861,10 @@ impl ServiceManager {
     }
 
     /// Ensures that a switch zone exists with the provided IP adddress.
-    pub async fn activate_switch(&self, switch_ip: Option<Ipv6Addr>) {
+    pub async fn activate_switch(
+        &self,
+        switch_ip: Option<Ipv6Addr>,
+    ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
 
         let services = match self.inner.stub_scrimlet {
@@ -888,12 +891,12 @@ impl ServiceManager {
             services,
         };
 
-        self.ensure_switch_zone(Some(request)).await;
+        self.ensure_switch_zone(Some(request)).await
     }
 
     /// Ensures that no switch zone is active.
-    pub async fn deactivate_switch(&self) {
-        self.ensure_switch_zone(None).await;
+    pub async fn deactivate_switch(&self) -> Result<(), Error> {
+        self.ensure_switch_zone(None).await
     }
 
     // Forcefully initialize a switch zone.
@@ -917,7 +920,10 @@ impl ServiceManager {
     }
 
     // Moves the current state to align with the "request".
-    async fn ensure_switch_zone(&self, request: Option<ServiceZoneRequest>) {
+    async fn ensure_switch_zone(
+        &self,
+        request: Option<ServiceZoneRequest>,
+    ) -> Result<(), Error> {
         let log = &self.inner.log;
         let mut switch_zone = self.inner.switch_zone.lock().await;
 
@@ -926,23 +932,52 @@ impl ServiceManager {
                 info!(log, "Enabling switch zone (new)");
                 self.clone().start_switch_zone(&mut switch_zone, request);
             }
-            (
-                SwitchZone::Initializing { request, worker },
-                Some(new_request),
-            ) if request.addresses != new_request.addresses => {
-                worker.take().unwrap().stop().await;
-                self.clone().start_switch_zone(&mut switch_zone, new_request);
-                info!(log, "Re-enabling previously-initializing switch zone (new address)");
-            }
-            (SwitchZone::Initializing { .. }, Some(_)) => {
+            (SwitchZone::Initializing { request, .. }, Some(new_request)) => {
                 info!(log, "Enabling switch zone (already underway)");
+                // The switch zone has not started yet -- we can simply replace
+                // the next request with our new request.
+                *request = new_request;
             }
             (SwitchZone::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
                 info!(log, "Re-enabling running switch zone (new address)");
-                zone.stop().await.unwrap();
-                self.clone().start_switch_zone(&mut switch_zone, new_request);
+                *request = new_request;
+
+                let address = request
+                    .addresses
+                    .get(0)
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "".to_string());
+
+                for service in &request.services {
+                    let smfh = SmfHelper::new(&zone, service);
+
+                    match service {
+                        ServiceType::ManagementGatewayService => {
+                            smfh.setprop(
+                                "config/address",
+                                &format!("[{}]:{}", address, MGS_PORT),
+                            )?;
+                            smfh.refresh()?;
+                        }
+                        ServiceType::Dendrite { .. } => {
+                            smfh.setprop(
+                                "config/address",
+                                &format!("[{}]:{}", address, DENDRITE_PORT),
+                            )?;
+                            smfh.refresh()?;
+                        }
+                        ServiceType::Tfport { .. } => {
+                            smfh.setprop(
+                                "config/host",
+                                &format!("[{}]", address),
+                            )?;
+                            smfh.refresh()?;
+                        }
+                        _ => (),
+                    }
+                }
             }
             (SwitchZone::Running { .. }, Some(_)) => {
                 info!(log, "Enabling switch zone (already complete)");
@@ -957,10 +992,11 @@ impl ServiceManager {
             }
             (SwitchZone::Running { zone, .. }, None) => {
                 info!(log, "Disabling switch zone (was running)");
-                zone.stop().await.unwrap();
+                let _ = zone.stop().await;
                 *switch_zone = SwitchZone::Disabled;
             }
         }
+        Ok(())
     }
 
     // Body of a tokio task responsible for running until the switch zone is

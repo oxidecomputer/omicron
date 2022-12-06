@@ -390,9 +390,14 @@ impl SledAgent {
 
         if self.inner.hardware.is_scrimlet_driver_loaded() {
             let switch_ip = Some(self.inner.switch_ip());
-            self.inner.services.activate_switch(switch_ip).await;
+            if let Err(e) = self.inner.services.activate_switch(switch_ip).await
+            {
+                warn!(log, "Failed to activate switch: {e}");
+            }
         } else {
-            self.inner.services.deactivate_switch().await;
+            if let Err(e) = self.inner.services.deactivate_switch().await {
+                warn!(log, "Failed to deactivate switch: {e}");
+            }
         }
     }
 
@@ -418,10 +423,18 @@ impl SledAgent {
                     }
                     crate::hardware::HardwareUpdate::TofinoLoaded => {
                         let switch_ip = Some(self.inner.switch_ip());
-                        self.inner.services.activate_switch(switch_ip).await;
+                        if let Err(e) =
+                            self.inner.services.activate_switch(switch_ip).await
+                        {
+                            warn!(log, "Failed to activate switch: {e}");
+                        }
                     }
                     crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                        self.inner.services.deactivate_switch().await;
+                        if let Err(e) =
+                            self.inner.services.deactivate_switch().await
+                        {
+                            warn!(log, "Failed to deactivate switch: {e}");
+                        }
                     }
                 },
                 Err(RecvError::Lagged(count)) => {
