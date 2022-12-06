@@ -216,7 +216,7 @@ dependencies = [
 name = "authz-macros"
 version = "0.1.0"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro2",
  "quote",
  "serde",
@@ -728,7 +728,7 @@ version = "3.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea0c8bce528c4be4da13ea6fead8965e95b6073585a2f05204bd8f4119f82a65"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -741,7 +741,7 @@ version = "4.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0177313f9f02afc995627906bbd8967e2be069f5261954222dac78290c2b9014"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -1238,7 +1238,7 @@ checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
 name = "db-macros"
 version = "0.1.0"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro2",
  "quote",
  "rustfmt-wrapper",
@@ -1470,7 +1470,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#04068c75717920ea4f978999e845d766ed9c1409"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a493ae0130a5ec9d801aaf288190ff7d287c3e5c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1510,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#04068c75717920ea4f978999e845d766ed9c1409"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a493ae0130a5ec9d801aaf288190ff7d287c3e5c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1656,7 +1656,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9720bba047d567ffc8a3cba48bf19126600e249ab7f128e9233e6376976a116"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro2",
  "quote",
  "syn",
@@ -2200,15 +2200,6 @@ dependencies = [
  "serde",
  "spin 0.9.4",
  "stable_deref_trait",
-]
-
-[[package]]
-name = "heck"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d621efb26863f0e9924c6ac577e8275e5e6b77455db64ffa6c65c904e9e132c"
-dependencies = [
- "unicode-segmentation",
 ]
 
 [[package]]
@@ -3643,7 +3634,7 @@ name = "openapi-lint"
 version = "0.2.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#91f0af87bdaed0e41c8b43f4b0d85cc706d6a961"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "indexmap",
  "openapiv3",
 ]
@@ -3755,9 +3746,9 @@ checksum = "3baf96e39c5359d2eb0dd6ccb42c62b91d9678aa68160d261b9e0ccbf9e9dea9"
 
 [[package]]
 name = "oso"
-version = "0.26.3"
+version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6797d3da6d3dfd431c845060285436443eccebb08f11b3e5f23adb7e21238c79"
+checksum = "83a07fa8e90aadd02f1d996e94b58cb57142adfc56daf97c2fd783eefaa3f0fe"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -3770,9 +3761,9 @@ dependencies = [
 
 [[package]]
 name = "oso-derive"
-version = "0.26.3"
+version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "155e58bf10e15b9dadcf048995e0a18d135f31a747214b77f3cb2d3f02664ea4"
+checksum = "354a3805eaebf00d20dd8446b3ae6fc8f34db013e1d3c1f3f6cd53db17fa6c2d"
 dependencies = [
  "quote",
  "syn",
@@ -4245,9 +4236,9 @@ dependencies = [
 
 [[package]]
 name = "polar-core"
-version = "0.26.3"
+version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673b0f55fb5a6a02e40ea15084389146285217d138f12d732362ebc1416fdad7"
+checksum = "f3833746ee893099f2dff25267b8210394b63983525edb2fe5374bccfb2f77eb"
 dependencies = [
  "indoc",
  "js-sys",
@@ -4255,7 +4246,7 @@ dependencies = [
  "lalrpop-util",
  "serde",
  "serde_derive",
- "strum_macros 0.23.1",
+ "strum_macros",
  "wasm-bindgen",
 ]
 
@@ -4458,7 +4449,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#6f23bcb5cdb69b80581ee1eb7f6738b1755488dc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1f9d8791450d9d9256faaf1fa50830f72d3d1d34"
 dependencies = [
  "anyhow",
  "clap 4.0.29",
@@ -4473,7 +4464,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#6f23bcb5cdb69b80581ee1eb7f6738b1755488dc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1f9d8791450d9d9256faaf1fa50830f72d3d1d34"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4487,10 +4478,10 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#6f23bcb5cdb69b80581ee1eb7f6738b1755488dc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1f9d8791450d9d9256faaf1fa50830f72d3d1d34"
 dependencies = [
  "getopts",
- "heck 0.4.0",
+ "heck",
  "indexmap",
  "openapiv3",
  "proc-macro2",
@@ -4509,7 +4500,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#6f23bcb5cdb69b80581ee1eb7f6738b1755488dc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1f9d8791450d9d9256faaf1fa50830f72d3d1d34"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -5346,9 +5337,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.148"
+version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e53f64bb4ba0191d6d0676e1b141ca55047d83b74f5607e6d8eb88126c52c2dc"
+checksum = "256b9932320c590e707b94576e3cc1f7c9024d0ee6612dfbcf1cb106cbe8e055"
 dependencies = [
  "serde_derive",
 ]
@@ -5383,9 +5374,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.148"
+version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a55492425aa53521babf6137309e7d34c20bbfbbfcfe2c7f3a047fd1f6b92c0c"
+checksum = "b4eae9b04cbffdfd550eb462ed33bc6a1b68c935127d008b27444d08380f94e4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5815,7 +5806,7 @@ version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5e79cdebbabaebb06a9bdbaedc7f159b410461f63611d4d0e3fb0fab8fed850"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro2",
  "quote",
  "syn",
@@ -6046,20 +6037,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 dependencies = [
- "strum_macros 0.24.3",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bb0dc7ee9c15cea6199cde9a127fa16a4c5819af85395457ad72d68edc85a38"
-dependencies = [
- "heck 0.3.3",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn",
+ "strum_macros",
 ]
 
 [[package]]
@@ -6068,7 +6046,7 @@ version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro2",
  "quote",
  "rustversion",
@@ -6688,7 +6666,7 @@ name = "typify-impl"
 version = "0.0.11-dev"
 source = "git+https://github.com/oxidecomputer/typify#55d9fa1ac5c2094668077bcba38b31f422add76b"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "log",
  "proc-macro2",
  "quote",
@@ -7447,7 +7425,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef224b009d070d3b1adb9e375fcf8ec2f1948a412c3bbf8755c0ef4e3f91ef94"
 dependencies = [
- "heck 0.4.0",
+ "heck",
  "proc-macro-error",
  "proc-macro2",
  "quote",
