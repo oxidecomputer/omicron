@@ -963,6 +963,9 @@ impl ServiceManager {
                                 &format!("[{}]:{}", address, MGS_PORT),
                             )?;
                             smfh.refresh()?;
+                            // TODO: For this restart to be optional, MGS must
+                            // implement a non-default "refresh" method.
+                            smfh.restart()?;
                         }
                         ServiceType::Dendrite { .. } => {
                             smfh.setprop(
@@ -970,6 +973,9 @@ impl ServiceManager {
                                 &format!("[{}]:{}", address, DENDRITE_PORT),
                             )?;
                             smfh.refresh()?;
+                            // TODO: For this restart to be optional, Dendrite must
+                            // implement a non-default "refresh" method.
+                            smfh.restart()?;
                         }
                         ServiceType::Tfport { .. } => {
                             smfh.setprop(
@@ -977,6 +983,9 @@ impl ServiceManager {
                                 &format!("[{}]", address),
                             )?;
                             smfh.refresh()?;
+                            // TODO: For this restart to be optional, Tfport must
+                            // implement a non-default "refresh" method.
+                            smfh.restart()?;
                         }
                         _ => (),
                     }
