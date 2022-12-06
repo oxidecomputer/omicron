@@ -92,7 +92,7 @@ no changes are needed. If you're running elsewhere, you find the value with:
 
 [source,text]
 ----
-$ arp -an | grep $(netstat -rn | grep default | awk '{ print $2; }')
+$ arp -an | grep $(netstat -rn | awk '{ if ($1 == "default") print $2 }')
 igb0   192.168.1.1          255.255.255.255          74:ac:b9:a4:dc:02
 ----
 
