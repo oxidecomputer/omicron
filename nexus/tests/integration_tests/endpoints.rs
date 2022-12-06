@@ -112,8 +112,7 @@ lazy_static! {
         format!("{}/disks", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
         format!("{}/images", *DEMO_PROJECT_URL);
-    pub static ref DEMO_PROJECT_URL_INSTANCES: String =
-        "/v1/instances".to_string();
+    pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
         format!("{}/snapshots", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
@@ -1285,11 +1284,12 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/by-id/instances/{id}",
+            url: "/v1/instances/{id}",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         },
 
