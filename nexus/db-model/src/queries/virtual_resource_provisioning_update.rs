@@ -3,6 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Describes the resource provisioning update CTE
+//!
+//! Refer to <nexus/src/db/queries/virtual_resource_provisioning_update.rs>
+//! for the construction of this query.
 
 use crate::schema::organization;
 use crate::schema::silo;
