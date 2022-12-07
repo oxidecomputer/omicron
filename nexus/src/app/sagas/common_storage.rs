@@ -69,7 +69,7 @@ pub async fn ensure_region_in_dataset(
     };
 
     let region = backoff::retry_notify(
-        backoff::retry_policy_long(),
+        backoff::retry_policy_internal_service(),
         create_region,
         log_create_failure,
     )

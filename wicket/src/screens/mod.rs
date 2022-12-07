@@ -17,7 +17,7 @@ use component::ComponentScreen;
 use rack::RackScreen;
 use splash::SplashScreen;
 
-/// An identifier for a specific [`Screen`] in the [`Wizard`]
+/// An identifier for a specific [`Screen`] in the [`Wizard`](crate::Wizard).
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScreenId {
     Splash,

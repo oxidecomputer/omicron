@@ -49,8 +49,8 @@ pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 
 /// The core type of this library is the `Wizard`.
 ///
-/// A `Wizard` manages a set of [`Screen`]s, where each screen represents a
-/// specific step in the user process. Each [`Screen`] is drawable, and the
+/// A `Wizard` manages a set of screens, where each screen represents a
+/// specific step in the user process. Each screen is drawable, and the
 /// active screen is rendered on every tick. The [`Wizard`] manages which
 /// screen is active, issues the rendering operation to the terminal, and
 /// communicates with other threads and async tasks to receive user input
@@ -270,7 +270,7 @@ impl Wizard {
             run_event_listener(log.clone(), events_tx).await;
             tokio::spawn(async move {
                 wicketd_manager.run().await;
-            })
+            });
         });
     }
 }

@@ -2887,7 +2887,7 @@ pub struct InstanceSerialConsoleParams {
 }
 
 #[endpoint {
-    method = POST,
+    method = GET,
     path = "/v1/instances/{instance}/serial-console",
     tags = ["instances"],
 }]
@@ -2908,14 +2908,14 @@ async fn instance_serial_console_v1(
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
-        let console = nexus
+        let data = nexus
             .instance_serial_console_data(
                 &opctx,
                 &instance_id,
                 &query.console_params,
             )
             .await?;
-        Ok(HttpResponseOk(console.into()))
+        Ok(HttpResponseOk(data))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

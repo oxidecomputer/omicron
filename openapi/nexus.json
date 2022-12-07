@@ -8001,7 +8001,7 @@
       }
     },
     "/v1/instances/{instance}/serial-console": {
-      "post": {
+      "get": {
         "tags": [
           "instances"
         ],
