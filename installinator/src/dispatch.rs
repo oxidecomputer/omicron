@@ -66,7 +66,7 @@ struct DiscoverOpts {
 
 impl DiscoverOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        let peers = Peers::discover(&log).await?;
+        let peers = Peers::mock_discover(&log).await?;
         println!("discovered peers: {}", peers.display());
         Ok(())
     }
@@ -87,8 +87,9 @@ struct InstallOpts {
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
         // Discover the nodes via the bootstrap network.
-        let discovered_peers =
-            Peers::discover(&log).await.context("error discovering peers")?;
+        let discovered_peers = Peers::mock_discover(&log)
+            .await
+            .context("error discovering peers")?;
 
         // TODO: is buffering up the entire artifact in memory is OK?
         let (peer, artifact) = discovered_peers

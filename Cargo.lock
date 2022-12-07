@@ -2548,6 +2548,7 @@ name = "installinator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "camino",
  "clap 4.0.29",

@@ -5,33 +5,22 @@
 use std::{fmt, net::Ipv6Addr, str::FromStr};
 
 use anyhow::{anyhow, bail, Result};
+use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use futures::{prelude::*, stream::FuturesUnordered};
 use itertools::Itertools;
 
-/// Return a list of nodes discovered on the bootstrap network.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Peers {
     log: slog::Logger,
-    // TODO: implement
-    peers: Vec<Ipv6Addr>,
+    imp: Box<dyn PeersImpl>,
 }
 
 impl Peers {
-    pub(crate) async fn discover(log: &slog::Logger) -> Result<Self> {
+    pub(crate) async fn mock_discover(log: &slog::Logger) -> Result<Peers> {
         let log = log.new(slog::o!("component" => "Peers"));
-
-        // TODO: reach out to the bootstrap network
-        slog::debug!(
-            log,
-            "returning Ipv6Addr::LOCALHOST and UNSPECIFIED as mock peer addresses"
-        );
-        let peers = vec![Ipv6Addr::LOCALHOST, Ipv6Addr::UNSPECIFIED];
-        Ok(Self { log, peers })
-    }
-
-    pub(crate) fn display(&self) -> impl fmt::Display {
-        self.peers.iter().join(", ")
+        let imp = Box::new(MockPeers::new(&log)?);
+        Ok(Self { log, imp })
     }
 
     pub(crate) async fn fetch_artifact(
@@ -41,10 +30,12 @@ impl Peers {
         // TODO: do we want a check phase that happens before the download?
 
         let download_futs: FuturesUnordered<_> = self
-            .peers
+            .imp
+            .peers()
             .iter()
             .map(|peer| async {
-                let result = self.fetch_impl(peer, artifact_id).await;
+                let result =
+                    self.imp.fetch_artifact_from_peer(peer, artifact_id).await;
                 (*peer, result)
             })
             .collect();
@@ -57,7 +48,7 @@ impl Peers {
                     bytes.len(),
                 );
 
-                // TODO: maybe perform checksumming here
+                // TODO: maybe perform checksumming and other signature validation here
                 future::ready(Some((peer, bytes)))
             }
             Err(err) => {
@@ -80,9 +71,45 @@ impl Peers {
         })
     }
 
-    // ---
+    pub(crate) fn display(&self) -> String {
+        self.imp.peers().iter().join(", ")
+    }
+}
 
-    async fn fetch_impl(
+#[async_trait]
+trait PeersImpl: fmt::Debug + Send + Sync {
+    async fn fetch_artifact_from_peer(
+        &self,
+        peer: &Ipv6Addr,
+        artifact_id: &ArtifactId,
+    ) -> Result<Bytes>;
+
+    fn peers(&self) -> &[Ipv6Addr];
+}
+
+/// Return a list of nodes discovered on the bootstrap network.
+#[derive(Clone, Debug)]
+struct MockPeers {
+    peers: Vec<Ipv6Addr>,
+}
+
+impl MockPeers {
+    fn new(log: &slog::Logger) -> Result<Self> {
+        let log = log.new(slog::o!("component" => "MockPeers"));
+
+        // TODO: reach out to the bootstrap network
+        slog::debug!(
+            log,
+            "returning Ipv6Addr::LOCALHOST and UNSPECIFIED as mock peer addresses"
+        );
+        let peers = vec![Ipv6Addr::LOCALHOST, Ipv6Addr::UNSPECIFIED];
+        Ok(Self { peers })
+    }
+}
+
+#[async_trait]
+impl PeersImpl for MockPeers {
+    async fn fetch_artifact_from_peer(
         &self,
         peer: &Ipv6Addr,
         artifact_id: &ArtifactId,
@@ -99,6 +126,10 @@ impl Peers {
         } else {
             bail!("invalid peer")
         }
+    }
+
+    fn peers(&self) -> &[Ipv6Addr] {
+        &self.peers
     }
 }
 
