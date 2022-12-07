@@ -1,0 +1,17 @@
+[package]
+name = "installinator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.65"
+bytes = "1.3.0"
+camino = "1.1"
+clap = { version = "4.0", features = ["derive"] }
+futures = "0.3.25"
+itertools = "0.10.5"
+slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
+slog-async = "2.7.0"
+slog-term = "2.9.0"
+tokio = { version = "1.22", features = [ "full" ] }
+wicketd-client = { path = "../wicketd-client" }
