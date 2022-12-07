@@ -19,3 +19,4 @@ instance_migrate                         (post   "/organizations/{organization_n
 instance_reboot                          (post   "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot")
 instance_start                           (post   "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start")
 instance_stop                            (post   "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop")
+instance_view_by_id                      (get    "/by-id/instances/{id}")

@@ -1284,16 +1284,6 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/v1/instances/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
             url: &*DEMO_INSTANCE_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
