@@ -13,9 +13,6 @@ schemars = "0.8"
 version = "0.4"
 features = [ "serde" ]
 
-[dependencies.omicron-common]
-path = "../common"
-
 [dependencies.serde]
 version = "1.0"
 features = [ "derive" ]
