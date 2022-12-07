@@ -50,7 +50,8 @@ impl DataStore {
                 .values(snapshot)
                 .on_conflict((dsl::project_id, dsl::name))
                 .filter_target(dsl::time_deleted.is_null())
-                .do_nothing(),
+                .do_update()
+                .set(dsl::time_modified.eq(Utc::now())),
         )
         .insert_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
