@@ -1817,12 +1817,12 @@ async fn disk_list_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_id =
-            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let authz_project =
+            nexus.project_lookup(&opctx, query.selector).await?;
         let disks = nexus
             .project_list_disks(
                 &opctx,
-                &project_id,
+                &authz_project,
                 &data_page_params_for(&rqctx, &query.pagination)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -1858,8 +1858,8 @@ async fn disk_list(
     let project_name = &path.project_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_id = nexus
-            .project_lookup_id(
+        let authz_project = nexus
+            .project_lookup(
                 &opctx,
                 params::ProjectSelector {
                     project: NameOrId::Name(project_name.clone().into()),
@@ -1872,7 +1872,7 @@ async fn disk_list(
         let disks = nexus
             .project_list_disks(
                 &opctx,
-                &project_id,
+                &authz_project,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -1912,10 +1912,10 @@ async fn disk_create_v1(
     let new_disk_params = &new_disk.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_id =
-            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let authz_project =
+            nexus.project_lookup(&opctx, query.selector).await?;
         let disk = nexus
-            .project_create_disk(&opctx, &project_id, new_disk_params)
+            .project_create_disk(&opctx, &authz_project, new_disk_params)
             .await?;
         Ok(HttpResponseCreated(disk.into()))
     };
@@ -1941,8 +1941,8 @@ async fn disk_create(
     let new_disk_params = &new_disk.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_id = nexus
-            .project_lookup_id(
+        let authz_project = nexus
+            .project_lookup(
                 &opctx,
                 params::ProjectSelector {
                     project: NameOrId::Name(project_name.clone().into()),
@@ -1953,7 +1953,7 @@ async fn disk_create(
             )
             .await?;
         let disk = nexus
-            .project_create_disk(&opctx, &project_id, &new_disk_params)
+            .project_create_disk(&opctx, &authz_project, &new_disk_params)
             .await?;
         Ok(HttpResponseCreated(disk.into()))
     };
@@ -1994,13 +1994,13 @@ async fn disk_view_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk_id = nexus
-            .disk_lookup_id(
+        let authz_disk = nexus
+            .disk_lookup(
                 &opctx,
                 params::DiskSelector::new(path.disk, &query.selector),
             )
             .await?;
-        let disk = nexus.disk_fetch(&opctx, &disk_id).await?;
+        let disk = nexus.disk_fetch(&opctx, &authz_disk).await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2033,7 +2033,7 @@ async fn disk_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk_id = nexus
-            .disk_lookup_id(
+            .disk_lookup(
                 &opctx,
                 params::DiskSelector {
                     disk: NameOrId::Name(disk_name.clone().into()),
@@ -2066,7 +2066,13 @@ async fn disk_view_by_id(
     let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus.disk_fetch(&opctx, id).await?;
+        let authz_disk = nexus
+            .disk_lookup(
+                &opctx,
+                params::DiskSelector::new(NameOrId::Id(*id), &None),
+            )
+            .await?;
+        let disk = nexus.disk_fetch(&opctx, &authz_disk).await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2089,13 +2095,13 @@ async fn disk_delete_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk_id = nexus
-            .disk_lookup_id(
+        let authz_disk = nexus
+            .disk_lookup(
                 &opctx,
                 params::DiskSelector::new(path.disk, &query.selector),
             )
             .await?;
-        nexus.project_delete_disk(&opctx, &disk_id).await?;
+        nexus.project_delete_disk(&opctx, &authz_disk).await?;
         Ok(HttpResponseOk(()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2119,7 +2125,7 @@ async fn disk_delete(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk_id = nexus
-            .disk_lookup_id(
+            .disk_lookup(
                 &opctx,
                 params::DiskSelector {
                     disk: NameOrId::Name(disk_name.clone().into()),
@@ -2177,8 +2183,8 @@ async fn disk_metrics_list_v1(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk_id = nexus
-            .disk_lookup_id(
+        let authz_disk = nexus
+            .disk_lookup(
                 &opctx,
                 params::DiskSelector::new(path.inner.disk, &query.selector),
             )
@@ -2187,7 +2193,7 @@ async fn disk_metrics_list_v1(
         let result = nexus
             .select_timeseries(
                 &format!("crucible_upstairs:{}", metric_name),
-                &[&format!("upstairs_uuid=={}", disk_id)],
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query.pagination,
                 limit,
             )
@@ -2226,8 +2232,8 @@ async fn disk_metrics_list(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk_id = nexus
-            .disk_lookup_id(
+        let authz_disk = nexus
+            .disk_lookup(
                 &opctx,
                 params::DiskSelector {
                     disk: NameOrId::Name(disk_name.clone().into()),
@@ -2242,7 +2248,7 @@ async fn disk_metrics_list(
         let result = nexus
             .select_timeseries(
                 &format!("crucible_upstairs:{}", metric_name),
-                &[&format!("upstairs_uuid=={}", disk_id)],
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
             )

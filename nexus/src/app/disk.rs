@@ -28,11 +28,11 @@ use uuid::Uuid;
 
 impl super::Nexus {
     // Disks
-    pub async fn disk_lookup_id(
+    pub async fn disk_lookup(
         &self,
         opctx: &OpContext,
         disk_selector: params::DiskSelector,
-    ) -> LookupResult<Uuid> {
+    ) -> LookupResult<authz::Disk> {
         match disk_selector {
             params::DiskSelector { disk: NameOrId::Id(id), .. } => {
                 let (.., authz_disk) =
@@ -40,7 +40,7 @@ impl super::Nexus {
                         .disk_id(id)
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_disk.id())
+                Ok(authz_disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(disk_name),
@@ -53,7 +53,7 @@ impl super::Nexus {
                         .disk_name(&Name(disk_name.clone()))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_disk.id())
+                Ok(authz_disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(disk_name),
@@ -67,7 +67,7 @@ impl super::Nexus {
                         .disk_name(&Name(disk_name.clone()))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_disk.id())
+                Ok(authz_disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(disk_name),
@@ -81,7 +81,7 @@ impl super::Nexus {
                         .disk_name(&Name(disk_name.clone()))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_disk.id())
+                Ok(authz_disk)
             }
             _ => Err(Error::InvalidRequest {
                 message: "
@@ -99,14 +99,10 @@ impl super::Nexus {
     pub async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        project_id: &Uuid,
+        authz_project: &authz::Project,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .project_id(*project_id)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
-
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
         match &params.disk_source {
             params::DiskSource::Blank { block_size } => {
                 // Reject disks where the block size doesn't evenly divide the
@@ -294,13 +290,10 @@ impl super::Nexus {
     pub async fn project_list_disks(
         &self,
         opctx: &OpContext,
-        project_id: &Uuid,
+        authz_project: &authz::Project,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .project_id(*project_id)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
         self.db_datastore
             .project_list_disks(opctx, &authz_project, pagparams)
             .await
@@ -309,10 +302,10 @@ impl super::Nexus {
     pub async fn disk_fetch(
         &self,
         opctx: &OpContext,
-        disk_id: &Uuid,
+        authz_disk: &authz::Disk,
     ) -> LookupResult<db::model::Disk> {
         let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(*disk_id)
+            .disk_id(authz_disk.id())
             .fetch()
             .await?;
         Ok(db_disk)
@@ -421,12 +414,9 @@ impl super::Nexus {
     pub async fn project_delete_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        disk_id: &Uuid,
+        authz_disk: &authz::Disk,
     ) -> DeleteResult {
-        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(*disk_id)
-            .lookup_for(authz::Action::Delete)
-            .await?;
+        opctx.authorize(authz::Action::Delete, authz_disk).await?;
 
         let saga_params =
             sagas::disk_delete::Params { disk_id: authz_disk.id() };
