@@ -2032,12 +2032,12 @@ async fn instance_list_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_id =
-            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let authz_project =
+            nexus.project_lookup(&opctx, query.selector).await?;
         let instances = nexus
             .project_list_instances(
                 &opctx,
-                project_id,
+                &authz_project,
                 &data_page_params_for(&rqctx, &query.pagination)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -2073,8 +2073,8 @@ async fn instance_list(
     let project_name = &path.project_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_id = nexus
-            .project_lookup_id(
+        let authz_project = nexus
+            .project_lookup(
                 &opctx,
                 params::ProjectSelector {
                     project: NameOrId::Name(project_name.clone().into()),
@@ -2087,7 +2087,7 @@ async fn instance_list(
         let instances = nexus
             .project_list_instances(
                 &opctx,
-                project_id,
+                &authz_project,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -2126,8 +2126,7 @@ async fn instance_create_v1(
     let new_instance_params = &new_instance.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_id =
-            nexus.project_lookup_id(&opctx, query.selector).await?;
+        let project_id = nexus.project_lookup(&opctx, query.selector).await?;
         let instance = nexus
             .project_create_instance(&opctx, &project_id, &new_instance_params)
             .await?;
@@ -2163,7 +2162,7 @@ async fn instance_create(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_id = nexus
-            .project_lookup_id(
+            .project_lookup(
                 &opctx,
                 params::ProjectSelector {
                     project: NameOrId::Name(project_name.clone().into()),
@@ -2215,13 +2214,13 @@ async fn instance_view_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
-        let instance = nexus.instance_fetch(&opctx, &instance_id).await?;
+        let instance = nexus.instance_fetch(&opctx, &authz_instance).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2253,8 +2252,8 @@ async fn instance_view(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector {
                     instance: NameOrId::Name(instance_name.clone().into()),
@@ -2265,7 +2264,7 @@ async fn instance_view(
                 },
             )
             .await?;
-        let instance = nexus.instance_fetch(&opctx, &instance_id).await?;
+        let instance = nexus.instance_fetch(&opctx, &authz_instance).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2287,7 +2286,17 @@ async fn instance_view_by_id(
     let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance = nexus.instance_fetch(&opctx, id).await?;
+        let authz_instance = nexus
+            .instance_lookup(
+                &opctx,
+                params::InstanceSelector {
+                    instance: NameOrId::Id(*id),
+                    project: None,
+                    organization: None,
+                },
+            )
+            .await?;
+        let instance = nexus.instance_fetch(&opctx, &authz_instance).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2309,13 +2318,13 @@ async fn instance_delete_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
-        nexus.project_destroy_instance(&opctx, &instance_id).await?;
+        nexus.project_destroy_instance(&opctx, &authz_instance).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2339,8 +2348,8 @@ async fn instance_delete(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector {
                     instance: NameOrId::Name(instance_name.clone().into()),
@@ -2351,7 +2360,7 @@ async fn instance_delete(
                 },
             )
             .await?;
-        nexus.project_destroy_instance(&opctx, &instance_id).await?;
+        nexus.project_destroy_instance(&opctx, &authz_instance).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2376,8 +2385,8 @@ async fn instance_migrate_v1(
     let migrate_instance_params = migrate_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
@@ -2385,7 +2394,7 @@ async fn instance_migrate_v1(
         let instance = nexus
             .project_instance_migrate(
                 &opctx,
-                instance_id,
+                &authz_instance,
                 migrate_instance_params,
             )
             .await?;
@@ -2415,8 +2424,8 @@ async fn instance_migrate(
     let migrate_instance_params = migrate_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector {
                     instance: NameOrId::Name(instance_name.clone().into()),
@@ -2430,7 +2439,7 @@ async fn instance_migrate(
         let instance = nexus
             .project_instance_migrate(
                 &opctx,
-                instance_id,
+                &authz_instance,
                 migrate_instance_params,
             )
             .await?;
@@ -2455,13 +2464,13 @@ async fn instance_reboot_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
-        let instance = nexus.instance_reboot(&opctx, instance_id).await?;
+        let instance = nexus.instance_reboot(&opctx, &authz_instance).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2485,8 +2494,8 @@ async fn instance_reboot(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector {
                     instance: NameOrId::Name(instance_name.clone().into()),
@@ -2497,7 +2506,7 @@ async fn instance_reboot(
                 },
             )
             .await?;
-        let instance = nexus.instance_reboot(&opctx, instance_id).await?;
+        let instance = nexus.instance_reboot(&opctx, &authz_instance).await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2520,13 +2529,13 @@ async fn instance_start_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
-        let instance = nexus.instance_start(&opctx, instance_id).await?;
+        let instance = nexus.instance_start(&opctx, &authz_instance).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2550,8 +2559,8 @@ async fn instance_start(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector {
                     instance: NameOrId::Name(instance_name.clone().into()),
@@ -2562,7 +2571,7 @@ async fn instance_start(
                 },
             )
             .await?;
-        let instance = nexus.instance_start(&opctx, instance_id).await?;
+        let instance = nexus.instance_start(&opctx, &authz_instance).await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2584,13 +2593,13 @@ async fn instance_stop_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
-        let instance = nexus.instance_stop(&opctx, instance_id).await?;
+        let instance = nexus.instance_stop(&opctx, &authz_instance).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2614,8 +2623,8 @@ async fn instance_stop(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector {
                     instance: NameOrId::Name(instance_name.clone().into()),
@@ -2626,7 +2635,7 @@ async fn instance_stop(
                 },
             )
             .await?;
-        let instance = nexus.instance_stop(&opctx, instance_id).await?;
+        let instance = nexus.instance_stop(&opctx, &authz_instance).await?;
         Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2657,8 +2666,8 @@ async fn instance_serial_console_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
@@ -2666,7 +2675,7 @@ async fn instance_serial_console_v1(
         let data = nexus
             .instance_serial_console_data(
                 &opctx,
-                &instance_id,
+                &authz_instance,
                 &query.console_params,
             )
             .await?;
@@ -2694,8 +2703,8 @@ async fn instance_serial_console(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_id = nexus
-            .instance_lookup_id(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
                 params::InstanceSelector {
                     instance: NameOrId::Name(instance_name.clone().into()),
@@ -2709,7 +2718,7 @@ async fn instance_serial_console(
         let data = nexus
             .instance_serial_console_data(
                 &opctx,
-                &instance_id,
+                &authz_instance,
                 &query_params.into_inner(),
             )
             .await?;
@@ -2734,13 +2743,13 @@ async fn instance_serial_console_stream_v1(
     let path = path_params.into_inner();
     let query = query_params.into_inner();
     let opctx = OpContext::for_external_api(&rqctx).await?;
-    let instance_id = nexus
-        .instance_lookup_id(
+    let authz_instance = nexus
+        .instance_lookup(
             &opctx,
             params::InstanceSelector::new(path.instance, &query.selector),
         )
         .await?;
-    nexus.instance_serial_console_stream(&opctx, conn, &instance_id).await?;
+    nexus.instance_serial_console_stream(&opctx, conn, &authz_instance).await?;
     Ok(())
 }
 
@@ -2762,8 +2771,8 @@ async fn instance_serial_console_stream(
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
     let opctx = OpContext::for_external_api(&rqctx).await?;
-    let instance_id = nexus
-        .instance_lookup_id(
+    let authz_instance = nexus
+        .instance_lookup(
             &opctx,
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name.clone().into()),
@@ -2774,7 +2783,7 @@ async fn instance_serial_console_stream(
             },
         )
         .await?;
-    nexus.instance_serial_console_stream(&opctx, conn, &instance_id).await?;
+    nexus.instance_serial_console_stream(&opctx, conn, &authz_instance).await?;
     Ok(())
 }
 
