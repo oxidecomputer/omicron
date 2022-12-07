@@ -7,6 +7,9 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum CollectionType {
+    Instance,
+    Disk,
+
     Project,
     Organization,
     Silo,
@@ -16,6 +19,8 @@ pub enum CollectionType {
 impl std::fmt::Display for CollectionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            CollectionType::Instance => write!(f, "instance"),
+            CollectionType::Disk => write!(f, "disk"),
             CollectionType::Project => write!(f, "project"),
             CollectionType::Organization => write!(f, "organization"),
             CollectionType::Silo => write!(f, "silo"),

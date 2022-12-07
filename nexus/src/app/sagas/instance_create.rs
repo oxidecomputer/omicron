@@ -887,6 +887,7 @@ async fn sic_create_instance_record(
 ) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id")?;
@@ -918,7 +919,7 @@ async fn sic_create_instance_record(
 
     let instance = osagactx
         .datastore()
-        .project_create_instance(new_instance)
+        .project_create_instance(&opctx, new_instance)
         .await
         .map_err(ActionError::action_failed)?;
 
