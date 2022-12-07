@@ -534,6 +534,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "camino"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88ad0e1e3e88dd237a156ab9f571021b8a158caa0ae44b1968a241efb5144c1e"
+
+[[package]]
 name = "cassowary"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2535,6 +2541,23 @@ checksum = "a0c10553d664a4d0bcff9f4215d0aac67a639cc68ef660840afe309b807bc9f5"
 dependencies = [
  "block-padding",
  "generic-array",
+]
+
+[[package]]
+name = "installinator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "camino",
+ "clap 4.0.29",
+ "futures",
+ "itertools",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "tokio",
+ "wicketd-client",
 ]
 
 [[package]]
