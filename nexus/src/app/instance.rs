@@ -54,11 +54,11 @@ use uuid::Uuid;
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
 impl super::Nexus {
-    pub async fn instance_lookup_id(
+    pub async fn instance_lookup(
         &self,
         opctx: &OpContext,
         instance_selector: params::InstanceSelector,
-    ) -> LookupResult<Uuid> {
+    ) -> LookupResult<authz::Instance> {
         match instance_selector {
             params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
                 // TODO: 400 if project or organization are present
@@ -67,7 +67,7 @@ impl super::Nexus {
                         .instance_id(id)
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_instance.id())
+                Ok(authz_instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name),
@@ -81,7 +81,7 @@ impl super::Nexus {
                         .instance_name(&Name(instance_name.clone()))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_instance.id())
+                Ok(authz_instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name),
@@ -95,7 +95,7 @@ impl super::Nexus {
                         .instance_name(&Name(instance_name.clone()))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_instance.id())
+                Ok(authz_instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name),
@@ -109,7 +109,7 @@ impl super::Nexus {
                         .instance_name(&Name(instance_name.clone()))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_instance.id())
+                Ok(authz_instance)
             }
             // TODO: Add a better error message
             _ => Err(Error::InvalidRequest {
@@ -128,13 +128,10 @@ impl super::Nexus {
     pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
-        project_id: &Uuid,
+        authz_project: &authz::Project,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .project_id(*project_id)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
@@ -263,13 +260,10 @@ impl super::Nexus {
     pub async fn project_list_instances(
         &self,
         opctx: &OpContext,
-        project_id: Uuid,
+        authz_project: &authz::Project,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .project_id(project_id)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
         self.db_datastore
             .project_list_instances(opctx, &authz_project, pagparams)
             .await
@@ -278,10 +272,10 @@ impl super::Nexus {
     pub async fn instance_fetch(
         &self,
         opctx: &OpContext,
-        instance_id: &Uuid,
+        authz_instance: &authz::Instance,
     ) -> LookupResult<db::model::Instance> {
         let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(*instance_id)
+            .instance_id(authz_instance.id())
             .fetch()
             .await?;
         Ok(db_instance)
@@ -293,15 +287,12 @@ impl super::Nexus {
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
-        instance_id: &Uuid,
+        authz_instance: &authz::Instance,
     ) -> DeleteResult {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(*instance_id)
-            .lookup_for(authz::Action::Delete)
-            .await?;
+        opctx.authorize(authz::Action::Delete, authz_instance).await?;
 
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
@@ -319,13 +310,10 @@ impl super::Nexus {
     pub async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
-        instance_id: Uuid,
+        authz_instance: &authz::Instance,
         params: params::InstanceMigrate,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         // Kick off the migration saga
         let saga_params = sagas::instance_migrate::Params {
@@ -379,7 +367,7 @@ impl super::Nexus {
     pub async fn instance_reboot(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        authz_instance: &authz::Instance,
     ) -> UpdateResult<db::model::Instance> {
         // To implement reboot, we issue a call to the sled agent to set a
         // runtime state of "reboot". We cannot simply stop the Instance and
@@ -394,7 +382,7 @@ impl super::Nexus {
         // running.
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(instance_id)
+                .instance_id(authz_instance.id())
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
@@ -415,11 +403,11 @@ impl super::Nexus {
     pub async fn instance_start(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        authz_instance: &authz::Instance,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(instance_id)
+                .instance_id(authz_instance.id())
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
@@ -440,11 +428,11 @@ impl super::Nexus {
     pub async fn instance_stop(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        authz_instance: &authz::Instance,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(instance_id)
+                .instance_id(authz_instance.id())
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
@@ -1139,10 +1127,10 @@ impl super::Nexus {
     pub(crate) async fn instance_serial_console_data(
         &self,
         opctx: &OpContext,
-        instance_id: &Uuid,
+        authz_instance: &authz::Instance,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let db_instance = self.instance_fetch(opctx, instance_id).await?;
+        let db_instance = self.instance_fetch(opctx, authz_instance).await?;
 
         let sa = self.instance_sled(&db_instance).await?;
         let data = sa
@@ -1166,9 +1154,9 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         conn: dropshot::WebsocketConnection,
-        instance_id: &Uuid,
+        authz_instance: &authz::Instance,
     ) -> Result<(), Error> {
-        let instance = self.instance_fetch(opctx, instance_id).await?;
+        let instance = self.instance_fetch(opctx, authz_instance).await?;
         let ip_addr = instance
             .runtime_state
             .propolis_ip

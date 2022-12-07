@@ -25,15 +25,20 @@ use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn project_lookup_id(
+    pub async fn project_lookup(
         &self,
         opctx: &OpContext,
         project_selector: params::ProjectSelector,
-    ) -> LookupResult<Uuid> {
+    ) -> LookupResult<authz::Project> {
         match project_selector {
             params::ProjectSelector { project: NameOrId::Id(id), .. } => {
                 // TODO: 400 if organization is present
-                Ok(id)
+                let (.., authz_project) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .project_id(id)
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_project)
             }
             params::ProjectSelector {
                 project: NameOrId::Name(project_name),
@@ -45,7 +50,7 @@ impl super::Nexus {
                         .project_name(&Name(project_name))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_project.id())
+                Ok(authz_project)
             }
             params::ProjectSelector {
                 project: NameOrId::Name(project_name),
@@ -57,7 +62,7 @@ impl super::Nexus {
                         .project_name(&Name(project_name))
                         .lookup_for(authz::Action::Read)
                         .await?;
-                Ok(authz_project.id())
+                Ok(authz_project)
             }
             _ => Err(Error::InvalidRequest {
                 message: "
