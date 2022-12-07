@@ -13,6 +13,8 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
+use crate::db::collection_insert::AsyncInsertError;
+use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -21,6 +23,7 @@ use crate::db::model::Disk;
 use crate::db::model::DiskRuntimeState;
 use crate::db::model::Instance;
 use crate::db::model::Name;
+use crate::db::model::Project;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
@@ -64,19 +67,29 @@ impl DataStore {
 
         let gen = disk.runtime().gen;
         let name = disk.name().clone();
-        let disk: Disk = diesel::insert_into(dsl::disk)
-            .values(disk)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .returning(Disk::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+        let project_id = disk.project_id;
+
+        let disk: Disk = Project::insert_resource(
+            project_id,
+            diesel::insert_into(dsl::disk)
+                .values(disk)
+                .on_conflict(dsl::id)
+                .do_nothing(),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Project,
+                lookup_type: LookupType::ById(project_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
                 )
-            })?;
+            }
+        })?;
 
         let runtime = disk.runtime();
         bail_unless!(

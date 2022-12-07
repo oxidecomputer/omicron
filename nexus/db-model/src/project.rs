@@ -2,8 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::Name;
-use crate::schema::project;
+use super::{
+    Disk, ExternalIp, Generation, Image, Instance, IpPool, Name, Snapshot, Vpc,
+};
+use crate::collection::DatastoreCollectionConfig;
+use crate::schema::{
+    disk, external_ip, image, instance, ip_pool, project, snapshot, vpc,
+};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -18,6 +23,8 @@ pub struct Project {
     #[diesel(embed)]
     identity: ProjectIdentity,
 
+    /// child resource generation number, per RFD 192
+    pub rcgen: Generation,
     pub organization_id: Uuid,
 }
 
@@ -26,6 +33,7 @@ impl Project {
     pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
+            rcgen: Generation::new(),
             organization_id,
         }
     }
@@ -38,6 +46,58 @@ impl From<Project> for views::Project {
             organization_id: project.organization_id,
         }
     }
+}
+
+impl DatastoreCollectionConfig<Instance> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = instance::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Disk> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = disk::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Image> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = image::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Snapshot> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = snapshot::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Vpc> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = vpc::dsl::project_id;
+}
+
+// NOTE: "IpPoolRange" also contains a reference to "project_id", but
+// ranges should only exist within IP Pools.
+impl DatastoreCollectionConfig<IpPool> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = ip_pool::dsl::project_id;
+}
+
+// TODO(https://github.com/oxidecomputer/omicron/issues/1482): Not yet utilized
+impl DatastoreCollectionConfig<ExternalIp> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = external_ip::dsl::project_id;
 }
 
 /// Describes a set of updates for the [`Project`] model.

@@ -19,6 +19,7 @@ use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
+use crate::db::model::Project;
 use crate::db::pagination::paginated;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::external_api::params;
@@ -158,17 +159,45 @@ impl DataStore {
         };
         let pool = IpPool::new(&new_pool.identity, project_id, rack_id);
         let pool_name = pool.name().as_str().to_string();
-        diesel::insert_into(dsl::ip_pool)
-            .values(pool)
-            .returning(IpPool::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+
+        if let Some(project_id) = project_id {
+            Project::insert_resource(
+                project_id,
+                diesel::insert_into(dsl::ip_pool).values(pool),
+            )
+            .insert_and_get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::IpPool, &pool_name),
-                )
+            .map_err(|e| match e {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Project,
+                    lookup_type: LookupType::ById(project_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::IpPool,
+                            &pool_name,
+                        ),
+                    )
+                }
             })
+        } else {
+            diesel::insert_into(dsl::ip_pool)
+                .values(pool)
+                .returning(IpPool::as_returning())
+                .get_result_async(self.pool_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::IpPool,
+                            &pool_name,
+                        ),
+                    )
+                })
+        }
     }
 
     pub async fn ip_pool_delete(

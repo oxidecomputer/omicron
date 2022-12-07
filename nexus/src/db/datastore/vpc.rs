@@ -18,6 +18,7 @@ use crate::db::identity::Resource;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
+use crate::db::model::Project;
 use crate::db::model::RouterRoute;
 use crate::db::model::RouterRouteUpdate;
 use crate::db::model::Sled;
@@ -81,23 +82,28 @@ impl DataStore {
         assert_eq!(authz_project.id(), vpc.project_id);
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        // TODO-correctness Shouldn't this use "insert_resource"?
-        //
-        // Note that to do so requires adding an `rcgen` column to the project
-        // table.
         let name = vpc.identity.name.clone();
+        let project_id = vpc.project_id;
         let query = InsertVpcQuery::new(vpc);
-        let vpc = diesel::insert_into(dsl::vpc)
-            .values(query)
-            .returning(Vpc::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+
+        let vpc: Vpc = Project::insert_resource(
+            project_id,
+            diesel::insert_into(dsl::vpc).values(query),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Project,
+                lookup_type: LookupType::ById(project_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
                 )
-            })?;
+            }
+        })?;
         Ok((
             authz::Vpc::new(
                 authz_project.clone(),
