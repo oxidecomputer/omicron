@@ -269,7 +269,7 @@ impl super::Nexus {
                 -i64::try_from(instance.runtime_state.memory.to_bytes())
                     .map_err(|e| {
                         Error::internal_error(&format!(
-                            "updating resource usage: {e}"
+                            "updating resource provisioning: {e}"
                         ))
                     })?,
             )

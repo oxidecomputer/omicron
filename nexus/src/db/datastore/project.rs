@@ -76,7 +76,7 @@ impl DataStore {
                     }
                 })?;
 
-                // Create resource usage for the project.
+                // Create resource provisioning for the project.
                 self.virtual_resource_provisioning_create_on_connection(
                     &conn,
                     VirtualResourceProvisioning::new(

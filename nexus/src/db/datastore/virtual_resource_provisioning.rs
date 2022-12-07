@@ -63,14 +63,17 @@ impl Producer {
         Self { samples: Arc::new(Mutex::new(vec![])) }
     }
 
-    fn append_disk_metrics(&self, usages: &Vec<VirtualResourceProvisioning>) {
-        let new_samples = usages
+    fn append_disk_metrics(
+        &self,
+        provisions: &Vec<VirtualResourceProvisioning>,
+    ) {
+        let new_samples = provisions
             .iter()
-            .map(|usage| {
+            .map(|provision| {
                 Sample::new(
-                    &CollectionTarget { id: usage.id },
+                    &CollectionTarget { id: provision.id },
                     &VirtualDiskSpaceProvisioned {
-                        bytes_used: usage.virtual_disk_bytes_provisioned,
+                        bytes_used: provision.virtual_disk_bytes_provisioned,
                     },
                 )
             })
@@ -79,19 +82,22 @@ impl Producer {
         self.append(new_samples);
     }
 
-    fn append_cpu_metrics(&self, usages: &Vec<VirtualResourceProvisioning>) {
-        let new_samples = usages
+    fn append_cpu_metrics(
+        &self,
+        provisions: &Vec<VirtualResourceProvisioning>,
+    ) {
+        let new_samples = provisions
             .iter()
-            .map(|usage| {
+            .map(|provision| {
                 Sample::new(
-                    &CollectionTarget { id: usage.id },
-                    &CpusProvisioned { cpus: usage.cpus_provisioned },
+                    &CollectionTarget { id: provision.id },
+                    &CpusProvisioned { cpus: provision.cpus_provisioned },
                 )
             })
-            .chain(usages.iter().map(|usage| {
+            .chain(provisions.iter().map(|provision| {
                 Sample::new(
-                    &CollectionTarget { id: usage.id },
-                    &RamProvisioned { bytes: usage.ram_provisioned },
+                    &CollectionTarget { id: provision.id },
+                    &RamProvisioned { bytes: provision.ram_provisioned },
                 )
             }))
             .collect::<Vec<_>>();
@@ -144,7 +150,7 @@ impl DataStore {
     {
         use db::schema::virtual_resource_provisioning::dsl;
 
-        let usages: Vec<VirtualResourceProvisioning> =
+        let provisions: Vec<VirtualResourceProvisioning> =
             diesel::insert_into(dsl::virtual_resource_provisioning)
                 .values(virtual_resource_provisioning)
                 .on_conflict_do_nothing()
@@ -157,9 +163,10 @@ impl DataStore {
                     )
                 })?;
         self.virtual_resource_provisioning_producer
-            .append_disk_metrics(&usages);
-        self.virtual_resource_provisioning_producer.append_cpu_metrics(&usages);
-        Ok(usages)
+            .append_disk_metrics(&provisions);
+        self.virtual_resource_provisioning_producer
+            .append_cpu_metrics(&provisions);
+        Ok(provisions)
     }
 
     pub async fn virtual_resource_provisioning_get(
@@ -204,14 +211,14 @@ impl DataStore {
         Ok(())
     }
 
-    /// Transitively updates all provisioned disk usage from project -> fleet.
+    /// Transitively updates all provisioned disk provisions from project -> fleet.
     pub async fn virtual_resource_provisioning_update_disk(
         &self,
         opctx: &OpContext,
         project_id: Uuid,
         disk_byte_diff: i64,
     ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
-        let usages = VirtualResourceProvisioningUpdate::new_update_disk(
+        let provisions = VirtualResourceProvisioningUpdate::new_update_disk(
             project_id,
             disk_byte_diff,
         )
@@ -219,11 +226,11 @@ impl DataStore {
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
         self.virtual_resource_provisioning_producer
-            .append_disk_metrics(&usages);
-        Ok(usages)
+            .append_disk_metrics(&provisions);
+        Ok(provisions)
     }
 
-    /// Transitively updates all CPU/RAM usage from project -> fleet.
+    /// Transitively updates all CPU/RAM provisions from project -> fleet.
     pub async fn virtual_resource_provisioning_update_cpus_and_ram(
         &self,
         opctx: &OpContext,
@@ -231,7 +238,7 @@ impl DataStore {
         cpus_diff: i64,
         ram_diff: i64,
     ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
-        let usages =
+        let provisions =
             VirtualResourceProvisioningUpdate::new_update_cpus_and_ram(
                 project_id, cpus_diff, ram_diff,
             )
@@ -240,7 +247,8 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
-        self.virtual_resource_provisioning_producer.append_cpu_metrics(&usages);
-        Ok(usages)
+        self.virtual_resource_provisioning_producer
+            .append_cpu_metrics(&provisions);
+        Ok(provisions)
     }
 }

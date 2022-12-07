@@ -557,7 +557,7 @@ async fn ssc_account_space(
             i64::try_from(snapshot_created.size.to_bytes())
                 .map_err(|e| {
                     Error::internal_error(&format!(
-                        "updating resource usage: {e}"
+                        "updating resource provisioning: {e}"
                     ))
                 })
                 .map_err(ActionError::action_failed)?,
@@ -585,7 +585,7 @@ async fn ssc_account_space_undo(
             -i64::try_from(snapshot_created.size.to_bytes())
                 .map_err(|e| {
                     Error::internal_error(&format!(
-                        "updating resource usage: {e}"
+                        "updating resource provisioning: {e}"
                     ))
                 })
                 .map_err(ActionError::action_failed)?,

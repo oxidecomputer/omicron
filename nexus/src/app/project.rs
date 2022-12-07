@@ -35,9 +35,9 @@ impl super::Nexus {
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
-        // TODO: We probably want to have "project creation", "resource usage
-        // creation", and "default VPC creation" co-located within a saga for
-        // atomicity.
+        // TODO: We probably want to have "project creation", "resource
+        // provisioning creation", and "default VPC creation" co-located within
+        // a saga for atomicity.
         //
         // Until then, we just perform the operations sequentially.
 

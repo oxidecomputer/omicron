@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Implementation of queries for updating resource usage info.
+//! Implementation of queries for updating resource provisioning info.
 
 use crate::db::alias::ExpressionAlias;
 use crate::db::model::VirtualResourceProvisioning;
@@ -127,7 +127,7 @@ impl AllCollections {
     }
 }
 
-/// Constructs a CTE for updating resource usage information in all
+/// Constructs a CTE for updating resource provisioning information in all
 /// collections for a particular object.
 #[derive(QueryId)]
 pub struct VirtualResourceProvisioningUpdate {

@@ -518,7 +518,7 @@ impl super::Nexus {
                 project.id(),
                 -i64::try_from(db_snapshot.size.to_bytes()).map_err(|e| {
                     Error::internal_error(&format!(
-                        "updating resource usage: {e}"
+                        "updating resource provisioning: {e}"
                     ))
                 })?,
             )
