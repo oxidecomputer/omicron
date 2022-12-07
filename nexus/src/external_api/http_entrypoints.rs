@@ -1980,7 +1980,7 @@ struct DiskViewParams {
 
 #[endpoint {
     method = GET,
-    path = "/disks/{disk_name}",
+    path = "/disks/{disk}",
     tags = ["disks"]
 }]
 async fn disk_view_v1(
