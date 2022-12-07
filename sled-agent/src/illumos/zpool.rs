@@ -9,6 +9,7 @@ use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 use uuid::Uuid;
 
+const ZPOOL_PREFIX: &str = "oxp_";
 const ZPOOL: &str = "/usr/sbin/zpool";
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
@@ -22,6 +23,14 @@ enum Error {
 
     #[error(transparent)]
     Parse(#[from] ParseError),
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to list zpools: {err}")]
+pub struct ListError {
+    #[from]
+    #[source]
+    err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -143,8 +152,22 @@ impl FromStr for ZpoolInfo {
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool {}
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(test, mockall::automock)]
 impl Zpool {
+    pub fn list() -> Result<Vec<ZpoolName>, ListError> {
+        let mut command = std::process::Command::new(ZPOOL);
+        let cmd = command.args(&["list", "-Hpo", "name"]);
+
+        let output = execute(cmd).map_err(Error::from)?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let zpool = stdout
+            .lines()
+            .filter_map(|line| line.parse::<ZpoolName>().ok())
+            .collect();
+        Ok(zpool)
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
     pub fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&[
@@ -190,7 +213,7 @@ impl<'de> Deserialize<'de> for ZpoolName {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let s = s.strip_prefix("oxp_").ok_or_else(|| {
+        let s = s.strip_prefix(ZPOOL_PREFIX).ok_or_else(|| {
             serde::de::Error::custom(
                 "Bad zpool prefix - must start with 'oxp_'",
             )
@@ -200,9 +223,21 @@ impl<'de> Deserialize<'de> for ZpoolName {
     }
 }
 
+impl FromStr for ZpoolName {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.strip_prefix(ZPOOL_PREFIX).ok_or_else(|| {
+            format!("Bad zpool name {}; must start with {}", s, ZPOOL_PREFIX)
+        })?;
+        let id = Uuid::from_str(&s).map_err(|e| e.to_string())?;
+        Ok(ZpoolName(id))
+    }
+}
+
 impl ToString for ZpoolName {
     fn to_string(&self) -> String {
-        format!("oxp_{}", self.0)
+        format!("{}{}", ZPOOL_PREFIX, self.0)
     }
 }
 
@@ -228,7 +263,7 @@ mod test {
     fn test_parse_zpool_name() {
         let uuid: Uuid =
             "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
-        let good_name = format!("oxp_{}", uuid);
+        let good_name = format!("{}{}", ZPOOL_PREFIX, uuid);
 
         let name = parse_name(&good_name).expect("Cannot parse as ZpoolName");
         assert_eq!(uuid, name.id());

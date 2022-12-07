@@ -392,6 +392,14 @@ CREATE UNIQUE INDEX ON omicron.public.silo_user (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TABLE omicron.public.silo_user_password_hash (
+    silo_user_id UUID NOT NULL,
+    hash TEXT NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY(silo_user_id)
+);
+
 /*
  * Silo groups
  */
@@ -1453,6 +1461,11 @@ CREATE INDEX ON omicron.public.console_session (
     time_created
 );
 
+-- This index is used to remove sessions for a user that's being deleted.
+CREATE INDEX ON omicron.public.console_session (
+    silo_user_id
+);
+
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
@@ -1565,6 +1578,11 @@ CREATE TABLE omicron.public.device_access_token (
 -- one token is ever created for a given device authorization flow.
 CREATE UNIQUE INDEX ON omicron.public.device_access_token (
     client_id, device_code
+);
+
+-- This index is used to remove tokens for a user that's being deleted.
+CREATE INDEX ON omicron.public.device_access_token (
+    silo_user_id
 );
 
 /*

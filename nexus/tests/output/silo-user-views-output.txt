@@ -1,0 +1,72 @@
+SILO: silo1
+    test user privileged:
+        list = 200
+        view "silo1-user1" = 200
+        view "silo1-user2" = 200
+        view "silo2-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user2" = 404 (message = "not found: silo-user with id ...")
+
+    test user silo1-user1:
+        list = 200
+        view "silo1-user1" = 200
+        view "silo1-user2" = 200
+        view "silo2-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user2" = 404 (message = "not found: silo-user with id ...")
+
+    test user silo1-user2:
+        list = 200
+        view "silo1-user1" = 200
+        view "silo1-user2" = 200
+        view "silo2-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user2" = 404 (message = "not found: silo-user with id ...")
+
+    test user silo2-user1:
+        list = 404 (message = "not found: silo with name \"silo1\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
+
+    test user silo2-user2:
+        list = 404 (message = "not found: silo with name \"silo1\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
+
+SILO: silo2
+    test user privileged:
+        list = 200
+        view "silo1-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo1-user2" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user1" = 200
+        view "silo2-user2" = 200
+
+    test user silo1-user1:
+        list = 404 (message = "not found: silo with name \"silo2\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
+
+    test user silo1-user2:
+        list = 404 (message = "not found: silo with name \"silo2\"")
+        view "silo1-user1" = 404 (message = "not found: silo with name ...")
+        view "silo1-user2" = 404 (message = "not found: silo with name ...")
+        view "silo2-user1" = 404 (message = "not found: silo with name ...")
+        view "silo2-user2" = 404 (message = "not found: silo with name ...")
+
+    test user silo2-user1:
+        list = 200
+        view "silo1-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo1-user2" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user1" = 200
+        view "silo2-user2" = 200
+
+    test user silo2-user2:
+        list = 200
+        view "silo1-user1" = 404 (message = "not found: silo-user with id ...")
+        view "silo1-user2" = 404 (message = "not found: silo-user with id ...")
+        view "silo2-user1" = 200
+        view "silo2-user2" = 200
+

@@ -8,7 +8,6 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
@@ -20,6 +19,9 @@ use omicron_common::api::external::{
 use omicron_nexus::external_api::views::Vpc;
 use std::convert::TryFrom;
 use uuid::Uuid;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
@@ -46,7 +48,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let default_vpc_firewall = format!("{}/firewall/rules", default_vpc_url);
     let rules = get_rules(client, &default_vpc_firewall).await;
     assert!(rules.iter().all(|r| r.vpc_id == default_vpc.identity.id));
-    assert!(is_default_firewall_rules(&rules));
+    assert!(is_default_firewall_rules("default", &rules));
 
     // Create another VPC and make sure it gets the default rules.
     let other_vpc = "second-vpc";
@@ -55,7 +57,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let vpc2 = create_vpc(&client, &org_name, &project_name, &other_vpc).await;
     let rules = get_rules(client, &other_vpc_firewall).await;
     assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
-    assert!(is_default_firewall_rules(&rules));
+    assert!(is_default_firewall_rules(other_vpc, &rules));
 
     // Modify one VPC's firewall
     let new_rules = vec![
@@ -106,21 +108,21 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<VpcFirewallRules>()
     .unwrap()
     .rules;
-    assert!(!is_default_firewall_rules(&updated_rules));
+    assert!(!is_default_firewall_rules("default", &updated_rules));
     assert_eq!(updated_rules.len(), new_rules.len());
     assert_eq!(updated_rules[0].identity.name, "allow-icmp");
     assert_eq!(updated_rules[1].identity.name, "deny-all-incoming");
 
     // Make sure the firewall is changed
     let rules = get_rules(client, &default_vpc_firewall).await;
-    assert!(!is_default_firewall_rules(&rules));
+    assert!(!is_default_firewall_rules("default", &rules));
     assert_eq!(rules.len(), new_rules.len());
     assert_eq!(rules[0].identity.name, "allow-icmp");
     assert_eq!(rules[1].identity.name, "deny-all-incoming");
 
     // Make sure the other firewall is unchanged
     let rules = get_rules(client, &other_vpc_firewall).await;
-    assert!(is_default_firewall_rules(&rules));
+    assert!(is_default_firewall_rules(other_vpc, &rules));
 
     // DELETE is unsupported
     NexusRequest::expect_failure(
@@ -177,7 +179,10 @@ async fn get_rules(
         .rules
 }
 
-fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
+fn is_default_firewall_rules(
+    vpc_name: &str,
+    rules: &Vec<VpcFirewallRule>,
+) -> bool {
     let default_rules = vec![
         VpcFirewallRule {
             identity: IdentityMetadata {
@@ -191,7 +196,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             status: VpcFirewallRuleStatus::Enabled,
             direction: VpcFirewallRuleDirection::Inbound,
             targets: vec![VpcFirewallRuleTarget::Vpc(
-                "default".parse().unwrap(),
+                vpc_name.parse().unwrap(),
             )],
             filters: VpcFirewallRuleFilter {
                 hosts: None,
@@ -216,11 +221,11 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             status: VpcFirewallRuleStatus::Enabled,
             direction: VpcFirewallRuleDirection::Inbound,
             targets: vec![VpcFirewallRuleTarget::Vpc(
-                "default".parse().unwrap(),
+                vpc_name.parse().unwrap(),
             )],
             filters: VpcFirewallRuleFilter {
                 hosts: Some(vec![VpcFirewallRuleHostFilter::Vpc(
-                    "default".parse().unwrap(),
+                    vpc_name.parse().unwrap(),
                 )]),
                 protocols: None,
                 ports: None,
@@ -242,7 +247,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             status: VpcFirewallRuleStatus::Enabled,
             direction: VpcFirewallRuleDirection::Inbound,
             targets: vec![VpcFirewallRuleTarget::Vpc(
-                "default".parse().unwrap(),
+                vpc_name.parse().unwrap(),
             )],
             filters: VpcFirewallRuleFilter {
                 hosts: None,
@@ -269,7 +274,7 @@ fn is_default_firewall_rules(rules: &Vec<VpcFirewallRule>) -> bool {
             status: VpcFirewallRuleStatus::Enabled,
             direction: VpcFirewallRuleDirection::Inbound,
             targets: vec![VpcFirewallRuleTarget::Vpc(
-                "default".parse().unwrap(),
+                vpc_name.parse().unwrap(),
             )],
             filters: VpcFirewallRuleFilter {
                 hosts: None,

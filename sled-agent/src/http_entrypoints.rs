@@ -7,6 +7,7 @@
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
     InstanceSerialConsoleData, InstanceSerialConsoleRequest, ServiceEnsureBody,
+    VpcFirewallRulesEnsureBody, Zpool,
 };
 use crate::serial::ByteOffset;
 use dropshot::{
@@ -24,7 +25,7 @@ use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
 
-use propolis_client::api::VolumeConstructionRequest;
+use crucible_client_types::VolumeConstructionRequest;
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -32,6 +33,7 @@ type SledApiDescription = ApiDescription<SledAgent>;
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(services_put)?;
+        api.register(zpools_get)?;
         api.register(filesystem_put)?;
         api.register(instance_put)?;
         api.register(disk_put)?;
@@ -39,6 +41,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_serial_get)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(issue_disk_snapshot_request)?;
+        api.register(vpc_firewall_rules_put)?;
 
         Ok(())
     }
@@ -62,6 +65,17 @@ async fn services_put(
     let body_args = body.into_inner();
     sa.services_ensure(body_args).await.map_err(|e| Error::from(e))?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/zpools",
+}]
+async fn zpools_get(
+    rqctx: Arc<RequestContext<SledAgent>>,
+) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.zpools_get().await.map_err(|e| Error::from(e))?))
 }
 
 #[endpoint {
@@ -289,4 +303,30 @@ async fn issue_disk_snapshot_request(
     Ok(HttpResponseOk(DiskSnapshotRequestResponse {
         snapshot_id: body.snapshot_id,
     }))
+}
+
+/// Path parameters for VPC requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    vpc_id: Uuid,
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/vpc/{vpc_id}/firewall/rules",
+}]
+async fn vpc_firewall_rules_put(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    path_params: Path<VpcPathParam>,
+    body: TypedBody<VpcFirewallRulesEnsureBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let vpc_id = path_params.into_inner().vpc_id;
+    let body_args = body.into_inner();
+
+    sa.firewall_rules_ensure(vpc_id, &body_args.rules[..])
+        .await
+        .map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
 }

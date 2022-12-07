@@ -11,6 +11,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use nexus_test_interface::NexusServer;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -18,11 +19,14 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::params::UserId;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
+use omicron_nexus::external_api::views::User;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
@@ -122,6 +126,23 @@ pub async fn create_silo(
             identity_mode,
             admin_group_name: None,
         },
+    )
+    .await
+}
+
+pub async fn create_local_user(
+    client: &ClientTestContext,
+    silo: &views::Silo,
+    username: &UserId,
+    password: params::UserPassword,
+) -> User {
+    let silo_name = &silo.identity.name;
+    let url =
+        format!("/system/silos/{}/identity-providers/local/users", silo_name);
+    object_create(
+        client,
+        &url,
+        &params::UserCreate { external_id: username.to_owned(), password },
     )
     .await
 }
@@ -414,7 +435,9 @@ impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
 
     // Creates fake physical storage, an organization, and a project.
-    pub async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
+    pub async fn new<N: NexusServer>(
+        cptestctx: &ControlPlaneTestContext<N>,
+    ) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
 
         let mut disk_test = Self { sled_agent, zpools: vec![] };
@@ -422,14 +445,18 @@ impl DiskTest {
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
         for _ in 0..3 {
             disk_test
-                .add_zpool_with_dataset(Self::DEFAULT_ZPOOL_SIZE_GIB)
+                .add_zpool_with_dataset(cptestctx, Self::DEFAULT_ZPOOL_SIZE_GIB)
                 .await;
         }
 
         disk_test
     }
 
-    pub async fn add_zpool_with_dataset(&mut self, gibibytes: u32) {
+    pub async fn add_zpool_with_dataset<N: NexusServer>(
+        &mut self,
+        cptestctx: &ControlPlaneTestContext<N>,
+        gibibytes: u32,
+    ) {
         let zpool = TestZpool {
             id: Uuid::new_v4(),
             size: ByteCount::from_gibibytes_u32(gibibytes),
@@ -439,7 +466,10 @@ impl DiskTest {
         self.sled_agent.create_zpool(zpool.id, zpool.size.to_bytes()).await;
 
         for dataset in &zpool.datasets {
-            self.sled_agent.create_crucible_dataset(zpool.id, dataset.id).await;
+            let address = self
+                .sled_agent
+                .create_crucible_dataset(zpool.id, dataset.id)
+                .await;
 
             // By default, regions are created immediately.
             let crucible = self
@@ -448,6 +478,16 @@ impl DiskTest {
                 .await;
             crucible
                 .set_create_callback(Box::new(|_| RegionState::Created))
+                .await;
+
+            let address = match address {
+                std::net::SocketAddr::V6(addr) => addr,
+                _ => panic!("Unsupported address type: {address} "),
+            };
+
+            cptestctx
+                .server
+                .upsert_crucible_dataset(dataset.id, zpool.id, address)
                 .await;
         }
 

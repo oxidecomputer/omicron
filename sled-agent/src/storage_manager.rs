@@ -5,8 +5,8 @@
 //! Management of sled-local storage.
 
 use crate::illumos::dladm::Etherstub;
+use crate::illumos::link::VnicAllocator;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
-use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::illumos::zpool::ZpoolName;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
@@ -15,7 +15,7 @@ use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
-use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
+use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use schemars::JsonSchema;
@@ -51,7 +51,7 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 pub enum Error {
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]
-    ZfsListFilesystems(#[from] crate::illumos::zfs::ListFilesystemsError),
+    ZfsListDataset(#[from] crate::illumos::zfs::ListDatasetsError),
 
     #[error(transparent)]
     ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
@@ -317,7 +317,7 @@ impl DatasetInfo {
                     warn!(log, "cockroachdb not yet alive");
                 };
                 backoff::retry_notify(
-                    backoff::internal_service_policy(),
+                    backoff::retry_policy_local(),
                     check_health,
                     log_failure,
                 )
@@ -489,6 +489,7 @@ async fn ensure_running_zone(
                 &[],
                 vec![],
                 None,
+                vec![],
             )
             .await?;
 
@@ -658,53 +659,7 @@ impl StorageWorker {
         };
         nexus_notifications.push_back(
             backoff::retry_notify(
-                backoff::internal_service_policy(),
-                notify_nexus,
-                log_post_failure,
-            )
-            .boxed(),
-        );
-    }
-
-    // Adds a "notification to nexus" to `nexus_notifications`,
-    // informing it about the addition of `datasets` to `pool_id`.
-    fn add_datasets_notify(
-        &self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
-        datasets: Vec<(Uuid, SocketAddrV6, DatasetKind)>,
-        pool_id: Uuid,
-    ) {
-        let lazy_nexus_client = self.lazy_nexus_client.clone();
-        let notify_nexus = move || {
-            let lazy_nexus_client = lazy_nexus_client.clone();
-            let datasets = datasets.clone();
-            async move {
-                let nexus = lazy_nexus_client.get().await.map_err(|e| {
-                    backoff::BackoffError::transient(e.to_string())
-                })?;
-
-                for (id, address, kind) in datasets {
-                    let request = DatasetPutRequest {
-                        address: address.to_string(),
-                        kind: kind.into(),
-                    };
-                    nexus.dataset_put(&pool_id, &id, &request).await.map_err(
-                        |e| backoff::BackoffError::transient(e.to_string()),
-                    )?;
-                }
-                Ok(())
-            }
-        };
-        let log = self.log.clone();
-        let log_post_failure = move |_, delay| {
-            warn!(
-                log,
-                "failed to notify nexus about datasets, will retry in {:?}", delay;
-            );
-        };
-        nexus_notifications.push_back(
-            backoff::retry_notify(
-                backoff::internal_service_policy(),
+                backoff::retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_post_failure,
             )
@@ -718,7 +673,6 @@ impl StorageWorker {
     // Attempts to add a dataset within a zpool, according to `request`.
     async fn add_dataset(
         &self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
         request: &NewFilesystemRequest,
     ) -> Result<(), Error> {
         info!(self.log, "add_dataset: {:?}", request);
@@ -764,12 +718,6 @@ impl StorageWorker {
             message: format!("Failed writing config to {path:?} for pool {pool_name}, dataset: {id}"),
             err,
         })?;
-
-        self.add_datasets_notify(
-            nexus_notifications,
-            vec![(id, dataset_info.address, dataset_info.kind)],
-            pool.id(),
-        );
 
         Ok(())
     }
@@ -848,7 +796,7 @@ impl StorageWorker {
                     // If we find filesystems within our datasets, ensure their
                     // zones are up-and-running.
                     let mut datasets = vec![];
-                    let existing_filesystems = Zfs::list_filesystems(&pool_name.to_string())?;
+                    let existing_filesystems = Zfs::list_datasets(&pool_name.to_string())?;
                     for fs_name in existing_filesystems {
                         info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name.to_string());
                         // We intentionally do not exit on error here -
@@ -864,21 +812,15 @@ impl StorageWorker {
                         }
                     }
 
-                    // Notify Nexus of the zpool and all datasets within.
+                    // Notify Nexus of the zpool.
                     self.add_zpool_notify(
                         &mut nexus_notifications,
                         pool.id(),
                         size,
                     );
-
-                    self.add_datasets_notify(
-                        &mut nexus_notifications,
-                        datasets,
-                        pool.id(),
-                    );
                 },
                 Some(request) = self.new_filesystems_rx.recv() => {
-                    let result = self.add_dataset(&mut nexus_notifications, &request).await;
+                    let result = self.add_dataset(&request).await;
                     let _ = request.responder.send(result);
                 }
             }
@@ -953,6 +895,14 @@ impl StorageManager {
             self.new_pools_tx.send(name.clone()).await.unwrap();
         }
         Ok(())
+    }
+
+    pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
+        let pools = self.pools.lock().await;
+        Ok(pools
+            .keys()
+            .map(|zpool| crate::params::Zpool { id: zpool.id() })
+            .collect())
     }
 
     pub async fn upsert_filesystem(

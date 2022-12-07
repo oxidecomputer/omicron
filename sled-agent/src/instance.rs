@@ -6,11 +6,11 @@
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::dladm::Etherstub;
+use crate::illumos::link::VnicAllocator;
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
@@ -18,6 +18,7 @@ use crate::opte::PortManager;
 use crate::opte::PortTicket;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
+use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -30,7 +31,7 @@ use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
-use propolis_client::api::DiskRequest;
+//use propolis_client::generated::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::IpAddr;
@@ -53,7 +54,7 @@ pub enum Error {
     VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
-    Propolis(#[from] propolis_client::Error),
+    Propolis(#[from] propolis_client::Error<propolis_client::types::Error>),
 
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed: {0}")]
@@ -113,15 +114,15 @@ async fn wait_for_http_server(
     };
 
     backoff::retry_notify(
-        backoff::internal_service_policy(),
+        backoff::retry_policy_local(),
         || async {
             // This request is nonsensical - we don't expect an instance to
             // exist - but getting a response that isn't a connection-based
             // error informs us the HTTP server is alive.
-            match client.instance_get().await {
+            match client.instance_get().send().await {
                 Ok(_) => return Ok(()),
                 Err(value) => {
-                    if let propolis_client::Error::Status(_) = &value {
+                    if value.status().is_some() {
                         // This means the propolis server responded to our
                         // request, instead of a connection error.
                         return Ok(());
@@ -225,9 +226,11 @@ struct InstanceInner {
     requested_nics: Vec<NetworkInterface>,
     source_nat: SourceNatConfig,
     external_ips: Vec<IpAddr>,
+    firewall_rules: Vec<VpcFirewallRule>,
 
     // Disk related properties
-    requested_disks: Vec<DiskRequest>,
+    // TODO: replace `propolis_client::handmade::*` with properly-modeled local types
+    requested_disks: Vec<propolis_client::handmade::api::DiskRequest>,
     cloud_init_bytes: Option<String>,
 
     // Internal State management
@@ -295,7 +298,9 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(request)
+            .instance_state_put()
+            .body(request)
+            .send()
             .await?;
         Ok(())
     }
@@ -327,7 +332,7 @@ impl InstanceInner {
                         Error::Migration(anyhow!("Missing Migration UUID"))
                     })?;
                 Some(propolis_client::api::InstanceMigrateInitiateRequest {
-                    src_addr: params.src_propolis_addr,
+                    src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,
                     migration_id,
                 })
@@ -338,17 +343,25 @@ impl InstanceInner {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
-            disks: self.requested_disks.clone(),
+            disks: self
+                .requested_disks
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone(),
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
-        client.instance_ensure(&request).await?;
+        let result = client.instance_ensure().body(request).send().await;
+        info!(self.log, "result of instance_ensure call is {:?}", result);
+        result?;
 
         // Monitor propolis for state changes in the background.
+        let monitor_client = client.clone();
         let monitor_task = Some(tokio::task::spawn(async move {
-            let r = instance.monitor_state_task().await;
+            let r = instance.monitor_state_task(monitor_client).await;
             let log = &instance.inner.lock().await.log;
             match r {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
@@ -357,9 +370,10 @@ impl InstanceInner {
         }));
 
         if self.serial_tty_task.is_none() {
-            let ws_uri = client.instance_serial_console_ws_uri();
-            self.serial_tty_task =
-                Some(SerialConsoleBuffer::new(ws_uri, self.log.clone()));
+            self.serial_tty_task = Some(SerialConsoleBuffer::new(
+                Arc::downgrade(&client),
+                self.log.clone(),
+            ));
         }
 
         self.running_state = Some(RunningState {
@@ -492,6 +506,7 @@ impl Instance {
             requested_nics: initial.nics,
             source_nat: initial.source_nat,
             external_ips: initial.external_ips,
+            firewall_rules: initial.firewall_rules,
             requested_disks: initial.disks,
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
@@ -541,6 +556,7 @@ impl Instance {
                 nic,
                 snat,
                 external_ips,
+                &inner.firewall_rules,
             )?;
             opte_ports.push(port);
             port_tickets.push(port_ticket);
@@ -565,6 +581,7 @@ impl Instance {
             opte_ports,
             // physical_nic=
             None,
+            vec![],
         )
         .await?;
 
@@ -593,7 +610,7 @@ impl Instance {
             inner.log, "Adding service"; "smf_name" => &smf_instance_name
         );
         backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_local(),
             || async {
                 running_zone
                     .run_cmd(&[
@@ -682,9 +699,12 @@ impl Instance {
 
         inner.state.current_mut().propolis_addr = Some(server_addr);
 
-        let client = Arc::new(PropolisClient::new(
-            server_addr,
-            inner.log.new(o!("component" => "propolis-client")),
+        // We use a custom client builder here because the default progenitor
+        // one has a timeout of 15s but we want to be able to wait indefinitely.
+        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
+        let client = Arc::new(PropolisClient::new_with_client(
+            &format!("http://{}", server_addr),
+            reqwest_client,
         ));
 
         // Although the instance is online, the HTTP server may not be running
@@ -723,7 +743,7 @@ impl Instance {
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&inner.log, &zname).unwrap();
+        Zones::halt_and_remove_logged(&inner.log, &zname).await.unwrap();
 
         // Remove ourselves from the instance manager's map of instances.
         let running_state = inner.running_state.as_mut().unwrap();
@@ -748,22 +768,19 @@ impl Instance {
     // Monitors propolis until explicitly told to disconnect.
     //
     // Intended to be spawned in a tokio task within [`Instance::start`].
-    async fn monitor_state_task(&self) -> Result<(), Error> {
-        // Grab the UUID and Propolis Client before we start looping, so we
-        // don't need to contend the lock to access them in steady state.
-        //
-        // They aren't modified after being initialized, so it's fine to grab
-        // a copy.
-        let client = {
-            let inner = self.inner.lock().await;
-            inner.running_state.as_ref().unwrap().client.clone()
-        };
-
+    async fn monitor_state_task(
+        &self,
+        client: Arc<PropolisClient>,
+    ) -> Result<(), Error> {
         let mut gen = 0;
         loop {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
-            let response = client.instance_state_monitor(gen).await?;
+            let response = client
+                .instance_state_monitor()
+                .body(propolis_client::api::InstanceStateMonitorRequest { gen })
+                .send()
+                .await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -835,7 +852,10 @@ impl Instance {
         if let Some(running_state) = &inner.running_state {
             running_state
                 .client
-                .instance_issue_crucible_snapshot_request(disk_id, snapshot_id)
+                .instance_issue_crucible_snapshot_request()
+                .id(disk_id)
+                .snapshot_id(snapshot_id)
+                .send()
                 .await?;
 
             Ok(())
@@ -896,6 +916,7 @@ mod test {
                 last_port: 16_384,
             },
             external_ips: vec![],
+            firewall_rules: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }
@@ -921,10 +942,8 @@ mod test {
     async fn transition_before_start() {
         let logctx = test_setup_log("transition_before_start");
         let log = &logctx.log;
-        let vnic_allocator = VnicAllocator::new(
-            "Test".to_string(),
-            Etherstub("mylink".to_string()),
-        );
+        let vnic_allocator =
+            VnicAllocator::new("Test", Etherstub("mylink".to_string()));
         let underlay_ip = std::net::Ipv6Addr::new(
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );

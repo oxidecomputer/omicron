@@ -498,7 +498,23 @@ fn do_check(config: &Config) -> Result<()> {
     ssh_exec(&builder, &cmd, SshStrategy::NoForward)
 }
 
-fn do_uninstall(
+fn do_uninstall(config: &Config) -> Result<()> {
+    let builder = &config.servers[&config.builder.server];
+    for server in config.deployment_servers() {
+        copy_omicron_package_binary_to_staging(config, builder, server)?;
+
+        // Run `omicron-package uninstall` on the deployment server
+        let cmd = format!(
+            "cd {} && pfexec ./omicron-package uninstall",
+            config.deployment.staging_dir.to_string_lossy(),
+        );
+        println!("$ {}", cmd);
+        ssh_exec(&server, &cmd, SshStrategy::Forward)?;
+    }
+    Ok(())
+}
+
+fn do_clean(
     config: &Config,
     artifact_dir: PathBuf,
     install_dir: PathBuf,
@@ -511,7 +527,7 @@ fn do_uninstall(
 
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
-            "cd {} && pfexec ./omicron-package uninstall --in {} --out {}",
+            "cd {} && pfexec ./omicron-package clean --in {} --out {}",
             config.deployment.staging_dir.to_string_lossy(),
             deployment_src.to_string_lossy(),
             install_dir.to_string_lossy()
@@ -976,12 +992,16 @@ fn main() -> Result<()> {
             do_build_minimal(&config)?;
             do_install(&config, &artifact_dir, &install_dir);
         }
-        SubCommand::Deploy(DeployCommand::Uninstall {
+        SubCommand::Deploy(DeployCommand::Uninstall) => {
+            do_build_minimal(&config)?;
+            do_uninstall(&config)?;
+        }
+        SubCommand::Deploy(DeployCommand::Clean {
             artifact_dir,
             install_dir,
         }) => {
             do_build_minimal(&config)?;
-            do_uninstall(&config, artifact_dir, install_dir)?;
+            do_clean(&config, artifact_dir, install_dir)?;
         }
         // TODO: It doesn't really make sense to allow the user direct access
         // to these low level operations in thing-flinger. Should we not use

@@ -10,16 +10,19 @@ path = "../rpaths"
 [dependencies]
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.56"
-base64 = "0.13.0"
+async-trait = "0.1.59"
+base64 = "0.13.1"
 bb8 = "0.8.0"
 clap = { version = "4.0", features = ["derive"] }
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
-diesel = { version = "2.0.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "861a09c350fd0e127b6105c8099e31a0bc3b711a" }
+diesel = { version = "2.0.2", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
-fatfs = "0.3.5"
-futures = "0.3.24"
+# TODO(luqman): Update once merged & new release is cut
+# https://github.com/rafalh/rust-fatfs/pull/76
+fatfs = { git = "https://github.com/luqmana/rust-fatfs", branch = "stable-0.3" }
+#fatfs = "0.3.5"
+futures = "0.3.25"
 headers = "0.3.8"
 hex = "0.4.3"
 http = "0.2.7"
@@ -27,10 +30,12 @@ hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
 lazy_static = "1.4.0"
-libc = "0.2.134"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
+# Not under "dev-dependencies"; these also need to be implemented for
+# integration tests.
+nexus-test-interface = { path = "test-interface" }
 num-integer = "0.1.45"
 # must match samael's crate!
 openssl = "0.10"
@@ -42,27 +47,30 @@ oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.6.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b596e72b6b93bc412d675358f782ae7d53f8bf7a", features = [ "generated" ] }
 rand = "0.8.5"
 ref-cast = "1.0"
-reqwest = { version = "0.11.12", features = [ "json" ] }
+reqwest = { version = "0.11.13", features = [ "json" ] }
 ring = "0.16"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
-serde_with = "2.0.1"
+serde_with = "2.1.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
-steno = "0.2"
+steno = "0.3"
 tempfile = "3.3"
 thiserror = "1.0"
+tokio-tungstenite = "0.18.0"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
-usdt = "0.3.1"
+usdt = "0.3.4"
 
 authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
 nexus-defaults = { path = "defaults" }
 nexus-db-model = { path = "db-model" }
+nexus-passwords = { path = "passwords" }
 nexus-types = { path = "types" }
 
 [dependencies.chrono]
@@ -103,7 +111,7 @@ version = "2.7"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.tokio]
-version = "1.21"
+version = "1.22"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -111,7 +119,7 @@ version = "0.7"
 features = [ "with-chrono-0_4", "with-serde_json-1", "with-uuid-1" ]
 
 [dependencies.uuid]
-version = "1.1.0"
+version = "1.2.2"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]
@@ -121,8 +129,10 @@ itertools = "0.10.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
+omicron-sled-agent = { path = "../sled-agent" }
 openapiv3 = "1.0"
-regex = "1.6.0"
+petgraph = "0.6.2"
+regex = "1.7.0"
 subprocess = "0.2.9"
 term = "0.7"
 httptest = "0.15.4"

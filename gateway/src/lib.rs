@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod bulk_state_get;
 mod config;
 mod context;
 mod error;
@@ -13,11 +12,19 @@ pub mod http_entrypoints; // TODO pub only for testing - is this right?
 pub use config::Config;
 pub use context::ServerContext;
 
-use slog::{debug, error, info, o, warn, Logger};
+use dropshot::ConfigDropshot;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::warn;
+use slog::Logger;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Run the OpenAPI generator for the API, which emits the OpenAPI spec
+/// Run the OpenAPI generator for the API; which emits the OpenAPI spec
 /// to stdout.
 pub fn run_openapi() -> Result<(), String> {
     http_entrypoints::api()
@@ -27,6 +34,11 @@ pub fn run_openapi() -> Result<(), String> {
         .contact_email("api@oxide.computer")
         .write(&mut std::io::stdout())
         .map_err(|e| e.to_string())
+}
+
+pub struct MgsArguments {
+    pub id: Uuid,
+    pub address: SocketAddrV6,
 }
 
 pub struct Server {
@@ -40,10 +52,11 @@ impl Server {
     /// Start a gateway server.
     pub async fn start(
         config: Config,
+        args: MgsArguments,
         _rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
-        let log = log.new(o!("name" => config.id.to_string()));
+        let log = log.new(o!("name" => args.id.to_string()));
         info!(log, "setting up gateway server");
 
         match gateway_sp_comms::register_probes() {
@@ -59,8 +72,16 @@ impl Server {
                 format!("initializing server context: {}", error)
             })?;
 
+        let dropshot = ConfigDropshot {
+            bind_address: SocketAddr::V6(args.address),
+            // We need to be able to accept the largest single update blob we
+            // expect to be given, which at the moment is probably a host phase
+            // 1 image? (32 MiB raw, plus overhead for HTTP encoding)
+            request_body_max_bytes: 128 << 20,
+            ..Default::default()
+        };
         let http_server_starter = dropshot::HttpServerStarter::new(
-            &config.dropshot,
+            &dropshot,
             http_entrypoints::api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot")),
@@ -92,7 +113,10 @@ impl Server {
 }
 
 /// Run an instance of the [Server].
-pub async fn run_server(config: Config) -> Result<(), String> {
+pub async fn run_server(
+    config: Config,
+    args: MgsArguments,
+) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
         config
@@ -109,7 +133,7 @@ pub async fn run_server(config: Config) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     }
     let rack_id = Uuid::new_v4();
-    let server = Server::start(config, rack_id, &log).await?;
+    let server = Server::start(config, args, rack_id, &log).await?;
     // server.register_as_producer().await;
     server.wait_for_finish().await
 }

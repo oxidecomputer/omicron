@@ -14,29 +14,15 @@ use gateway_sp_comms::error::UpdateError;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    #[error("invalid page token ({0})")]
-    InvalidPageToken(InvalidPageToken),
     #[error("websocket connection failure: {0}")]
     BadWebsocketConnection(&'static str),
     #[error(transparent)]
     CommunicationsError(#[from] SpCommsError),
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum InvalidPageToken {
-    #[error("no such ID")]
-    NoSuchId,
-    #[error("invalid value for last seen item")]
-    InvalidLastSeenItem,
-}
-
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::InvalidPageToken(_) => HttpError::for_bad_request(
-                Some("InvalidPageToken".to_string()),
-                err.to_string(),
-            ),
             Error::CommunicationsError(err) => http_err_from_comms_err(err),
             Error::BadWebsocketConnection(_) => HttpError::for_bad_request(
                 Some("BadWebsocketConnection".to_string()),

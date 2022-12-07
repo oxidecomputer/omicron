@@ -21,13 +21,14 @@ pub mod common;
 // Modules for the non-simulated sled agent.
 pub mod bootstrap;
 pub mod config;
+mod hardware;
 mod http_entrypoints;
 pub mod illumos;
 mod instance;
 mod instance_manager;
 mod nexus;
 mod opte;
-mod params;
+pub mod params;
 pub mod rack_setup;
 mod serial;
 pub mod server;
@@ -37,7 +38,9 @@ pub mod sp;
 mod storage_manager;
 mod updates;
 
+pub use illumos::zfs;
 pub use illumos::zone;
+pub use illumos::zpool;
 pub use sled_agent::cleanup_networking_resources;
 
 #[cfg(test)]

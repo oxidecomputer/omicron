@@ -20,10 +20,10 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
-use omicron_common::address::{get_sled_address, Ipv6Subnet};
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -136,7 +136,6 @@ impl Agent {
     ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
-            "server" => sled_config.id.to_string(),
         ));
 
         // We expect this directory to exist - ensure that it does, before any
@@ -222,8 +221,11 @@ impl Agent {
         Ok((agent, trust_quorum))
     }
 
-    /// Initializes the Sled Agent on behalf of the RSS, if one has not already
-    /// been initialized.
+    /// Initializes the Sled Agent on behalf of the RSS.
+    ///
+    /// If the Sled Agent has already been initialized:
+    /// - This method is idempotent for the same request
+    /// - Thie method returns an error for different requests
     pub async fn request_agent(
         &self,
         request: &SledAgentRequest,
@@ -231,14 +233,21 @@ impl Agent {
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
-        let sled_address = get_sled_address(request.subnet);
+        let sled_address = request.sled_address();
 
         let mut maybe_agent = self.sled_agent.lock().await;
         if let Some(server) = &*maybe_agent {
             // Server already exists, return it.
             info!(&self.log, "Sled Agent already loaded");
 
-            if &server.address().ip() != sled_address.ip() {
+            if server.id() != request.id {
+                let err_str = format!(
+                    "Sled Agent already running with UUID {}, but {} was requested",
+                    server.id(),
+                    request.id,
+                );
+                return Err(BootstrapError::SledError(err_str));
+            } else if &server.address().ip() != sled_address.ip() {
                 let err_str = format!(
                     "Sled Agent already running on address {}, but {} was requested",
                     server.address().ip(),
@@ -269,19 +278,10 @@ impl Agent {
             *self.share.lock().await = Some(share);
         }
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/823):
-        // Currently, the prescence or abscence of RSS is our signal
-        // for "is this a scrimlet or not".
-        // Longer-term, we should make this call based on the underlying
-        // hardware.
-        let is_scrimlet = self.rss.lock().await.is_some();
-
         // Server does not exist, initialize it.
         let server = SledServer::start(
             &self.sled_config,
             self.parent_log.clone(),
-            sled_address,
-            is_scrimlet,
             request.clone(),
         )
         .await
@@ -326,7 +326,7 @@ impl Agent {
         // indicating which kind of address we're advertising).
         self.ddmd_client.advertise_prefix(request.subnet);
 
-        Ok(SledAgentResponse { id: self.sled_config.id })
+        Ok(SledAgentResponse { id: request.id })
     }
 
     /// Communicates with peers, sharing secrets, until the rack has been
@@ -337,7 +337,7 @@ impl Agent {
     ) -> Result<RackSecret, BootstrapError> {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let rack_secret = retry_notify(
-            internal_service_policy(),
+            retry_policy_internal_service_aggressive(),
             || async {
                 let other_agents = {
                     // Manually build up a `HashSet` instead of `.collect()`ing
@@ -461,9 +461,13 @@ impl Agent {
         Ok(rack_secret)
     }
 
-    // Initializes the Rack Setup Service.
-    async fn start_rss(&self, config: &Config) -> Result<(), BootstrapError> {
+    /// Initializes the Rack Setup Service, if requested by `config`.
+    pub async fn start_rss(
+        &self,
+        config: &Config,
+    ) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
+            info!(&self.log, "bootstrap service initializing RSS");
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
@@ -479,20 +483,6 @@ impl Agent {
             );
             self.rss.lock().await.replace(rss);
         }
-        Ok(())
-    }
-
-    /// Performs device initialization:
-    ///
-    /// - Verifies, unpacks, and launches other services.
-    pub async fn initialize(
-        &self,
-        config: &Config,
-    ) -> Result<(), BootstrapError> {
-        info!(&self.log, "bootstrap service initializing");
-
-        self.start_rss(config).await?;
-
         Ok(())
     }
 }

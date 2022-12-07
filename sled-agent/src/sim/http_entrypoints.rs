@@ -6,7 +6,7 @@
 
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceSerialConsoleData,
-    InstanceSerialConsoleRequest,
+    InstanceSerialConsoleRequest, VpcFirewallRulesEnsureBody,
 };
 use crate::serial::ByteOffset;
 use dropshot::endpoint;
@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
 
-use propolis_client::api::VolumeConstructionRequest;
+use crucible_client_types::VolumeConstructionRequest;
 
 type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 
@@ -43,6 +43,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_serial_get)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(issue_disk_snapshot_request)?;
+        api.register(vpc_firewall_rules_put)?;
 
         Ok(())
     }
@@ -283,4 +284,26 @@ async fn issue_disk_snapshot_request(
     Ok(HttpResponseOk(DiskSnapshotRequestResponse {
         snapshot_id: body.snapshot_id,
     }))
+}
+
+/// Path parameters for VPC requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    vpc_id: Uuid,
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/vpc/{vpc_id}/firewall/rules",
+}]
+async fn vpc_firewall_rules_put(
+    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    path_params: Path<VpcPathParam>,
+    body: TypedBody<VpcFirewallRulesEnsureBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let _sa = rqctx.context();
+    let _vpc_id = path_params.into_inner().vpc_id;
+    let _body_args = body.into_inner();
+
+    Ok(HttpResponseUpdatedNoContent())
 }

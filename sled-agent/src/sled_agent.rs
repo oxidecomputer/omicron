@@ -6,33 +6,42 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
-use crate::illumos::vnic::VnicKind;
+use crate::hardware::HardwareManager;
+use crate::illumos::link::LinkKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
 use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
-use crate::nexus::LazyNexusClient;
+use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
-    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody,
+    DatasetKind, DendriteAsic, DiskStateRequested, InstanceHardware,
+    InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData, ServiceEnsureBody, ServiceType,
+    ServiceZoneRequest, VpcFirewallRule, ZoneType, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use dropshot::HttpError;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use omicron_common::address::{
+    get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
+};
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
 };
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use slog::Logger;
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::process::Command;
+use std::sync::Arc;
 use uuid::Uuid;
 
-use propolis_client::api::VolumeConstructionRequest;
+use crucible_client_types::VolumeConstructionRequest;
 
 #[cfg(not(test))]
 use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
@@ -92,6 +101,9 @@ pub enum Error {
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] crate::opte::Error),
 
+    #[error("Error monitoring hardware: {0}")]
+    Hardware(String),
+
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
 }
@@ -114,20 +126,13 @@ impl From<Error> for dropshot::HttpError {
                         instance_error,
                     ) => match instance_error {
                         crate::instance::Error::Propolis(propolis_error) => {
-                            match propolis_error {
-                                propolis_client::Error::Reqwest(
-                                    reqwest_error,
-                                ) => HttpError::for_internal_error(
-                                    reqwest_error.to_string(),
+                            match propolis_error.status() {
+                                None => HttpError::for_internal_error(
+                                    propolis_error.to_string(),
                                 ),
 
-                                propolis_client::Error::Status(status_code) => {
-                                    HttpError::for_status(
-                                        None,
-                                        status_code.try_into().unwrap_or_else(
-                                            |_| 500.try_into().unwrap(),
-                                        ),
-                                    )
+                                Some(status_code) => {
+                                    HttpError::for_status(None, status_code)
                                 }
                             }
                         }
@@ -147,9 +152,17 @@ impl From<Error> for dropshot::HttpError {
 /// Describes an executing Sled Agent object.
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.
-pub struct SledAgent {
+struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
+
+    // The sled's initial configuration
+    config: Config,
+
+    // Subnet of the Sled's underlay.
+    //
+    // The Sled Agent's address can be derived from this value.
+    subnet: Ipv6Subnet<SLED_PREFIX>,
 
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
@@ -157,10 +170,32 @@ pub struct SledAgent {
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
 
-    lazy_nexus_client: LazyNexusClient,
+    // Component of Sled Agent responsible for monitoring hardware.
+    hardware: HardwareManager,
 
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
+
+    // Lazily-acquired connection to Nexus.
+    lazy_nexus_client: LazyNexusClient,
+
+    // A serialized request queue for operations interacting with Nexus.
+    nexus_request_queue: NexusRequestQueue,
+}
+
+impl SledAgentInner {
+    fn sled_address(&self) -> SocketAddrV6 {
+        get_sled_address(self.subnet)
+    }
+
+    fn switch_ip(&self) -> Ipv6Addr {
+        get_switch_zone_address(self.subnet)
+    }
+}
+
+#[derive(Clone)]
+pub struct SledAgent {
+    inner: Arc<SledAgentInner>,
 }
 
 impl SledAgent {
@@ -169,11 +204,8 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
-        sled_address: SocketAddrV6,
         request: SledAgentRequest,
     ) -> Result<SledAgent, Error> {
-        let id = config.id;
-
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
         let parent_log = log.clone();
@@ -181,7 +213,7 @@ impl SledAgent {
         // Use "log" for ourself.
         let log = log.new(o!(
             "component" => "SledAgent",
-            "sled_id" => id.to_string(),
+            "sled_id" => request.id.to_string(),
         ));
         info!(&log, "created sled agent");
 
@@ -207,6 +239,7 @@ impl SledAgent {
         // should be removed once the Sled Agent is initialized with a
         // RSS-provided IP address. In the meantime, we use one from the
         // configuration file.
+        let sled_address = request.sled_address();
         Zones::ensure_has_global_zone_v6_address(
             etherstub_vnic.clone(),
             *sled_address.ip(),
@@ -224,17 +257,15 @@ impl SledAgent {
         // Currently, we're removing these zones. In the future, we should
         // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
         // to leave the running Zones intact).
-        let zones = Zones::get()?;
+        let zones = Zones::get().await?;
         stream::iter(zones)
             .zip(stream::iter(std::iter::repeat(log.clone())))
             .map(Ok::<_, crate::zone::AdmError>)
             .try_for_each_concurrent(
                 None,
-                |(zone, log)| async {
-                    tokio::task::spawn_blocking(move || {
-                        warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-                        Zones::halt_and_remove_logged(&log, zone.name())
-                    }).await.unwrap()
+                |(zone, log)| async move {
+                    warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
+                    Zones::halt_and_remove_logged(&log, zone.name()).await
                 }
             ).await?;
 
@@ -277,7 +308,7 @@ impl SledAgent {
 
         let storage = StorageManager::new(
             &parent_log,
-            id,
+            request.id,
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
@@ -301,10 +332,15 @@ impl SledAgent {
             request.gateway.mac,
         );
 
-        let svc_config = services::Config {
-            gateway_address: request.gateway.address,
-            ..Default::default()
-        };
+        let svc_config = services::Config::new(
+            config.sidecar_revision.clone(),
+            request.gateway.address,
+        );
+
+        let hardware =
+            HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
+                .map_err(|e| Error::Hardware(e))?;
+
         let services = ServiceManager::new(
             parent_log.clone(),
             etherstub.clone(),
@@ -316,11 +352,190 @@ impl SledAgent {
         )
         .await?;
 
-        Ok(SledAgent { id, storage, instances, lazy_nexus_client, services })
+        let sled_agent = SledAgent {
+            inner: Arc::new(SledAgentInner {
+                id: request.id,
+                config: config.clone(),
+                subnet: request.subnet,
+                storage,
+                instances,
+                hardware,
+                services,
+                lazy_nexus_client,
+
+                // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
+                // Propagate usage of this request queue throughout the Sled Agent.
+                //
+                // Also, we could maybe de-dup some of the backoff code in the request queue?
+                nexus_request_queue: NexusRequestQueue::new(),
+            }),
+        };
+
+        // We immediately add a notification to the request queue about our
+        // existence. If inspection of the hardware later informs us that we're
+        // actually running on a scrimlet, that's fine, the updated value will
+        // be received by Nexus eventually.
+        sled_agent.notify_nexus_about_self(&log);
+
+        // Begin monitoring the underlying hardware, and reacting to changes.
+        let sa = sled_agent.clone();
+        tokio::spawn(async move {
+            sa.monitor(log).await;
+        });
+
+        Ok(sled_agent)
+    }
+
+    // Observe the current hardware state manually.
+    //
+    // We use this when we're monitoring hardware for the first
+    // time, and if we miss notifications.
+    async fn full_hardware_scan(&self, log: &Logger) {
+        info!(log, "Performing full hardware scan");
+        self.notify_nexus_about_self(log);
+        if self.inner.hardware.is_scrimlet_driver_loaded() {
+            self.ensure_scrimlet_services_active(&log).await;
+        } else {
+            self.ensure_scrimlet_services_deactive(&log).await;
+        }
+    }
+
+    async fn monitor(&self, log: Logger) {
+        // Start monitoring the hardware for changes
+        let mut hardware_updates = self.inner.hardware.monitor();
+
+        // Scan the system manually for events we have have missed
+        // before we started monitoring.
+        self.full_hardware_scan(&log).await;
+
+        // Rely on monitoring for tracking all future updates.
+        loop {
+            use tokio::sync::broadcast::error::RecvError;
+            match hardware_updates.recv().await {
+                Ok(update) => match update {
+                    crate::hardware::HardwareUpdate::TofinoDeviceChange => {
+                        // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
+                        //
+                        // This won't block on Nexus responding; it may take while before
+                        // Nexus actually comes online.
+                        self.notify_nexus_about_self(&log);
+                    }
+                    crate::hardware::HardwareUpdate::TofinoLoaded => {
+                        self.ensure_scrimlet_services_active(&log).await;
+                    }
+                    crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                        self.ensure_scrimlet_services_deactive(&log).await;
+                    }
+                },
+                Err(RecvError::Lagged(count)) => {
+                    warn!(log, "Hardware monitor missed {count} messages");
+                    self.full_hardware_scan(&log).await;
+                }
+                Err(RecvError::Closed) => {
+                    warn!(log, "Hardware monitor receiver closed; exiting");
+                    return;
+                }
+            }
+        }
+    }
+
+    async fn ensure_scrimlet_services_active(&self, log: &Logger) {
+        info!(log, "Ensuring scrimlet services (enabling services)");
+
+        let services = match self.inner.config.stub_scrimlet {
+            Some(_) => {
+                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
+            }
+            None => {
+                vec![
+                    ServiceType::ManagementGatewayService,
+                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
+                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                ]
+            }
+        };
+
+        let request = ServiceZoneRequest {
+            id: Uuid::new_v4(),
+            zone_type: ZoneType::Switch,
+            addresses: vec![self.inner.switch_ip()],
+            gz_addresses: vec![],
+            services,
+        };
+
+        self.inner.services.ensure_switch(Some(request)).await;
+    }
+
+    async fn ensure_scrimlet_services_deactive(&self, log: &Logger) {
+        info!(log, "Ensuring scrimlet services (disabling services)");
+        self.inner.services.ensure_switch(None).await;
     }
 
     pub fn id(&self) -> Uuid {
-        self.id
+        self.inner.id
+    }
+
+    // Sends a request to Nexus informing it that the current sled exists.
+    fn notify_nexus_about_self(&self, log: &Logger) {
+        let sled_id = self.inner.id;
+        let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
+        let sled_address = self.inner.sled_address();
+        let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let log = log.clone();
+        let fut = async move {
+            // Notify the control plane that we're up, and continue trying this
+            // until it succeeds. We retry with an randomized, capped exponential
+            // backoff.
+            //
+            // TODO-robustness if this returns a 400 error, we probably want to
+            // return a permanent error from the `notify_nexus` closure.
+            let notify_nexus = || async {
+                info!(
+                    log,
+                    "contacting server nexus, registering sled: {}", sled_id
+                );
+                let role = if is_scrimlet {
+                    nexus_client::types::SledRole::Scrimlet
+                } else {
+                    nexus_client::types::SledRole::Gimlet
+                };
+
+                let nexus_client = lazy_nexus_client
+                    .get()
+                    .await
+                    .map_err(|err| BackoffError::transient(err.to_string()))?;
+                nexus_client
+                    .sled_agent_put(
+                        &sled_id,
+                        &nexus_client::types::SledAgentStartupInfo {
+                            sa_address: sled_address.to_string(),
+                            role,
+                        },
+                    )
+                    .await
+                    .map_err(|err| BackoffError::transient(err.to_string()))
+            };
+            let log_notification_failure = |err, delay| {
+                warn!(
+                    log,
+                    "failed to notify nexus about sled agent: {}, will retry in {:?}", err, delay;
+                );
+            };
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                notify_nexus,
+                log_notification_failure,
+            )
+            .await
+            .expect("Expected an infinite retry loop contacting Nexus");
+        };
+        self.inner
+            .nexus_request_queue
+            .sender()
+            .send(Box::pin(fut))
+            .unwrap_or_else(|err| {
+                panic!("Failed to send future to request queue: {err}");
+            });
     }
 
     /// Ensures that particular services should be initialized.
@@ -331,8 +546,14 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
-        self.services.ensure(requested_services).await?;
+        self.inner.services.ensure_persistent(requested_services).await?;
         Ok(())
+    }
+
+    /// Gets the sled's current list of all zpools.
+    pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
+        let zpools = self.inner.storage.get_zpools().await?;
+        Ok(zpools)
     }
 
     /// Ensures that a filesystem type exists within the zpool.
@@ -342,7 +563,8 @@ impl SledAgent {
         dataset_kind: DatasetKind,
         address: SocketAddrV6,
     ) -> Result<(), Error> {
-        self.storage
+        self.inner
+            .storage
             .upsert_filesystem(zpool_uuid, dataset_kind, address)
             .await?;
         Ok(())
@@ -356,7 +578,8 @@ impl SledAgent {
         target: InstanceRuntimeStateRequested,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<InstanceRuntimeState, Error> {
-        self.instances
+        self.inner
+            .instances
             .ensure(instance_id, initial, target, migrate)
             .await
             .map_err(|e| Error::Instance(e))
@@ -380,7 +603,7 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifact,
     ) -> Result<(), Error> {
-        let nexus_client = self.lazy_nexus_client.get().await?;
+        let nexus_client = self.inner.lazy_nexus_client.get().await?;
         crate::updates::download_artifact(artifact, &nexus_client).await?;
         Ok(())
     }
@@ -391,7 +614,8 @@ impl SledAgent {
         byte_offset: ByteOffset,
         max_bytes: Option<usize>,
     ) -> Result<InstanceSerialConsoleData, Error> {
-        self.instances
+        self.inner
+            .instances
             .instance_serial_console_buffer_data(
                 instance_id,
                 byte_offset,
@@ -408,7 +632,8 @@ impl SledAgent {
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        self.instances
+        self.inner
+            .instances
             .instance_issue_disk_snapshot_request(
                 instance_id,
                 disk_id,
@@ -430,6 +655,18 @@ impl SledAgent {
         // constructing a volume and performing a snapshot through some other
         // means. Currently unimplemented.
         todo!();
+    }
+
+    pub async fn firewall_rules_ensure(
+        &self,
+        _vpc_id: Uuid,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .firewall_rules_ensure(rules)
+            .await
+            .map_err(Error::from)
     }
 }
 
@@ -457,7 +694,17 @@ fn delete_addresses_matching_prefixes(
     let mut cmd = Command::new(PFEXEC);
     let cmd = cmd.args(&[IPADM, "show-addr", "-p", "-o", "ADDROBJ"]);
     let output = execute(cmd)?;
-    for addrobj in output.stdout.lines().flatten() {
+
+    // `ipadm show-addr` can return multiple addresses with the same name, but
+    // multiple values. Collecting to a set ensures that only a single name is
+    // used.
+    let addrobjs = output
+        .stdout
+        .lines()
+        .flatten()
+        .collect::<std::collections::HashSet<_>>();
+
+    for addrobj in addrobjs {
         if prefixes.iter().any(|prefix| addrobj.starts_with(prefix)) {
             warn!(
                 log,
@@ -486,7 +733,7 @@ async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
                   log,
                   "Deleting existing VNIC";
                     "vnic_name" => &vnic,
-                    "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
+                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
                 );
                 Dladm::delete_vnic(&vnic)
             })

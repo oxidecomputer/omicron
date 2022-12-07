@@ -6,9 +6,10 @@ license = "MPL-2.0"
 
 [dependencies]
 async-trait = "0.1"
-progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+ipnetwork = "0.20"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 regress = "0.4.1"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.11.13", default-features = false, features = ["rustls-tls", "stream"] }
 
 [dependencies.chrono]
 version = "0.4"
@@ -26,5 +27,5 @@ version = "2.5"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.uuid]
-version = "1.1.0"
+version = "1.2.2"
 features = [ "serde", "v4" ]

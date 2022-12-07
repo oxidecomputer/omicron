@@ -4,12 +4,10 @@ members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "end-to-end-tests",
     "gateway",
-    "gateway/faux-mgs",
     "gateway-cli",
     "gateway-client",
-    "gateway-messages",
-    "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
@@ -17,6 +15,7 @@ members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/defaults",
+    "nexus/passwords",
     "nexus/test-utils",
     "nexus/test-utils-macros",
     "nexus/types",
@@ -35,6 +34,9 @@ members = [
     "oximeter/oximeter-macro-impl",
     "oximeter-client",
     "test-utils",
+    "wicket",
+    "wicketd",
+    "wicketd-client",
 ]
 
 default-members = [
@@ -42,11 +44,8 @@ default-members = [
     "ddm-admin-client",
     "deploy",
     "gateway",
-    "gateway/faux-mgs",
     "gateway-cli",
     "gateway-client",
-    "gateway-messages",
-    "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
@@ -54,7 +53,9 @@ default-members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/defaults",
+    "nexus/passwords",
     "nexus/types",
+    "nexus-client",
     "package",
     "rpaths",
     "sled-agent",
@@ -69,6 +70,9 @@ default-members = [
     "oximeter/oximeter-macro-impl",
     "oximeter-client",
     "test-utils",
+    "wicket",
+    "wicketd",
+    "wicketd-client",
 ]
 resolver = "2"
 
@@ -87,6 +91,19 @@ opt-level = 3
 [profile.dev.package.lalrpop]
 opt-level = 3
 
+# `polar-core` is exercised heavily during the test suite and it's worthwhile to
+# have it built with optimizations.
+[profile.dev.package.polar-core]
+opt-level = 3
+
+# Password hashing is expensive by construction.  Build the hashing libraries
+# with optimizations to significantly speed up tests.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.rust-argon2]
+opt-level = 3
+
+
 [profile.release]
 panic = "abort"
 
@@ -102,7 +119,8 @@ panic = "abort"
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }
 #[patch."https://github.com/oxidecomputer/crucible"]
-#crucible-client-typess = { path = "../crucible/crucible-client-typess" }
+#crucible-agent-client = { path = "../crucible/agent-client" }
+#crucible-client-types = { path = "../crucible/crucible-client-types" }
 
 #
 # Local client generation during development.

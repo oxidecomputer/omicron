@@ -1,0 +1,19 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Omicron CockroachDB Debugging Guide
+
+This is a guide for debugging CockroachDB on a variety of environments.
+
+If you have advice that is not covered here, consider adding it!
+
+== Debugging on a Live System
+
+The following provides instructions for connecting to a CRDB shell on a running system.
+
+1. **Find the zone running CockroachDB**. This can be accomplished by running `zoneadm list -cv`, and finding the zone with a prefix of `oxz_cockroachdb`.
+2. **Log into that zone**. This can be done using `pfexec zlogin <that zone name>`.
+3. **Read the CockroachDB log file to determine the connection instructions**. This can be done with `tail -f $(svcs -L cockroachdb)`, look for a line starting with `RPC client flags:`. As one example, this may look like `/opt/oxide/cockroachdb/bin/cockroach <client cmd> --host=[fd00:1122:3344:101::3]:32221 --insecure`
+
+4. Run that command, with however you want to access `cockroach`. One notable `<client cmd>` is `sql`, which grants access to a SQL shell.

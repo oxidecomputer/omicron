@@ -8,7 +8,7 @@ use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use omicron_zone_package::config::Config;
-use omicron_zone_package::config::ExternalPackageSource;
+use omicron_zone_package::package::PackageSource;
 use quote::quote;
 use std::env;
 use std::fs;
@@ -23,14 +23,14 @@ fn main() -> Result<()> {
     let config: Config = toml::de::from_slice(&manifest)
         .context("failed to parse ../package-manifest.toml")?;
     let maghemite = config
-        .external_packages
+        .packages
         .get("maghemite")
         .context("missing maghemite package in ../package-manifest.toml")?;
     let commit = match &maghemite.source {
-        ExternalPackageSource::Manual => {
+        PackageSource::Prebuilt { commit, .. } => commit,
+        _ => {
             bail!("maghemite external package must have type `prebuilt`")
         }
-        ExternalPackageSource::Prebuilt { commit, .. } => commit,
     };
 
     // Report a relatively verbose error if we haven't downloaded the requisite
