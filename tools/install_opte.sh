@@ -127,17 +127,17 @@ HELIOS_NETDEV_REPO_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p"
 HELIOS_NETDEV_REPO_SHA_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p.sha256"
 HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
 
-# The xde repo provides a full OS/Net incorporation, with updated kernel bits
+# The stlouis repo provides a full OS/Net incorporation, with updated kernel bits
 # that the `xde` kernel module and OPTE rely on.
-XDE_REPO_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/os-build/xde"
-XDE_REPO_COMMIT="37beaa374df2094e5b5df9f37d9fd87d77ebb4a0"
-XDE_REPO_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p"
-XDE_REPO_SHA_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p.sha256"
-XDE_REPO_PATH="$XDE_DIR/$(basename "$XDE_REPO_URL")"
+STLOUIS_REPO_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/os-build/stlouis"
+STLOUIS_REPO_COMMIT="1c8f32867ae3131a9b5c096af80b8058f78ef94f"
+STLOUIS_REPO_URL="$STLOUIS_REPO_BASE_URL/$STLOUIS_REPO_COMMIT/repo.p5p"
+STLOUIS_REPO_SHA_URL="$STLOUIS_REPO_BASE_URL/$STLOUIS_REPO_COMMIT/repo.p5p.sha256"
+STLOUIS_REPO_PATH="$XDE_DIR/$(basename "$STLOUIS_REPO_URL")"
 
 # Download and verify the package repositorieies
 download_and_check_sha "$HELIOS_NETDEV_REPO_URL" "$(sha_from_url "$HELIOS_NETDEV_REPO_SHA_URL")"
-download_and_check_sha "$XDE_REPO_URL" "$(sha_from_url "$XDE_REPO_SHA_URL")"
+download_and_check_sha "$STLOUIS_REPO_URL" "$(sha_from_url "$STLOUIS_REPO_SHA_URL")"
 
 # Set the `helios-dev` repo as non-sticky, meaning that packages that were
 # originally provided by it may be updated by another repository, if that repo
@@ -146,7 +146,7 @@ ensure_helios_dev_is_non_sticky
 
 # Add the OPTE and xde repositories and update packages.
 add_publisher "$HELIOS_NETDEV_REPO_PATH"
-add_publisher "$XDE_REPO_PATH"
+add_publisher "$STLOUIS_REPO_PATH"
 
 # Actually install the xde kernel module and opteadm tool
 RC=0
