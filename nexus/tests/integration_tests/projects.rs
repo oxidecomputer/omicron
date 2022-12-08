@@ -442,4 +442,9 @@ async fn test_project_deletion_with_ip_pool(
     delete_project(&url, &client).await;
 }
 
-// TODO: external IP
+// TODO(https://github.com/oxidecomputer/omicron/issues/1334): Once floating IPs
+// are implemented, we should:
+// - Create a project-scoped external IP
+// - Attempt to delete the project (show that we cannot)
+// - Delete the external IP
+// - Delete the project

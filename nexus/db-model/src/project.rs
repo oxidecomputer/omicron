@@ -92,7 +92,10 @@ impl DatastoreCollectionConfig<IpPool> for Project {
     type CollectionIdColumn = ip_pool::dsl::project_id;
 }
 
-// TODO(https://github.com/oxidecomputer/omicron/issues/1482): Not yet utilized
+// TODO(https://github.com/oxidecomputer/omicron/issues/1482): Not yet utilized,
+// but needed for project deletion safety.
+// TODO(https://github.com/oxidecomputer/omicron/issues/1334): Cannot be
+// utilized until floating IPs are implemented.
 impl DatastoreCollectionConfig<ExternalIp> for Project {
     type CollectionId = Uuid;
     type GenerationNumberColumn = project::dsl::rcgen;
