@@ -114,7 +114,7 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
         if disk_found.is_some() {
             return Err(Error::InvalidRequest {
-                message: "project to be deleted contains an disk".to_string(),
+                message: "project to be deleted contains a disk".to_string(),
             });
         }
 
@@ -223,7 +223,8 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
         if ip_pool_found.is_some() {
             return Err(Error::InvalidRequest {
-                message: "project to be deleted contains a ip pool".to_string(),
+                message: "project to be deleted contains an ip pool"
+                    .to_string(),
             });
         }
 
