@@ -1820,8 +1820,7 @@ async fn disk_list_v1(
     let instance = query.instance;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disks = if instance.is_some() {
-            let instance = instance.unwrap();
+        let disks = if let Some(instance) = instance {
             let authz_instance = nexus
                 .instance_lookup(
                     &opctx,
@@ -1839,9 +1838,8 @@ async fn disk_list_v1(
                 .into_iter()
                 .map(|disk| disk.into())
                 .collect()
-        } else if query.selector.is_some() {
-            let authz_project =
-                nexus.project_lookup(&opctx, query.selector.unwrap()).await?;
+        } else if let Some(selector) = query.selector {
+            let authz_project = nexus.project_lookup(&opctx, selector).await?;
             nexus
                 .project_list_disks(
                     &opctx,
