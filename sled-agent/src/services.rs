@@ -879,7 +879,7 @@ impl ServiceManager {
     /// Ensures that a switch zone exists with the provided IP adddress.
     pub async fn activate_switch(
         &self,
-        switch_ip: Option<Ipv6Addr>,
+        switch_zone_ip: Option<Ipv6Addr>,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
 
@@ -897,7 +897,7 @@ impl ServiceManager {
         };
 
         let addresses =
-            if let Some(ip) = switch_ip { vec![ip] } else { vec![] };
+            if let Some(ip) = switch_zone_ip { vec![ip] } else { vec![] };
 
         let request = ServiceZoneRequest {
             id: Uuid::new_v4(),

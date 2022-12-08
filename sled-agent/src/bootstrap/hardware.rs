@@ -62,8 +62,8 @@ impl HardwareMonitorWorker {
                     match update {
                         Ok(update) => match update {
                             crate::hardware::HardwareUpdate::TofinoLoaded => {
-                                let switch_ip = None;
-                                if let Err(e) = self.services.activate_switch(switch_ip).await {
+                                let switch_zone_ip = None;
+                                if let Err(e) = self.services.activate_switch(switch_zone_ip).await {
                                     warn!(self.log, "Failed to activate switch: {e}");
                                 }
                             }
@@ -95,8 +95,9 @@ impl HardwareMonitorWorker {
     async fn full_hardware_scan(&self) {
         info!(self.log, "Performing full hardware scan");
         if self.hardware.is_scrimlet_driver_loaded() {
-            let switch_ip = None;
-            if let Err(e) = self.services.activate_switch(switch_ip).await {
+            let switch_zone_ip = None;
+            if let Err(e) = self.services.activate_switch(switch_zone_ip).await
+            {
                 warn!(self.log, "Failed to activate switch: {e}");
             }
         } else {

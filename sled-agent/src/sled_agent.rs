@@ -184,7 +184,7 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    fn switch_ip(&self) -> Ipv6Addr {
+    fn switch_zone_ip(&self) -> Ipv6Addr {
         get_switch_zone_address(self.subnet)
     }
 }
@@ -389,8 +389,9 @@ impl SledAgent {
         self.notify_nexus_about_self(log);
 
         if self.inner.hardware.is_scrimlet_driver_loaded() {
-            let switch_ip = Some(self.inner.switch_ip());
-            if let Err(e) = self.inner.services.activate_switch(switch_ip).await
+            let switch_zone_ip = Some(self.inner.switch_zone_ip());
+            if let Err(e) =
+                self.inner.services.activate_switch(switch_zone_ip).await
             {
                 warn!(log, "Failed to activate switch: {e}");
             }
@@ -422,9 +423,12 @@ impl SledAgent {
                         self.notify_nexus_about_self(&log);
                     }
                     crate::hardware::HardwareUpdate::TofinoLoaded => {
-                        let switch_ip = Some(self.inner.switch_ip());
-                        if let Err(e) =
-                            self.inner.services.activate_switch(switch_ip).await
+                        let switch_zone_ip = Some(self.inner.switch_zone_ip());
+                        if let Err(e) = self
+                            .inner
+                            .services
+                            .activate_switch(switch_zone_ip)
+                            .await
                         {
                             warn!(log, "Failed to activate switch: {e}");
                         }
