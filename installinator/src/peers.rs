@@ -140,7 +140,8 @@ impl Peers {
                     // The entire artifact has been downloaded.
                     return Ok(artifact_bytes);
                 }
-                Err(err) => {
+                Err(_) => {
+                    // The operation timed out.
                     _ = cancel_sender.send(());
                     return Err(ArtifactFetchError::Timeout {
                         peer,
