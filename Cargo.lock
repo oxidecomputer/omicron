@@ -3525,6 +3525,7 @@ dependencies = [
  "nexus-client",
  "omicron-common",
  "omicron-test-utils",
+ "once_cell",
  "openapi-lint",
  "openapiv3",
  "opte-ioctl",

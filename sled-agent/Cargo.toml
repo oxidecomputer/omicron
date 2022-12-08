@@ -25,6 +25,7 @@ libc = "0.2.138"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
+once_cell = "1.16"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "23fdf5856f10f23e2d26865d2d7e2d3bc537bca3", features = [ "api", "std" ] }
 oximeter = { version = "0.1.0", path = "../oximeter/oximeter" }
 oximeter-producer = { version = "0.1.0", path = "../oximeter/producer" }
