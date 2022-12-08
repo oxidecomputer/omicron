@@ -768,6 +768,136 @@
         }
       }
     },
+    "/disks/{disk}/attach": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Attach a disk to an instance",
+        "operationId": "disk_attach_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceIdentifier"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/disks/{disk}/detach": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Detach a disk from an instance",
+        "operationId": "disk_detach_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceIdentifier"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk}/metrics/{metric_name}": {
       "get": {
         "tags": [
@@ -10442,6 +10572,17 @@
           }
         ]
       },
+      "InstanceIdentifier": {
+        "type": "object",
+        "properties": {
+          "instance": {
+            "$ref": "#/components/schemas/NameOrId"
+          }
+        },
+        "required": [
+          "instance"
+        ]
+      },
       "InstanceMigrate": {
         "description": "Migration parameters for an [`Instance`](omicron_common::api::external::Instance)",
         "type": "object",
@@ -10941,6 +11082,27 @@
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]$",
         "maxLength": 63
+      },
+      "NameOrId": {
+        "oneOf": [
+          {
+            "title": "id",
+            "allOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              }
+            ]
+          },
+          {
+            "title": "name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        ]
       },
       "NetworkInterface": {
         "description": "A `NetworkInterface` represents a virtual network interface device.",
@@ -13696,27 +13858,6 @@
             ]
           }
         }
-      },
-      "NameOrId": {
-        "oneOf": [
-          {
-            "title": "id",
-            "allOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              }
-            ]
-          },
-          {
-            "title": "name",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        ]
       },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",

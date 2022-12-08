@@ -139,6 +139,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_create_v1)?;
         api.register(disk_view_v1)?;
         api.register(disk_delete_v1)?;
+        api.register(disk_attach_v1)?;
+        api.register(disk_detach_v1)?;
         api.register(disk_metrics_list_v1)?;
 
         api.register(instance_list)?;
@@ -2169,6 +2171,84 @@ async fn disk_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Attach a disk to an instance
+#[endpoint {
+    method = POST,
+    path = "/disks/{disk}/attach",
+    tags = ["disks"],
+}]
+async fn disk_attach_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DiskLookupPathParam>,
+    query_params: Query<DiskViewParams>,
+    body: TypedBody<params::InstanceIdentifier>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let body = body.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_instance = nexus
+            .instance_lookup(
+                &opctx,
+                params::InstanceSelector::new(body.instance, &query.selector),
+            )
+            .await?;
+        let authz_disk = nexus
+            .disk_lookup(
+                &opctx,
+                params::DiskSelector::new(path.disk, &query.selector),
+            )
+            .await?;
+        let disk = nexus
+            .instance_attach_disk(&opctx, &authz_instance, &authz_disk)
+            .await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach a disk from an instance
+#[endpoint {
+    method = POST,
+    path = "/disks/{disk}/detach",
+    tags = ["disks"],
+}]
+async fn disk_detach_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DiskLookupPathParam>,
+    query_params: Query<DiskViewParams>,
+    body: TypedBody<params::InstanceIdentifier>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let body = body.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_instance = nexus
+            .instance_lookup(
+                &opctx,
+                params::InstanceSelector::new(body.instance, &query.selector),
+            )
+            .await?;
+        let authz_disk = nexus
+            .disk_lookup(
+                &opctx,
+                params::DiskSelector::new(path.disk, &query.selector),
+            )
+            .await?;
+        let disk = nexus
+            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
+            .await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 #[derive(Display, Deserialize, JsonSchema)]
 #[display(style = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -3135,16 +3215,35 @@ async fn instance_disk_attach(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
+    let disk_name = disk_to_attach.into_inner().name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus
-            .instance_attach_disk(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_attach.into_inner().name.into(),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
             )
+            .await?;
+        let authz_disk = nexus
+            .disk_lookup(
+                &opctx,
+                params::DiskSelector {
+                    disk: NameOrId::Name(disk_name),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
+            )
+            .await?;
+        let disk = nexus
+            .instance_attach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };
@@ -3168,16 +3267,35 @@ async fn instance_disk_detach(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let instance_name = &path.instance_name;
+    let disk_name = disk_to_detach.into_inner().name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus
-            .instance_detach_disk(
+        let authz_instance = nexus
+            .instance_lookup(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_detach.into_inner().name.into(),
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
             )
+            .await?;
+        let authz_disk = nexus
+            .disk_lookup(
+                &opctx,
+                params::DiskSelector {
+                    disk: NameOrId::Name(disk_name),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
+            )
+            .await?;
+        let disk = nexus
+            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };

@@ -934,6 +934,11 @@ pub struct DiskIdentifier {
     pub name: Name,
 }
 
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceIdentifier {
+    pub instance: NameOrId,
+}
+
 /// Parameters for the
 /// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
 /// attached or detached to an instance.

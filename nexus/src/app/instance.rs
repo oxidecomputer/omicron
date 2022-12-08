@@ -755,25 +755,9 @@ impl super::Nexus {
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        authz_instance: &authz::Instance,
+        authz_disk: &authz::Disk,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
-
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
@@ -803,25 +787,9 @@ impl super::Nexus {
     pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        authz_instance: &authz::Instance,
+        authz_disk: &authz::Disk,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
-
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk detach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
