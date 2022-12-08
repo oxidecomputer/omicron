@@ -78,7 +78,7 @@ impl super::Nexus {
                 let (.., authz_instance) =
                     LookupPath::new(opctx, &self.db_datastore)
                         .project_id(project_id)
-                        .instance_name(&Name(instance_name.clone()))
+                        .instance_name(&Name(instance_name))
                         .lookup_for(authz::Action::Read)
                         .await?;
                 Ok(authz_instance)
