@@ -329,10 +329,10 @@ impl SledAgent {
             request.gateway.mac,
         );
 
-        let svc_config = services::Config {
-            gateway_address: request.gateway.address,
-            ..Default::default()
-        };
+        let svc_config = services::Config::new(
+            config.sidecar_revision.clone(),
+            request.gateway.address,
+        );
 
         let hardware =
             HardwareManager::new(parent_log.clone(), config.stub_scrimlet)

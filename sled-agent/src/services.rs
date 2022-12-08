@@ -149,6 +149,9 @@ type ConfigDirGetter = Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>;
 
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
+    /// Identifies the revision of the sidecar to be used.
+    pub sidecar_revision: String,
+
     /// An optional internet gateway address for external services.
     pub gateway_address: Option<Ipv4Addr>,
 
@@ -161,10 +164,14 @@ pub struct Config {
     pub get_svc_config_dir: ConfigDirGetter,
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl Config {
+    pub fn new(
+        sidecar_revision: String,
+        gateway_address: Option<Ipv4Addr>,
+    ) -> Self {
         Self {
-            gateway_address: None,
+            sidecar_revision,
+            gateway_address,
             all_svcs_config_path: default_services_config_path(),
             get_svc_config_dir: Box::new(|zone_name: &str, svc_name: &str| {
                 PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
@@ -725,7 +732,10 @@ impl ServiceManager {
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",
                             )?;
-                            smfh.setprop("config/board_rev", "rev_a")?;
+                            smfh.setprop(
+                                "config/board_rev",
+                                &self.inner.config.sidecar_revision,
+                            )?;
                         }
                         DendriteAsic::TofinoStub => smfh.setprop(
                             "config/port_config",
@@ -1189,13 +1199,14 @@ mod test {
                 self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
             let svc_config_dir = self.config_dir.path().to_path_buf();
             Config {
+                sidecar_revision: "rev_whatever_its_a_test".to_string(),
+                gateway_address: None,
                 all_svcs_config_path,
                 get_svc_config_dir: Box::new(
                     move |_zone_name: &str, _svc_name: &str| {
                         svc_config_dir.clone()
                     },
                 ),
-                ..Default::default()
             }
         }
     }
