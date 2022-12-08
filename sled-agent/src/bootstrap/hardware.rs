@@ -135,6 +135,7 @@ impl HardwareMonitor {
             etherstub.clone(),
             etherstub_vnic.clone(),
             sled_config.stub_scrimlet,
+            sled_config.sidecar_revision.clone(),
         )
         .await?;
 

@@ -226,6 +226,7 @@ pub struct ServiceManagerInner {
     log: Logger,
     switch_zone: Mutex<SwitchZone>,
     stub_scrimlet: Option<bool>,
+    sidecar_revision: String,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
@@ -261,6 +262,7 @@ impl ServiceManager {
         etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
         stub_scrimlet: Option<bool>,
+        sidecar_revision: String,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -271,6 +273,7 @@ impl ServiceManager {
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SwitchZone::Disabled),
                 stub_scrimlet,
+                sidecar_revision,
                 zones: Mutex::new(vec![]),
                 vnic_allocator: VnicAllocator::new("Service", etherstub),
                 underlay_vnic,
@@ -734,7 +737,7 @@ impl ServiceManager {
                             )?;
                             smfh.setprop(
                                 "config/board_rev",
-                                &self.inner.config.sidecar_revision,
+                                &self.inner.sidecar_revision,
                             )?;
                         }
                         DendriteAsic::TofinoStub => smfh.setprop(
@@ -1224,6 +1227,7 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             None,
+            "rev-test".to_string(),
         )
         .await
         .unwrap();
@@ -1258,6 +1262,7 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             None,
+            "rev-test".to_string(),
         )
         .await
         .unwrap();
@@ -1294,6 +1299,7 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             None,
+            "rev-test".to_string(),
         )
         .await
         .unwrap();
@@ -1319,6 +1325,7 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             None,
+            "rev-test".to_string(),
         )
         .await
         .unwrap();
@@ -1352,6 +1359,7 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             None,
+            "rev-test".to_string(),
         )
         .await
         .unwrap();
@@ -1379,6 +1387,7 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             None,
+            "rev-test".to_string(),
         )
         .await
         .unwrap();
