@@ -90,7 +90,9 @@ async fn instance_launch() -> Result<()> {
             hostname: "localshark".into(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
-            disks: vec![InstanceDiskAttachment::Attach { name: disk_name }],
+            disks: vec![InstanceDiskAttachment::Attach {
+                name: disk_name.clone(),
+            }],
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool_name: None }],
             user_data: String::new(),
