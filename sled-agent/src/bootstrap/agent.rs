@@ -369,6 +369,8 @@ impl Agent {
                     },
                 )?;
 
+                // This is the point-of-no-return, where we're committed to the
+                // sled agent starting.
                 restarter.cancel();
                 *state = SledAgentState::After(server);
 
