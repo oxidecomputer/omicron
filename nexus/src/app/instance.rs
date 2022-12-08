@@ -742,19 +742,12 @@ impl super::Nexus {
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        authz_instance: &authz::Instance,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
         self.db_datastore
-            .instance_list_disks(opctx, &authz_instance, pagparams)
+            .instance_list_disks(opctx, authz_instance, pagparams)
             .await
     }
 

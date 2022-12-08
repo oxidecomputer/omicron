@@ -1797,8 +1797,10 @@ async fn ip_pool_service_range_remove(
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskListParams {
+    /// Optional filter to narrow disks returned to those attached to the given instance
+    instance: Option<NameOrId>,
     #[serde(flatten)]
-    selector: params::ProjectSelector,
+    selector: Option<params::ProjectSelector>,
     #[serde(flatten)]
     pagination: PaginatedByName,
 }
@@ -1815,21 +1817,48 @@ async fn disk_list_v1(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let instance = query.instance;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let authz_project =
-            nexus.project_lookup(&opctx, query.selector).await?;
-        let disks = nexus
-            .project_list_disks(
-                &opctx,
-                &authz_project,
-                &data_page_params_for(&rqctx, &query.pagination)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
-            .await?
-            .into_iter()
-            .map(|disk| disk.into())
-            .collect();
+        let disks = if instance.is_some() {
+            let instance = instance.unwrap();
+            let authz_instance = nexus
+                .instance_lookup(
+                    &opctx,
+                    params::InstanceSelector::new(instance, &query.selector),
+                )
+                .await?;
+            nexus
+                .instance_list_disks(
+                    &opctx,
+                    &authz_instance,
+                    &data_page_params_for(&rqctx, &query.pagination)?
+                        .map_name(|n| Name::ref_cast(n)),
+                )
+                .await?
+                .into_iter()
+                .map(|disk| disk.into())
+                .collect()
+        } else if query.selector.is_some() {
+            let authz_project =
+                nexus.project_lookup(&opctx, query.selector.unwrap()).await?;
+            nexus
+                .project_list_disks(
+                    &opctx,
+                    &authz_project,
+                    &data_page_params_for(&rqctx, &query.pagination)?
+                        .map_name(|n| Name::ref_cast(n)),
+                )
+                .await?
+                .into_iter()
+                .map(|disk| disk.into())
+                .collect()
+        } else {
+            Err(Error::InvalidRequest {
+                // TODO: Improve this error message
+                message: "instance or project selector required".to_string(),
+            })?
+        };
         Ok(HttpResponseOk(ScanByName::results_page(
             &query.pagination,
             disks,
@@ -3059,12 +3088,22 @@ async fn instance_disk_list(
     let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_instance = nexus
+            .instance_lookup(
+                &opctx,
+                params::InstanceSelector {
+                    instance: NameOrId::Name(instance_name.clone().into()),
+                    project: Some(NameOrId::Name(project_name.clone().into())),
+                    organization: Some(NameOrId::Name(
+                        organization_name.clone().into(),
+                    )),
+                },
+            )
+            .await?;
         let disks = nexus
             .instance_list_disks(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
+                &authz_instance,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
