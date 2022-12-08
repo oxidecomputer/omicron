@@ -6,8 +6,12 @@ use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use slog::Drain;
+use tokio::io::AsyncWriteExt;
 
-use crate::peers::{ArtifactId, Peers};
+use crate::{
+    buf_list::BufList,
+    peers::{loop_fetch_from_peers, ArtifactId, Peers},
+};
 
 /// Installinator app.
 #[derive(Debug, Parser)]
@@ -86,32 +90,56 @@ struct InstallOpts {
 
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        // Discover the nodes via the bootstrap network.
-        let discovered_peers = Peers::mock_discover(&log)
-            .await
-            .context("error discovering peers")?;
-
-        // TODO: is buffering up the entire artifact in memory is OK?
-        let (peer, artifact) = discovered_peers
-            .fetch_artifact(&self.artifact_id)
-            .await
-            .context("error fetching artifact")?;
+        // TODO: is buffering up the entire artifact in memory OK?
+        let (peer, artifact) = loop_fetch_from_peers(
+            &log,
+            || {
+                // TODO: discover nodes via the bootstrap network
+                async {
+                    Peers::mock_discover(&log)
+                        .await
+                        .context("error discovering peers")
+                }
+            },
+            &self.artifact_id,
+        )
+        .await?;
 
         slog::info!(
             log,
             "for artifact {}, fetched {} bytes from {peer}, writing to {}",
             self.artifact_id,
-            artifact.len(),
+            artifact.num_bytes(),
             self.destination,
         );
 
-        std::fs::write(&self.destination, &artifact).with_context(|| {
-            format!(
-                "error writing {} to {}",
-                self.artifact_id, self.destination
-            )
-        })?;
+        // TODO: add retries to this?
+        write_artifact(&self.artifact_id, artifact, &self.destination).await?;
 
         Ok(())
     }
+}
+
+async fn write_artifact(
+    artifact_id: &ArtifactId,
+    mut artifact: BufList,
+    destination: &Utf8Path,
+) -> Result<()> {
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(destination)
+        .await
+        .with_context(|| {
+            format!("failed to open destination `{destination}` for writing")
+        })?;
+
+    let num_bytes = artifact.num_bytes();
+
+    file.write_all_buf(&mut artifact).await.with_context(|| {
+        format!("failed to write artifact {artifact_id} ({num_bytes} bytes) to destination `{destination}`")
+    })?;
+
+    Ok(())
 }

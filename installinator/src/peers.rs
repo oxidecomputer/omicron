@@ -2,81 +2,155 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, net::Ipv6Addr, str::FromStr};
+use std::{fmt, future::Future, net::Ipv6Addr, str::FromStr, time::Duration};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use bytes::{Bytes, BytesMut};
+use display_error_chain::DisplayErrorChain;
 use itertools::Itertools;
-use tokio::sync::{broadcast, mpsc};
+use progenitor_client::ResponseValue;
+use reqwest::StatusCode;
+use tokio::sync::{mpsc, oneshot};
+
+use crate::{buf_list::BufList, errors::ArtifactFetchError};
+
+/// In a loop, discover peers, and fetch from them.
+///
+/// This only produces an error if the discover function errors out. In normal use, it is expected
+/// to never error out.
+pub(crate) async fn loop_fetch_from_peers<F, Fut>(
+    log: &slog::Logger,
+    mut discover_fn: F,
+    artifact_id: &ArtifactId,
+) -> Result<(Ipv6Addr, BufList)>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<Peers>>,
+{
+    loop {
+        let peers = discover_fn().await?;
+        slog::debug!(
+            log,
+            "discovered {} peers: [{}]",
+            peers.peers().len(),
+            peers.display(),
+        );
+        match peers.fetch_artifact(artifact_id).await {
+            Some((peer, artifact)) => return Ok((peer, artifact)),
+            None => {
+                slog::debug!(
+                    log,
+                    "unable to fetch artifact from peers, retrying",
+                );
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct Peers {
     log: slog::Logger,
     imp: Box<dyn PeersImpl>,
+    timeout: Duration,
 }
 
 impl Peers {
     pub(crate) async fn mock_discover(log: &slog::Logger) -> Result<Peers> {
         let log = log.new(slog::o!("component" => "Peers"));
         let imp = Box::new(MockPeers::new(&log)?);
-        Ok(Self { log, imp })
+        Ok(Self { log, imp, timeout: Duration::from_secs(10) })
     }
 
     pub(crate) async fn fetch_artifact(
         &self,
         artifact_id: &ArtifactId,
-    ) -> Result<(Ipv6Addr, Bytes)> {
+    ) -> Option<(Ipv6Addr, BufList)> {
         // TODO: do we want a check phase that happens before the download?
+        let peers = self.peers();
+        let mut remaining_peers = peers.len();
 
-        let (sender, mut receiver) = mpsc::channel(8);
-        let (cancel_sender, cancel_receiver) = broadcast::channel(1);
-        for peer in self.imp.peers().iter() {
-            self.imp.start_fetch_artifact(
-                *peer,
-                artifact_id,
-                sender.clone(),
-                cancel_sender.subscribe(),
+        let log =
+            self.log.new(slog::o!("artifact_id" => artifact_id.to_string()));
+
+        slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
+
+        for peer in peers {
+            remaining_peers -= 1;
+
+            slog::debug!(
+                log,
+                "start fetch from peer {peer:?}"; "remaining_peers" => remaining_peers,
             );
-        }
 
-        std::mem::drop((sender, cancel_receiver));
-
-        loop {
-            match receiver.recv().await {
-                Some((peer, Ok(bytes))) => {
-                    slog::debug!(
-                        self.log,
-                        "for artifact {artifact_id}, peer {peer} \
-                             returned an artifact with {} bytes",
-                        bytes.len(),
-                    );
-
-                    // TODO: maybe perform checksumming and other signature validation here
-
-                    // A result was received -- cancel remaining jobs.
-                    let _ = cancel_sender.send(());
-                    break Ok((peer, bytes));
+            // Attempt to download data from this peer.
+            match self.fetch_from_peer(*peer, artifact_id).await {
+                Ok(image_bytes) => {
+                    slog::debug!(log, "fetched from peer {peer}");
+                    return Some((*peer, image_bytes));
                 }
-                Some((peer, Err(err))) => {
+                Err(error) => {
                     slog::debug!(
-                        self.log,
-                        "for artifact {artifact_id}, peer {peer} returned {err:?}",
+                        log,
+                        "error: {}",
+                        DisplayErrorChain::new(&error);
+                        "remaining_peers" => remaining_peers,
                     );
-                }
-                None => {
-                    // No more peers are left.
-                    bail!(
-                        "for artifact {artifact_id}, no peers \
-                             returned a successful result out of [{}]",
-                        self.display()
-                    )
                 }
             }
         }
+
+        None
     }
 
-    pub(crate) fn display(&self) -> String {
-        self.imp.peers().iter().join(", ")
+    pub(crate) fn peers(&self) -> &[Ipv6Addr] {
+        self.imp.peers()
+    }
+
+    pub(crate) fn display(&self) -> impl fmt::Display {
+        self.peers().iter().join(", ")
+    }
+
+    async fn fetch_from_peer(
+        &self,
+        peer: Ipv6Addr,
+        artifact_id: &ArtifactId,
+    ) -> Result<BufList, ArtifactFetchError> {
+        let (sender, mut receiver) = mpsc::channel(8);
+        let (cancel_sender, cancel_receiver) = oneshot::channel();
+
+        self.imp.start_fetch_artifact(
+            peer,
+            artifact_id,
+            sender,
+            cancel_receiver,
+        );
+
+        let mut artifact_bytes = BufList::new();
+
+        loop {
+            match tokio::time::timeout(self.timeout, receiver.recv()).await {
+                Ok(Some(Ok(bytes))) => {
+                    artifact_bytes.push_chunk(bytes);
+                }
+                Ok(Some(Err(error))) => {
+                    _ = cancel_sender.send(());
+                    return Err(ArtifactFetchError::HttpError { peer, error });
+                }
+                Ok(None) => {
+                    // The entire artifact has been downloaded.
+                    return Ok(artifact_bytes);
+                }
+                Err(err) => {
+                    _ = cancel_sender.send(());
+                    return Err(ArtifactFetchError::Timeout {
+                        peer,
+                        duration: self.timeout,
+                        // TODO: compute bytes fetched
+                        bytes_fetched: 0,
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -87,12 +161,11 @@ trait PeersImpl: fmt::Debug + Send + Sync {
         &self,
         peer: Ipv6Addr,
         artifact_id: &ArtifactId,
-        sender: mpsc::Sender<(Ipv6Addr, Result<Bytes>)>,
-        cancel_receiver: broadcast::Receiver<()>,
+        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
+        cancel_receiver: oneshot::Receiver<()>,
     );
 }
 
-/// Return a list of nodes discovered on the bootstrap network.
 #[derive(Clone, Debug)]
 struct MockPeers {
     peers: Vec<Ipv6Addr>,
@@ -121,9 +194,9 @@ impl PeersImpl for MockPeers {
         &self,
         peer: Ipv6Addr,
         artifact_id: &ArtifactId,
-        sender: mpsc::Sender<(Ipv6Addr, Result<Bytes>)>,
+        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
         // MockPeers doesn't need cancel_receiver (yet)
-        _cancel_receiver: broadcast::Receiver<()>,
+        _cancel_receiver: oneshot::Receiver<()>,
     ) {
         let artifact_id = artifact_id.clone();
         tokio::spawn(async move {
@@ -133,14 +206,19 @@ impl PeersImpl for MockPeers {
                 bytes.extend_from_slice(artifact_id.to_string().as_bytes());
                 Ok(bytes.freeze())
             } else if peer == Ipv6Addr::UNSPECIFIED {
-                // TODO: return a real HTTP error
-                Err(anyhow!("404 not found"))
+                Err(progenitor_client::Error::ErrorResponse(
+                    ResponseValue::new(
+                        (),
+                        StatusCode::NOT_FOUND,
+                        Default::default(),
+                    ),
+                ))
             } else {
                 panic!("invalid peer, unknown to MockPeers: {peer}")
             };
 
             // Ignore errors in case the channel is dropped.
-            let _ = sender.send((peer, res)).await;
+            _ = sender.send(res).await;
         });
     }
 }
