@@ -8,7 +8,7 @@ use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -17,6 +17,34 @@ use serde::{
 };
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectSelector {
+    pub project: NameOrId,
+    pub organization: Option<NameOrId>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceSelector {
+    pub instance: NameOrId,
+    pub project: Option<NameOrId>,
+    pub organization: Option<NameOrId>,
+}
+
+impl InstanceSelector {
+    pub fn new(
+        instance: NameOrId,
+        project_selector: &Option<ProjectSelector>,
+    ) -> InstanceSelector {
+        InstanceSelector {
+            instance,
+            organization: project_selector
+                .as_ref()
+                .and_then(|s| s.organization.clone()),
+            project: project_selector.as_ref().map(|s| s.project.clone()),
+        }
+    }
+}
 
 // Silos
 

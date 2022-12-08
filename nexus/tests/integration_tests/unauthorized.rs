@@ -258,7 +258,7 @@ lazy_static! {
         SetupReq::Post {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
-            id_routes: vec!["/by-id/instances/{id}"],
+            id_routes: vec!["/v1/instances/{id}"],
         },
         // Lookup the previously created NIC
         SetupReq::Get {

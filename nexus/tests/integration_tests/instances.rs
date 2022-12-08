@@ -124,6 +124,65 @@ async fn test_instances_access_before_create_returns_not_found(
 }
 
 #[nexus_test]
+async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    create_ip_pool(&client, "p0", None, None).await;
+    let org = create_organization(&client, ORGANIZATION_NAME).await;
+    let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create an instance.
+    let instance_name = "test-instance";
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
+
+    // Fetch instance by id
+    let fetched_instance = instance_get(
+        &client,
+        format!("/v1/instances/{}", instance.identity.id).as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // Fetch instance by name and project_id
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}",
+            instance.identity.name, project.identity.id
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // Fetch instance by name, project_name, and organization_id
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}&organization={}",
+            instance.identity.name, project.identity.name, org.identity.id
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // Fetch instance by name, project_name, and organization_name
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}&organization={}",
+            instance.identity.name, project.identity.name, org.identity.name
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+}
+
+#[nexus_test]
 async fn test_instances_create_reboot_halt(
     cptestctx: &ControlPlaneTestContext,
 ) {
