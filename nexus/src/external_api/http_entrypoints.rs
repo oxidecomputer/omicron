@@ -2115,7 +2115,7 @@ async fn disk_delete_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskLookupPathParam>,
     query_params: Query<DiskViewParams>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -2129,7 +2129,7 @@ async fn disk_delete_v1(
             )
             .await?;
         nexus.project_delete_disk(&opctx, &authz_disk).await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
