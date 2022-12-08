@@ -21,7 +21,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main",
 futures = "0.3.25"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
-libc = "0.2.137"
+libc = "0.2.138"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
