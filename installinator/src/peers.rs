@@ -5,10 +5,9 @@
 use std::{fmt, net::Ipv6Addr, str::FromStr};
 
 use anyhow::{anyhow, bail, Result};
-use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use futures::{prelude::*, stream::FuturesUnordered};
 use itertools::Itertools;
+use tokio::sync::{broadcast, mpsc};
 
 #[derive(Debug)]
 pub(crate) struct Peers {
@@ -29,46 +28,51 @@ impl Peers {
     ) -> Result<(Ipv6Addr, Bytes)> {
         // TODO: do we want a check phase that happens before the download?
 
-        let download_futs: FuturesUnordered<_> = self
-            .imp
-            .peers()
-            .iter()
-            .map(|peer| async {
-                let result =
-                    self.imp.fetch_artifact_from_peer(peer, artifact_id).await;
-                (*peer, result)
-            })
-            .collect();
-        let filtered = download_futs.filter_map(|(peer, res)| match res {
-            Ok(bytes) => {
-                slog::debug!(
-                    self.log,
-                    "for artifact {artifact_id}, peer {peer} \
-                         returned an artifact with {} bytes",
-                    bytes.len(),
-                );
+        let (sender, mut receiver) = mpsc::channel(8);
+        let (cancel_sender, cancel_receiver) = broadcast::channel(1);
+        for peer in self.imp.peers().iter() {
+            self.imp.start_fetch_artifact(
+                *peer,
+                artifact_id,
+                sender.clone(),
+                cancel_sender.subscribe(),
+            );
+        }
 
-                // TODO: maybe perform checksumming and other signature validation here
-                future::ready(Some((peer, bytes)))
-            }
-            Err(err) => {
-                slog::debug!(
-                    self.log,
-                    "for artifact {artifact_id}, peer {peer} returned {err:?}",
-                );
-                future::ready(None)
-            }
-        });
-        tokio::pin!(filtered);
+        std::mem::drop((sender, cancel_receiver));
 
-        // Did we get any successful values?
-        filtered.next().await.ok_or_else(|| {
-            anyhow!(
-                "for artifact {artifact_id}, no peers \
-                     returned a successful result out of [{}]",
-                self.display()
-            )
-        })
+        loop {
+            match receiver.recv().await {
+                Some((peer, Ok(bytes))) => {
+                    slog::debug!(
+                        self.log,
+                        "for artifact {artifact_id}, peer {peer} \
+                             returned an artifact with {} bytes",
+                        bytes.len(),
+                    );
+
+                    // TODO: maybe perform checksumming and other signature validation here
+
+                    // A result was received -- cancel remaining jobs.
+                    let _ = cancel_sender.send(());
+                    break Ok((peer, bytes));
+                }
+                Some((peer, Err(err))) => {
+                    slog::debug!(
+                        self.log,
+                        "for artifact {artifact_id}, peer {peer} returned {err:?}",
+                    );
+                }
+                None => {
+                    // No more peers are left.
+                    bail!(
+                        "for artifact {artifact_id}, no peers \
+                             returned a successful result out of [{}]",
+                        self.display()
+                    )
+                }
+            }
+        }
     }
 
     pub(crate) fn display(&self) -> String {
@@ -76,15 +80,16 @@ impl Peers {
     }
 }
 
-#[async_trait]
 trait PeersImpl: fmt::Debug + Send + Sync {
-    async fn fetch_artifact_from_peer(
-        &self,
-        peer: &Ipv6Addr,
-        artifact_id: &ArtifactId,
-    ) -> Result<Bytes>;
-
     fn peers(&self) -> &[Ipv6Addr];
+
+    fn start_fetch_artifact(
+        &self,
+        peer: Ipv6Addr,
+        artifact_id: &ArtifactId,
+        sender: mpsc::Sender<(Ipv6Addr, Result<Bytes>)>,
+        cancel_receiver: broadcast::Receiver<()>,
+    );
 }
 
 /// Return a list of nodes discovered on the bootstrap network.
@@ -107,29 +112,36 @@ impl MockPeers {
     }
 }
 
-#[async_trait]
 impl PeersImpl for MockPeers {
-    async fn fetch_artifact_from_peer(
-        &self,
-        peer: &Ipv6Addr,
-        artifact_id: &ArtifactId,
-    ) -> Result<Bytes> {
-        // TODO: implement this
-        if peer == &Ipv6Addr::LOCALHOST {
-            let mut bytes = BytesMut::new();
-            bytes.extend_from_slice(b"mock");
-            bytes.extend_from_slice(artifact_id.to_string().as_bytes());
-            Ok(bytes.freeze())
-        } else if peer == &Ipv6Addr::UNSPECIFIED {
-            // TODO: return a real HTTP error
-            bail!("404 not found")
-        } else {
-            bail!("invalid peer")
-        }
-    }
-
     fn peers(&self) -> &[Ipv6Addr] {
         &self.peers
+    }
+
+    fn start_fetch_artifact(
+        &self,
+        peer: Ipv6Addr,
+        artifact_id: &ArtifactId,
+        sender: mpsc::Sender<(Ipv6Addr, Result<Bytes>)>,
+        // MockPeers doesn't need cancel_receiver (yet)
+        _cancel_receiver: broadcast::Receiver<()>,
+    ) {
+        let artifact_id = artifact_id.clone();
+        tokio::spawn(async move {
+            let res = if peer == Ipv6Addr::LOCALHOST {
+                let mut bytes = BytesMut::new();
+                bytes.extend_from_slice(b"mock");
+                bytes.extend_from_slice(artifact_id.to_string().as_bytes());
+                Ok(bytes.freeze())
+            } else if peer == Ipv6Addr::UNSPECIFIED {
+                // TODO: return a real HTTP error
+                Err(anyhow!("404 not found"))
+            } else {
+                panic!("invalid peer, unknown to MockPeers: {peer}")
+            };
+
+            // Ignore errors in case the channel is dropped.
+            let _ = sender.send((peer, res)).await;
+        });
     }
 }
 
