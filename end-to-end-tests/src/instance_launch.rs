@@ -253,7 +253,7 @@ async fn instance_launch() -> Result<()> {
                 .disk_delete()
                 .organization_name(ctx.org_name.clone())
                 .project_name(ctx.project_name.clone())
-                .disk_name(disk_name)
+                .disk_name(disk_name.clone())
                 .send()
                 .await
                 .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
