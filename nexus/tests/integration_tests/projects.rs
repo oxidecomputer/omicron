@@ -10,20 +10,17 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
-    create_disk, create_instance_with, create_ip_pool, create_organization,
-    create_project, create_vpc, object_create, project_get, DiskTest,
+    create_disk, create_ip_pool, create_organization, create_project,
+    create_vpc, object_create, project_get, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::views::Project;
-use omicron_nexus::Nexus;
-use omicron_nexus::TestInterfaces as _;
-use sled_agent_client::TestInterfaces as _;
-use std::sync::Arc;
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -135,11 +132,6 @@ async fn delete_project_expect_fail(
     error.message
 }
 
-pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.instance_sled_by_id(id).await.unwrap();
-    sa.instance_finish_transition(id.clone()).await;
-}
-
 #[nexus_test]
 async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -171,7 +163,6 @@ async fn test_project_deletion_with_instance(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
 
     let org_name = "test-org";
     create_ip_pool(&client, "p0", None, None).await;
@@ -184,43 +175,33 @@ async fn test_project_deletion_with_instance(
     create_project(&client, &org_name, &name).await;
     delete_project_default_subnet(&url, &client).await;
     delete_project_default_vpc(&url, &client).await;
-    let instance = create_instance_with(
-        &client,
-        &org_name,
-        &name,
-        "my-instance",
-        &params::InstanceNetworkInterfaceAttachment::None,
-        vec![],
+
+    let _: Instance = object_create(
+        client,
+        &format!("{url}/instances"),
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-instance".parse().unwrap(),
+                description: format!("description"),
+            },
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: String::from("the_host"),
+            user_data: b"none".to_vec(),
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            start: false,
+        },
     )
     .await;
+
     assert_eq!(
         "project to be deleted contains an instance",
         delete_project_expect_fail(&url, &client).await,
     );
-    let nexus = &apictx.nexus;
 
-    // TODO: Can we start the instance as stopped...
-
-    // Let the instance start running
-    instance_simulate(nexus, &instance.identity.id).await;
-    // Ask the instance to stop
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &format!("{url}/instances/my-instance/stop"),
-        )
-        .body(None as Option<&serde_json::Value>)
-        .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .unwrap();
-    // Let the instance stop
-    instance_simulate(nexus, &instance.identity.id).await;
     NexusRequest::object_delete(
         client,
         &format!("{url}/instances/my-instance"),
