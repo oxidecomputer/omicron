@@ -149,7 +149,7 @@ fn test_unauthorized_coverage() {
     }
     assert_eq!(
         has_uncovered_endpoints, false,
-        "{}\nMake sure you've added a test for this endpoint in unauthorized.rs.",
+        "{}\nMake sure you've added a test for this endpoint in endpoints.rs.",
         unexpected_uncovered_endpoints
     )
 }

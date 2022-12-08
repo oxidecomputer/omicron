@@ -250,9 +250,9 @@ lazy_static! {
         },
         // Create a Disk in the Project
         SetupReq::Post {
-            url: &*DEMO_PROJECT_URL_DISKS,
+            url: &*DEMO_DISKS_URL,
             body: serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
-            id_routes: vec!["/by-id/disks/{id}"],
+            id_routes: vec!["/v1/disks/{id}"],
         },
         // Create an Instance in the Project
         SetupReq::Post {

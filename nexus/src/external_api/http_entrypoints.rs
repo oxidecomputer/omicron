@@ -1809,7 +1809,7 @@ pub struct DiskListParams {
 
 #[endpoint {
     method = GET,
-    path = "/disks",
+    path = "/v1/disks",
     tags = ["disks"],
 }]
 async fn disk_list_v1(
@@ -1927,7 +1927,7 @@ pub struct DiskCreateParams {
 /// Create a disk
 #[endpoint {
     method = POST,
-    path = "/disks",
+    path = "/v1/disks",
     tags = ["disks"]
 }]
 async fn disk_create_v1(
@@ -2009,7 +2009,7 @@ struct DiskViewParams {
 
 #[endpoint {
     method = GET,
-    path = "/disks/{disk}",
+    path = "/v1/disks/{disk}",
     tags = ["disks"]
 }]
 async fn disk_view_v1(
@@ -2110,7 +2110,7 @@ async fn disk_view_by_id(
 /// Delete a disk
 #[endpoint {
     method = DELETE,
-    path = "/disks/{disk}",
+    path = "/v1/disks/{disk}",
     tags = ["disks"],
 }]
 async fn disk_delete_v1(
@@ -2174,7 +2174,7 @@ async fn disk_delete(
 /// Attach a disk to an instance
 #[endpoint {
     method = POST,
-    path = "/disks/{disk}/attach",
+    path = "/v1/disks/{disk}/attach",
     tags = ["disks"],
 }]
 async fn disk_attach_v1(
@@ -2213,7 +2213,7 @@ async fn disk_attach_v1(
 /// Detach a disk from an instance
 #[endpoint {
     method = POST,
-    path = "/disks/{disk}/detach",
+    path = "/v1/disks/{disk}/detach",
     tags = ["disks"],
 }]
 async fn disk_detach_v1(
@@ -2273,7 +2273,7 @@ pub struct DiskMetricsPaginationParams {
 
 #[endpoint {
     method = GET,
-    path = "/disks/{disk}/metrics/{metric_name}",
+    path = "/v1/disks/{disk}/metrics/{metric_name}",
     tags = ["disks"],
 }]
 async fn disk_metrics_list_v1(
@@ -2315,7 +2315,7 @@ async fn disk_metrics_list_v1(
 /// Fetch disk metrics
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
+    path = "/v1/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
     tags = ["disks"],
 }]
 async fn disk_metrics_list(

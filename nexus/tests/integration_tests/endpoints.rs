@@ -105,11 +105,9 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL: String =
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_SELECTOR: String =
-        format!("?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_POLICY_URL: String =
         format!("{}/policy", *DEMO_PROJECT_URL);
-    pub static ref DEMO_PROJECT_URL_DISKS: String =
-        format!("{}/disks", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
         format!("{}/images", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
@@ -194,8 +192,11 @@ lazy_static! {
 
     // Disk used for testing
     pub static ref DEMO_DISK_NAME: Name = "demo-disk".parse().unwrap();
+    // TODO: Once we can test a URL multiple times we should also a case to exercise authz for disks filtered by instances
+    pub static ref DEMO_DISKS_URL: String =
+        format!("/v1/disks?{}", *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_DISK_URL: String =
-        format!("{}/{}", *DEMO_PROJECT_URL_DISKS, *DEMO_DISK_NAME);
+        format!("/v1/disks/{}?{}", *DEMO_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_DISK_CREATE: params::DiskCreate =
         params::DiskCreate {
             identity: IdentityMetadataCreateParams {
@@ -210,10 +211,14 @@ lazy_static! {
                 DiskTest::DEFAULT_ZPOOL_SIZE_GIB / 2
             ),
         };
+    pub static ref DEMO_DISKS_ATTACH_URL: String =
+        format!("/v1/disks/{}/attach?{}", *DEMO_DISK_NAME, *DEMO_PROJECT_SELECTOR);
+    pub static ref DEMO_DISKS_DETACH_URL: String =
+        format!("/v1/disks/{}/detach?{}", *DEMO_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_DISK_METRICS_URL: String =
         format!(
-            "{}/metrics/activated?start_time={:?}&end_time={:?}",
-            *DEMO_DISK_URL,
+            "/v1/disks/{}/metrics/activated?start_time={:?}&end_time={:?}",
+            *DEMO_DISK_NAME,
             Utc::now(),
             Utc::now(),
         );
@@ -224,28 +229,23 @@ lazy_static! {
 lazy_static! {
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
+    pub static ref DEMO_INSTANCE_SELECTOR: String = format!("{}&instance={}", *DEMO_PROJECT_SELECTOR, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_URL: String =
-        format!("/v1/instances/{}?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/instances/{}?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_START_URL: String =
-        format!("/v1/instances/{}/start?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/instances/{}/start?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_STOP_URL: String =
-        format!("/v1/instances/{}/stop?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/instances/{}/stop?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_REBOOT_URL: String =
-        format!("/v1/instances/{}/reboot?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/instances/{}/reboot?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_MIGRATE_URL: String =
-        format!("/v1/instances/{}/migrate?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/instances/{}/migrate?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_SERIAL_URL: String =
-        format!("/v1/instances/{}/serial-console?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/instances/{}/serial-console?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_SERIAL_STREAM_URL: String =
-        format!("/v1/instances/{}/serial-console/stream?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/instances/{}/serial-console/stream?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
 
     // To be migrated...
-    pub static ref DEMO_INSTANCE_DISKS_URL: String =
-        format!("/organizations/{}/projects/{}/instances/{}/disks", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
-    pub static ref DEMO_INSTANCE_DISKS_ATTACH_URL: String =
-        format!("{}/attach", *DEMO_INSTANCE_DISKS_URL);
-    pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
-        format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("/organizations/{}/projects/{}/instances/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
@@ -1132,7 +1132,7 @@ lazy_static! {
         /* Disks */
 
         VerifyEndpoint {
-            url: &*DEMO_PROJECT_URL_DISKS,
+            url: &*DEMO_DISKS_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -1140,15 +1140,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_DISK_CREATE).unwrap()
                 ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/disks/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 
@@ -1172,7 +1163,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &*DEMO_INSTANCE_DISKS_URL,
+            url: &*DEMO_DISKS_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -1180,7 +1171,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
+            url: &*DEMO_DISKS_ATTACH_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -1192,7 +1183,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: &*DEMO_INSTANCE_DISKS_DETACH_URL,
+            url: &*DEMO_DISKS_DETACH_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
