@@ -104,14 +104,15 @@ lazy_static! {
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
     pub static ref DEMO_PROJECT_URL: String =
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_SELECTOR: String =
+        format!("?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_POLICY_URL: String =
         format!("{}/policy", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("{}/disks", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
         format!("{}/images", *DEMO_PROJECT_URL);
-    pub static ref DEMO_PROJECT_URL_INSTANCES: String =
-        format!("{}/instances", *DEMO_PROJECT_URL);
+    pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
         format!("{}/snapshots", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
@@ -224,29 +225,31 @@ lazy_static! {
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
     pub static ref DEMO_INSTANCE_URL: String =
-        format!("{}/{}", *DEMO_PROJECT_URL_INSTANCES, *DEMO_INSTANCE_NAME);
+        format!("/v1/instances/{}?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_START_URL: String =
-        format!("{}/start", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/start?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_STOP_URL: String =
-        format!("{}/stop", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/stop?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_REBOOT_URL: String =
-        format!("{}/reboot", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/reboot?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_MIGRATE_URL: String =
-        format!("{}/migrate", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/migrate?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
+        format!("/v1/instances/{}/serial-console?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_INSTANCE_SERIAL_STREAM_URL: String =
+        format!("/v1/instances/{}/serial-console/stream?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+
+    // To be migrated...
     pub static ref DEMO_INSTANCE_DISKS_URL: String =
-        format!("{}/disks", *DEMO_INSTANCE_URL);
+        format!("/organizations/{}/projects/{}/instances/{}/disks", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_DISKS_ATTACH_URL: String =
         format!("{}/attach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
-        format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+        format!("/organizations/{}/projects/{}/instances/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
-        format!("{}/external-ips", *DEMO_INSTANCE_URL);
-    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
-        format!("{}/serial-console", *DEMO_INSTANCE_URL);
-    pub static ref DEMO_INSTANCE_SERIAL_STREAM_URL: String =
-        format!("{}/serial-console/stream", *DEMO_INSTANCE_URL);
+        format!("/organizations/{}/projects/{}/instances/{}/external-ips", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -1285,15 +1288,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap()
                 ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/instances/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 

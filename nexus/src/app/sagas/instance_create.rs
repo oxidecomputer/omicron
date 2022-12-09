@@ -46,8 +46,6 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub organization_name: Name,
-    pub project_name: Name,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
 }
@@ -1091,8 +1089,6 @@ mod test {
     fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            organization_name: ORG_NAME.parse().unwrap(),
-            project_name: PROJECT_NAME.parse().unwrap(),
             project_id,
             create_params: params::InstanceCreate {
                 identity: IdentityMetadataCreateParams {

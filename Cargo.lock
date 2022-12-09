@@ -1470,7 +1470,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a493ae0130a5ec9d801aaf288190ff7d287c3e5c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#2529126352fde3745fce92420a22aadf58c7677d"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1510,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a493ae0130a5ec9d801aaf288190ff7d287c3e5c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#2529126352fde3745fce92420a22aadf58c7677d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2730,9 +2730,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.137"
+version = "0.2.138"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc7fcc620a3bff7cdd7a365be3376c97191aeaccc2a603e600951e452615bf89"
+checksum = "db6d7e329c562c5dfab7a46a2afabc8b987ab9a4834c9d1ca04dc54c1546cef8"
 
 [[package]]
 name = "libloading"
@@ -3525,6 +3525,7 @@ dependencies = [
  "nexus-client",
  "omicron-common",
  "omicron-test-utils",
+ "once_cell",
  "openapi-lint",
  "openapiv3",
  "opte-ioctl",
@@ -7128,7 +7129,6 @@ name = "wicketd-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
  "progenitor",
  "reqwest",
  "schemars",

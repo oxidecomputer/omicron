@@ -20,10 +20,61 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl super::Nexus {
+    pub async fn project_lookup(
+        &self,
+        opctx: &OpContext,
+        project_selector: params::ProjectSelector,
+    ) -> LookupResult<authz::Project> {
+        match project_selector {
+            params::ProjectSelector { project: NameOrId::Id(id), .. } => {
+                // TODO: 400 if organization is present
+                let (.., authz_project) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .project_id(id)
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_project)
+            }
+            params::ProjectSelector {
+                project: NameOrId::Name(project_name),
+                organization: Some(NameOrId::Id(organization_id)),
+            } => {
+                let (.., authz_project) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_id(organization_id)
+                        .project_name(&Name(project_name))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_project)
+            }
+            params::ProjectSelector {
+                project: NameOrId::Name(project_name),
+                organization: Some(NameOrId::Name(organization_name)),
+            } => {
+                let (.., authz_project) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .organization_name(&Name(organization_name))
+                        .project_name(&Name(project_name))
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+                Ok(authz_project)
+            }
+            _ => Err(Error::InvalidRequest {
+                message: "
+                    Unable to resolve project. Expected one of
+                        - project: Uuid
+                        - project: Name, organization: Uuid 
+                        - project: Name, organization: Name
+                    "
+                .to_string(),
+            }),
+        }
+    }
     pub async fn project_create(
         &self,
         opctx: &OpContext,

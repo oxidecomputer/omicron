@@ -28,13 +28,17 @@ image_view_by_id                         /by-id/images/{id}
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
 instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
+instance_create_v1                       /v1/instances
 instance_delete                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
+instance_delete_v1                       /v1/instances/{instance}
 instance_disk_attach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
 instance_disk_detach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
 instance_external_ip_list                /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
+instance_list_v1                         /v1/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
+instance_migrate_v1                      /v1/instances/{instance}/migrate
 instance_network_interface_create        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interface_delete        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interface_list          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
@@ -42,12 +46,18 @@ instance_network_interface_update        /organizations/{organization_name}/proj
 instance_network_interface_view          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interface_view_by_id    /by-id/network-interfaces/{id}
 instance_reboot                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
+instance_reboot_v1                       /v1/instances/{instance}/reboot
 instance_serial_console                  /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console
 instance_serial_console_stream           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream
+instance_serial_console_stream_v1        /v1/instances/{instance}/serial-console/stream
+instance_serial_console_v1               /v1/instances/{instance}/serial-console
 instance_start                           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
+instance_start_v1                        /v1/instances/{instance}/start
 instance_stop                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
+instance_stop_v1                         /v1/instances/{instance}/stop
 instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 instance_view_by_id                      /by-id/instances/{id}
+instance_view_v1                         /v1/instances/{instance}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
