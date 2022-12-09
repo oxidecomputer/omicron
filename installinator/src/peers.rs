@@ -2,7 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, future::Future, net::Ipv6Addr, str::FromStr, time::Duration};
+use std::{
+    fmt,
+    future::Future,
+    net::Ipv6Addr,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use anyhow::{bail, Result};
 use bytes::{Bytes, BytesMut};
@@ -83,15 +89,21 @@ impl Peers {
             );
 
             // Attempt to download data from this peer.
+            let start = Instant::now();
             match self.fetch_from_peer(*peer, artifact_id).await {
-                Ok(image_bytes) => {
-                    slog::debug!(log, "fetched from peer {peer}");
-                    return Some((*peer, image_bytes));
-                }
-                Err(error) => {
+                Ok(artifact_bytes) => {
+                    let elapsed = start.elapsed();
                     slog::debug!(
                         log,
-                        "error: {}",
+                        "fetched artifact from peer {peer} in {elapsed:?}"
+                    );
+                    return Some((*peer, artifact_bytes));
+                }
+                Err(error) => {
+                    let elapsed = start.elapsed();
+                    slog::debug!(
+                        log,
+                        "error after {elapsed:?}: {}",
                         DisplayErrorChain::new(&error);
                         "remaining_peers" => remaining_peers,
                     );
@@ -145,9 +157,8 @@ impl Peers {
                     _ = cancel_sender.send(());
                     return Err(ArtifactFetchError::Timeout {
                         peer,
-                        duration: self.timeout,
-                        // TODO: compute bytes fetched
-                        bytes_fetched: 0,
+                        timeout: self.timeout,
+                        bytes_fetched: artifact_bytes.num_bytes(),
                     });
                 }
             }

@@ -11,6 +11,6 @@ pub(crate) enum ArtifactFetchError {
     #[error("peer {peer} returned an HTTP error")]
     HttpError { peer: Ipv6Addr, error: wicketd_client::Error },
 
-    #[error("peer {peer} timed out ({duration:?}) after returning {bytes_fetched} bytes")]
-    Timeout { peer: Ipv6Addr, duration: Duration, bytes_fetched: usize },
+    #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
+    Timeout { peer: Ipv6Addr, timeout: Duration, bytes_fetched: usize },
 }
