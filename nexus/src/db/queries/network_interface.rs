@@ -1534,7 +1534,10 @@ mod tests {
 
     // Add an instance. We'll use this to verify that the instance must be
     // stopped to add or delete interfaces.
-    async fn create_instance(opctx: &OpContext, db_datastore: &DataStore) -> Instance {
+    async fn create_instance(
+        opctx: &OpContext,
+        db_datastore: &DataStore,
+    ) -> Instance {
         let instance_id = Uuid::new_v4();
         let project_id =
             "f89892a0-58e0-60c8-a164-a82d0bd29ff4".parse().unwrap();
@@ -1579,7 +1582,10 @@ mod tests {
             .expect("Failed to create new instance record")
     }
 
-    async fn create_stopped_instance(opctx: &OpContext, db_datastore: &DataStore) -> Instance {
+    async fn create_stopped_instance(
+        opctx: &OpContext,
+        db_datastore: &DataStore,
+    ) -> Instance {
         let instance = create_instance(opctx, db_datastore).await;
         instance_set_state(
             db_datastore,
@@ -2097,7 +2103,9 @@ mod tests {
         }
 
         // Next one should fail
-        let instance = create_stopped_instance(&context.opctx, &context.db_datastore).await;
+        let instance =
+            create_stopped_instance(&context.opctx, &context.db_datastore)
+                .await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance.id(),

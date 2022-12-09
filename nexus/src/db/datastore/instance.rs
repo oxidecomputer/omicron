@@ -72,7 +72,8 @@ impl DataStore {
         let gen = instance.runtime().gen;
         let name = instance.name().clone();
 
-        let instance = self.pool_authorized(opctx)
+        let instance = self
+            .pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // TODO: Use "collection_insert" to "insert_resource" into a

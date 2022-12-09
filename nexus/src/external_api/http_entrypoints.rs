@@ -2322,7 +2322,9 @@ async fn instance_delete_v1(
                 params::InstanceSelector::new(path.instance, &query.selector),
             )
             .await?;
-        nexus.project_destroy_instance(&opctx, &authz_instance, &instance).await?;
+        nexus
+            .project_destroy_instance(&opctx, &authz_instance, &instance)
+            .await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2358,7 +2360,9 @@ async fn instance_delete(
                 },
             )
             .await?;
-        nexus.project_destroy_instance(&opctx, &authz_instance, &instance).await?;
+        nexus
+            .project_destroy_instance(&opctx, &authz_instance, &instance)
+            .await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
