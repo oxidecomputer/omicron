@@ -229,6 +229,8 @@ impl DataStore {
                             match sv {
                                 VolumeConstructionRequest::Region {
                                     block_size,
+                                    blocks_per_extent,
+                                    extent_count,
                                     opts,
                                     gen,
                                 } => {
@@ -236,6 +238,8 @@ impl DataStore {
                                     new_sv.push(
                                         VolumeConstructionRequest::Region {
                                             block_size,
+                                            blocks_per_extent,
+                                            extent_count,
                                             opts,
                                             gen: gen + 1,
                                         },
@@ -293,6 +297,8 @@ impl DataStore {
                     }
                     VolumeConstructionRequest::Region {
                         block_size: _,
+                        blocks_per_extent: _,
+                        extent_count: _,
                         opts: _,
                         gen: _,
                     } => {
@@ -769,7 +775,12 @@ impl DataStore {
                         }
                     }
                     VolumeConstructionRequest::File { id: _, block_size: _, path: _ }
-                    | VolumeConstructionRequest::Region { block_size: _, opts: _, gen: _ }
+                    | VolumeConstructionRequest::Region { 
+                        block_size: _,
+                        blocks_per_extent: _,
+                        extent_count: _,
+                        opts: _,
+                        gen: _ }
                     | VolumeConstructionRequest::Url { id: _, block_size: _, url: _ } => {
                         // Volume has a format that does not contain ROPs
                         Ok(false)
@@ -840,7 +851,13 @@ fn resources_associated_with_volume(
             // no action required
         }
 
-        VolumeConstructionRequest::Region { block_size: _, opts, gen: _ } => {
+        VolumeConstructionRequest::Region {
+            block_size: _,
+            blocks_per_extent: _,
+            extent_count: _,
+            opts,
+            gen: _,
+        } => {
             for target in &opts.target {
                 if opts.read_only {
                     crucible_targets.read_only_targets.push(target.clone());

@@ -284,6 +284,8 @@ async fn sdc_regions_ensure(
     .await?;
 
     let block_size = datasets_and_regions[0].1.block_size;
+    let blocks_per_extent = datasets_and_regions[0].1.extent_size;
+    let extent_count = datasets_and_regions[0].1.extent_count;
 
     // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
@@ -409,6 +411,8 @@ async fn sdc_regions_ensure(
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
+            blocks_per_extent,
+            extent_count: extent_count.try_into().unwrap(),
             gen: 1,
             opts: CrucibleOpts {
                 id: disk_id,
@@ -576,12 +580,20 @@ fn randomize_volume_construction_request_ids(
             })
         }
 
-        VolumeConstructionRequest::Region { block_size, opts, gen } => {
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            opts,
+            gen,
+        } => {
             let mut opts = opts.clone();
             opts.id = Uuid::new_v4();
 
             Ok(VolumeConstructionRequest::Region {
                 block_size: *block_size,
+                blocks_per_extent: *blocks_per_extent,
+                extent_count: *extent_count,
                 opts,
                 gen: *gen,
             })
