@@ -118,10 +118,11 @@ impl super::Nexus {
     pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
-        authz_project: &authz::Project,
+        project_lookup: &lookup::Project<'_>,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
@@ -250,10 +251,11 @@ impl super::Nexus {
     pub async fn project_list_instances(
         &self,
         opctx: &OpContext,
-        authz_project: &authz::Project,
+        project_lookup: &lookup::Project<'_>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .project_list_instances(opctx, &authz_project, pagparams)
             .await
