@@ -126,6 +126,7 @@ async fn write_artifact(
     destination: &Utf8Path,
 ) -> Result<()> {
     let mut file = tokio::fs::OpenOptions::new()
+        // TODO: do we want create = true? Maybe only if writing to a file and not an M.2.
         .create(true)
         .write(true)
         .truncate(true)
