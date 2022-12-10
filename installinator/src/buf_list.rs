@@ -27,6 +27,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 /// TODO: maybe turn this into its own crate
 #[derive(Clone, Debug, Default)]
 pub struct BufList {
+    // Invariant: none of the bufs in this queue are zero-length.
     bufs: VecDeque<Bytes>,
 }
 
@@ -47,8 +48,13 @@ impl BufList {
         // But, if it isn't, this will copy it to a `Bytes` that we can
         // now clone.
         let bytes = data.copy_to_bytes(len);
+
         // Buffer a clone of the bytes read on this poll.
-        self.bufs.push_back(bytes.clone());
+        // Don't push zero-length bufs to uphold the invariant.
+        if len > 0 {
+            self.bufs.push_back(bytes.clone());
+        }
+
         // Return the bytes
         bytes
     }

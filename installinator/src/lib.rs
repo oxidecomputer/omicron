@@ -5,6 +5,7 @@
 mod buf_list;
 mod dispatch;
 mod errors;
+mod mock_peers;
 mod peers;
 
 pub use dispatch::*;

@@ -2,13 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{
-    fmt,
-    future::Future,
-    net::Ipv6Addr,
-    str::FromStr,
-    time::{Duration, Instant},
-};
+use std::{fmt, future::Future, net::Ipv6Addr, str::FromStr, time::Duration};
 
 use anyhow::{bail, Result};
 use bytes::{Bytes, BytesMut};
@@ -16,7 +10,10 @@ use display_error_chain::DisplayErrorChain;
 use itertools::Itertools;
 use progenitor_client::ResponseValue;
 use reqwest::StatusCode;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Instant,
+};
 
 use crate::{buf_list::BufList, errors::ArtifactFetchError};
 
@@ -34,11 +31,12 @@ where
     Fut: Future<Output = Result<Peers>>,
 {
     loop {
+        // TODO: add retries around peer discovery?
         let peers = discover_fn().await?;
         slog::debug!(
             log,
             "discovered {} peers: [{}]",
-            peers.peers().len(),
+            peers.peer_count(),
             peers.display(),
         );
         match peers.fetch_artifact(artifact_id).await {
@@ -61,10 +59,22 @@ pub(crate) struct Peers {
 }
 
 impl Peers {
-    pub(crate) async fn mock_discover(log: &slog::Logger) -> Result<Peers> {
+    pub(crate) fn new(
+        log: &slog::Logger,
+        imp: Box<dyn PeersImpl>,
+        timeout: Duration,
+    ) -> Self {
         let log = log.new(slog::o!("component" => "Peers"));
-        let imp = Box::new(MockPeers::new(&log)?);
-        Ok(Self { log, imp, timeout: Duration::from_secs(10) })
+        Self { log, imp, timeout }
+    }
+
+    // TODO: replace this with MockPeersUniverse
+    pub(crate) async fn mock_discover(log: &slog::Logger) -> Result<Peers> {
+        Ok(Self::new(
+            log,
+            Box::new(MockPeers::new(log)?),
+            Duration::from_secs(10),
+        ))
     }
 
     pub(crate) async fn fetch_artifact(
@@ -73,7 +83,7 @@ impl Peers {
     ) -> Option<(Ipv6Addr, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
-        let mut remaining_peers = peers.len();
+        let mut remaining_peers = self.peer_count();
 
         let log =
             self.log.new(slog::o!("artifact_id" => artifact_id.to_string()));
@@ -90,14 +100,14 @@ impl Peers {
 
             // Attempt to download data from this peer.
             let start = Instant::now();
-            match self.fetch_from_peer(*peer, artifact_id).await {
+            match self.fetch_from_peer(peer, artifact_id).await {
                 Ok(artifact_bytes) => {
                     let elapsed = start.elapsed();
                     slog::debug!(
                         log,
                         "fetched artifact from peer {peer} in {elapsed:?}"
                     );
-                    return Some((*peer, artifact_bytes));
+                    return Some((peer, artifact_bytes));
                 }
                 Err(error) => {
                     let elapsed = start.elapsed();
@@ -114,12 +124,16 @@ impl Peers {
         None
     }
 
-    pub(crate) fn peers(&self) -> &[Ipv6Addr] {
+    pub(crate) fn peers(&self) -> impl Iterator<Item = Ipv6Addr> + '_ {
         self.imp.peers()
     }
 
+    pub(crate) fn peer_count(&self) -> usize {
+        self.imp.peer_count()
+    }
+
     pub(crate) fn display(&self) -> impl fmt::Display {
-        self.peers().iter().join(", ")
+        self.peers().join(", ")
     }
 
     async fn fetch_from_peer(
@@ -166,8 +180,9 @@ impl Peers {
     }
 }
 
-trait PeersImpl: fmt::Debug + Send + Sync {
-    fn peers(&self) -> &[Ipv6Addr];
+pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
+    fn peers(&self) -> Box<dyn Iterator<Item = Ipv6Addr> + '_>;
+    fn peer_count(&self) -> usize;
 
     fn start_fetch_artifact(
         &self,
@@ -198,8 +213,12 @@ impl MockPeers {
 }
 
 impl PeersImpl for MockPeers {
-    fn peers(&self) -> &[Ipv6Addr] {
-        &self.peers
+    fn peers(&self) -> Box<dyn Iterator<Item = Ipv6Addr> + '_> {
+        Box::new(self.peers.iter().copied())
+    }
+
+    fn peer_count(&self) -> usize {
+        self.peers.len()
     }
 
     fn start_fetch_artifact(
@@ -239,6 +258,13 @@ impl PeersImpl for MockPeers {
 pub(crate) struct ArtifactId {
     name: String,
     version: String,
+}
+
+impl ArtifactId {
+    #[cfg(test)]
+    pub(crate) fn dummy() -> Self {
+        Self { name: "dummy".to_owned(), version: "0.1.0".to_owned() }
+    }
 }
 
 impl fmt::Display for ArtifactId {

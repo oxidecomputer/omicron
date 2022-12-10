@@ -2561,10 +2561,13 @@ dependencies = [
  "futures",
  "itertools",
  "progenitor-client",
+ "proptest",
  "reqwest",
  "slog",
  "slog-async",
+ "slog-envlogger",
  "slog-term",
+ "test-strategy",
  "thiserror",
  "tokio",
  "wicketd-client",
@@ -6208,6 +6211,18 @@ name = "termtree"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "507e9898683b6c43a9aa55b64259b721b52ba226e0f3779137e50ad114a4c90b"
+
+[[package]]
+name = "test-strategy"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62d6408d1406657be2f9d1701fbae379331d30d2f6e92050710edb0d34eeb480"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "structmeta",
+ "syn",
+]
 
 [[package]]
 name = "textwrap"
