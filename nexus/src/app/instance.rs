@@ -15,6 +15,7 @@ use crate::cidata::InstanceCiData;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
@@ -36,6 +37,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use ref_cast::RefCast;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
@@ -54,20 +56,17 @@ use uuid::Uuid;
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
 impl super::Nexus {
-    pub async fn instance_lookup(
-        &self,
-        opctx: &OpContext,
-        instance_selector: params::InstanceSelector,
-    ) -> LookupResult<authz::Instance> {
+    pub fn instance_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        instance_selector: &'a params::InstanceSelector,
+    ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
             params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
                 // TODO: 400 if project or organization are present
-                let (.., authz_instance) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .instance_id(id)
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_instance)
+                let instance =
+                    LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
+                Ok(instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name),
@@ -75,41 +74,32 @@ impl super::Nexus {
                 ..
             } => {
                 // TODO: 400 if organization is present
-                let (.., authz_instance) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .project_id(project_id)
-                        .instance_name(&Name(instance_name))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_instance)
+                let instance = LookupPath::new(opctx, &self.db_datastore)
+                    .project_id(*project_id)
+                    .instance_name(Name::ref_cast(instance_name));
+                Ok(instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name),
                 project: Some(NameOrId::Name(project_name)),
                 organization: Some(NameOrId::Id(organization_id)),
             } => {
-                let (.., authz_instance) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .organization_id(organization_id)
-                        .project_name(&Name(project_name))
-                        .instance_name(&Name(instance_name.clone()))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_instance)
+                let instance = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_id(*organization_id)
+                    .project_name(Name::ref_cast(project_name))
+                    .instance_name(Name::ref_cast(instance_name));
+                Ok(instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(instance_name),
                 project: Some(NameOrId::Name(project_name)),
                 organization: Some(NameOrId::Name(organization_name)),
             } => {
-                let (.., authz_instance) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .organization_name(&Name(organization_name))
-                        .project_name(&Name(project_name))
-                        .instance_name(&Name(instance_name.clone()))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_instance)
+                let instance = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_name(Name::ref_cast(organization_name))
+                    .project_name(Name::ref_cast(project_name))
+                    .instance_name(Name::ref_cast(instance_name));
+                Ok(instance)
             }
             // TODO: Add a better error message
             _ => Err(Error::InvalidRequest {
@@ -128,10 +118,11 @@ impl super::Nexus {
     pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
-        authz_project: &authz::Project,
+        project_lookup: &lookup::Project<'_>,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
@@ -260,25 +251,14 @@ impl super::Nexus {
     pub async fn project_list_instances(
         &self,
         opctx: &OpContext,
-        authz_project: &authz::Project,
+        project_lookup: &lookup::Project<'_>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .project_list_instances(opctx, &authz_project, pagparams)
             .await
-    }
-
-    pub async fn instance_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-    ) -> LookupResult<db::model::Instance> {
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(authz_instance.id())
-            .fetch()
-            .await?;
-        Ok(db_instance)
     }
 
     // This operation may only occur on stopped instances, which implies that
@@ -287,12 +267,13 @@ impl super::Nexus {
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> DeleteResult {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        opctx.authorize(authz::Action::Delete, authz_instance).await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Delete).await?;
 
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
@@ -310,10 +291,11 @@ impl super::Nexus {
     pub async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
         params: params::InstanceMigrate,
     ) -> UpdateResult<db::model::Instance> {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         // Kick off the migration saga
         let saga_params = sagas::instance_migrate::Params {
@@ -367,7 +349,7 @@ impl super::Nexus {
     pub async fn instance_reboot(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
         // To implement reboot, we issue a call to the sled agent to set a
         // runtime state of "reboot". We cannot simply stop the Instance and
@@ -380,11 +362,7 @@ impl super::Nexus {
         // even if the whole rack powered off while this was going on, we would
         // never lose track of the fact that this Instance was supposed to be
         // running.
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(authz_instance.id())
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Reboot,
             migration_params: None,
@@ -403,13 +381,9 @@ impl super::Nexus {
     pub async fn instance_start(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(authz_instance.id())
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
             migration_params: None,
@@ -428,13 +402,9 @@ impl super::Nexus {
     pub async fn instance_stop(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(authz_instance.id())
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
             migration_params: None,
@@ -1087,11 +1057,10 @@ impl super::Nexus {
     /// provided they are still in the sled-agent's cache.
     pub(crate) async fn instance_serial_console_data(
         &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let db_instance = self.instance_fetch(opctx, authz_instance).await?;
+        let (.., db_instance) = instance_lookup.fetch().await?;
 
         let sa = self.instance_sled(&db_instance).await?;
         let data = sa
@@ -1113,11 +1082,11 @@ impl super::Nexus {
 
     pub(crate) async fn instance_serial_console_stream(
         &self,
-        opctx: &OpContext,
         conn: dropshot::WebsocketConnection,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> Result<(), Error> {
-        let instance = self.instance_fetch(opctx, authz_instance).await?;
+        // TODO: Technically the stream is two way so the user of this method can modify the instance in some way. Should we use different permissions?
+        let (.., instance) = instance_lookup.fetch().await?;
         let ip_addr = instance
             .runtime_state
             .propolis_ip
