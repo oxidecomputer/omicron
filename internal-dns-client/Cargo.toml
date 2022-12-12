@@ -23,4 +23,4 @@ internal-dns = { path = "../internal-dns" }
 omicron-test-utils = { path = "../test-utils" }
 sled = "0.34"
 tempfile = "3.3"
-tokio = { version = "1.22", features = [ "full" ] }
+tokio = { version = "1.23", features = [ "full" ] }
