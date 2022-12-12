@@ -9,6 +9,7 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
@@ -22,66 +23,55 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use ref_cast::RefCast;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
     // Disks
-    pub async fn disk_lookup(
-        &self,
-        opctx: &OpContext,
-        disk_selector: params::DiskSelector,
-    ) -> LookupResult<authz::Disk> {
+    pub fn disk_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        disk_selector: &'a params::DiskSelector,
+    ) -> LookupResult<lookup::Disk<'a>> {
         match disk_selector {
             params::DiskSelector { disk: NameOrId::Id(id), .. } => {
-                let (.., authz_disk) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .disk_id(id)
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_disk)
+                let disk =
+                    LookupPath::new(opctx, &self.db_datastore).disk_id(*id);
+                Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(disk_name),
                 project: Some(NameOrId::Id(project_id)),
                 ..
             } => {
-                let (.., authz_disk) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .project_id(project_id)
-                        .disk_name(&Name(disk_name.clone()))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_disk)
+                let disk = LookupPath::new(opctx, &self.db_datastore)
+                    .project_id(*project_id)
+                    .disk_name(Name::ref_cast(disk_name));
+                Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(disk_name),
                 project: Some(NameOrId::Name(project_name)),
                 organization: Some(NameOrId::Id(organization_id)),
             } => {
-                let (.., authz_disk) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .organization_id(organization_id)
-                        .project_name(&Name(project_name.clone()))
-                        .disk_name(&Name(disk_name.clone()))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_disk)
+                let disk = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_id(*organization_id)
+                    .project_name(Name::ref_cast(project_name))
+                    .disk_name(Name::ref_cast(disk_name));
+                Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(disk_name),
                 project: Some(NameOrId::Name(project_name)),
                 organization: Some(NameOrId::Name(organization_name)),
             } => {
-                let (.., authz_disk) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .organization_name(&Name(organization_name.clone()))
-                        .project_name(&Name(project_name.clone()))
-                        .disk_name(&Name(disk_name.clone()))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_disk)
+                let disk = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_name(Name::ref_cast(organization_name))
+                    .project_name(Name::ref_cast(project_name))
+                    .disk_name(Name::ref_cast(disk_name));
+                Ok(disk)
             }
             _ => Err(Error::InvalidRequest {
                 message: "
@@ -99,10 +89,11 @@ impl super::Nexus {
     pub async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        authz_project: &authz::Project,
+        project_lookup: &lookup::Project<'_>,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
         match &params.disk_source {
             params::DiskSource::Blank { block_size } => {
                 // Reject disks where the block size doesn't evenly divide the
@@ -290,25 +281,14 @@ impl super::Nexus {
     pub async fn project_list_disks(
         &self,
         opctx: &OpContext,
-        authz_project: &authz::Project,
+        project_lookup: &lookup::Project<'_>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .project_list_disks(opctx, &authz_project, pagparams)
             .await
-    }
-
-    pub async fn disk_fetch(
-        &self,
-        opctx: &OpContext,
-        authz_disk: &authz::Disk,
-    ) -> LookupResult<db::model::Disk> {
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(authz_disk.id())
-            .fetch()
-            .await?;
-        Ok(db_disk)
     }
 
     /// Modifies the runtime state of the Disk as requested.  This generally
@@ -413,10 +393,10 @@ impl super::Nexus {
 
     pub async fn project_delete_disk(
         self: &Arc<Self>,
-        opctx: &OpContext,
-        authz_disk: &authz::Disk,
+        disk_lookup: &lookup::Disk<'_>,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_disk).await?;
+        let (.., authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Delete).await?;
 
         let saga_params =
             sagas::disk_delete::Params { disk_id: authz_disk.id() };

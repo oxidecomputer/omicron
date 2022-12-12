@@ -16,6 +16,7 @@
           "disks"
         ],
         "summary": "Fetch a disk by id",
+        "description": "Use `GET /v1/disks/{disk}` instead",
         "operationId": "disk_view_by_id",
         "parameters": [
           {
@@ -46,7 +47,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/images/{id}": {
@@ -528,480 +530,6 @@
             }
           }
         }
-      }
-    },
-    "/disks": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "operationId": "disk_list_v1",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "instance",
-            "description": "Optional filter to narrow disks returned to those attached to the given instance",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiskResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Create a disk",
-        "operationId": "disk_create_v1",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiskCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/disks/{disk}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "operationId": "disk_view_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Delete a disk",
-        "operationId": "disk_delete_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/disks/{disk}/attach": {
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Attach a disk to an instance",
-        "operationId": "disk_attach_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceIdentifier"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/disks/{disk}/detach": {
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Detach a disk from an instance",
-        "operationId": "disk_detach_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceIdentifier"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/disks/{disk}/metrics/{metric_name}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "operationId": "disk_metrics_list_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "metric_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DiskMetricName"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "end_time",
-            "description": "An exclusive end time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "start_time",
-            "description": "An inclusive start time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
       }
     },
     "/groups": {
@@ -1839,6 +1367,7 @@
           "disks"
         ],
         "summary": "List disks",
+        "description": "Use `GET /v1/disks` instead",
         "operationId": "disk_list",
         "parameters": [
           {
@@ -1910,12 +1439,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
         "tags": [
           "disks"
         ],
+        "summary": "Use `POST /v1/disks` instead",
         "operationId": "disk_create",
         "parameters": [
           {
@@ -1966,7 +1497,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}": {
@@ -1975,6 +1507,7 @@
           "disks"
         ],
         "summary": "Fetch a disk",
+        "description": "Use `GET /v1/disks/{disk}` instead",
         "operationId": "disk_view",
         "parameters": [
           {
@@ -2022,12 +1555,14 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "disks"
         ],
+        "summary": "Use `DELETE /v1/disks/{disk}` instead",
         "operationId": "disk_delete",
         "parameters": [
           {
@@ -2068,7 +1603,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}": {
@@ -2077,6 +1613,7 @@
           "disks"
         ],
         "summary": "Fetch disk metrics",
+        "description": "Use `GET /v1/disks/{disk}/metrics/{metric_name}` instead",
         "operationId": "disk_metrics_list",
         "parameters": [
           {
@@ -2176,6 +1713,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -2669,6 +2207,7 @@
           "instances"
         ],
         "summary": "List an instance's disks",
+        "description": "Use `GET /v1/disks?instance={instance}` instead",
         "operationId": "instance_disk_list",
         "parameters": [
           {
@@ -2747,6 +2286,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -2756,6 +2296,7 @@
           "instances"
         ],
         "summary": "Attach a disk to an instance",
+        "description": "Use `POST /v1/disks/{disk}/attach { instance: <instance> } ` instead",
         "operationId": "instance_disk_attach",
         "parameters": [
           {
@@ -2813,7 +2354,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach": {
@@ -2822,6 +2364,7 @@
           "instances"
         ],
         "summary": "Detach a disk from an instance",
+        "description": "Use `POST /v1/disks/{disk}/detach { instance: <instance> } ` instead",
         "operationId": "instance_disk_detach",
         "parameters": [
           {
@@ -2879,7 +2422,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips": {
@@ -8112,6 +7656,480 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/disks": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "operationId": "disk_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "instance",
+            "description": "Optional filter to narrow disks returned to those attached to the given instance",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiskResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Create a disk",
+        "operationId": "disk_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "operationId": "disk_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Delete a disk",
+        "operationId": "disk_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/attach": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Attach a disk to an instance",
+        "operationId": "disk_attach_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceIdentifier"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/detach": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Detach a disk from an instance",
+        "operationId": "disk_detach_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceIdentifier"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/metrics/{metric_name}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "operationId": "disk_metrics_list_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "If Name is used to reference the disk you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiskMetricName"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "An exclusive end time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "An inclusive start time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementResultsPage"
                 }
               }
             }
@@ -13859,29 +13877,6 @@
           }
         }
       },
-      "NameSortMode": {
-        "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of \"name\"",
-            "type": "string",
-            "enum": [
-              "name_ascending"
-            ]
-          }
-        ]
-      },
-      "DiskMetricName": {
-        "type": "string",
-        "enum": [
-          "activated",
-          "flush",
-          "read",
-          "read_bytes",
-          "write",
-          "write_bytes"
-        ]
-      },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -13918,6 +13913,29 @@
               "id_ascending"
             ]
           }
+        ]
+      },
+      "NameSortMode": {
+        "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_ascending"
+            ]
+          }
+        ]
+      },
+      "DiskMetricName": {
+        "type": "string",
+        "enum": [
+          "activated",
+          "flush",
+          "read",
+          "read_bytes",
+          "write",
+          "write_bytes"
         ]
       }
     }

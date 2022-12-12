@@ -712,12 +712,13 @@ impl super::Nexus {
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_lookup: &lookup::Instance<'_>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .instance_list_disks(opctx, authz_instance, pagparams)
+            .instance_list_disks(opctx, &authz_instance, pagparams)
             .await
     }
 
@@ -725,9 +726,13 @@ impl super::Nexus {
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        authz_disk: &authz::Disk,
+        instance_lookup: &lookup::Instance<'_>,
+        disk_lookup: &lookup::Disk<'_>,
     ) -> UpdateResult<db::model::Disk> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Modify).await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
@@ -757,9 +762,13 @@ impl super::Nexus {
     pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        authz_disk: &authz::Disk,
+        instance_lookup: &lookup::Instance<'_>,
+        disk_lookup: &lookup::Disk<'_>,
     ) -> UpdateResult<db::model::Disk> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Modify).await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk detach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
