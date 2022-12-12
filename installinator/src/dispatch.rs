@@ -3,14 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
+use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use slog::Drain;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    buf_list::BufList,
-    peers::{loop_fetch_from_peers, ArtifactId, Peers},
+    errors::DiscoverPeersError,
+    peers::{ArtifactId, FetchedArtifact, Peers},
 };
 
 /// Installinator app.
@@ -91,7 +92,7 @@ struct InstallOpts {
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
         // TODO: is buffering up the entire artifact in memory OK?
-        let (peer, artifact) = loop_fetch_from_peers(
+        let artifact = FetchedArtifact::loop_fetch_from_peers(
             &log,
             || {
                 // TODO: discover nodes via the bootstrap network
@@ -99,6 +100,7 @@ impl InstallOpts {
                     Peers::mock_discover(&log)
                         .await
                         .context("error discovering peers")
+                        .map_err(DiscoverPeersError::Retry)
                 }
             },
             &self.artifact_id,
@@ -107,14 +109,16 @@ impl InstallOpts {
 
         slog::info!(
             log,
-            "for artifact {}, fetched {} bytes from {peer}, writing to {}",
+            "for artifact {}, fetched {} bytes from {}, writing to {}",
             self.artifact_id,
-            artifact.num_bytes(),
+            artifact.artifact.num_bytes(),
+            artifact.addr,
             self.destination,
         );
 
         // TODO: add retries to this?
-        write_artifact(&self.artifact_id, artifact, &self.destination).await?;
+        write_artifact(&self.artifact_id, artifact.artifact, &self.destination)
+            .await?;
 
         Ok(())
     }

@@ -14,3 +14,13 @@ pub(crate) enum ArtifactFetchError {
     #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
     Timeout { peer: Ipv6Addr, timeout: Duration, bytes_fetched: usize },
 }
+
+#[derive(Debug, Error)]
+pub(crate) enum DiscoverPeersError {
+    #[error("failed to discover peers (will retry)")]
+    Retry(#[source] anyhow::Error),
+
+    #[error("failed to discover peers (no more retries left, will abort)")]
+    #[allow(unused)]
+    Abort(#[source] anyhow::Error),
+}

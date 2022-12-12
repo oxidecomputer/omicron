@@ -5,6 +5,7 @@
 use std::{fmt, future::Future, net::Ipv6Addr, str::FromStr, time::Duration};
 
 use anyhow::{bail, Result};
+use buf_list::BufList;
 use bytes::{Bytes, BytesMut};
 use display_error_chain::DisplayErrorChain;
 use itertools::Itertools;
@@ -15,39 +16,83 @@ use tokio::{
     time::Instant,
 };
 
-use crate::{buf_list::BufList, errors::ArtifactFetchError};
+use crate::errors::{ArtifactFetchError, DiscoverPeersError};
 
-/// In a loop, discover peers, and fetch from them.
-///
-/// This only produces an error if the discover function errors out. In normal use, it is expected
-/// to never error out.
-pub(crate) async fn loop_fetch_from_peers<F, Fut>(
-    log: &slog::Logger,
-    mut discover_fn: F,
-    artifact_id: &ArtifactId,
-) -> Result<(Ipv6Addr, BufList)>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<Peers>>,
-{
-    loop {
-        // TODO: add retries around peer discovery?
-        let peers = discover_fn().await?;
-        slog::debug!(
-            log,
-            "discovered {} peers: [{}]",
-            peers.peer_count(),
-            peers.display(),
-        );
-        match peers.fetch_artifact(artifact_id).await {
-            Some((peer, artifact)) => return Ok((peer, artifact)),
-            None => {
-                slog::debug!(
-                    log,
-                    "unable to fetch artifact from peers, retrying",
-                );
+/// A fetched artifact
+pub(crate) struct FetchedArtifact {
+    pub(crate) attempt: usize,
+    pub(crate) addr: Ipv6Addr,
+    pub(crate) artifact: BufList,
+}
+
+impl FetchedArtifact {
+    /// In a loop, discover peers, and fetch from them.
+    ///
+    /// This only produces an error if the discover function errors out. In normal use, it is expected
+    /// to never error out.
+    pub(crate) async fn loop_fetch_from_peers<F, Fut>(
+        log: &slog::Logger,
+        mut discover_fn: F,
+        artifact_id: &ArtifactId,
+    ) -> Result<Self>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<Peers, DiscoverPeersError>>,
+    {
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let peers = match discover_fn().await {
+                Ok(peers) => peers,
+                Err(DiscoverPeersError::Retry(error)) => {
+                    slog::debug!(
+                        log,
+                        "(attempt {attempt}) failed to discover peers, retrying: {}",
+                        DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
+                    );
+                    // XXX: add a delay here?
+                    continue;
+                }
+                Err(DiscoverPeersError::Abort(error)) => {
+                    return Err(error);
+                }
+            };
+
+            slog::debug!(
+                log,
+                "discovered {} peers: [{}]",
+                peers.peer_count(),
+                peers.display(),
+            );
+            match peers.fetch_artifact(artifact_id).await {
+                Some((addr, artifact)) => {
+                    return Ok(Self { attempt, addr, artifact })
+                }
+                None => {
+                    slog::debug!(
+                        log,
+                        "unable to fetch artifact from peers, retrying",
+                    );
+                }
             }
         }
+    }
+}
+
+impl fmt::Debug for FetchedArtifact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FetchedArtifact")
+            .field("attempt", &self.attempt)
+            .field("addr", &self.addr)
+            .field(
+                "artifact",
+                &format!(
+                    "({} bytes in {} chunks)",
+                    self.artifact.num_bytes(),
+                    self.artifact.num_chunks()
+                ),
+            )
+            .finish()
     }
 }
 
