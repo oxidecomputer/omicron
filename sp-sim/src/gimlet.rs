@@ -954,6 +954,38 @@ impl SpHandler for Handler {
         Err(SpError::RequestUnsupportedForComponent)
     }
 
+    fn component_get_active_slot(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+    ) -> Result<u16, SpError> {
+        warn!(
+            &self.log, "asked for component active slot (not supported for sim components)";
+            "sender" => %sender,
+            "port" => ?port,
+            "component" => ?component,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn component_set_active_slot(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+        slot: u16,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log, "asked to set component active slot (not supported for sim components)";
+            "sender" => %sender,
+            "port" => ?port,
+            "component" => ?component,
+            "slot" => slot,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
     fn get_startup_options(
         &mut self,
         sender: SocketAddrV6,
