@@ -36,7 +36,7 @@ members = [
     "test-utils",
     "wicket",
     "wicketd",
-    "wicketd-client"
+    "wicketd-client",
 ]
 
 default-members = [
@@ -70,6 +70,9 @@ default-members = [
     "oximeter/oximeter-macro-impl",
     "oximeter-client",
     "test-utils",
+    "wicket",
+    "wicketd",
+    "wicketd-client",
 ]
 resolver = "2"
 
@@ -116,7 +119,8 @@ panic = "abort"
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }
 #[patch."https://github.com/oxidecomputer/crucible"]
-#crucible-client-typess = { path = "../crucible/crucible-client-typess" }
+#crucible-agent-client = { path = "../crucible/agent-client" }
+#crucible-client-types = { path = "../crucible/crucible-client-types" }
 
 #
 # Local client generation during development.

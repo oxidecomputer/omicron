@@ -10,21 +10,11 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts/{name}/{version}/{hash}": {
+    "/artifacts/{name}/{version}": {
       "get": {
         "summary": "Fetch an artifact from the in-memory cache.",
         "operationId": "get_artifact",
         "parameters": [
-          {
-            "in": "path",
-            "name": "hash",
-            "description": "A hash of the artifact. TODO: is there a hash type?",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "style": "simple"
-          },
           {
             "in": "path",
             "name": "name",

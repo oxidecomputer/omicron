@@ -10,7 +10,9 @@ use super::sled_agent::SledAgent;
 use crate::nexus::NexusClient;
 use crucible_agent_client::types::State as RegionState;
 
-use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use slog::{Drain, Logger};
 use std::sync::Arc;
 
@@ -84,7 +86,7 @@ impl Server {
                 "error" => ?error);
         };
         retry_notify(
-            retry_policy_short(),
+            retry_policy_internal_service_aggressive(),
             notify_nexus,
             log_notification_failure,
         )

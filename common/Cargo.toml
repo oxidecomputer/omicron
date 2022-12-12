@@ -27,15 +27,15 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 smf = "0.2"
 steno = "0.3"
 thiserror = "1.0"
-tokio = { version = "1.22", features = [ "full" ] }
+tokio = { version = "1.23", features = [ "full" ] }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 toml = "0.5.9"
 uuid = { version = "1.2.2", features = [ "serde", "v4" ] }
 parse-display = "0.6.0"
-progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 
 [dev-dependencies]
 expectorate = "1.0.5"
-libc = "0.2.135"
+libc = "0.2.138"
 serde_urlencoded = "0.7.1"
-tokio = { version = "1.22", features = [ "test-util" ] }
+tokio = { version = "1.23", features = [ "test-util" ] }

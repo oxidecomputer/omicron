@@ -144,7 +144,7 @@ async fn update_inventory(
     client: &gateway_client::Client,
 ) -> bool {
     let new_keys: BTreeSet<SpIdentifier> =
-        sps.iter().map(|sp| sp.info.id.clone().into()).collect();
+        sps.iter().map(|sp| sp.info.id).collect();
 
     let old_inventory_len = inventory.len();
 
@@ -159,7 +159,7 @@ async fn update_inventory(
     let mut to_fetch: Vec<SpIdentifier> = vec![];
     for sp in sps.into_iter() {
         let state = sp.details;
-        let id: SpIdentifier = sp.info.id.into();
+        let id: SpIdentifier = sp.info.id;
         let ignition = sp.info.details;
 
         inventory
