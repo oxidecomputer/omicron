@@ -996,7 +996,7 @@ dependencies = [
  "autocfg",
  "cfg-if 1.0.0",
  "crossbeam-utils",
- "memoffset",
+ "memoffset 0.6.5",
  "scopeguard",
 ]
 
@@ -2007,7 +2007,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c1484109c394f45e08018e0f35adc4a136cd207d#c1484109c394f45e08018e0f35adc4a136cd207d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2e0b41543425ef374ee08c313dcc25b07b98a05e#2e0b41543425ef374ee08c313dcc25b07b98a05e"
 dependencies = [
  "bitflags",
  "hubpack",
@@ -2023,11 +2023,13 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c1484109c394f45e08018e0f35adc4a136cd207d#c1484109c394f45e08018e0f35adc4a136cd207d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2e0b41543425ef374ee08c313dcc25b07b98a05e#2e0b41543425ef374ee08c313dcc25b07b98a05e"
 dependencies = [
+ "async-trait",
  "backoff",
  "futures",
  "gateway-messages",
+ "nix",
  "once_cell",
  "serde",
  "serde_with",
@@ -2902,6 +2904,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "memoffset"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3169,6 +3180,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46a58d1d356c6597d08cde02c2f09d785b09e28711837b1ed667dc652c08a694"
+dependencies = [
+ "bitflags",
+ "cfg-if 1.0.0",
+ "libc",
+ "memoffset 0.7.1",
+ "static_assertions",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3354,6 +3378,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap 4.0.29",
  "dropshot",
  "expectorate",

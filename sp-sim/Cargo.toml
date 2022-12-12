@@ -19,7 +19,7 @@ toml = "0.5.9"
 
 [dependencies.gateway-messages]
 git = "https://github.com/oxidecomputer/management-gateway-service"
-rev = "c1484109c394f45e08018e0f35adc4a136cd207d"
+rev = "2e0b41543425ef374ee08c313dcc25b07b98a05e"
 default-features = false
 features = ["std"]
 

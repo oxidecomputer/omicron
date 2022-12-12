@@ -22,11 +22,6 @@ use sprockets_rot::common::Ed25519PublicKey;
 pub use sprockets_rot::RotSprocketError;
 use std::net::SocketAddrV6;
 
-pub mod ignition_id {
-    pub const GIMLET: u16 = 0b0000_0000_0001_0001;
-    pub const SIDECAR: u16 = 0b0000_0000_0001_0010;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Responsiveness {
     Responsive,
