@@ -13,6 +13,6 @@ omicron-test-utils = { path = "../test-utils" }
 oxide-client = { path = "../oxide-client" }
 rand = "0.8.5"
 reqwest = { version = "0.11.13", default-features = false }
-russh = "0.35.0-beta.2"
+russh = "0.35.0-beta.8"
 russh-keys = "0.22.0"
 tokio = { version = "1.23.0", features = ["macros", "rt-multi-thread"] }
