@@ -9,6 +9,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::identity::Resource;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcRouterKind;
@@ -45,15 +46,11 @@ impl super::Nexus {
     pub async fn project_create_vpc(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
         let default_route_id = Uuid::new_v4();
