@@ -13,18 +13,14 @@ use crate::db::collection_detach_many::DatastoreDetachManyTarget;
 use crate::db::collection_detach_many::DetachManyError;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
-use crate::db::model::CollectionType;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
-use crate::db::model::VirtualResourceProvisioning;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -72,49 +68,24 @@ impl DataStore {
         let gen = instance.runtime().gen;
         let name = instance.name().clone();
 
-        let instance = self
-            .pool_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                // TODO: Use "collection_insert" to "insert_resource" into a
-                // Project. Otherwise, the project could be concurrently
-                // deleted during instance creation!
-                let instance: Instance = diesel::insert_into(dsl::instance)
-                    .values(instance)
-                    .on_conflict(dsl::id)
-                    .do_nothing()
-                    .returning(Instance::as_returning())
-                    .get_result_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            async_bb8_diesel::PoolError::Connection(e),
-                            ErrorHandler::Conflict(
-                                ResourceType::Instance,
-                                name.as_str(),
-                            ),
-                        )
-                    })?;
-
-                // Create resource provisioning for the instance.
-                // TODO: Create with contents???
-                self.virtual_resource_provisioning_create_on_connection(
-                    &conn,
-                    VirtualResourceProvisioning::new(
-                        instance.id(),
-                        CollectionType::Instance,
+        // TODO: Use "collection_insert" to "insert_resource" into a
+        // Project. Otherwise, the project could be concurrently
+        // deleted during instance creation!
+        let instance: Instance = diesel::insert_into(dsl::instance)
+            .values(instance)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .returning(Instance::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Instance,
+                        name.as_str(),
                     ),
                 )
-                .await?;
-
-                Ok(instance)
-            })
-            .await
-            .map_err(|e| match e {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
-                }
             })?;
 
         bail_unless!(

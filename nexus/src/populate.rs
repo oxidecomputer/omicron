@@ -286,7 +286,7 @@ impl Populator for PopulateFleet {
                     opctx,
                     db::model::VirtualResourceProvisioning::new(
                         id,
-                        db::model::CollectionType::Fleet,
+                        db::model::CollectionTypeProvisioned::Fleet,
                     ),
                 )
                 .await?;

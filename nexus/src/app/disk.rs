@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -513,8 +514,9 @@ impl super::Nexus {
 
         // TODO: This should exist within a saga
         self.db_datastore
-            .virtual_resource_provisioning_update_disk(
+            .virtual_resource_provisioning_delete_disk(
                 &opctx,
+                db_snapshot.id(),
                 project.id(),
                 -i64::try_from(db_snapshot.size.to_bytes()).map_err(|e| {
                     Error::internal_error(&format!(

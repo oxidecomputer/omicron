@@ -162,6 +162,28 @@ CREATE TABLE omicron.public.virtual_resource_provisioning (
     ram_provisioned INT8 NOT NULL
 );
 
+-- A table describing a single virtual resource which has been provisioned.
+-- This may include:
+-- - Disks
+-- - Instances
+-- - Snapshots
+CREATE TABLE omicron.public.virtual_resource_provisioned (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    -- Identifies the type of the resource.
+    resource_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the resource.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned.
+    ram_provisioned INT8 NOT NULL
+);
+
 /*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.

@@ -15,7 +15,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::identity::Resource;
-use crate::db::model::CollectionType;
+use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualResourceProvisioning;
@@ -60,7 +60,7 @@ impl DataStore {
             opctx,
             VirtualResourceProvisioning::new(
                 DEFAULT_SILO.id(),
-                CollectionType::Silo,
+                CollectionTypeProvisioned::Silo,
             ),
         )
         .await?;
@@ -154,7 +154,7 @@ impl DataStore {
                 diesel::insert_into(dsl::virtual_resource_provisioning)
                     .values(VirtualResourceProvisioning::new(
                         silo.id(),
-                        CollectionType::Silo,
+                        CollectionTypeProvisioned::Silo,
                     ))
                     .execute_async(&conn)
                     .await?;
@@ -163,7 +163,7 @@ impl DataStore {
                     &conn,
                     VirtualResourceProvisioning::new(
                         DEFAULT_SILO.id(),
-                        CollectionType::Silo,
+                        CollectionTypeProvisioned::Silo,
                     ),
                 )
                 .await?;

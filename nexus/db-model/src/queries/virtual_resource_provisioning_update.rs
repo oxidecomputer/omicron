@@ -35,6 +35,12 @@ table! {
     }
 }
 
+table! {
+    do_update (update) {
+        update -> Bool,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(organization, parent_org,);
 diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
@@ -44,4 +50,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     parent_silo,
     parent_fleet,
     all_collections,
+    do_update,
 );

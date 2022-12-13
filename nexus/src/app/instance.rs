@@ -299,8 +299,9 @@ impl super::Nexus {
             .project_delete_instance(opctx, &authz_instance)
             .await?;
         self.db_datastore
-            .virtual_resource_provisioning_update_cpus_and_ram(
+            .virtual_resource_provisioning_delete_instance(
                 &opctx,
+                instance.id(),
                 instance.project_id,
                 -i64::from(instance.runtime_state.ncpus.0 .0),
                 -i64::try_from(instance.runtime_state.memory.to_bytes())

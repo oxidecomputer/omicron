@@ -211,16 +211,47 @@ impl DataStore {
         Ok(())
     }
 
+    // TODO: These could 100% act on model types:
+    // - Would help with identifying UUID
+    // - Would help with project ID lookup
+    // - Would help with calculating resource usage
+    //
+    // I think we just need to validate that the model exists when we make these
+    // calls? Maybe it could be an optional helper?
+
     /// Transitively updates all provisioned disk provisions from project -> fleet.
-    pub async fn virtual_resource_provisioning_update_disk(
+    pub async fn virtual_resource_provisioning_insert_disk(
         &self,
         opctx: &OpContext,
+        id: Uuid,
         project_id: Uuid,
         disk_byte_diff: i64,
     ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
-        let provisions = VirtualResourceProvisioningUpdate::new_update_disk(
-            project_id,
+        let provisions = VirtualResourceProvisioningUpdate::new_insert_disk(
+            id,
             disk_byte_diff,
+            project_id,
+        )
+        .get_results_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        self.virtual_resource_provisioning_producer
+            .append_disk_metrics(&provisions);
+        Ok(provisions)
+    }
+
+    /// Transitively updates all provisioned disk provisions from project -> fleet.
+    pub async fn virtual_resource_provisioning_delete_disk(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        disk_byte_diff: i64,
+    ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
+        let provisions = VirtualResourceProvisioningUpdate::new_delete_disk(
+            id,
+            disk_byte_diff,
+            project_id,
         )
         .get_results_async(self.pool_authorized(opctx).await?)
         .await
@@ -231,16 +262,40 @@ impl DataStore {
     }
 
     /// Transitively updates all CPU/RAM provisions from project -> fleet.
-    pub async fn virtual_resource_provisioning_update_cpus_and_ram(
+    pub async fn virtual_resource_provisioning_insert_instance(
         &self,
         opctx: &OpContext,
+        id: Uuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: i64,
     ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
         let provisions =
-            VirtualResourceProvisioningUpdate::new_update_cpus_and_ram(
-                project_id, cpus_diff, ram_diff,
+            VirtualResourceProvisioningUpdate::new_insert_instance(
+                id, cpus_diff, ram_diff, project_id,
+            )
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        self.virtual_resource_provisioning_producer
+            .append_cpu_metrics(&provisions);
+        Ok(provisions)
+    }
+
+    /// Transitively updates all CPU/RAM provisions from project -> fleet.
+    pub async fn virtual_resource_provisioning_delete_instance(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        cpus_diff: i64,
+        ram_diff: i64,
+    ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
+        let provisions =
+            VirtualResourceProvisioningUpdate::new_delete_instance(
+                id, cpus_diff, ram_diff, project_id,
             )
             .get_results_async(self.pool_authorized(opctx).await?)
             .await

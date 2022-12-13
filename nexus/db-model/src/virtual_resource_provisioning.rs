@@ -6,31 +6,28 @@ use crate::schema::virtual_resource_provisioning;
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub enum CollectionType {
-    Instance,
-    Disk,
-
+pub enum CollectionTypeProvisioned {
     Project,
     Organization,
     Silo,
     Fleet,
 }
 
-impl std::fmt::Display for CollectionType {
+impl std::fmt::Display for CollectionTypeProvisioned {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CollectionType::Instance => write!(f, "instance"),
-            CollectionType::Disk => write!(f, "disk"),
-            CollectionType::Project => write!(f, "project"),
-            CollectionType::Organization => write!(f, "organization"),
-            CollectionType::Silo => write!(f, "silo"),
-            CollectionType::Fleet => write!(f, "fleet"),
+            CollectionTypeProvisioned::Project => write!(f, "project"),
+            CollectionTypeProvisioned::Organization => {
+                write!(f, "organization")
+            }
+            CollectionTypeProvisioned::Silo => write!(f, "silo"),
+            CollectionTypeProvisioned::Fleet => write!(f, "fleet"),
         }
     }
 }
 
 /// Describes virtual_resource_provisioning for a collection
-#[derive(Selectable, Queryable, Insertable, Debug)]
+#[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = virtual_resource_provisioning)]
 pub struct VirtualResourceProvisioning {
     pub id: Uuid,
@@ -42,7 +39,7 @@ pub struct VirtualResourceProvisioning {
 }
 
 impl VirtualResourceProvisioning {
-    pub fn new(id: Uuid, collection_type: CollectionType) -> Self {
+    pub fn new(id: Uuid, collection_type: CollectionTypeProvisioned) -> Self {
         Self {
             id,
             collection_type: collection_type.to_string(),

@@ -823,12 +823,14 @@ async fn sic_account_resources(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .virtual_resource_provisioning_update_cpus_and_ram(
+        .virtual_resource_provisioning_insert_instance(
             &opctx,
+            instance_id,
             params.project_id,
             i64::from(params.create_params.ncpus.0),
             i64::try_from(params.create_params.memory.to_bytes())
@@ -850,12 +852,14 @@ async fn sic_account_resources_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .virtual_resource_provisioning_update_cpus_and_ram(
+        .virtual_resource_provisioning_delete_instance(
             &opctx,
+            instance_id,
             params.project_id,
             -i64::from(params.create_params.ncpus.0),
             -i64::try_from(params.create_params.memory.to_bytes())

@@ -14,7 +14,7 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Resource;
-use crate::db::model::CollectionType;
+use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::Project;
@@ -81,7 +81,7 @@ impl DataStore {
                     &conn,
                     VirtualResourceProvisioning::new(
                         project.id(),
-                        CollectionType::Project,
+                        CollectionTypeProvisioned::Project,
                     ),
                 )
                 .await?;

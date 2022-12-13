@@ -551,8 +551,9 @@ async fn ssc_account_space(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .virtual_resource_provisioning_update_disk(
+        .virtual_resource_provisioning_insert_disk(
             &opctx,
+            snapshot_created.id(),
             params.project_id,
             i64::try_from(snapshot_created.size.to_bytes())
                 .map_err(|e| {
@@ -579,8 +580,9 @@ async fn ssc_account_space_undo(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .virtual_resource_provisioning_update_disk(
+        .virtual_resource_provisioning_delete_disk(
             &opctx,
+            snapshot_created.id(),
             params.project_id,
             -i64::try_from(snapshot_created.size.to_bytes())
                 .map_err(|e| {

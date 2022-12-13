@@ -427,6 +427,16 @@ table! {
 }
 
 table! {
+    virtual_resource_provisioned {
+        id -> Uuid,
+        resource_type -> Text,
+        virtual_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+    }
+}
+
+table! {
     zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,
