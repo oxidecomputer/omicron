@@ -126,9 +126,9 @@ async fn delete_project_expect_fail(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
+    .expect("Failed to make request")
     .parsed_body()
-    .unwrap();
+    .expect("Failed to parse body of request");
     error.message
 }
 
