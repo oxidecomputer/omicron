@@ -1539,6 +1539,7 @@ mod tests {
     // Add an instance. We'll use this to verify that the instance must be
     // stopped to add or delete interfaces.
     async fn create_instance(
+        opctx: &OpContext,
         project_id: Uuid,
         db_datastore: &DataStore,
     ) -> Instance {
@@ -1578,17 +1579,25 @@ mod tests {
         };
         let instance =
             Instance::new(instance_id, project_id, &params, runtime.into());
+
+        let (.., authz_project) = LookupPath::new(&opctx, &db_datastore)
+            .project_id(project_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .expect("Failed to lookup project for instance creation");
+
         db_datastore
-            .project_create_instance(instance)
+            .project_create_instance(&opctx, &authz_project, instance)
             .await
             .expect("Failed to create new instance record")
     }
 
     async fn create_stopped_instance(
+        opctx: &OpContext,
         project_id: Uuid,
         db_datastore: &DataStore,
     ) -> Instance {
-        let instance = create_instance(project_id, db_datastore).await;
+        let instance = create_instance(opctx, project_id, db_datastore).await;
         instance_set_state(
             db_datastore,
             instance,
@@ -1757,7 +1766,12 @@ mod tests {
         ) -> Instance {
             instance_set_state(
                 &self.db_datastore,
-                create_instance(self.project_id, &self.db_datastore).await,
+                create_instance(
+                    &self.opctx,
+                    self.project_id,
+                    &self.db_datastore,
+                )
+                .await,
                 state,
             )
             .await
@@ -2142,9 +2156,12 @@ mod tests {
         }
 
         // Next one should fail
-        let instance =
-            create_stopped_instance(context.project_id, &context.db_datastore)
-                .await;
+        let instance = create_stopped_instance(
+            &context.opctx,
+            context.project_id,
+            &context.db_datastore,
+        )
+        .await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance.id(),

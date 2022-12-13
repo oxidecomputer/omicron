@@ -63,9 +63,13 @@ impl DataStore {
     // what this function does under the hood).
     pub async fn project_create_instance(
         &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
         instance: Instance,
     ) -> CreateResult<Instance> {
         use db::schema::instance::dsl;
+
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let gen = instance.runtime().gen;
         let name = instance.name().clone();
@@ -78,13 +82,10 @@ impl DataStore {
                 .on_conflict(dsl::id)
                 .do_nothing(),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Project,
-                lookup_type: LookupType::ById(project_id),
-            },
+            AsyncInsertError::CollectionNotFound => authz_project.not_found(),
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
