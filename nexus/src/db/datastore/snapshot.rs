@@ -36,11 +36,11 @@ impl DataStore {
     pub async fn project_ensure_snapshot(
         &self,
         opctx: &OpContext,
-        authz_silo: &authz::Silo,
+        authz_project: &authz::Project,
         snapshot: Snapshot,
     ) -> CreateResult<Snapshot> {
         let gen = snapshot.gen;
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         use db::schema::snapshot::dsl;
         let project_id = snapshot.project_id;
