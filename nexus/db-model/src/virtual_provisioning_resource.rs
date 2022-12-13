@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::virtual_resource_provisioned;
+use crate::schema::virtual_provisioning_resource;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -20,10 +20,10 @@ impl std::fmt::Display for ResourceTypeProvisioned {
     }
 }
 
-/// Describes virtual_resource_provisioned for a resource.
+/// Describes virtual_provisioning_resource for a resource.
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
-#[diesel(table_name = virtual_resource_provisioned)]
-pub struct VirtualResourceProvisioned {
+#[diesel(table_name = virtual_provisioning_resource)]
+pub struct VirtualProvisioningResource {
     pub id: Uuid,
     pub resource_type: String,
 
@@ -32,7 +32,7 @@ pub struct VirtualResourceProvisioned {
     pub ram_provisioned: i64,
 }
 
-impl VirtualResourceProvisioned {
+impl VirtualProvisioningResource {
     pub fn new(id: Uuid, resource_type: ResourceTypeProvisioned) -> Self {
         Self {
             id,

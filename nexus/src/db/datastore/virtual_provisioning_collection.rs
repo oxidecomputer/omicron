@@ -2,16 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! [`DataStore`] methods on [`VirtualResourceProvisioning`]s.
+//! [`DataStore`] methods on [`VirtualProvisioningCollection`]s.
 
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
-use crate::db::model::VirtualResourceProvisioning;
+use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pool::DbConnection;
-use crate::db::queries::virtual_resource_provisioning_update::VirtualResourceProvisioningUpdate;
+use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use diesel::prelude::*;
 use omicron_common::api::external::{
@@ -47,7 +47,7 @@ struct RamProvisioned {
     bytes: i64,
 }
 
-/// An oximeter producer for reporting [`VirtualResourceProvisioning`] information to Clickhouse.
+/// An oximeter producer for reporting [`VirtualProvisioningCollection`] information to Clickhouse.
 ///
 /// This producer collects samples whenever the database record for a collection
 /// is created or updated. This implies that the CockroachDB record is always
@@ -65,7 +65,7 @@ impl Producer {
 
     fn append_disk_metrics(
         &self,
-        provisions: &Vec<VirtualResourceProvisioning>,
+        provisions: &Vec<VirtualProvisioningCollection>,
     ) {
         let new_samples = provisions
             .iter()
@@ -84,7 +84,7 @@ impl Producer {
 
     fn append_cpu_metrics(
         &self,
-        provisions: &Vec<VirtualResourceProvisioning>,
+        provisions: &Vec<VirtualProvisioningCollection>,
     ) {
         let new_samples = provisions
             .iter()
@@ -122,37 +122,37 @@ impl oximeter::Producer for Producer {
 }
 
 impl DataStore {
-    /// Create a [`VirtualResourceProvisioning`] object.
-    pub async fn virtual_resource_provisioning_create(
+    /// Create a [`VirtualProvisioningCollection`] object.
+    pub async fn virtual_provisioning_collection_create(
         &self,
         opctx: &OpContext,
-        virtual_resource_provisioning: VirtualResourceProvisioning,
-    ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
+        virtual_provisioning_collection: VirtualProvisioningCollection,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let pool = self.pool_authorized(opctx).await?;
-        self.virtual_resource_provisioning_create_on_connection(
+        self.virtual_provisioning_collection_create_on_connection(
             pool,
-            virtual_resource_provisioning,
+            virtual_provisioning_collection,
         )
         .await
     }
 
-    pub(crate) async fn virtual_resource_provisioning_create_on_connection<
+    pub(crate) async fn virtual_provisioning_collection_create_on_connection<
         ConnErr,
     >(
         &self,
         conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
               + Sync),
-        virtual_resource_provisioning: VirtualResourceProvisioning,
-    ) -> Result<Vec<VirtualResourceProvisioning>, Error>
+        virtual_provisioning_collection: VirtualProvisioningCollection,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error>
     where
         ConnErr: From<diesel::result::Error> + Send + 'static,
         PoolError: From<ConnErr>,
     {
-        use db::schema::virtual_resource_provisioning::dsl;
+        use db::schema::virtual_provisioning_collection::dsl;
 
-        let provisions: Vec<VirtualResourceProvisioning> =
-            diesel::insert_into(dsl::virtual_resource_provisioning)
-                .values(virtual_resource_provisioning)
+        let provisions: Vec<VirtualProvisioningCollection> =
+            diesel::insert_into(dsl::virtual_provisioning_collection)
+                .values(virtual_provisioning_collection)
                 .on_conflict_do_nothing()
                 .get_results_async(conn)
                 .await
@@ -162,46 +162,47 @@ impl DataStore {
                         ErrorHandler::Server,
                     )
                 })?;
-        self.virtual_resource_provisioning_producer
+        self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions);
-        self.virtual_resource_provisioning_producer
+        self.virtual_provisioning_collection_producer
             .append_cpu_metrics(&provisions);
         Ok(provisions)
     }
 
-    pub async fn virtual_resource_provisioning_get(
+    pub async fn virtual_provisioning_collection_get(
         &self,
         opctx: &OpContext,
         id: Uuid,
-    ) -> Result<VirtualResourceProvisioning, Error> {
-        use db::schema::virtual_resource_provisioning::dsl;
+    ) -> Result<VirtualProvisioningCollection, Error> {
+        use db::schema::virtual_provisioning_collection::dsl;
 
-        let virtual_resource_provisioning = dsl::virtual_resource_provisioning
-            .find(id)
-            .select(VirtualResourceProvisioning::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::VirtualResourceProvisioning,
-                        LookupType::ById(id),
-                    ),
-                )
-            })?;
-        Ok(virtual_resource_provisioning)
+        let virtual_provisioning_collection =
+            dsl::virtual_provisioning_collection
+                .find(id)
+                .select(VirtualProvisioningCollection::as_select())
+                .get_result_async(self.pool_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::VirtualProvision,
+                            LookupType::ById(id),
+                        ),
+                    )
+                })?;
+        Ok(virtual_provisioning_collection)
     }
 
-    /// Delete a [`VirtualResourceProvisioning`] object.
-    pub async fn virtual_resource_provisioning_delete(
+    /// Delete a [`VirtualProvisioningCollection`] object.
+    pub async fn virtual_provisioning_collection_delete(
         &self,
         opctx: &OpContext,
         id: Uuid,
     ) -> DeleteResult {
-        use db::schema::virtual_resource_provisioning::dsl;
+        use db::schema::virtual_provisioning_collection::dsl;
 
-        diesel::delete(dsl::virtual_resource_provisioning)
+        diesel::delete(dsl::virtual_provisioning_collection)
             .filter(dsl::id.eq(id))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
@@ -220,14 +221,14 @@ impl DataStore {
     // calls? Maybe it could be an optional helper?
 
     /// Transitively updates all provisioned disk provisions from project -> fleet.
-    pub async fn virtual_resource_provisioning_insert_disk(
+    pub async fn virtual_provisioning_collection_insert_disk(
         &self,
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
         disk_byte_diff: i64,
-    ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
-        let provisions = VirtualResourceProvisioningUpdate::new_insert_disk(
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        let provisions = VirtualProvisioningCollectionUpdate::new_insert_disk(
             id,
             disk_byte_diff,
             project_id,
@@ -235,20 +236,20 @@ impl DataStore {
         .get_results_async(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        self.virtual_resource_provisioning_producer
+        self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions);
         Ok(provisions)
     }
 
     /// Transitively updates all provisioned disk provisions from project -> fleet.
-    pub async fn virtual_resource_provisioning_delete_disk(
+    pub async fn virtual_provisioning_collection_delete_disk(
         &self,
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
         disk_byte_diff: i64,
-    ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
-        let provisions = VirtualResourceProvisioningUpdate::new_delete_disk(
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        let provisions = VirtualProvisioningCollectionUpdate::new_delete_disk(
             id,
             disk_byte_diff,
             project_id,
@@ -256,22 +257,22 @@ impl DataStore {
         .get_results_async(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        self.virtual_resource_provisioning_producer
+        self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions);
         Ok(provisions)
     }
 
     /// Transitively updates all CPU/RAM provisions from project -> fleet.
-    pub async fn virtual_resource_provisioning_insert_instance(
+    pub async fn virtual_provisioning_collection_insert_instance(
         &self,
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: i64,
-    ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
-            VirtualResourceProvisioningUpdate::new_insert_instance(
+            VirtualProvisioningCollectionUpdate::new_insert_instance(
                 id, cpus_diff, ram_diff, project_id,
             )
             .get_results_async(self.pool_authorized(opctx).await?)
@@ -279,22 +280,22 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
-        self.virtual_resource_provisioning_producer
+        self.virtual_provisioning_collection_producer
             .append_cpu_metrics(&provisions);
         Ok(provisions)
     }
 
     /// Transitively updates all CPU/RAM provisions from project -> fleet.
-    pub async fn virtual_resource_provisioning_delete_instance(
+    pub async fn virtual_provisioning_collection_delete_instance(
         &self,
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: i64,
-    ) -> Result<Vec<VirtualResourceProvisioning>, Error> {
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
-            VirtualResourceProvisioningUpdate::new_delete_instance(
+            VirtualProvisioningCollectionUpdate::new_delete_instance(
                 id, cpus_diff, ram_diff, project_id,
             )
             .get_results_async(self.pool_authorized(opctx).await?)
@@ -302,7 +303,7 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
-        self.virtual_resource_provisioning_producer
+        self.virtual_provisioning_collection_producer
             .append_cpu_metrics(&provisions);
         Ok(provisions)
     }

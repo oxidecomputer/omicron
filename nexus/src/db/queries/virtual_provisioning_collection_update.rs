@@ -6,11 +6,11 @@
 
 use crate::db::alias::ExpressionAlias;
 use crate::db::model::ResourceTypeProvisioned;
-use crate::db::model::VirtualResourceProvisioned;
-use crate::db::model::VirtualResourceProvisioning;
+use crate::db::model::VirtualProvisioningCollection;
+use crate::db::model::VirtualProvisioningResource;
 use crate::db::pool::DbConnection;
-use crate::db::schema::virtual_resource_provisioned;
-use crate::db::schema::virtual_resource_provisioning;
+use crate::db::schema::virtual_provisioning_collection;
+use crate::db::schema::virtual_provisioning_resource;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
 use db_macros::Subquery;
 use diesel::pg::Pg;
@@ -19,7 +19,7 @@ use diesel::{
     sql_types, CombineDsl, ExpressionMethods, IntoSql,
     NullableExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper,
 };
-use nexus_db_model::queries::virtual_resource_provisioning_update::{
+use nexus_db_model::queries::virtual_provisioning_collection_update::{
     all_collections, do_update, parent_fleet, parent_org, parent_silo,
 };
 
@@ -138,9 +138,9 @@ struct DoUpdate {
 
 impl DoUpdate {
     fn new_for_insert(id: uuid::Uuid) -> Self {
-        use virtual_resource_provisioned::dsl;
+        use virtual_provisioning_resource::dsl;
 
-        let not_allocted = dsl::virtual_resource_provisioned
+        let not_allocted = dsl::virtual_provisioning_resource
             .find(id)
             .count()
             .single_value()
@@ -155,9 +155,9 @@ impl DoUpdate {
     }
 
     fn new_for_delete(id: uuid::Uuid) -> Self {
-        use virtual_resource_provisioned::dsl;
+        use virtual_provisioning_resource::dsl;
 
-        let already_allocated = dsl::virtual_resource_provisioned
+        let already_allocated = dsl::virtual_provisioning_resource
             .find(id)
             .count()
             .single_value()
@@ -173,9 +173,10 @@ impl DoUpdate {
 }
 
 #[derive(Subquery, QueryId)]
-#[subquery(name = virtual_resource_provisioning)]
+#[subquery(name = virtual_provisioning_collection)]
 struct UpdatedProvisions {
-    query: Box<dyn CteQuery<SqlType = virtual_resource_provisioning::SqlType>>,
+    query:
+        Box<dyn CteQuery<SqlType = virtual_provisioning_collection::SqlType>>,
 }
 
 impl UpdatedProvisions {
@@ -185,15 +186,15 @@ impl UpdatedProvisions {
         values: V,
     ) -> Self
     where
-        V: diesel::AsChangeset<Target = virtual_resource_provisioning::table>,
+        V: diesel::AsChangeset<Target = virtual_provisioning_collection::table>,
         <V as diesel::AsChangeset>::Changeset:
             QueryFragment<Pg> + Send + 'static,
     {
-        use virtual_resource_provisioning::dsl;
+        use virtual_provisioning_collection::dsl;
 
         Self {
             query: Box::new(
-                diesel::update(dsl::virtual_resource_provisioning)
+                diesel::update(dsl::virtual_provisioning_collection)
                     .set(values)
                     .filter(
                         dsl::id.eq_any(
@@ -209,7 +210,7 @@ impl UpdatedProvisions {
                             .single_value()
                             .assume_not_null(),
                     )
-                    .returning(virtual_resource_provisioning::all_columns),
+                    .returning(virtual_provisioning_collection::all_columns),
             ),
         }
     }
@@ -252,11 +253,11 @@ where
 /// Constructs a CTE for updating resource provisioning information in all
 /// collections for a particular object.
 #[derive(QueryId)]
-pub struct VirtualResourceProvisioningUpdate {
+pub struct VirtualProvisioningCollectionUpdate {
     cte: Cte,
 }
 
-impl VirtualResourceProvisioningUpdate {
+impl VirtualProvisioningCollectionUpdate {
     // Generic utility for updating all collections including this resource,
     // even transitively.
     //
@@ -282,7 +283,7 @@ impl VirtualResourceProvisioningUpdate {
     ) -> Self
     where
         U: QueryFragment<Pg> + crate::db::subquery::Subquery + Send + 'static,
-        V: diesel::AsChangeset<Target = virtual_resource_provisioning::table>,
+        V: diesel::AsChangeset<Target = virtual_provisioning_collection::table>,
         <V as diesel::AsChangeset>::Changeset:
             QueryFragment<Pg> + Send + 'static,
     {
@@ -303,7 +304,7 @@ impl VirtualResourceProvisioningUpdate {
         let final_select = Box::new(
             updated_collections
                 .query_source()
-                .select(VirtualResourceProvisioning::as_select()),
+                .select(VirtualProvisioningCollection::as_select()),
         );
 
         let cte = CteBuilder::new()
@@ -324,11 +325,11 @@ impl VirtualResourceProvisioningUpdate {
         disk_byte_diff: i64,
         project_id: uuid::Uuid,
     ) -> Self {
-        use virtual_resource_provisioned::dsl as resource_dsl;
-        use virtual_resource_provisioning::dsl as collection_dsl;
+        use virtual_provisioning_collection::dsl as collection_dsl;
+        use virtual_provisioning_resource::dsl as resource_dsl;
 
         let mut provision =
-            VirtualResourceProvisioned::new(id, ResourceTypeProvisioned::Disk);
+            VirtualProvisioningResource::new(id, ResourceTypeProvisioned::Disk);
         provision.virtual_disk_bytes_provisioned = disk_byte_diff;
 
         Self::apply_update(
@@ -336,10 +337,12 @@ impl VirtualResourceProvisioningUpdate {
             DoUpdate::new_for_insert(id),
             // The query to actually insert the record.
             UnreferenceableSubquery(
-                diesel::insert_into(resource_dsl::virtual_resource_provisioned)
-                    .values(provision)
-                    .on_conflict_do_nothing()
-                    .returning(virtual_resource_provisioned::all_columns),
+                diesel::insert_into(
+                    resource_dsl::virtual_provisioning_resource,
+                )
+                .values(provision)
+                .on_conflict_do_nothing()
+                .returning(virtual_provisioning_resource::all_columns),
             ),
             // Within this project, org, silo, fleet...
             project_id,
@@ -355,17 +358,17 @@ impl VirtualResourceProvisioningUpdate {
         disk_byte_diff: i64,
         project_id: uuid::Uuid,
     ) -> Self {
-        use virtual_resource_provisioned::dsl as resource_dsl;
-        use virtual_resource_provisioning::dsl as collection_dsl;
+        use virtual_provisioning_collection::dsl as collection_dsl;
+        use virtual_provisioning_resource::dsl as resource_dsl;
 
         Self::apply_update(
             // We should delete the record if it exists.
             DoUpdate::new_for_delete(id),
             // The query to actually delete the record.
             UnreferenceableSubquery(
-                diesel::delete(resource_dsl::virtual_resource_provisioned)
+                diesel::delete(resource_dsl::virtual_provisioning_resource)
                     .filter(resource_dsl::id.eq(id))
-                    .returning(virtual_resource_provisioned::all_columns),
+                    .returning(virtual_provisioning_resource::all_columns),
             ),
             // Within this project, org, silo, fleet...
             project_id,
@@ -382,10 +385,10 @@ impl VirtualResourceProvisioningUpdate {
         ram_diff: i64,
         project_id: uuid::Uuid,
     ) -> Self {
-        use virtual_resource_provisioned::dsl as resource_dsl;
-        use virtual_resource_provisioning::dsl as collection_dsl;
+        use virtual_provisioning_collection::dsl as collection_dsl;
+        use virtual_provisioning_resource::dsl as resource_dsl;
 
-        let mut provision = VirtualResourceProvisioned::new(
+        let mut provision = VirtualProvisioningResource::new(
             id,
             ResourceTypeProvisioned::Instance,
         );
@@ -397,10 +400,12 @@ impl VirtualResourceProvisioningUpdate {
             DoUpdate::new_for_insert(id),
             // The query to actually insert the record.
             UnreferenceableSubquery(
-                diesel::insert_into(resource_dsl::virtual_resource_provisioned)
-                    .values(provision)
-                    .on_conflict_do_nothing()
-                    .returning(virtual_resource_provisioned::all_columns),
+                diesel::insert_into(
+                    resource_dsl::virtual_provisioning_resource,
+                )
+                .values(provision)
+                .on_conflict_do_nothing()
+                .returning(virtual_provisioning_resource::all_columns),
             ),
             // Within this project, org, silo, fleet...
             project_id,
@@ -420,17 +425,17 @@ impl VirtualResourceProvisioningUpdate {
         ram_diff: i64,
         project_id: uuid::Uuid,
     ) -> Self {
-        use virtual_resource_provisioned::dsl as resource_dsl;
-        use virtual_resource_provisioning::dsl as collection_dsl;
+        use virtual_provisioning_collection::dsl as collection_dsl;
+        use virtual_provisioning_resource::dsl as resource_dsl;
 
         Self::apply_update(
             // We should delete the record if it exists.
             DoUpdate::new_for_delete(id),
             // The query to actually delete the record.
             UnreferenceableSubquery(
-                diesel::delete(resource_dsl::virtual_resource_provisioned)
+                diesel::delete(resource_dsl::virtual_provisioning_resource)
                     .filter(resource_dsl::id.eq(id))
-                    .returning(virtual_resource_provisioned::all_columns),
+                    .returning(virtual_provisioning_resource::all_columns),
             ),
             // Within this project, org, silo, fleet...
             project_id,
@@ -445,7 +450,7 @@ impl VirtualResourceProvisioningUpdate {
     }
 }
 
-impl QueryFragment<Pg> for VirtualResourceProvisioningUpdate {
+impl QueryFragment<Pg> for VirtualProvisioningCollectionUpdate {
     fn walk_ast<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -461,8 +466,8 @@ type SelectableSql<T> = <
     <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
 >::SqlType;
 
-impl Query for VirtualResourceProvisioningUpdate {
-    type SqlType = SelectableSql<VirtualResourceProvisioning>;
+impl Query for VirtualProvisioningCollectionUpdate {
+    type SqlType = SelectableSql<VirtualProvisioningCollection>;
 }
 
-impl RunQueryDsl<DbConnection> for VirtualResourceProvisioningUpdate {}
+impl RunQueryDsl<DbConnection> for VirtualProvisioningCollectionUpdate {}

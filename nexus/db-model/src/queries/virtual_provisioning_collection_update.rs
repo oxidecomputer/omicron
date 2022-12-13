@@ -4,12 +4,12 @@
 
 //! Describes the resource provisioning update CTE
 //!
-//! Refer to <nexus/src/db/queries/virtual_resource_provisioning_update.rs>
+//! Refer to <nexus/src/db/queries/virtual_provisioning_collection_update.rs>
 //! for the construction of this query.
 
 use crate::schema::organization;
 use crate::schema::silo;
-use crate::schema::virtual_resource_provisioning;
+use crate::schema::virtual_provisioning_collection;
 
 table! {
     parent_org {
@@ -45,7 +45,7 @@ diesel::allow_tables_to_appear_in_same_query!(organization, parent_org,);
 diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
 diesel::allow_tables_to_appear_in_same_query!(
-    virtual_resource_provisioning,
+    virtual_provisioning_collection,
     parent_org,
     parent_silo,
     parent_fleet,

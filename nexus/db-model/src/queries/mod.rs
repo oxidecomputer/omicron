@@ -5,4 +5,4 @@
 //! Subqueries used in CTEs.
 
 pub mod region_allocation;
-pub mod virtual_resource_provisioning_update;
+pub mod virtual_provisioning_collection_update;

@@ -417,7 +417,7 @@ table! {
 }
 
 table! {
-    virtual_resource_provisioning {
+    virtual_provisioning_collection {
         id -> Uuid,
         collection_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
@@ -427,7 +427,7 @@ table! {
 }
 
 table! {
-    virtual_resource_provisioned {
+    virtual_provisioning_resource {
         id -> Uuid,
         resource_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,

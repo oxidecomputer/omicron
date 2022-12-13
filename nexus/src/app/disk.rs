@@ -514,7 +514,7 @@ impl super::Nexus {
 
         // TODO: This should exist within a saga
         self.db_datastore
-            .virtual_resource_provisioning_delete_disk(
+            .virtual_provisioning_collection_delete_disk(
                 &opctx,
                 db_snapshot.id(),
                 project.id(),

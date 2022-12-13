@@ -324,7 +324,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     let provision = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
     assert_eq!(
@@ -354,7 +354,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
     let provision = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
     assert_eq!(
@@ -389,7 +389,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let provision = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
     assert_eq!(
@@ -413,7 +413,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let provision = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
     assert_eq!(
@@ -429,7 +429,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let provision = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
     assert_eq!(
@@ -445,7 +445,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let provision = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
     assert_eq!(provision.virtual_disk_bytes_provisioned, 0);

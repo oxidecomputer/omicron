@@ -604,7 +604,7 @@ pub enum ResourceType {
     RoleBuiltin,
     UpdateAvailableArtifact,
     UserBuiltin,
-    VirtualResourceProvisioning,
+    VirtualProvision,
     Zpool,
 }
 

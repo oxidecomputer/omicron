@@ -20,7 +20,7 @@ use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::OrganizationUpdate;
 use crate::db::model::Silo;
-use crate::db::model::VirtualResourceProvisioning;
+use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
@@ -84,9 +84,9 @@ impl DataStore {
                     }
                 })?;
 
-                self.virtual_resource_provisioning_create_on_connection(
+                self.virtual_provisioning_collection_create_on_connection(
                     &conn,
-                    VirtualResourceProvisioning::new(
+                    VirtualProvisioningCollection::new(
                         org.id(),
                         CollectionTypeProvisioned::Organization,
                     ),

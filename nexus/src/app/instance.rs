@@ -299,7 +299,7 @@ impl super::Nexus {
             .project_delete_instance(opctx, &authz_instance)
             .await?;
         self.db_datastore
-            .virtual_resource_provisioning_delete_instance(
+            .virtual_provisioning_collection_delete_instance(
                 &opctx,
                 instance.id(),
                 instance.project_id,

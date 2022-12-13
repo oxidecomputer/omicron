@@ -19,7 +19,7 @@ use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
-use crate::db::model::VirtualResourceProvisioning;
+use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
@@ -77,9 +77,9 @@ impl DataStore {
                 })?;
 
                 // Create resource provisioning for the project.
-                self.virtual_resource_provisioning_create_on_connection(
+                self.virtual_provisioning_collection_create_on_connection(
                     &conn,
-                    VirtualResourceProvisioning::new(
+                    VirtualProvisioningCollection::new(
                         project.id(),
                         CollectionTypeProvisioned::Project,
                     ),

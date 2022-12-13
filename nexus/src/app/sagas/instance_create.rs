@@ -828,7 +828,7 @@ async fn sic_account_resources(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .virtual_resource_provisioning_insert_instance(
+        .virtual_provisioning_collection_insert_instance(
             &opctx,
             instance_id,
             params.project_id,
@@ -857,7 +857,7 @@ async fn sic_account_resources_undo(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .virtual_resource_provisioning_delete_instance(
+        .virtual_provisioning_collection_delete_instance(
             &opctx,
             instance_id,
             params.project_id,

@@ -902,7 +902,7 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_disk_virtual_resource_provisioning(
+async fn test_disk_virtual_provisioning_collection(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -922,31 +922,46 @@ async fn test_disk_virtual_resource_provisioning(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // The project and organization should start as empty.
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id1)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id1)
         .await
         .unwrap();
-    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id2)
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        0
+    );
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id2)
         .await
         .unwrap();
-    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, org_id)
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        0
+    );
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, org_id)
         .await
         .unwrap();
-    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, *SILO_ID)
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        0
+    );
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
         .await
         .unwrap();
-    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, *FLEET_ID)
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        0
+    );
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, *FLEET_ID)
         .await
         .unwrap();
-    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        0
+    );
 
     // Ask for a 1 gibibyte disk in the first project.
     //
@@ -974,41 +989,44 @@ async fn test_disk_virtual_resource_provisioning(
     .execute()
     .await
     .expect("unexpected failure creating 1 GiB disk");
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id1)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id1)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id2)
-        .await
-        .unwrap();
-    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, org_id)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id2)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        0
+    );
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, org_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, *SILO_ID)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, *FLEET_ID)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, *FLEET_ID)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
 
@@ -1039,28 +1057,28 @@ async fn test_disk_virtual_resource_provisioning(
     .execute()
     .await
     .expect("unexpected failure creating 1 GiB disk");
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id1)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id1)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id2)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id2)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, org_id)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, org_id)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         2 * disk_size.to_bytes() as i64
     );
 
@@ -1072,25 +1090,28 @@ async fn test_disk_virtual_resource_provisioning(
         .execute()
         .await
         .expect("failed to delete disk");
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id1)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id1)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, project_id2)
-        .await
-        .unwrap();
-    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
-    let virtual_resource_provisioning = datastore
-        .virtual_resource_provisioning_get(&opctx, org_id)
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id2)
         .await
         .unwrap();
     assert_eq!(
-        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        0
+    );
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, org_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
 }

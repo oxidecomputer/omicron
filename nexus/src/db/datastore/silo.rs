@@ -18,7 +18,7 @@ use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
 use crate::db::model::Silo;
-use crate::db::model::VirtualResourceProvisioning;
+use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
 use crate::external_api::shared;
@@ -56,9 +56,9 @@ impl DataStore {
             })?;
         info!(opctx.log, "created {} built-in silos", count);
 
-        self.virtual_resource_provisioning_create(
+        self.virtual_provisioning_collection_create(
             opctx,
-            VirtualResourceProvisioning::new(
+            VirtualProvisioningCollection::new(
                 DEFAULT_SILO.id(),
                 CollectionTypeProvisioned::Silo,
             ),
@@ -150,18 +150,18 @@ impl DataStore {
             .await?
             .transaction_async(|conn| async move {
                 let silo = silo_create_query.get_result_async(&conn).await?;
-                use db::schema::virtual_resource_provisioning::dsl;
-                diesel::insert_into(dsl::virtual_resource_provisioning)
-                    .values(VirtualResourceProvisioning::new(
+                use db::schema::virtual_provisioning_collection::dsl;
+                diesel::insert_into(dsl::virtual_provisioning_collection)
+                    .values(VirtualProvisioningCollection::new(
                         silo.id(),
                         CollectionTypeProvisioned::Silo,
                     ))
                     .execute_async(&conn)
                     .await?;
 
-                self.virtual_resource_provisioning_create_on_connection(
+                self.virtual_provisioning_collection_create_on_connection(
                     &conn,
-                    VirtualResourceProvisioning::new(
+                    VirtualProvisioningCollection::new(
                         DEFAULT_SILO.id(),
                         CollectionTypeProvisioned::Silo,
                     ),

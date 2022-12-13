@@ -145,7 +145,7 @@ CREATE INDEX ON omicron.public.service (
 -- - Organizations
 -- - Silos
 -- - Fleet
-CREATE TABLE omicron.public.virtual_resource_provisioning (
+CREATE TABLE omicron.public.virtual_provisioning_collection (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
     -- Identifies the type of the collection.
@@ -167,7 +167,7 @@ CREATE TABLE omicron.public.virtual_resource_provisioning (
 -- - Disks
 -- - Instances
 -- - Snapshots
-CREATE TABLE omicron.public.virtual_resource_provisioned (
+CREATE TABLE omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
     -- Identifies the type of the resource.

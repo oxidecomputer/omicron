@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::virtual_resource_provisioning;
+use crate::schema::virtual_provisioning_collection;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -26,10 +26,10 @@ impl std::fmt::Display for CollectionTypeProvisioned {
     }
 }
 
-/// Describes virtual_resource_provisioning for a collection
+/// Describes virtual_provisioning_collection for a collection
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
-#[diesel(table_name = virtual_resource_provisioning)]
-pub struct VirtualResourceProvisioning {
+#[diesel(table_name = virtual_provisioning_collection)]
+pub struct VirtualProvisioningCollection {
     pub id: Uuid,
     pub collection_type: String,
 
@@ -38,7 +38,7 @@ pub struct VirtualResourceProvisioning {
     pub ram_provisioned: i64,
 }
 
-impl VirtualResourceProvisioning {
+impl VirtualProvisioningCollection {
     pub fn new(id: Uuid, collection_type: CollectionTypeProvisioned) -> Self {
         Self {
             id,
