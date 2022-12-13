@@ -201,7 +201,7 @@ impl super::Nexus {
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
-                .fetch()
+                .fetch_for(authz::Action::Delete)
                 .await?;
         self.db_datastore
             .project_delete(opctx, &authz_project, &db_project)
