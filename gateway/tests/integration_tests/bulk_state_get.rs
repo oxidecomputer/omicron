@@ -105,7 +105,6 @@ async fn bulk_sp_get_one_sp_powered_off() {
                     flt_sp,
                 },
             };
-            sp.details = SpState::Disabled;
         }
     }
 

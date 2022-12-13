@@ -11,7 +11,7 @@ futures = "0.3.25"
 libc = "0.2"
 slog-async = "2.6"
 slog-term = "2.9"
-tokio = { version = "1.22", features = [ "rt-multi-thread", "macros", "time" ] }
+tokio = { version = "1.23", features = [ "rt-multi-thread", "macros", "time" ] }
 tokio-tungstenite = "0.18"
 uuid = { version = "1.2", features = [ "v4" ] }
 

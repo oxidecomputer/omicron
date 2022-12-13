@@ -9,6 +9,7 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::bootstrap::params::SledAgentRequest;
 use crate::nexus::LazyNexusClient;
+use crate::services::ServiceManager;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -34,6 +35,7 @@ impl Server {
         config: &Config,
         log: Logger,
         request: SledAgentRequest,
+        services: ServiceManager,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -48,6 +50,7 @@ impl Server {
             log.clone(),
             lazy_nexus_client.clone(),
             request,
+            services,
         )
         .await
         .map_err(|e| e.to_string())?;
