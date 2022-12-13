@@ -62,56 +62,26 @@ impl super::Nexus {
         instance_selector: &'a params::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
-            params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
-                // TODO: 400 if project or organization are present
+            params::InstanceSelector(NameOrId::Id(id), ..) => {
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
                 Ok(instance)
             }
-            params::InstanceSelector {
-                instance: NameOrId::Name(instance_name),
-                project: Some(NameOrId::Id(project_id)),
-                ..
-            } => {
-                // TODO: 400 if organization is present
-                let instance = LookupPath::new(opctx, &self.db_datastore)
-                    .project_id(*project_id)
-                    .instance_name(Name::ref_cast(instance_name));
-                Ok(instance)
+            params::InstanceSelector(
+                NameOrId::Name(name),
+                project_selector,
+            ) => {
+                if let Some(project) = project_selector {
+                    let instance = self
+                        .project_lookup(opctx, project)?
+                        .instance_name(Name::ref_cast(name));
+                    Ok(instance)
+                } else {
+                    Err(Error::InvalidRequest {
+                        message: "Unable to resolve instance by name without instance".to_string(),
+                    })
+                }
             }
-            params::InstanceSelector {
-                instance: NameOrId::Name(instance_name),
-                project: Some(NameOrId::Name(project_name)),
-                organization: Some(NameOrId::Id(organization_id)),
-            } => {
-                let instance = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_id(*organization_id)
-                    .project_name(Name::ref_cast(project_name))
-                    .instance_name(Name::ref_cast(instance_name));
-                Ok(instance)
-            }
-            params::InstanceSelector {
-                instance: NameOrId::Name(instance_name),
-                project: Some(NameOrId::Name(project_name)),
-                organization: Some(NameOrId::Name(organization_name)),
-            } => {
-                let instance = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_name(Name::ref_cast(organization_name))
-                    .project_name(Name::ref_cast(project_name))
-                    .instance_name(Name::ref_cast(instance_name));
-                Ok(instance)
-            }
-            // TODO: Add a better error message
-            _ => Err(Error::InvalidRequest {
-                message: "
-                Unable to resolve instance. Expected one of
-                    - instance: Uuid 
-                    - instance: Name, project: Uuid
-                    - instance: Name, project: Name, organization: Uuid
-                    - instance: Name, project: Name, organization: Name
-                "
-                .to_string(),
-            }),
         }
     }
 

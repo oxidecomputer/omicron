@@ -33,39 +33,23 @@ impl super::Nexus {
         project_selector: &'a params::ProjectSelector,
     ) -> LookupResult<lookup::Project<'a>> {
         match project_selector {
-            params::ProjectSelector { project: NameOrId::Id(id), .. } => {
-                // TODO: 400 if organization is present
+            params::ProjectSelector(NameOrId::Id(id), ..) => {
                 let project =
                     LookupPath::new(opctx, &self.db_datastore).project_id(*id);
                 Ok(project)
             }
-            params::ProjectSelector {
-                project: NameOrId::Name(project_name),
-                organization: Some(NameOrId::Id(organization_id)),
-            } => {
-                let project = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_id(*organization_id)
-                    .project_name(Name::ref_cast(project_name));
-                Ok(project)
+            params::ProjectSelector(NameOrId::Name(name), org_selector) => {
+                if let Some(org) = org_selector {
+                    let project = self
+                        .organization_lookup(opctx, org)?
+                        .project_name(Name::ref_cast(name));
+                    Ok(project)
+                } else {
+                    Err(Error::InvalidRequest {
+                        message: "Unable to resolve project by name without organization".to_string(),
+                    })
+                }
             }
-            params::ProjectSelector {
-                project: NameOrId::Name(project_name),
-                organization: Some(NameOrId::Name(organization_name)),
-            } => {
-                let project = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_name(Name::ref_cast(organization_name))
-                    .project_name(Name::ref_cast(project_name));
-                Ok(project)
-            }
-            _ => Err(Error::InvalidRequest {
-                message: "
-                    Unable to resolve project. Expected one of
-                        - project: Uuid
-                        - project: Name, organization: Uuid 
-                        - project: Name, organization: Name
-                    "
-                .to_string(),
-            }),
         }
     }
     pub async fn project_create(

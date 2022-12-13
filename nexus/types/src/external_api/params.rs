@@ -18,31 +18,36 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectSelector {
-    pub project: NameOrId,
-    pub organization: Option<NameOrId>,
+pub struct OrganizationSelector(pub NameOrId);
+
+pub struct ProjectSelector(pub NameOrId, pub Option<OrganizationSelector>);
+
+impl ProjectSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: NameOrId,
+    ) -> ProjectSelector {
+        ProjectSelector(project, organization.map(|o| OrganizationSelector(o)))
+    }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceSelector {
-    pub instance: NameOrId,
-    pub project: Option<NameOrId>,
-    pub organization: Option<NameOrId>,
-}
+pub struct InstanceSelector(pub NameOrId, pub Option<ProjectSelector>);
 
 impl InstanceSelector {
     pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
         instance: NameOrId,
-        project_selector: &Option<ProjectSelector>,
     ) -> InstanceSelector {
-        InstanceSelector {
+        InstanceSelector(
             instance,
-            organization: project_selector
-                .as_ref()
-                .and_then(|s| s.organization.clone()),
-            project: project_selector.as_ref().map(|s| s.project.clone()),
-        }
+            project.map(|p| {
+                ProjectSelector(
+                    p,
+                    organization.map(|o| OrganizationSelector(o)),
+                )
+            }),
+        )
     }
 }
 
