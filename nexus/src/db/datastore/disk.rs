@@ -62,8 +62,15 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn project_create_disk(&self, disk: Disk) -> CreateResult<Disk> {
+    pub async fn project_create_disk(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        disk: Disk,
+    ) -> CreateResult<Disk> {
         use db::schema::disk::dsl;
+
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let gen = disk.runtime().gen;
         let name = disk.name().clone();
@@ -76,13 +83,10 @@ impl DataStore {
                 .on_conflict(dsl::id)
                 .do_nothing(),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Project,
-                lookup_type: LookupType::ById(project_id),
-            },
+            AsyncInsertError::CollectionNotFound => authz_project.not_found(),
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
