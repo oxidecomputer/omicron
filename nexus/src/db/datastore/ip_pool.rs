@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -140,7 +141,7 @@ impl DataStore {
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
-        let project_id = match new_pool.project.clone() {
+        let maybe_authz_project = match new_pool.project.clone() {
             None => None,
             Some(project) => {
                 if let Some(_) = &rack_id {
@@ -152,26 +153,30 @@ impl DataStore {
                 let (.., authz_project) = LookupPath::new(opctx, self)
                     .organization_name(&Name(project.organization))
                     .project_name(&Name(project.project))
-                    .lookup_for(authz::Action::Read)
+                    .lookup_for(authz::Action::CreateChild)
                     .await?;
-                Some(authz_project.id())
+                Some(authz_project)
             }
         };
-        let pool = IpPool::new(&new_pool.identity, project_id, rack_id);
+
+        let maybe_project_id = maybe_authz_project
+            .as_ref()
+            .map(|authz_project| authz_project.id());
+        let pool = IpPool::new(&new_pool.identity, maybe_project_id, rack_id);
         let pool_name = pool.name().as_str().to_string();
 
-        if let Some(project_id) = project_id {
+        if let Some(authz_project) = maybe_authz_project {
+            opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
             Project::insert_resource(
-                project_id,
+                authz_project.id(),
                 diesel::insert_into(dsl::ip_pool).values(pool),
             )
             .insert_and_get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| match e {
-                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                    type_name: ResourceType::Project,
-                    lookup_type: LookupType::ById(project_id),
-                },
+                AsyncInsertError::CollectionNotFound => {
+                    authz_project.not_found()
+                }
                 AsyncInsertError::DatabaseError(e) => {
                     public_error_from_diesel_pool(
                         e,
