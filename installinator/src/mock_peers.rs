@@ -7,7 +7,9 @@ use std::{collections::BTreeMap, fmt, net::Ipv6Addr, time::Duration};
 use anyhow::{bail, Result};
 use bytes::Bytes;
 use progenitor_client::ResponseValue;
+use proptest::prelude::*;
 use reqwest::StatusCode;
+use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
 
 use crate::peers::{ArtifactId, PeersImpl};
@@ -23,13 +25,12 @@ impl fmt::Debug for MockPeersUniverse {
         f.debug_struct("MockPeersUniverse")
             .field("artifact", &format!("({} bytes)", self.artifact.len()))
             .field("peers", &self.peers)
-            .field("attempts", &self.attempt_bitmaps)
+            .field("attempt_bitmaps", &self.attempt_bitmaps)
             .finish()
     }
 }
 
 impl MockPeersUniverse {
-    #[allow(unused)]
     fn new(
         artifact: Bytes,
         peers: BTreeMap<Ipv6Addr, MockPeer>,
@@ -39,7 +40,51 @@ impl MockPeersUniverse {
         Self { artifact, peers, attempt_bitmaps }
     }
 
-    #[allow(unused)]
+    fn strategy(max_peer_count: usize) -> impl Strategy<Value = Self> {
+        let artifact_strategy = prop_oneof![
+            // Don't try shrinking the bytes inside the artifact -- their individual values don't
+            // matter.
+            99 => prop::collection::vec(any::<u8>().no_shrink(), 0..4096),
+            // Make it not very unlikely that the artifact is empty.
+            1 => Just(Vec::new()),
+        ];
+
+        // We can assume without loss of generality that content is fetched from peers in
+        // ascending IPv6 order. In other words, the addresses themselves aren't relevant beyond
+        // being unique identifiers. This means that this code can use a BTreeMap rather than a
+        // fancier structure like an IndexMap.
+        let peers_strategy = prop::collection::btree_map(
+            any::<Ipv6Addr>(),
+            any::<MockResponse_>(),
+            0..max_peer_count,
+        );
+
+        // Any u32 is a valid bitmap (see the documentation for AttemptBitmap).
+        let attempt_bitmaps_strategy =
+            prop::collection::vec(any::<AttemptBitmap>(), 1..16);
+
+        (artifact_strategy, peers_strategy, attempt_bitmaps_strategy).prop_map(
+            |(artifact, peers, attempt_bitmaps): (
+                Vec<u8>,
+                BTreeMap<Ipv6Addr, MockResponse_>,
+                Vec<AttemptBitmap>,
+            )| {
+                let artifact = Bytes::from(artifact);
+                let peers = peers
+                    .into_iter()
+                    .map(|(peer, response)| {
+                        let response = response.into_actual(&artifact);
+                        (
+                            peer,
+                            MockPeer { artifact: artifact.clone(), response },
+                        )
+                    })
+                    .collect();
+                Self::new(artifact, peers, attempt_bitmaps)
+            },
+        )
+    }
+
     fn expected_success(&self, timeout: Duration) -> Option<(usize, Ipv6Addr)> {
         self.attempts()
             .enumerate()
@@ -85,14 +130,16 @@ impl MockPeersUniverse {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-#[cfg_attr(test, derive(test_strategy::Arbitrary))]
-#[allow(unused)]
+#[derive(Copy, Clone, Debug, Arbitrary)]
 enum AttemptBitmap {
-    #[cfg_attr(test, weight(9))]
-    // We assume there are at most 32 peers.
+    /// Any u32 is a valid bitmap. If there are fewer peers than bits in the bitmap, the
+    /// higher-order bits will be ignored.
+    ///
+    /// (We check in MockPeersUniverse::new that there are at most 32 peers.)
+    #[weight(9)]
     Success(u32),
-    #[cfg_attr(test, weight(1))]
+
+    #[weight(1)]
     Failure,
 }
 
@@ -113,7 +160,6 @@ impl MockPeers {
     }
 
     /// Returns the peer that can return the entire dataset within the timeout.
-    #[allow(dead_code)]
     fn successful_peer(&self, timeout: Duration) -> Option<Ipv6Addr> {
         self.peers()
             .filter_map(|(addr, peer)| {
@@ -219,6 +265,15 @@ impl MockPeer {
                     }
                 }
 
+                // (This trivial function is copied from tokio's source.)
+                fn far_future() -> Duration {
+                    // Roughly 30 years from now.
+                    // API does not provide a way to obtain max `Instant`
+                    // or convert specific date in the future to instant.
+                    // 1000 years overflows on macOS, 100 years overflows on FreeBSD.
+                    Duration::from_secs(86400 * 365 * 30)
+                }
+
                 // If we got here, we didn't manage to return all the data we needed. Sleep forever.
                 tokio::time::sleep(far_future()).await;
             }
@@ -250,19 +305,10 @@ impl MockPeer {
     }
 }
 
-// (This trivial function is copied from tokio's source.)
-pub(crate) fn far_future() -> Duration {
-    // Roughly 30 years from now.
-    // API does not provide a way to obtain max `Instant`
-    // or convert specific date in the future to instant.
-    // 1000 years overflows on macOS, 100 years overflows on FreeBSD.
-    Duration::from_secs(86400 * 365 * 30)
-}
-
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 enum MockResponse {
-    // Once the actions run out, this times out.
+    // Once the actions run out, this times out. We don't need a separate "timeout" variant here
+    // because we don't lose any generality by relying on the length of the actions list.
     Response(Vec<ResponseAction>),
     NotFound { after: Duration },
     Forbidden { after: Duration },
@@ -274,129 +320,69 @@ struct ResponseAction {
     count: usize,
 }
 
-#[cfg(test)]
-mod proptest_helpers {
-    use proptest::prelude::*;
-    use test_strategy::Arbitrary;
-
-    use super::*;
-
-    impl MockPeersUniverse {
-        pub(crate) fn strategy(
-            max_peer_count: usize,
-        ) -> impl Strategy<Value = Self> {
-            let artifact_strategy = prop_oneof![
-                // Don't try shrinking the bytes inside the artifact -- their individual values don't
-                // matter.
-                99 => prop::collection::vec(any::<u8>().no_shrink(), 0..4096),
-                // Make it not very unlikely that the artifact is empty.
-                1 => Just(Vec::new()),
-            ];
-
-            // We can assume without loss of generality that content is fetched from peers in
-            // ascending IPv6 order. In other words, the addresses themselves aren't relevant beyond
-            // being unique identifiers. This means that this code can use a BTreeMap rather than a
-            // fancier structure like an IndexMap.
-            let peers_strategy = prop::collection::btree_map(
-                any::<Ipv6Addr>(),
-                any::<MockResponse_>(),
-                0..max_peer_count,
-            );
-
-            // Any u32 is a valid bitmap. If there are fewer peers than bits in the bitmap, the
-            // higher-order bits will be ignored.
-            let attempt_bitmaps_strategy =
-                prop::collection::vec(any::<AttemptBitmap>(), 1..16);
-
-            (artifact_strategy, peers_strategy, attempt_bitmaps_strategy)
-                .prop_map(
-                    |(artifact, peers, attempt_bitmaps): (
-                        Vec<u8>,
-                        BTreeMap<Ipv6Addr, MockResponse_>,
-                        Vec<AttemptBitmap>,
-                    )| {
-                        let artifact = Bytes::from(artifact);
-                        let peers = peers
-                            .into_iter()
-                            .map(|(peer, response)| {
-                                let response = response.into_actual(&artifact);
-                                (
-                                    peer,
-                                    MockPeer {
-                                        artifact: artifact.clone(),
-                                        response,
-                                    },
-                                )
-                            })
-                            .collect();
-                        Self::new(artifact, peers, attempt_bitmaps)
-                    },
-                )
-        }
-    }
-
-    #[derive(Debug, Arbitrary)]
-    enum MockResponse_ {
-        #[weight(8)]
-        Response(
-            #[strategy(prop::collection::vec(any::<ResponseAction_>(), 0..32))]
-            Vec<ResponseAction_>,
-        ),
-        #[weight(1)]
-        NotFound {
-            #[strategy((0..1000u64).prop_map(Duration::from_millis))]
-            after: Duration,
-        },
-        #[weight(1)]
-        Forbidden {
-            #[strategy((0..1000u64).prop_map(Duration::from_millis))]
-            after: Duration,
-        },
-    }
-
-    impl MockResponse_ {
-        fn into_actual(self, data: &[u8]) -> MockResponse {
-            // This means that the data will be broken up into at least 2 packets, and more likely
-            // 4-8.
-            let limit = data.len() / 2;
-            match self {
-                Self::Response(actions) => {
-                    let actions = actions
-                        .into_iter()
-                        .map(|action| action.into_actual(limit))
-                        .collect();
-                    MockResponse::Response(actions)
-                }
-                Self::NotFound { after } => MockResponse::NotFound { after },
-                Self::Forbidden { after } => MockResponse::Forbidden { after },
-            }
-        }
-    }
-
-    #[derive(Debug, Arbitrary)]
-    struct ResponseAction_ {
+/// This is an enum that has the same shape as `MockResponse`, except it uses `prop::sample::Index`
+/// (within `ResponseAction_`) to represent an unresolved index into the artifact.
+#[derive(Debug, Arbitrary)]
+enum MockResponse_ {
+    #[weight(8)]
+    Response(
+        #[strategy(prop::collection::vec(any::<ResponseAction_>(), 0..32))]
+        Vec<ResponseAction_>,
+    ),
+    #[weight(1)]
+    NotFound {
         #[strategy((0..1000u64).prop_map(Duration::from_millis))]
         after: Duration,
-        count: prop::sample::Index,
-    }
+    },
+    #[weight(1)]
+    Forbidden {
+        #[strategy((0..1000u64).prop_map(Duration::from_millis))]
+        after: Duration,
+    },
+}
 
-    impl ResponseAction_ {
-        // The return value is the actual action + the number of bytes to advance data by.
-        fn into_actual(self, limit: usize) -> ResponseAction {
-            let limit = if limit == 0 {
-                // limit = 0 if it's an empty artifact. We can try and record that we're returning
-                // some bytes anyway.
-                8
-            } else {
-                limit
-            };
-            let count = self.count.index(limit);
-            ResponseAction { after: self.after, count }
+impl MockResponse_ {
+    fn into_actual(self, data: &[u8]) -> MockResponse {
+        // This means that the data will be broken up into at least 2 packets, and more likely
+        // 4-8.
+        let limit = data.len() / 2;
+        match self {
+            Self::Response(actions) => {
+                let actions = actions
+                    .into_iter()
+                    .map(|action| action.into_actual(limit))
+                    .collect();
+                MockResponse::Response(actions)
+            }
+            Self::NotFound { after } => MockResponse::NotFound { after },
+            Self::Forbidden { after } => MockResponse::Forbidden { after },
         }
     }
 }
 
-#[cfg(test)]
+/// This is an enum that has the same shape as `ResponseAction_`, except it uses `prop::sample::Index`
+/// (within `ResponseAction_`) to represent an unresolved index into the artifact.
+#[derive(Debug, Arbitrary)]
+struct ResponseAction_ {
+    #[strategy((0..1000u64).prop_map(Duration::from_millis))]
+    after: Duration,
+    count: prop::sample::Index,
+}
+
+impl ResponseAction_ {
+    fn into_actual(self, limit: usize) -> ResponseAction {
+        let limit = if limit == 0 {
+            // limit = 0 if it's an empty artifact. We can try and record that we're returning
+            // some bytes anyway.
+            8
+        } else {
+            limit
+        };
+        let count = self.count.index(limit);
+        ResponseAction { after: self.after, count }
+    }
+}
+
 mod tests {
     use super::*;
     use crate::{
@@ -406,7 +392,6 @@ mod tests {
 
     use bytes::Buf;
     use futures::future;
-    use proptest::prelude::*;
     use slog::Drain;
     use test_strategy::proptest;
 

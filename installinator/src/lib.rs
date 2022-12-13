@@ -4,6 +4,7 @@
 
 mod dispatch;
 mod errors;
+#[cfg(test)]
 mod mock_peers;
 mod peers;
 

@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -11,7 +13,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     errors::DiscoverPeersError,
-    peers::{ArtifactId, FetchedArtifact, Peers},
+    peers::{ArtifactId, ExamplePeers, FetchedArtifact, Peers},
 };
 
 /// Installinator app.
@@ -28,7 +30,7 @@ impl InstallinatorApp {
         let log = Self::setup_log("/tmp/installinator.log").unwrap();
 
         match self.subcommand {
-            InstallinatorCommand::Discover(opts) => opts.exec(log).await,
+            InstallinatorCommand::DebugDiscover(opts) => opts.exec(log).await,
             InstallinatorCommand::Install(opts) => opts.exec(log).await,
         }
     }
@@ -58,20 +60,24 @@ impl InstallinatorApp {
 #[derive(Debug, Subcommand)]
 enum InstallinatorCommand {
     /// Discover peers on the bootstrap network.
-    Discover(DiscoverOpts),
+    DebugDiscover(DebugDiscoverOpts),
     /// Perform the installation.
     Install(InstallOpts),
 }
 
 #[derive(Debug, Args)]
 #[command(version)]
-struct DiscoverOpts {
-    //
+struct DebugDiscoverOpts {
+    // TODO: add options here
 }
 
-impl DiscoverOpts {
+impl DebugDiscoverOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        let peers = Peers::mock_discover(&log).await?;
+        let peers = Peers::new(
+            &log,
+            Box::new(ExamplePeers::new(&log)?),
+            Duration::from_secs(10),
+        );
         println!("discovered peers: {}", peers.display());
         Ok(())
     }
@@ -97,10 +103,14 @@ impl InstallOpts {
             || {
                 // TODO: discover nodes via the bootstrap network
                 async {
-                    Peers::mock_discover(&log)
-                        .await
-                        .context("error discovering peers")
-                        .map_err(DiscoverPeersError::Retry)
+                    Ok(Peers::new(
+                        &log,
+                        Box::new(
+                            ExamplePeers::new(&log)
+                                .map_err(DiscoverPeersError::Retry)?,
+                        ),
+                        Duration::from_secs(10),
+                    ))
                 }
             },
             &self.artifact_id,

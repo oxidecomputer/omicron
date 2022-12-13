@@ -18,7 +18,7 @@ use tokio::{
 
 use crate::errors::{ArtifactFetchError, DiscoverPeersError};
 
-/// A fetched artifact
+/// A fetched artifact.
 pub(crate) struct FetchedArtifact {
     pub(crate) attempt: usize,
     pub(crate) addr: Ipv6Addr,
@@ -28,8 +28,8 @@ pub(crate) struct FetchedArtifact {
 impl FetchedArtifact {
     /// In a loop, discover peers, and fetch from them.
     ///
-    /// This only produces an error if the discover function errors out. In normal use, it is expected
-    /// to never error out.
+    /// If `discover_fn` returns [`DiscoverPeersError::Retry`], this function will retry. If it
+    /// returns `DiscoverPeersError::Abort`, this function will exit with the underlying error.
     pub(crate) async fn loop_fetch_from_peers<F, Fut>(
         log: &slog::Logger,
         mut discover_fn: F,
@@ -50,7 +50,8 @@ impl FetchedArtifact {
                         "(attempt {attempt}) failed to discover peers, retrying: {}",
                         DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
                     );
-                    // XXX: add a delay here?
+                    // Add a small delay here to avoid slamming the CPU.
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                     continue;
                 }
                 Err(DiscoverPeersError::Abort(error)) => {
@@ -73,6 +74,8 @@ impl FetchedArtifact {
                         log,
                         "unable to fetch artifact from peers, retrying",
                     );
+                    // Add a small delay here to avoid slamming the CPU.
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
         }
@@ -111,15 +114,6 @@ impl Peers {
     ) -> Self {
         let log = log.new(slog::o!("component" => "Peers"));
         Self { log, imp, timeout }
-    }
-
-    // TODO: replace this with MockPeersUniverse
-    pub(crate) async fn mock_discover(log: &slog::Logger) -> Result<Peers> {
-        Ok(Self::new(
-            log,
-            Box::new(MockPeers::new(log)?),
-            Duration::from_secs(10),
-        ))
     }
 
     pub(crate) async fn fetch_artifact(
@@ -238,26 +232,28 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
     );
 }
 
+/// This is an example implementation of `PeersImpl` that will be deleted once the real
+/// implementation is up and running.
 #[derive(Clone, Debug)]
-struct MockPeers {
+pub(crate) struct ExamplePeers {
     peers: Vec<Ipv6Addr>,
 }
 
-impl MockPeers {
-    fn new(log: &slog::Logger) -> Result<Self> {
-        let log = log.new(slog::o!("component" => "MockPeers"));
+impl ExamplePeers {
+    pub(crate) fn new(log: &slog::Logger) -> Result<Self> {
+        let log = log.new(slog::o!("component" => "ExamplePeers"));
 
         // TODO: reach out to the bootstrap network
         slog::debug!(
             log,
-            "returning Ipv6Addr::LOCALHOST and UNSPECIFIED as mock peer addresses"
+            "returning Ipv6Addr::LOCALHOST and UNSPECIFIED as example peer addresses"
         );
         let peers = vec![Ipv6Addr::LOCALHOST, Ipv6Addr::UNSPECIFIED];
         Ok(Self { peers })
     }
 }
 
-impl PeersImpl for MockPeers {
+impl PeersImpl for ExamplePeers {
     fn peers(&self) -> Box<dyn Iterator<Item = Ipv6Addr> + '_> {
         Box::new(self.peers.iter().copied())
     }
@@ -271,14 +267,14 @@ impl PeersImpl for MockPeers {
         peer: Ipv6Addr,
         artifact_id: &ArtifactId,
         sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
-        // MockPeers doesn't need cancel_receiver (yet)
+        // ExamplePeers doesn't need cancel_receiver (yet)
         _cancel_receiver: oneshot::Receiver<()>,
     ) {
         let artifact_id = artifact_id.clone();
         tokio::spawn(async move {
             let res = if peer == Ipv6Addr::LOCALHOST {
                 let mut bytes = BytesMut::new();
-                bytes.extend_from_slice(b"mock");
+                bytes.extend_from_slice(b"example");
                 bytes.extend_from_slice(artifact_id.to_string().as_bytes());
                 Ok(bytes.freeze())
             } else if peer == Ipv6Addr::UNSPECIFIED {
@@ -290,7 +286,7 @@ impl PeersImpl for MockPeers {
                     ),
                 ))
             } else {
-                panic!("invalid peer, unknown to MockPeers: {peer}")
+                panic!("invalid peer, unknown to ExamplePeers: {peer}")
             };
 
             // Ignore errors in case the channel is dropped.
