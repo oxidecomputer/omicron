@@ -4,8 +4,8 @@
 
 use crate::config::Config;
 use crate::config::SidecarConfig;
+use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
-use crate::ignition_id;
 use crate::rot::RotSprocketExt;
 use crate::server;
 use crate::server::UdpServer;
@@ -14,18 +14,26 @@ use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
+use gateway_messages::ignition;
+use gateway_messages::ignition::IgnitionError;
+use gateway_messages::ignition::LinkEvents;
+use gateway_messages::sp_impl::BoundsChecked;
 use gateway_messages::sp_impl::DeviceDescription;
 use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::BulkIgnitionState;
+use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
-use gateway_messages::IgnitionFlags;
 use gateway_messages::IgnitionState;
-use gateway_messages::ResponseError;
+use gateway_messages::ImageVersion;
+use gateway_messages::MgsError;
+use gateway_messages::PowerState;
+use gateway_messages::RotState;
 use gateway_messages::SerialNumber;
 use gateway_messages::SpComponent;
+use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpState;
+use gateway_messages::StartupOptions;
 use slog::debug;
 use slog::info;
 use slog::warn;
@@ -35,6 +43,7 @@ use sprockets_rot::common::msgs::RotResponseV1;
 use sprockets_rot::common::Ed25519PublicKey;
 use sprockets_rot::RotSprocket;
 use sprockets_rot::RotSprocketError;
+use std::iter;
 use std::net::SocketAddrV6;
 use std::sync::Mutex;
 use tokio::select;
@@ -43,7 +52,7 @@ use tokio::sync::oneshot;
 use tokio::task;
 use tokio::task::JoinHandle;
 
-const SIM_SIDECAR_VERSION: u32 = 1;
+const SIM_SIDECAR_VERSION: ImageVersion = ImageVersion { epoch: 0, version: 0 };
 
 pub struct Sidecar {
     rot: Mutex<RotSprocket>,
@@ -109,57 +118,42 @@ impl Sidecar {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, inner_task) = if let Some(bind_addrs) =
-            sidecar.common.bind_addrs
-        {
-            // bind to our two local "KSZ" ports
-            assert_eq!(bind_addrs.len(), 2);
-            let servers = future::try_join(
-                UdpServer::new(
-                    bind_addrs[0],
-                    sidecar.common.multicast_addr,
-                    &log,
-                ),
-                UdpServer::new(
-                    bind_addrs[1],
-                    sidecar.common.multicast_addr,
-                    &log,
-                ),
-            )
-            .await?;
-            let servers = [servers.0, servers.1];
-            let local_addrs =
-                [servers[0].local_addr(), servers[1].local_addr()];
+        let (local_addrs, inner_task) =
+            if let Some(bind_addrs) = sidecar.common.bind_addrs {
+                // bind to our two local "KSZ" ports
+                assert_eq!(bind_addrs.len(), 2);
+                let servers = future::try_join(
+                    UdpServer::new(
+                        bind_addrs[0],
+                        sidecar.common.multicast_addr,
+                        &log,
+                    ),
+                    UdpServer::new(
+                        bind_addrs[1],
+                        sidecar.common.multicast_addr,
+                        &log,
+                    ),
+                )
+                .await?;
+                let servers = [servers.0, servers.1];
+                let local_addrs =
+                    [servers[0].local_addr(), servers[1].local_addr()];
 
-            let mut ignition_targets = Vec::new();
-            for _ in &config.simulated_sps.sidecar {
-                ignition_targets.push(IgnitionState {
-                    id: ignition_id::SIDECAR,
-                    flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
-                });
-            }
-            for _ in &config.simulated_sps.gimlet {
-                ignition_targets.push(IgnitionState {
-                    id: ignition_id::GIMLET,
-                    flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
-                });
-            }
+                let inner = Inner::new(
+                    servers,
+                    sidecar.common.components.clone(),
+                    sidecar.common.serial_number,
+                    FakeIgnition::new(&config.simulated_sps),
+                    commands_rx,
+                    log,
+                );
+                let inner_task =
+                    task::spawn(async move { inner.run().await.unwrap() });
 
-            let inner = Inner::new(
-                servers,
-                sidecar.common.components.clone(),
-                sidecar.common.serial_number,
-                ignition_targets,
-                commands_rx,
-                log,
-            );
-            let inner_task =
-                task::spawn(async move { inner.run().await.unwrap() });
-
-            (Some(local_addrs), Some(inner_task))
-        } else {
-            (None, None)
-        };
+                (Some(local_addrs), Some(inner_task))
+            } else {
+                (None, None)
+            };
 
         let (manufacturing_public_key, rot) =
             RotSprocket::bootstrap_from_config(&sidecar.common);
@@ -211,7 +205,7 @@ impl Inner {
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
         serial_number: SerialNumber,
-        ignition_targets: Vec<IgnitionState>,
+        ignition: FakeIgnition,
         commands: mpsc::UnboundedReceiver<(
             Command,
             oneshot::Sender<CommandResponse>,
@@ -220,12 +214,7 @@ impl Inner {
     ) -> Self {
         let [udp0, udp1] = servers;
         Self {
-            handler: Handler {
-                log,
-                components,
-                serial_number,
-                ignition_targets,
-            },
+            handler: Handler::new(serial_number, components, ignition, log),
             udp0,
             udp1,
             commands,
@@ -271,7 +260,10 @@ impl Inner {
                     match command {
                         Command::CurrentIgnitionState => {
                             tx.send(CommandResponse::CurrentIgnitionState(
-                                self.handler.ignition_targets.clone()
+                                self.handler
+                                    .ignition
+                                    .state
+                                    .clone()
                             )).map_err(|_| "receiving half died").unwrap();
                         }
                         Command::SetResponsiveness(r) => {
@@ -289,33 +281,61 @@ impl Inner {
 struct Handler {
     log: Logger,
     components: Vec<SpComponentConfig>,
+
+    // `SpHandler` wants `&'static str` references when describing components;
+    // this is fine on the real SP where the strings are baked in at build time,
+    // but awkward here where we read them in at runtime. We'll leak the strings
+    // to conform to `SpHandler` rather than making it more complicated to ease
+    // our life as a simulator.
+    leaked_component_device_strings: Vec<&'static str>,
+    leaked_component_description_strings: Vec<&'static str>,
+
     serial_number: SerialNumber,
-    ignition_targets: Vec<IgnitionState>,
+    ignition: FakeIgnition,
+    power_state: PowerState,
 }
 
 impl Handler {
-    fn get_target(&self, target: u8) -> Result<&IgnitionState, ResponseError> {
-        self.ignition_targets
-            .get(usize::from(target))
-            .ok_or(ResponseError::IgnitionTargetDoesNotExist(target))
-    }
+    fn new(
+        serial_number: SerialNumber,
+        components: Vec<SpComponentConfig>,
+        ignition: FakeIgnition,
+        log: Logger,
+    ) -> Self {
+        let mut leaked_component_device_strings =
+            Vec::with_capacity(components.len());
+        let mut leaked_component_description_strings =
+            Vec::with_capacity(components.len());
 
-    fn get_target_mut(
-        &mut self,
-        target: u8,
-    ) -> Result<&mut IgnitionState, ResponseError> {
-        self.ignition_targets
-            .get_mut(usize::from(target))
-            .ok_or(ResponseError::IgnitionTargetDoesNotExist(target))
+        for c in &components {
+            leaked_component_device_strings
+                .push(&*Box::leak(c.device.clone().into_boxed_str()));
+            leaked_component_description_strings
+                .push(&*Box::leak(c.description.clone().into_boxed_str()));
+        }
+
+        Self {
+            log,
+            components,
+            leaked_component_device_strings,
+            leaked_component_description_strings,
+            serial_number,
+            ignition,
+            power_state: PowerState::A2,
+        }
     }
 }
 
 impl SpHandler for Handler {
+    type BulkIgnitionStateIter = iter::Skip<std::vec::IntoIter<IgnitionState>>;
+    type BulkIgnitionLinkEventsIter =
+        iter::Skip<std::vec::IntoIter<LinkEvents>>;
+
     fn discover(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<gateway_messages::DiscoverResponse, ResponseError> {
+    ) -> Result<gateway_messages::DiscoverResponse, SpError> {
         debug!(
             &self.log,
             "received discover; sending response";
@@ -325,13 +345,17 @@ impl SpHandler for Handler {
         Ok(DiscoverResponse { sp_port: port })
     }
 
+    fn num_ignition_ports(&mut self) -> Result<u32, SpError> {
+        Ok(self.ignition.num_targets() as u32)
+    }
+
     fn ignition_state(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
         target: u8,
-    ) -> Result<IgnitionState, ResponseError> {
-        let state = self.get_target(target)?;
+    ) -> Result<IgnitionState, SpError> {
+        let state = self.ignition.get_target(target)?;
         debug!(
             &self.log,
             "received ignition state request";
@@ -347,27 +371,104 @@ impl SpHandler for Handler {
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<BulkIgnitionState, ResponseError> {
-        let num_targets = self.ignition_targets.len();
-        assert!(
-            num_targets <= BulkIgnitionState::MAX_IGNITION_TARGETS,
-            "too many configured ignition targets (max is {})",
-            BulkIgnitionState::MAX_IGNITION_TARGETS
+        offset: u32,
+    ) -> Result<Self::BulkIgnitionStateIter, SpError> {
+        debug!(
+            &self.log,
+            "received bulk ignition state request";
+            "sender" => %sender,
+            "port" => ?port,
+            "offset" => offset,
+            "state" => ?self.ignition.state,
         );
-        let mut out = BulkIgnitionState {
-            targets: [IgnitionState::default();
-                BulkIgnitionState::MAX_IGNITION_TARGETS],
-        };
-        out.targets[..num_targets].copy_from_slice(&self.ignition_targets);
+        Ok(self.ignition.state.clone().into_iter().skip(offset as usize))
+    }
+
+    fn ignition_link_events(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        target: u8,
+    ) -> Result<LinkEvents, SpError> {
+        // Check validity of `target`
+        _ = self.ignition.get_target(target)?;
+
+        let events = self.ignition.link_events[usize::from(target)];
 
         debug!(
             &self.log,
-            "received bulk ignition state request; sending state for {} targets",
-            num_targets;
+            "received ignition link events request";
             "sender" => %sender,
             "port" => ?port,
+            "target" => target,
+            "events" => ?events,
         );
-        Ok(out)
+
+        Ok(events)
+    }
+
+    fn bulk_ignition_link_events(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        offset: u32,
+    ) -> Result<Self::BulkIgnitionLinkEventsIter, SpError> {
+        debug!(
+            &self.log,
+            "received bulk ignition link events request";
+            "sender" => %sender,
+            "port" => ?port,
+            "offset" => offset,
+        );
+        Ok(self.ignition.link_events.clone().into_iter().skip(offset as usize))
+    }
+
+    /// If `target` is `None`, clear link events for all targets.
+    fn clear_ignition_link_events(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        target: Option<u8>,
+        transceiver_select: Option<ignition::TransceiverSelect>,
+    ) -> Result<(), SpError> {
+        let targets = match target {
+            Some(t) => {
+                // Check validity
+                _ = self.ignition.get_target(t)?;
+                usize::from(t)..usize::from(t) + 1
+            }
+            None => 0..self.ignition.num_targets(),
+        };
+
+        for t in targets {
+            match transceiver_select {
+                Some(ignition::TransceiverSelect::Controller) => {
+                    self.ignition.link_events[t].controller =
+                        empty_transceiver_events();
+                }
+                Some(ignition::TransceiverSelect::TargetLink0) => {
+                    self.ignition.link_events[t].target_link0 =
+                        empty_transceiver_events();
+                }
+                Some(ignition::TransceiverSelect::TargetLink1) => {
+                    self.ignition.link_events[t].target_link1 =
+                        empty_transceiver_events();
+                }
+                None => {
+                    self.ignition.link_events[t] = empty_link_events();
+                }
+            }
+        }
+
+        debug!(
+            &self.log,
+            "cleared ignition link events";
+            "sender" => %sender,
+            "port" => ?port,
+            "target" => ?target,
+            "transceiver_select" => ?transceiver_select,
+        );
+        Ok(())
     }
 
     fn ignition_command(
@@ -376,17 +477,8 @@ impl SpHandler for Handler {
         port: SpPort,
         target: u8,
         command: IgnitionCommand,
-    ) -> Result<(), ResponseError> {
-        let state = self.get_target_mut(target)?;
-        match command {
-            IgnitionCommand::PowerOn => {
-                state.flags.set(IgnitionFlags::POWER, true)
-            }
-            IgnitionCommand::PowerOff => {
-                state.flags.set(IgnitionFlags::POWER, false)
-            }
-        }
-
+    ) -> Result<(), SpError> {
+        self.ignition.command(target, command)?;
         debug!(
             &self.log,
             "received ignition command; sending ack";
@@ -403,13 +495,13 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         _component: SpComponent,
-    ) -> Result<(), ResponseError> {
+    ) -> Result<(), SpError> {
         warn!(
             &self.log, "received serial console attach; unsupported by sidecar";
             "sender" => %sender,
             "port" => ?port,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn serial_console_write(
@@ -418,36 +510,45 @@ impl SpHandler for Handler {
         port: SpPort,
         _offset: u64,
         _data: &[u8],
-    ) -> Result<u64, ResponseError> {
+    ) -> Result<u64, SpError> {
         warn!(
             &self.log, "received serial console write; unsupported by sidecar";
             "sender" => %sender,
             "port" => ?port,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn serial_console_detach(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<(), ResponseError> {
+    ) -> Result<(), SpError> {
         warn!(
             &self.log, "received serial console detach; unsupported by sidecar";
             "sender" => %sender,
             "port" => ?port,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn sp_state(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<SpState, ResponseError> {
+    ) -> Result<SpState, SpError> {
         let state = SpState {
             serial_number: self.serial_number,
             version: SIM_SIDECAR_VERSION,
+            power_state: self.power_state,
+            rot: Ok(RotState {
+                version: SIM_SIDECAR_VERSION,
+                messages_received: 0,
+                invalid_messages_received: 0,
+                incomplete_transmissions: 0,
+                rx_fifo_overrun: 0,
+                tx_fifo_underrun: 0,
+            }),
         };
         debug!(
             &self.log, "received state request";
@@ -463,7 +564,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         update: gateway_messages::SpUpdatePrepare,
-    ) -> Result<(), ResponseError> {
+    ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received update prepare request; not supported by simulated sidecar";
@@ -471,7 +572,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "update" => ?update,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn component_update_prepare(
@@ -479,7 +580,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         update: gateway_messages::ComponentUpdatePrepare,
-    ) -> Result<(), ResponseError> {
+    ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received update prepare request; not supported by simulated sidecar";
@@ -487,7 +588,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "update" => ?update,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn update_status(
@@ -495,7 +596,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
-    ) -> Result<gateway_messages::UpdateStatus, ResponseError> {
+    ) -> Result<gateway_messages::UpdateStatus, SpError> {
         warn!(
             &self.log,
             "received update status request; not supported by simulated sidecar";
@@ -503,7 +604,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn update_chunk(
@@ -512,7 +613,7 @@ impl SpHandler for Handler {
         port: SpPort,
         chunk: gateway_messages::UpdateChunk,
         data: &[u8],
-    ) -> Result<(), ResponseError> {
+    ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received update chunk; not supported by simulated sidecar";
@@ -521,7 +622,7 @@ impl SpHandler for Handler {
             "offset" => chunk.offset,
             "length" => data.len(),
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn update_abort(
@@ -530,7 +631,7 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
         id: gateway_messages::UpdateId,
-    ) -> Result<(), ResponseError> {
+    ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received update abort; not supported by simulated sidecar";
@@ -539,21 +640,21 @@ impl SpHandler for Handler {
             "component" => ?component,
             "id" => ?id,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn power_state(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<gateway_messages::PowerState, ResponseError> {
-        warn!(
-            &self.log,
-            "received power state; not supported by simulated sidecar";
+    ) -> Result<gateway_messages::PowerState, SpError> {
+        debug!(
+            &self.log, "received power state";
             "sender" => %sender,
             "port" => ?port,
+            "power_state" => ?self.power_state,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Ok(self.power_state)
     }
 
     fn set_power_state(
@@ -561,55 +662,325 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         power_state: gateway_messages::PowerState,
-    ) -> Result<(), ResponseError> {
-        warn!(
-            &self.log,
-            "received set power state; not supported by simulated sidecar";
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "received set power state";
             "sender" => %sender,
             "port" => ?port,
             "power_state" => ?power_state,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        self.power_state = power_state;
+        Ok(())
     }
 
     fn reset_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<(), ResponseError> {
+    ) -> Result<(), SpError> {
         warn!(
             &self.log, "received sys-reset prepare request; not supported by simulated sidecar";
             "sender" => %sender,
             "port" => ?port,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn reset_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<std::convert::Infallible, ResponseError> {
+    ) -> Result<std::convert::Infallible, SpError> {
         warn!(
             &self.log, "received sys-reset trigger request; not supported by simulated sidecar";
             "sender" => %sender,
             "port" => ?port,
         );
-        Err(ResponseError::RequestUnsupportedForSp)
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
         self.components.len().try_into().unwrap()
     }
 
-    fn device_description(&mut self, index: u32) -> DeviceDescription<'_> {
-        let c = &self.components[index as usize];
+    fn device_description(
+        &mut self,
+        index: BoundsChecked,
+    ) -> DeviceDescription<'static> {
+        let index = index.0 as usize;
+        let c = &self.components[index];
         DeviceDescription {
             component: SpComponent::try_from(c.id.as_str()).unwrap(),
-            device: &c.device,
-            description: &c.description,
+            device: self.leaked_component_device_strings[index],
+            description: self.leaked_component_description_strings[index],
             capabilities: c.capabilities,
             presence: c.presence,
         }
+    }
+
+    fn num_component_details(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+    ) -> Result<u32, SpError> {
+        warn!(
+            &self.log, "asked for component details (returning 0 details)";
+            "sender" => %sender,
+            "port" => ?port,
+            "component" => ?component,
+        );
+        Ok(0)
+    }
+
+    fn component_details(
+        &mut self,
+        component: SpComponent,
+        index: BoundsChecked,
+    ) -> ComponentDetails {
+        // We return 0 for all components, so we should never be called (`index`
+        // would have to have been bounds checked to live in 0..0).
+        unreachable!("asked for {component:?} details index {index:?}")
+    }
+
+    fn component_clear_status(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log, "asked to clear status (not supported for sim components)";
+            "sender" => %sender,
+            "port" => ?port,
+            "component" => ?component,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn component_get_active_slot(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+    ) -> Result<u16, SpError> {
+        warn!(
+            &self.log, "asked for component active slot (not supported for sim components)";
+            "sender" => %sender,
+            "port" => ?port,
+            "component" => ?component,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn component_set_active_slot(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+        slot: u16,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log, "asked to set component active slot (not supported for sim components)";
+            "sender" => %sender,
+            "port" => ?port,
+            "component" => ?component,
+            "slot" => slot,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn get_startup_options(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<StartupOptions, SpError> {
+        warn!(
+            &self.log, "asked for startup options (unsupported by sidecar)";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn set_startup_options(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        startup_options: StartupOptions,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log, "asked to set startup options (unsupported by sidecar)";
+            "sender" => %sender,
+            "port" => ?port,
+            "options" => ?startup_options,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn mgs_response_error(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        message_id: u32,
+        err: MgsError,
+    ) {
+        warn!(
+            &self.log, "received MGS error response";
+            "sender" => %sender,
+            "port" => ?port,
+            "message_id" => message_id,
+            "err" => ?err,
+        );
+    }
+
+    fn mgs_response_host_phase2_data(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        message_id: u32,
+        hash: [u8; 32],
+        offset: u64,
+        data: &[u8],
+    ) {
+        debug!(
+            &self.log, "received host phase 2 data from MGS";
+            "sender" => %sender,
+            "port" => ?port,
+            "message_id" => message_id,
+            "hash" => ?hash,
+            "offset" => offset,
+            "data_len" => data.len(),
+        );
+    }
+}
+
+struct FakeIgnition {
+    state: Vec<IgnitionState>,
+    link_events: Vec<LinkEvents>,
+}
+
+fn empty_transceiver_events() -> ignition::TransceiverEvents {
+    ignition::TransceiverEvents {
+        encoding_error: false,
+        decoding_error: false,
+        ordered_set_invalid: false,
+        message_version_invalid: false,
+        message_type_invalid: false,
+        message_checksum_invalid: false,
+    }
+}
+
+fn empty_link_events() -> LinkEvents {
+    LinkEvents {
+        controller: empty_transceiver_events(),
+        target_link0: empty_transceiver_events(),
+        target_link1: empty_transceiver_events(),
+    }
+}
+
+fn initial_ignition_state(system_type: ignition::SystemType) -> IgnitionState {
+    fn valid_receiver() -> ignition::ReceiverStatus {
+        ignition::ReceiverStatus {
+            aligned: true,
+            locked: true,
+            polarity_inverted: false,
+        }
+    }
+    IgnitionState {
+        receiver: valid_receiver(),
+        target: Some(ignition::TargetState {
+            system_type,
+            power_state: ignition::SystemPowerState::On,
+            power_reset_in_progress: false,
+            faults: ignition::SystemFaults {
+                power_a3: false,
+                power_a2: false,
+                sp: false,
+                rot: false,
+            },
+            controller0_present: true,
+            controller1_present: false,
+            link0_receiver_status: valid_receiver(),
+            link1_receiver_status: valid_receiver(),
+        }),
+    }
+}
+
+impl FakeIgnition {
+    // Ignition always has 35 ports: 32 sleds, 2 psc, 1 sidecar (the other one)
+    const NUM_IGNITION_TARGETS: usize = 35;
+
+    fn new(config: &SimulatedSpsConfig) -> Self {
+        let mut state = Vec::new();
+
+        for _ in &config.sidecar {
+            state.push(initial_ignition_state(ignition::SystemType::Sidecar));
+        }
+        for _ in &config.gimlet {
+            state.push(initial_ignition_state(ignition::SystemType::Gimlet));
+        }
+
+        assert!(
+            state.len() <= Self::NUM_IGNITION_TARGETS,
+            "too many simulated SPs"
+        );
+        while state.len() < Self::NUM_IGNITION_TARGETS {
+            state.push(IgnitionState {
+                receiver: ignition::ReceiverStatus {
+                    aligned: false,
+                    locked: false,
+                    polarity_inverted: false,
+                },
+                target: None,
+            });
+        }
+
+        Self {
+            state,
+            link_events: vec![empty_link_events(); Self::NUM_IGNITION_TARGETS],
+        }
+    }
+
+    fn num_targets(&self) -> usize {
+        self.state.len()
+    }
+
+    fn get_target(&self, target: u8) -> Result<&IgnitionState, SpError> {
+        self.state
+            .get(usize::from(target))
+            .ok_or(SpError::Ignition(IgnitionError::InvalidPort))
+    }
+
+    fn get_target_mut(
+        &mut self,
+        target: u8,
+    ) -> Result<&mut IgnitionState, SpError> {
+        self.state
+            .get_mut(usize::from(target))
+            .ok_or(SpError::Ignition(IgnitionError::InvalidPort))
+    }
+
+    fn command(
+        &mut self,
+        target: u8,
+        command: IgnitionCommand,
+    ) -> Result<(), SpError> {
+        let target = self
+            .get_target_mut(target)?
+            .target
+            .as_mut()
+            .ok_or(SpError::Ignition(IgnitionError::NoTargetPresent))?;
+
+        match command {
+            IgnitionCommand::PowerOn | IgnitionCommand::PowerReset => {
+                target.power_state = ignition::SystemPowerState::On;
+            }
+            IgnitionCommand::PowerOff => {
+                target.power_state = ignition::SystemPowerState::Off;
+            }
+        }
+
+        Ok(())
     }
 }
