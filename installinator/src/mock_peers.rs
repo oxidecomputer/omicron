@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeMap, fmt, net::SocketAddrV6, time::Duration};
+use std::{
+    collections::BTreeMap, fmt, net::SocketAddrV6, pin::Pin, time::Duration,
+};
 
 use anyhow::{bail, Result};
 use bytes::Bytes;
@@ -10,9 +12,8 @@ use progenitor_client::ResponseValue;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
-use tokio::sync::mpsc;
 
-use crate::peers::{ArtifactId, PeersImpl};
+use crate::peers::{ArtifactId, FetchSender, PeersImpl};
 
 struct MockPeersUniverse {
     artifact: Bytes,
@@ -216,24 +217,18 @@ impl PeersImpl for MockPeers {
         self.selected_peers.len()
     }
 
-    fn start_fetch_artifact(
+    fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
-        // For now, we ignore the artifact ID -- we assume that there's only one ID under test.
+        // We don't (yet) use the artifact ID in MockPeers
         _artifact_id: ArtifactId,
-        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
-        cancel_receiver: tokio::sync::oneshot::Receiver<()>,
-    ) {
+        sender: FetchSender,
+    ) -> Pin<Box<dyn futures::Future<Output = ()> + Send>> {
         let peer_data = self
             .get(peer)
             .unwrap_or_else(|| panic!("peer {peer} not found in selection"))
             .clone();
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = peer_data.send_response(sender) => {}
-                _ = cancel_receiver => {}
-            }
-        });
+        Box::pin(async move { peer_data.send_response(sender).await })
     }
 }
 
@@ -253,10 +248,7 @@ impl fmt::Debug for MockPeer {
 }
 
 impl MockPeer {
-    async fn send_response(
-        self,
-        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
-    ) {
+    async fn send_response(self, sender: FetchSender) {
         let mut artifact = self.artifact;
         match self.response {
             MockResponse::Response(actions) => {

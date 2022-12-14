@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    fmt, future::Future, net::SocketAddrV6, str::FromStr, time::Duration,
+    fmt, future::Future, net::SocketAddrV6, pin::Pin, str::FromStr,
+    time::Duration,
 };
 
 use anyhow::{bail, Result};
@@ -241,12 +242,15 @@ impl Peers {
         let (sender, mut receiver) = mpsc::channel(8);
         let (cancel_sender, cancel_receiver) = oneshot::channel();
 
-        self.imp.start_fetch_artifact(
-            peer,
-            artifact_id.clone(),
-            sender,
-            cancel_receiver,
-        );
+        let fetch =
+            self.imp.fetch_from_peer_impl(peer, artifact_id.clone(), sender);
+
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = fetch => {},
+                _ = cancel_receiver => {},
+            }
+        });
 
         let mut artifact_bytes = BufList::new();
 
@@ -291,14 +295,17 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
     fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_>;
     fn peer_count(&self) -> usize;
 
-    fn start_fetch_artifact(
+    fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
         artifact_id: ArtifactId,
-        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
-        cancel_receiver: oneshot::Receiver<()>,
-    );
+        sender: FetchSender,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
+
+/// The send side of the channel over which data is sent.
+pub(crate) type FetchSender =
+    mpsc::Sender<Result<Bytes, progenitor_client::Error>>;
 
 /// A [`PeersImpl`] that uses HTTP to fetch artifacts from peers. This is the real implementation.
 #[derive(Clone, Debug)]
@@ -323,22 +330,17 @@ impl PeersImpl for HttpPeers {
         self.peers.len()
     }
 
-    fn start_fetch_artifact(
+    fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
         artifact_id: ArtifactId,
-        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
-        cancel_receiver: oneshot::Receiver<()>,
-    ) {
+        sender: FetchSender,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         // TODO: be able to fetch from sled-agent clients as well
         let artifact_client = ArtifactClient::new(peer, &self.log);
-
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = artifact_client.fetch_artifact(artifact_id, sender) => {},
-                _ = cancel_receiver => {},
-            }
-        });
+        Box::pin(
+            async move { artifact_client.fetch(artifact_id, sender).await },
+        )
     }
 }
 
@@ -358,11 +360,7 @@ impl ArtifactClient {
         Self { log, client }
     }
 
-    async fn fetch_artifact(
-        &self,
-        artifact_id: ArtifactId,
-        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
-    ) {
+    async fn fetch(&self, artifact_id: ArtifactId, sender: FetchSender) {
         let artifact_bytes = match self
             .client
             .get_artifact(&artifact_id.name, &artifact_id.version)
