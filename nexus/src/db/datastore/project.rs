@@ -39,9 +39,12 @@ use uuid::Uuid;
 //
 // - $i is an identifier for a type of resource.
 // - $i has a corresponding "db::schema::$i", which has a project_id,
-// time_deleted, and id field.
+// time_deleted, and $label field.
+// - If $label is supplied, it must be a mandatory column of the table
+// which is (1) looked up, and (2) used in an error message, if the resource.
+// exists in the project. Otherwise, it is assumbed to be a "Uuid" named "id".
 macro_rules! generate_fn_to_ensure_none_in_project {
-    ($i:ident) => {
+    ($i:ident, $label:ident, $label_ty:ty) => {
         ::paste::paste! {
             async fn [<ensure_no_ $i s_in_project>](
                 &self,
@@ -50,18 +53,18 @@ macro_rules! generate_fn_to_ensure_none_in_project {
             ) -> DeleteResult {
                 use db::schema::$i;
 
-                let [<$i _found>] = diesel_pool_result_optional(
+                let maybe_label = diesel_pool_result_optional(
                     $i::dsl::$i
                         .filter($i::dsl::project_id.eq(authz_project.id()))
                         .filter($i::dsl::time_deleted.is_null())
-                        .select($i::dsl::id)
+                        .select($i::dsl::$label)
                         .limit(1)
-                        .first_async::<Uuid>(self.pool_authorized(opctx).await?)
+                        .first_async::<$label_ty>(self.pool_authorized(opctx).await?)
                         .await,
                 )
                 .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
-                if [<$i _found>].is_some() {
+                if let Some(label) = maybe_label {
                     let object = stringify!($i).replace('_', " ");
                     const VOWELS: [char; 5] = ['a', 'e', 'i', 'o', 'u'];
                     let article = if VOWELS.iter().any(|&v| object.starts_with(v)) {
@@ -71,14 +74,17 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                     };
 
                     return Err(Error::InvalidRequest {
-                        message: format!("project to be deleted contains {article} {object}"),
+                        message: format!("project to be deleted contains {article} {object}: {label}"),
                     });
                 }
 
                 Ok(())
             }
         }
-    }
+    };
+    ($i:ident) => {
+        generate_fn_to_ensure_none_in_project!($i, id, Uuid);
+    };
 }
 
 impl DataStore {
@@ -115,12 +121,12 @@ impl DataStore {
         })
     }
 
-    generate_fn_to_ensure_none_in_project!(instance);
-    generate_fn_to_ensure_none_in_project!(disk);
-    generate_fn_to_ensure_none_in_project!(image);
-    generate_fn_to_ensure_none_in_project!(snapshot);
-    generate_fn_to_ensure_none_in_project!(vpc);
-    generate_fn_to_ensure_none_in_project!(ip_pool);
+    generate_fn_to_ensure_none_in_project!(instance, name, String);
+    generate_fn_to_ensure_none_in_project!(disk, name, String);
+    generate_fn_to_ensure_none_in_project!(image, name, String);
+    generate_fn_to_ensure_none_in_project!(snapshot, name, String);
+    generate_fn_to_ensure_none_in_project!(vpc, name, String);
+    generate_fn_to_ensure_none_in_project!(ip_pool, name, String);
     generate_fn_to_ensure_none_in_project!(external_ip);
 
     /// Delete a project

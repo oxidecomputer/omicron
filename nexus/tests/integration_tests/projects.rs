@@ -146,12 +146,12 @@ async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
     // Project deletion will fail while the subnet & VPC remain.
     create_project(&client, &org_name, &name).await;
     assert_eq!(
-        "project to be deleted contains a vpc",
+        "project to be deleted contains a vpc: default",
         delete_project_expect_fail(&url, &client).await,
     );
     delete_project_default_subnet(&url, &client).await;
     assert_eq!(
-        "project to be deleted contains a vpc",
+        "project to be deleted contains a vpc: default",
         delete_project_expect_fail(&url, &client).await,
     );
     delete_project_default_vpc(&url, &client).await;
@@ -198,7 +198,7 @@ async fn test_project_deletion_with_instance(
     .await;
 
     assert_eq!(
-        "project to be deleted contains an instance",
+        "project to be deleted contains an instance: my-instance",
         delete_project_expect_fail(&url, &client).await,
     );
 
@@ -231,7 +231,7 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
     delete_project_default_vpc(&url, &client).await;
     create_disk(&client, &org_name, &name, "my-disk").await;
     assert_eq!(
-        "project to be deleted contains a disk",
+        "project to be deleted contains a disk: my-disk",
         delete_project_expect_fail(&url, &client).await,
     );
     NexusRequest::object_delete(&client, &format!("{url}/disks/my-disk"))
@@ -331,7 +331,7 @@ async fn test_project_deletion_with_snapshot(
         .expect("failed to delete disk");
 
     assert_eq!(
-        "project to be deleted contains a snapshot",
+        "project to be deleted contains a snapshot: my-snapshot",
         delete_project_expect_fail(&url, &client).await,
     );
 
@@ -370,7 +370,7 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
     create_vpc(&client, org_name, name, vpc_name).await;
 
     assert_eq!(
-        "project to be deleted contains a vpc",
+        "project to be deleted contains a vpc: just-rainsticks",
         delete_project_expect_fail(&url, &client).await,
     );
 
@@ -428,7 +428,7 @@ async fn test_project_deletion_with_ip_pool(
             .unwrap();
 
     assert_eq!(
-        "project to be deleted contains an ip pool",
+        "project to be deleted contains an ip pool: p0",
         delete_project_expect_fail(&url, &client).await,
     );
 
