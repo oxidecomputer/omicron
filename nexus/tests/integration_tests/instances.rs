@@ -2880,7 +2880,7 @@ async fn test_instance_ephemeral_ip_from_correct_project(
     // Create two IP pools.
     //
     // The first is restricted to the "restricted" project, the second unrestricted.
-    let project_path = params::ProjectPath {
+    let project_path = params::OldProjectPath {
         organization: Name::try_from(ORGANIZATION_NAME.to_string()).unwrap(),
         project: Name::try_from("restricted".to_string()).unwrap(),
     };

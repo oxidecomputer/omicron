@@ -77,7 +77,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-    project_path: Option<params::ProjectPath>,
+    project_path: Option<params::OldProjectPath>,
 ) -> (IpPool, IpPoolRange) {
     let ip_range = ip_range.unwrap_or_else(|| {
         use std::net::Ipv4Addr;

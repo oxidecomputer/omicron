@@ -60,7 +60,6 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -1067,11 +1066,6 @@ async fn organization_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-struct OrganizationLookupPathParam {
-    organization: NameOrId,
-}
-
 #[endpoint {
     method = GET,
     path = "/v1/organizations/{organization}",
@@ -1079,7 +1073,7 @@ struct OrganizationLookupPathParam {
 }]
 async fn organization_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<OrganizationLookupPathParam>,
+    path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1089,7 +1083,9 @@ async fn organization_view_v1(
         let (.., organization) = nexus
             .organization_lookup(
                 &opctx,
-                &params::OrganizationSelector(path.organization),
+                &params::OrganizationSelector {
+                    organization: path.organization,
+                },
             )?
             .fetch()
             .await?;
@@ -1125,7 +1121,9 @@ async fn organization_view(
         let (.., organization) = nexus
             .organization_lookup(
                 &opctx,
-                &params::OrganizationSelector(path.organization_name.into()),
+                &params::OrganizationSelector {
+                    organization: path.organization_name.into(),
+                },
             )?
             .fetch()
             .await?;
@@ -1154,7 +1152,7 @@ async fn organization_view_by_id(
         let (.., organization) = nexus
             .organization_lookup(
                 &opctx,
-                &params::OrganizationSelector(path.id.into()),
+                &params::OrganizationSelector { organization: path.id.into() },
             )?
             .fetch()
             .await?;
@@ -1170,7 +1168,7 @@ async fn organization_view_by_id(
 }]
 async fn organization_delete_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<OrganizationLookupPathParam>,
+    path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1178,7 +1176,7 @@ async fn organization_delete_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_selector =
-            &params::OrganizationSelector(params.organization);
+            &params::OrganizationSelector { organization: params.organization };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         nexus.organization_delete(&opctx, &organization_lookup).await?;
@@ -1204,8 +1202,9 @@ async fn organization_delete(
     let params = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector(params.organization_name.into());
+        let organization_selector = &params::OrganizationSelector {
+            organization: params.organization_name.into(),
+        };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         nexus.organization_delete(&opctx, &organization_lookup).await?;
@@ -1221,7 +1220,7 @@ async fn organization_delete(
 }]
 async fn organization_update_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<OrganizationLookupPathParam>,
+    path_params: Path<params::OrganizationPath>,
     updated_organization: TypedBody<params::OrganizationUpdate>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1230,7 +1229,7 @@ async fn organization_update_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_selector =
-            &params::OrganizationSelector(params.organization);
+            &params::OrganizationSelector { organization: params.organization };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let new_organization = nexus
@@ -1268,8 +1267,9 @@ async fn organization_update(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector(path.organization_name.into());
+        let organization_selector = &params::OrganizationSelector {
+            organization: path.organization_name.into(),
+        };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let new_organization = nexus
@@ -1291,7 +1291,7 @@ async fn organization_update(
 }]
 async fn organization_policy_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<OrganizationLookupPathParam>,
+    path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
     let apictx = rqctx.context();
@@ -1300,7 +1300,7 @@ async fn organization_policy_view_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_selector =
-            &params::OrganizationSelector(params.organization);
+            &params::OrganizationSelector { organization: params.organization };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let policy = nexus
@@ -1330,8 +1330,9 @@ async fn organization_policy_view(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector(path.organization_name.into());
+        let organization_selector = &params::OrganizationSelector {
+            organization: path.organization_name.into(),
+        };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let policy = nexus
@@ -1349,7 +1350,7 @@ async fn organization_policy_view(
 }]
 async fn organization_policy_update_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<OrganizationLookupPathParam>,
+    path_params: Path<params::OrganizationPath>,
     new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
@@ -1360,7 +1361,7 @@ async fn organization_policy_update_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_selector =
-            &params::OrganizationSelector(params.organization);
+            &params::OrganizationSelector { organization: params.organization };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let nasgns = new_policy.role_assignments.len();
@@ -1401,8 +1402,9 @@ async fn organization_policy_update(
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector(path.organization_name.into());
+        let organization_selector = &params::OrganizationSelector {
+            organization: path.organization_name.into(),
+        };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let policy = nexus
@@ -1417,13 +1419,6 @@ async fn organization_policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectListQueryParams {
-    pub organization: NameOrId,
-    #[serde(flatten)]
-    pagination: PaginatedByNameOrId,
-}
-
 /// List projects
 #[endpoint {
     method = GET,
@@ -1432,17 +1427,15 @@ pub struct ProjectListQueryParams {
 }]
 async fn project_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ProjectListQueryParams>,
+    query_params: Query<params::ProjectList>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector(query.organization);
         let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
+            nexus.organization_lookup(&opctx, &query.organization)?;
         let params = ScanByNameOrId::from_query(&query.pagination)?;
         let field = pagination_field_for_scan_params(params);
         let projects = match field {
@@ -1503,8 +1496,9 @@ async fn project_list(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector(path.organization_name.into());
+        let organization_selector = &params::OrganizationSelector {
+            organization: path.organization_name.into(),
+        };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let params = ScanByNameOrId::from_query(&query)?;
@@ -1546,16 +1540,6 @@ async fn project_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectLookupPathParams {
-    pub project: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectCreateParams {
-    pub organization: NameOrId,
-}
-
 #[endpoint {
     method = POST,
     path = "/v1/projects",
@@ -1563,7 +1547,7 @@ pub struct ProjectCreateParams {
 }]
 async fn project_create_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<ProjectCreateParams>,
+    query_params: Query<params::OrganizationSelector>,
     new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1572,7 +1556,7 @@ async fn project_create_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_selector =
-            params::OrganizationSelector(query.organization);
+            params::OrganizationSelector { organization: query.organization };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let project = nexus
@@ -1605,8 +1589,9 @@ async fn project_create(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector(path.organization_name.into());
+        let organization_selector = &params::OrganizationSelector {
+            organization: path.organization_name.into(),
+        };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let project = nexus
@@ -1621,11 +1606,6 @@ async fn project_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectQueryParams {
-    pub organization: Option<NameOrId>,
-}
-
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}",
@@ -1633,8 +1613,8 @@ pub struct ProjectQueryParams {
 }]
 async fn project_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ProjectLookupPathParams>,
-    query_params: Query<ProjectQueryParams>,
+    path_params: Path<params::ProjectPath>,
+    query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1642,8 +1622,10 @@ async fn project_view_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_selector =
-            params::ProjectSelector::new(query.organization, path.project);
+        let project_selector = params::ProjectSelector {
+            organization_selector: query.organization_selector,
+            project: path.project,
+        };
         let (.., project) =
             nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
         Ok(HttpResponseOk(project.into()))
@@ -1722,8 +1704,8 @@ async fn project_view_by_id(
 }]
 async fn project_delete_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ProjectLookupPathParams>,
-    query_params: Query<ProjectQueryParams>,
+    path_params: Path<params::ProjectPath>,
+    query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1731,8 +1713,10 @@ async fn project_delete_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_selector =
-            params::ProjectSelector::new(query.organization, path.project);
+        let project_selector = params::ProjectSelector {
+            organization_selector: query.organization_selector,
+            project: path.project,
+        };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         nexus.project_delete(&opctx, &project_lookup).await?;
         Ok(HttpResponseDeleted())
@@ -1776,8 +1760,8 @@ async fn project_delete(
 }]
 async fn project_update_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ProjectLookupPathParams>,
-    query_params: Query<ProjectQueryParams>,
+    path_params: Path<params::ProjectPath>,
+    query_params: Query<params::OptionalOrganizationSelector>,
     updated_project: TypedBody<params::ProjectUpdate>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1787,8 +1771,10 @@ async fn project_update_v1(
     let updated_project = updated_project.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_selector =
-            params::ProjectSelector::new(query.organization, path.project);
+        let project_selector = params::ProjectSelector {
+            organization_selector: query.organization_selector,
+            project: path.project,
+        };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let project = nexus
             .project_update(&opctx, &project_lookup, &updated_project)
@@ -1846,8 +1832,8 @@ async fn project_update(
 }]
 async fn project_policy_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ProjectLookupPathParams>,
-    query_params: Query<ProjectQueryParams>,
+    path_params: Path<params::ProjectPath>,
+    query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1855,8 +1841,10 @@ async fn project_policy_view_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_selector =
-            params::ProjectSelector::new(query.organization, path.project);
+        let project_selector = params::ProjectSelector {
+            organization_selector: query.organization_selector,
+            project: path.project,
+        };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let policy =
             nexus.project_fetch_policy(&opctx, &project_lookup).await?;
@@ -1902,7 +1890,7 @@ async fn project_policy_view(
 }]
 async fn project_policy_update_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ProjectLookupPathParams>,
+    path_params: Path<params::ProjectPath>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -2554,14 +2542,6 @@ async fn disk_metrics_list(
 
 // Instances
 
-#[derive(Deserialize, JsonSchema)]
-struct InstanceListQueryParams {
-    #[serde(flatten)]
-    pagination: PaginatedByName,
-    project: NameOrId,
-    organization: Option<NameOrId>,
-}
-
 #[endpoint {
     method = GET,
     path = "/v1/instances",
@@ -2569,16 +2549,15 @@ struct InstanceListQueryParams {
 }]
 async fn instance_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceListQueryParams>,
+    query_params: Query<params::InstanceList>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_selector =
-            &params::ProjectSelector::new(query.organization, query.project);
-        let project_lookup = nexus.project_lookup(&opctx, project_selector)?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, &query.project_selector)?;
         let instances = nexus
             .project_list_instances(
                 &opctx,
@@ -2641,12 +2620,6 @@ async fn instance_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-struct InstanceCreateParams {
-    organization: Option<NameOrId>,
-    project: NameOrId,
-}
-
 #[endpoint {
     method = POST,
     path = "/v1/instances",
@@ -2654,18 +2627,16 @@ struct InstanceCreateParams {
 }]
 async fn instance_create_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceCreateParams>,
+    query_params: Query<params::ProjectSelector>,
     new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
+    let project_selector = query_params.into_inner();
     let new_instance_params = &new_instance.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_selector =
-            &params::ProjectSelector::new(query.organization, query.project);
-        let project_lookup = nexus.project_lookup(&opctx, project_selector)?;
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let instance = nexus
             .project_create_instance(
                 &opctx,
@@ -2719,24 +2690,6 @@ async fn instance_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Instance requests
-#[derive(Deserialize, JsonSchema)]
-struct InstanceLookupPathParam {
-    /// If Name is used to reference the instance you must also include one of the following qualifiers as query parameters:
-    /// - `project_id`
-    /// - `project_name`, `organization_id`
-    /// - `project_name`, `organization_name`
-    ///
-    /// If Id is used the above qualifiers are will be ignored
-    instance: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct InstanceQueryParams {
-    organization: Option<NameOrId>,
-    project: Option<NameOrId>,
-}
-
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}",
@@ -2744,8 +2697,8 @@ struct InstanceQueryParams {
 }]
 async fn instance_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceQueryParams>,
-    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -2753,12 +2706,10 @@ async fn instance_view_v1(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        // let instance_selector = params::InstanceSelector::new(path.instance, &query.selector);
-        let instance_selector = params::InstanceSelector::new(
-            query.organization,
-            query.project,
-            path.instance,
-        );
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let (.., instance) = instance_lookup.fetch().await?;
@@ -2837,18 +2788,17 @@ async fn instance_view_by_id(
 }]
 async fn instance_delete_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceQueryParams>,
-    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        query.organization,
-        query.project,
-        path.instance,
-    );
+    let instance_selector = params::InstanceSelector {
+        project_selector: query.project_selector,
+        instance: path.instance,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -2895,8 +2845,8 @@ async fn instance_delete(
 }]
 async fn instance_migrate_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceQueryParams>,
-    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
     migrate_params: TypedBody<params::InstanceMigrate>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2904,11 +2854,10 @@ async fn instance_migrate_v1(
     let path = path_params.into_inner();
     let query = query_params.into_inner();
     let migrate_instance_params = migrate_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        query.organization,
-        query.project,
-        path.instance,
-    );
+    let instance_selector = params::InstanceSelector {
+        project_selector: query.project_selector,
+        instance: path.instance,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -2969,18 +2918,17 @@ async fn instance_migrate(
 }]
 async fn instance_reboot_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceQueryParams>,
-    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        query.organization,
-        query.project,
-        path.instance,
-    );
+    let instance_selector = params::InstanceSelector {
+        project_selector: query.project_selector,
+        instance: path.instance,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -3027,18 +2975,17 @@ async fn instance_reboot(
 }]
 async fn instance_start_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceQueryParams>,
-    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        query.organization,
-        query.project,
-        path.instance,
-    );
+    let instance_selector = params::InstanceSelector {
+        project_selector: query.project_selector,
+        instance: path.instance,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -3084,18 +3031,17 @@ async fn instance_start(
 }]
 async fn instance_stop_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<InstanceQueryParams>,
-    path_params: Path<InstanceLookupPathParam>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        query.organization,
-        query.project,
-        path.instance,
-    );
+    let instance_selector = params::InstanceSelector {
+        project_selector: query.project_selector,
+        instance: path.instance,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -3134,15 +3080,6 @@ async fn instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceSerialConsoleParams {
-    organization: Option<NameOrId>,
-    project: Option<NameOrId>,
-
-    #[serde(flatten)]
-    pub console_params: params::InstanceSerialConsoleRequest,
-}
-
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/serial-console",
@@ -3150,18 +3087,17 @@ pub struct InstanceSerialConsoleParams {
 }]
 async fn instance_serial_console_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<InstanceLookupPathParam>,
-    query_params: Query<InstanceSerialConsoleParams>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::InstanceSerialConsole>,
 ) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        query.organization,
-        query.project,
-        path.instance,
-    );
+    let instance_selector = params::InstanceSelector {
+        project_selector: query.project_selector,
+        instance: path.instance,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -3219,19 +3155,18 @@ async fn instance_serial_console(
 async fn instance_serial_console_stream_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     conn: WebsocketConnection,
-    path_params: Path<InstanceLookupPathParam>,
-    query_params: Query<InstanceQueryParams>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
 ) -> WebsocketChannelResult {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
     let opctx = OpContext::for_external_api(&rqctx).await?;
-    let instance_selector = params::InstanceSelector::new(
-        query.organization,
-        query.project,
-        path.instance,
-    );
+    let instance_selector = params::InstanceSelector {
+        project_selector: query.project_selector,
+        instance: path.instance,
+    };
     let instance_lookup = nexus.instance_lookup(&opctx, &instance_selector)?;
     nexus.instance_serial_console_stream(conn, &instance_lookup).await?;
     Ok(())

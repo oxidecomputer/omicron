@@ -62,25 +62,27 @@ impl super::Nexus {
         instance_selector: &'a params::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
-            params::InstanceSelector(NameOrId::Id(id), ..) => {
+            params::InstanceSelector {
+                project_selector: None,
+                instance: NameOrId::Id(id),
+            } => {
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
                 Ok(instance)
             }
-            params::InstanceSelector(
-                NameOrId::Name(name),
-                project_selector,
-            ) => {
-                if let Some(project) = project_selector {
-                    let instance = self
-                        .project_lookup(opctx, project)?
-                        .instance_name(Name::ref_cast(name));
-                    Ok(instance)
-                } else {
-                    Err(Error::InvalidRequest {
-                        message: "Unable to resolve instance by name without instance".to_string(),
-                    })
-                }
+            params::InstanceSelector {
+                project_selector: Some(project_selector),
+                instance: NameOrId::Name(name),
+            } => {
+                let instance = self
+                    .project_lookup(opctx, project_selector)?
+                    .instance_name(Name::ref_cast(name));
+                Ok(instance)
+            }
+            _ => {
+                return Err(Error::invalid_request(
+                    "instance should either be UUID or project should be specified",
+                ));
             }
         }
     }

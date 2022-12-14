@@ -31,12 +31,14 @@ impl super::Nexus {
         organization_selector: &'a params::OrganizationSelector,
     ) -> LookupResult<lookup::Organization<'a>> {
         match organization_selector {
-            params::OrganizationSelector(NameOrId::Id(id)) => {
+            params::OrganizationSelector { organization: NameOrId::Id(id) } => {
                 let organization = LookupPath::new(opctx, &self.db_datastore)
                     .organization_id(*id);
                 Ok(organization)
             }
-            params::OrganizationSelector(NameOrId::Name(name)) => {
+            params::OrganizationSelector {
+                organization: NameOrId::Name(name),
+            } => {
                 let organization = LookupPath::new(opctx, &self.db_datastore)
                     .organization_name(Name::ref_cast(name));
                 Ok(organization)

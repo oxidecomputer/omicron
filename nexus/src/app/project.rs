@@ -34,23 +34,26 @@ impl super::Nexus {
         project_selector: &'a params::ProjectSelector,
     ) -> LookupResult<lookup::Project<'a>> {
         match project_selector {
-            params::ProjectSelector(NameOrId::Id(id), ..) => {
+            params::ProjectSelector {
+                project: NameOrId::Id(id),
+                organization_selector: None,
+            } => {
                 let project =
                     LookupPath::new(opctx, &self.db_datastore).project_id(*id);
                 Ok(project)
             }
-            params::ProjectSelector(NameOrId::Name(name), org_selector) => {
-                if let Some(org) = org_selector {
-                    let project = self
-                        .organization_lookup(opctx, org)?
-                        .project_name(Name::ref_cast(name));
-                    Ok(project)
-                } else {
-                    Err(Error::InvalidRequest {
-                        message: "Unable to resolve project by name without organization".to_string(),
-                    })
-                }
+            params::ProjectSelector {
+                project: NameOrId::Name(name),
+                organization_selector: Some(organization_selector),
+            } => {
+                let project = self
+                    .organization_lookup(opctx, organization_selector)?
+                    .project_name(Name::ref_cast(name));
+                Ok(project)
             }
+            _ => Err(Error::invalid_request(
+                    "project should either be UUID or organization should be specified"
+            )),
         }
     }
     pub async fn project_create(
