@@ -32,6 +32,55 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
+// Generates internal functions used for validation during project deletion.
+// Used simply to reduce boilerplate.
+//
+// It assumes:
+//
+// - $i is an identifier for a type of resource.
+// - $i has a corresponding "db::schema::$i", which has a project_id,
+// time_deleted, and id field.
+macro_rules! generate_fn_to_ensure_none_in_project {
+    ($i:ident) => {
+        ::paste::paste! {
+            async fn [<ensure_no_ $i s_in_project>](
+                &self,
+                opctx: &OpContext,
+                authz_project: &authz::Project,
+            ) -> DeleteResult {
+                use db::schema::$i;
+
+                let [<$i _found>] = diesel_pool_result_optional(
+                    $i::dsl::$i
+                        .filter($i::dsl::project_id.eq(authz_project.id()))
+                        .filter($i::dsl::time_deleted.is_null())
+                        .select($i::dsl::id)
+                        .limit(1)
+                        .first_async::<Uuid>(self.pool_authorized(opctx).await?)
+                        .await,
+                )
+                .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+
+                if [<$i _found>].is_some() {
+                    let object = stringify!($i).replace('_', " ");
+                    const VOWELS: [char; 5] = ['a', 'e', 'i', 'o', 'u'];
+                    let article = if VOWELS.iter().any(|&v| object.starts_with(v)) {
+                        "an"
+                    } else {
+                        "a"
+                    };
+
+                    return Err(Error::InvalidRequest {
+                        message: format!("project to be deleted contains {article} {object}"),
+                    });
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
 impl DataStore {
     /// Create a project
     pub async fn project_create(
@@ -66,198 +115,13 @@ impl DataStore {
         })
     }
 
-    async fn ensure_no_instances_in_project(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-    ) -> DeleteResult {
-        use db::schema::instance;
-
-        // Make sure there are no instances present within this project.
-        let instance_found = diesel_pool_result_optional(
-            instance::dsl::instance
-                .filter(instance::dsl::project_id.eq(authz_project.id()))
-                .filter(instance::dsl::time_deleted.is_null())
-                .select(instance::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        if instance_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "project to be deleted contains an instance"
-                    .to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn ensure_no_disks_in_project(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-    ) -> DeleteResult {
-        use db::schema::disk;
-
-        // Make sure there are no disks present within this project.
-        let disk_found = diesel_pool_result_optional(
-            disk::dsl::disk
-                .filter(disk::dsl::project_id.eq(authz_project.id()))
-                .filter(disk::dsl::time_deleted.is_null())
-                .select(disk::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        if disk_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "project to be deleted contains a disk".to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn ensure_no_images_in_project(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-    ) -> DeleteResult {
-        use db::schema::image;
-
-        // Make sure there are no images present within this project.
-        let image_found = diesel_pool_result_optional(
-            image::dsl::image
-                .filter(image::dsl::project_id.eq(authz_project.id()))
-                .filter(image::dsl::time_deleted.is_null())
-                .select(image::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        if image_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "project to be deleted contains an image".to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn ensure_no_snapshots_in_project(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-    ) -> DeleteResult {
-        use db::schema::snapshot;
-
-        // Make sure there are no snapshots present within this project.
-        let snapshot_found = diesel_pool_result_optional(
-            snapshot::dsl::snapshot
-                .filter(snapshot::dsl::project_id.eq(authz_project.id()))
-                .filter(snapshot::dsl::time_deleted.is_null())
-                .select(snapshot::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        if snapshot_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "project to be deleted contains a snapshot"
-                    .to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn ensure_no_vpcs_in_project(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-    ) -> DeleteResult {
-        use db::schema::vpc;
-
-        // Make sure there are no vpcs present within this project.
-        let vpc_found = diesel_pool_result_optional(
-            vpc::dsl::vpc
-                .filter(vpc::dsl::project_id.eq(authz_project.id()))
-                .filter(vpc::dsl::time_deleted.is_null())
-                .select(vpc::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        if vpc_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "project to be deleted contains a vpc".to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn ensure_no_ip_pools_in_project(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-    ) -> DeleteResult {
-        use db::schema::ip_pool;
-
-        // Make sure there are no ip_pools present within this project.
-        let ip_pool_found = diesel_pool_result_optional(
-            ip_pool::dsl::ip_pool
-                .filter(ip_pool::dsl::project_id.eq(authz_project.id()))
-                .filter(ip_pool::dsl::time_deleted.is_null())
-                .select(ip_pool::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        if ip_pool_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "project to be deleted contains an ip pool"
-                    .to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    async fn ensure_no_external_ips_in_project(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-    ) -> DeleteResult {
-        use db::schema::external_ip;
-
-        // Make sure there are no external_ips present within this project.
-        let external_ip_found = diesel_pool_result_optional(
-            external_ip::dsl::external_ip
-                .filter(external_ip::dsl::project_id.eq(authz_project.id()))
-                .filter(external_ip::dsl::time_deleted.is_null())
-                .select(external_ip::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
-        if external_ip_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "project to be deleted contains an external IP"
-                    .to_string(),
-            });
-        }
-
-        Ok(())
-    }
+    generate_fn_to_ensure_none_in_project!(instance);
+    generate_fn_to_ensure_none_in_project!(disk);
+    generate_fn_to_ensure_none_in_project!(image);
+    generate_fn_to_ensure_none_in_project!(snapshot);
+    generate_fn_to_ensure_none_in_project!(vpc);
+    generate_fn_to_ensure_none_in_project!(ip_pool);
+    generate_fn_to_ensure_none_in_project!(external_ip);
 
     /// Delete a project
     pub async fn project_delete(
