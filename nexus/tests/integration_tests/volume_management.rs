@@ -53,7 +53,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 }
 
 async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_org_and_project(client).await;
 
     // Define a global image
@@ -461,7 +461,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     // Test multiple disks with multiple snapshots
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -608,7 +608,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     // Test multiple disks with multiple snapshots, varying the delete order
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -894,7 +894,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
     // delete all disks, then delete all snapshots
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_org_and_project(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
@@ -935,7 +935,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
     // delete all snapshots, then delete all disks
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_org_and_project(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
@@ -976,7 +976,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
     // delete snapshots and disks in a random order
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_org_and_project(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;

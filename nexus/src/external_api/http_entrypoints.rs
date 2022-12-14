@@ -107,23 +107,21 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
 
-        // Customer-Accessible IP Pools API
+        // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_view_by_id)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
-
-        // Operator-Accessible IP Pools API
+        // Variants for internal services
         api.register(ip_pool_service_view)?;
 
-        // Customer-Accessible IP Pool Range API (used by instances)
+        // Operator-Accessible IP Pool Range API
         api.register(ip_pool_range_list)?;
         api.register(ip_pool_range_add)?;
         api.register(ip_pool_range_remove)?;
-
-        // Operator-Accessible IP Pool Range API (used by Oxide services)
+        // Variants for internal services
         api.register(ip_pool_service_range_list)?;
         api.register(ip_pool_service_range_add)?;
         api.register(ip_pool_service_range_remove)?;

@@ -58,7 +58,6 @@ pub struct ExternalIp {
     pub time_deleted: Option<DateTime<Utc>>,
     pub ip_pool_id: Uuid,
     pub ip_pool_range_id: Uuid,
-    pub project_id: Option<Uuid>,
     // This is Some(_) for:
     //  - all instance SNAT IPs
     //  - all ephemeral IPs
@@ -88,7 +87,7 @@ impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {
 /// these options.
 #[derive(Debug, Clone, Copy)]
 pub enum IpSource {
-    Instance { project_id: Uuid, pool_id: Option<Uuid> },
+    Instance { pool_id: Uuid },
     Service { pool_id: Uuid },
 }
 
@@ -108,9 +107,8 @@ pub struct IncompleteExternalIp {
 impl IncompleteExternalIp {
     pub fn for_instance_source_nat(
         id: Uuid,
-        project_id: Uuid,
         instance_id: Uuid,
-        pool_id: Option<Uuid>,
+        pool_id: Uuid,
     ) -> Self {
         Self {
             id,
@@ -119,16 +117,11 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::SNat,
             instance_id: Some(instance_id),
-            source: IpSource::Instance { project_id, pool_id },
+            source: IpSource::Instance { pool_id },
         }
     }
 
-    pub fn for_ephemeral(
-        id: Uuid,
-        project_id: Uuid,
-        instance_id: Uuid,
-        pool_id: Option<Uuid>,
-    ) -> Self {
+    pub fn for_ephemeral(id: Uuid, instance_id: Uuid, pool_id: Uuid) -> Self {
         Self {
             id,
             name: None,
@@ -136,7 +129,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
             instance_id: Some(instance_id),
-            source: IpSource::Instance { project_id, pool_id },
+            source: IpSource::Instance { pool_id },
         }
     }
 
@@ -144,8 +137,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
-        project_id: Uuid,
-        pool_id: Option<Uuid>,
+        pool_id: Uuid,
     ) -> Self {
         Self {
             id,
@@ -154,7 +146,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Floating,
             instance_id: None,
-            source: IpSource::Instance { project_id, pool_id },
+            source: IpSource::Instance { pool_id },
         }
     }
 

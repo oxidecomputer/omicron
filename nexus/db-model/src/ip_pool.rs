@@ -28,13 +28,7 @@ pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
 
-    /// An optional ID of the project for which this pool is reserved.
-    pub project_id: Option<Uuid>,
-
-    /// An optional ID of the rack for which this pool is reserved.
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1276): This
-    // should probably point to an AZ or fleet, not a rack.
-    pub rack_id: Option<Uuid>,
+    pub internal_only: bool,
 
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
@@ -44,16 +38,14 @@ pub struct IpPool {
 impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
-        project_id: Option<Uuid>,
-        rack_id: Option<Uuid>,
+        internal_only: bool,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
                 Uuid::new_v4(),
                 pool_identity.clone(),
             ),
-            project_id,
-            rack_id,
+            internal_only,
             rcgen: 0,
         }
     }
@@ -61,7 +53,7 @@ impl IpPool {
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity(), project_id: pool.project_id }
+        Self { identity: pool.identity() }
     }
 }
 
@@ -98,20 +90,13 @@ pub struct IpPoolRange {
     pub last_address: IpNetwork,
     /// Foreign-key to the `ip_pool` table with the parent pool for this range
     pub ip_pool_id: Uuid,
-    /// Foreign-key to the `project` table, with the Project to which this range
-    /// is restricted, if any (derived from the `ip_pool` table).
-    pub project_id: Option<Uuid>,
     /// The child resource generation number, tracking IP addresses allocated or
     /// used from this range.
     pub rcgen: i64,
 }
 
 impl IpPoolRange {
-    pub fn new(
-        range: &IpRange,
-        ip_pool_id: Uuid,
-        project_id: Option<Uuid>,
-    ) -> Self {
+    pub fn new(range: &IpRange, ip_pool_id: Uuid) -> Self {
         let now = Utc::now();
         let first_address = range.first_address();
         let last_address = range.last_address();
@@ -129,7 +114,6 @@ impl IpPoolRange {
             first_address: IpNetwork::from(range.first_address()),
             last_address: IpNetwork::from(range.last_address()),
             ip_pool_id,
-            project_id,
             rcgen: 0,
         }
     }

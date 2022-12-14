@@ -85,7 +85,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_organization(&client, organization_name).await;
     create_project(&client, organization_name, project_name).await;
     let url_instances = format!(

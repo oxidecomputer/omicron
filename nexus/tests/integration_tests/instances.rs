@@ -61,7 +61,7 @@ fn get_instances_url() -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -127,7 +127,7 @@ async fn test_instances_access_before_create_returns_not_found(
 async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_ip_pool(&client, "p0", None, None).await;
+    create_ip_pool(&client, "p0", None).await;
     let org = create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -191,7 +191,7 @@ async fn test_instances_create_reboot_halt(
     let nexus = &apictx.nexus;
 
     // Create an IP pool and  project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -517,7 +517,7 @@ async fn test_instances_create_stopped_start(
     let nexus = &apictx.nexus;
 
     // Create an IP pool and  project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -573,7 +573,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     let nexus = &apictx.nexus;
 
     // Create an IP pool and project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -698,7 +698,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -811,7 +811,7 @@ async fn test_instance_with_single_explicit_ip_address(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -887,7 +887,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -1045,7 +1045,7 @@ async fn test_instance_create_delete_network_interface(
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -1296,7 +1296,7 @@ async fn test_instance_update_network_interfaces(
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -1784,7 +1784,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -1878,7 +1878,7 @@ async fn test_instance_fails_to_boot_with_disk(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -2181,7 +2181,7 @@ async fn test_attach_eight_disks_to_instance(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -2396,7 +2396,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -2533,7 +2533,7 @@ async fn test_disks_detached_when_instance_destroyed(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -2779,7 +2779,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let nexus = &apictx.nexus;
 
     // Create a project that we'll use for testing.
-    create_ip_pool(client, POOL_NAME, None, None).await;
+    create_ip_pool(client, POOL_NAME, None).await;
     create_organization(client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -2880,10 +2880,6 @@ async fn test_instance_ephemeral_ip_from_correct_project(
     // Create two IP pools.
     //
     // The first is restricted to the "restricted" project, the second unrestricted.
-    let project_path = params::ProjectPath {
-        organization: Name::try_from(ORGANIZATION_NAME.to_string()).unwrap(),
-        project: Name::try_from("restricted".to_string()).unwrap(),
-    };
     let first_range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 1),
@@ -2898,15 +2894,8 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         )
         .unwrap(),
     );
-    create_ip_pool(
-        &client,
-        "restricted-pool",
-        Some(first_range),
-        Some(project_path),
-    )
-    .await;
-    create_ip_pool(&client, "unrestricted-pool", Some(second_range), None)
-        .await;
+    create_ip_pool(&client, "restricted-pool", Some(first_range)).await;
+    create_ip_pool(&client, "unrestricted-pool", Some(second_range)).await;
 
     // Create an instance in the default project, not the "dummy" project
     let instance_params = params::InstanceCreate {

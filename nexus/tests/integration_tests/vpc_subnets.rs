@@ -40,7 +40,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     let project_name = "springfield-squidport";
     create_organization(&client, &org_name).await;
     let _ = create_project(&client, org_name, project_name).await;
-    create_ip_pool(client, "pool0", None, None).await;
+    create_ip_pool(client, "pool0", None).await;
 
     let vpcs_url =
         format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);

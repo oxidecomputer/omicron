@@ -28,16 +28,19 @@ impl super::Nexus {
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore.ip_pool_create(opctx, new_pool, None).await
+        self.db_datastore
+            .ip_pool_create(opctx, new_pool, /* internal_only= */ false)
+            .await
     }
 
     pub async fn ip_pool_services_create(
         &self,
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
-        rack_id: Uuid,
     ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore.ip_pool_create(opctx, new_pool, Some(rack_id)).await
+        self.db_datastore
+            .ip_pool_create(opctx, new_pool, /* internal_only= */ true)
+            .await
     }
 
     pub async fn ip_pools_list_by_name(
@@ -119,7 +122,7 @@ impl super::Nexus {
                 .ip_pool_name(pool_name)
                 .fetch_for(authz::Action::ListChildren)
                 .await?;
-        if db_pool.rack_id.is_some() {
+        if db_pool.internal_only {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 pool_name,
@@ -142,15 +145,13 @@ impl super::Nexus {
                 .ip_pool_name(pool_name)
                 .fetch_for(authz::Action::Modify)
                 .await?;
-        if db_pool.rack_id.is_some() {
+        if db_pool.internal_only {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 pool_name,
             ));
         }
-        self.db_datastore
-            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
-            .await
+        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
     pub async fn ip_pool_delete_range(
@@ -164,7 +165,7 @@ impl super::Nexus {
                 .ip_pool_name(pool_name)
                 .fetch_for(authz::Action::Modify)
                 .await?;
-        if db_pool.rack_id.is_some() {
+        if db_pool.internal_only {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 pool_name,
@@ -215,14 +216,12 @@ impl super::Nexus {
         rack_id: Uuid,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (authz_pool, db_pool) = self
+        let (authz_pool, ..) = self
             .db_datastore
             .ip_pools_lookup_by_rack_id(opctx, rack_id)
             .await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
-        self.db_datastore
-            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
-            .await
+        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
     pub async fn ip_pool_service_delete_range(
