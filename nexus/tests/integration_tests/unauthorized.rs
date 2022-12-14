@@ -69,7 +69,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap(),
+                    .expect(&format!("Failed to GET from URL: {url}")),
                 id_routes,
             ),
             SetupReq::Post { url, body, id_routes } => (
@@ -78,7 +78,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap(),
+                    .expect(&format!("Failed to POST to URL: {url}")),
                 id_routes,
             ),
         };
@@ -201,12 +201,6 @@ lazy_static! {
             ],
         },
         // Create an IP pool
-        SetupReq::Post {
-            url: &*DEMO_IP_POOLS_URL,
-            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-            id_routes: vec!["/system/by-id/ip-pools/{id}"],
-        },
-        // Create an IP Pool range
         SetupReq::Post {
             url: &*DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
@@ -415,7 +409,7 @@ async fn verify_endpoint(
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap()
+                    .expect(&format!("Failed to GET: {uri}"))
                     .parsed_body::<serde_json::Value>()
                     .unwrap(),
             )

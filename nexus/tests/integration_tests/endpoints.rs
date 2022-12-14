@@ -330,7 +330,7 @@ lazy_static! {
 
     // IP Pools
     pub static ref DEMO_IP_POOLS_URL: &'static str = "/system/ip-pools";
-    pub static ref DEMO_IP_POOL_NAME: Name = "pool0".parse().unwrap();
+    pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
         params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {

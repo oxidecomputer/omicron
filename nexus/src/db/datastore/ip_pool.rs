@@ -109,7 +109,7 @@ impl DataStore {
     ///
     /// An index exists to look up pools by rack ID, but it is not a primary
     /// key, which requires this lookup function to be used instead of the
-    /// [`LookupPath`] utility.
+    /// [`crate::db::lookup::LookupPath`] utility.
     pub async fn ip_pools_lookup_by_rack_id(
         &self,
         opctx: &OpContext,
