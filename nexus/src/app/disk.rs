@@ -36,53 +36,28 @@ impl super::Nexus {
         disk_selector: &'a params::DiskSelector,
     ) -> LookupResult<lookup::Disk<'a>> {
         match disk_selector {
-            params::DiskSelector { disk: NameOrId::Id(id), .. } => {
-                let disk =
-                    LookupPath::new(opctx, &self.db_datastore).disk_id(*id);
+            params::DiskSelector {
+                disk: NameOrId::Id(id),
+                project_selector: None,
+            } => {
+                let disk = LookupPath::new(opctx, &self.db_datastore)
+                    .disk_id(*id)
+                    .fetch();
                 Ok(disk)
             }
             params::DiskSelector {
-                disk: NameOrId::Name(disk_name),
-                project: Some(NameOrId::Id(project_id)),
-                ..
+                disk: NameOrId::Name(name),
+                project_selector: Some(project_selector),
             } => {
-                let disk = LookupPath::new(opctx, &self.db_datastore)
-                    .project_id(*project_id)
-                    .disk_name(Name::ref_cast(disk_name));
+                let disk = self
+                    .project_lookup(opctx, project_selector)?
+                    .disk_name(name)
+                    .fetch();
                 Ok(disk)
             }
-            params::DiskSelector {
-                disk: NameOrId::Name(disk_name),
-                project: Some(NameOrId::Name(project_name)),
-                organization: Some(NameOrId::Id(organization_id)),
-            } => {
-                let disk = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_id(*organization_id)
-                    .project_name(Name::ref_cast(project_name))
-                    .disk_name(Name::ref_cast(disk_name));
-                Ok(disk)
-            }
-            params::DiskSelector {
-                disk: NameOrId::Name(disk_name),
-                project: Some(NameOrId::Name(project_name)),
-                organization: Some(NameOrId::Name(organization_name)),
-            } => {
-                let disk = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_name(Name::ref_cast(organization_name))
-                    .project_name(Name::ref_cast(project_name))
-                    .disk_name(Name::ref_cast(disk_name));
-                Ok(disk)
-            }
-            _ => Err(Error::InvalidRequest {
-                message: "
-                Unable to resolve disk. Expected one of
-                    - disk: Uuid
-                    - disk: Name, project: Uuid
-                    - disk: Name, project: Name, organization: Uuid
-                    - disk: Name, project: Name, organization: Name
-                "
-                .to_string(),
-            }),
+            _ => Err(Error::invalid_request(
+                "disk should either be UUID or project should be specified",
+            )),
         }
     }
 

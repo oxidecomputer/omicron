@@ -84,6 +84,27 @@ pub struct OptionalProjectSelector {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct DiskSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub disk: NameOrId,
+}
+
+impl DiskSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        disk: NameOrId,
+    ) -> Self {
+        DiskSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            disk,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
@@ -98,11 +119,8 @@ impl InstanceSelector {
         instance: NameOrId,
     ) -> Self {
         InstanceSelector {
-            project_selector: if let Some(p) = project {
-                Some(ProjectSelector::new(organization, p))
-            } else {
-                None
-            },
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
             instance,
         }
     }
