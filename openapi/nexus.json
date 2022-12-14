@@ -7839,7 +7839,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7891,7 +7890,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7938,7 +7936,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -8002,7 +7999,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -8040,7 +8036,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -8130,7 +8125,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -8194,7 +8188,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -8248,7 +8241,6 @@
           {
             "in": "path",
             "name": "instance",
-            "description": "If Name is used to reference the instance you must also include one of the following qualifiers as query parameters: - `project_id` - `project_name`, `organization_id` - `project_name`, `organization_name`\n\nIf Id is used the above qualifiers are will be ignored",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
