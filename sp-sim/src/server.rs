@@ -121,6 +121,7 @@ pub fn logger(config: &Config) -> Result<Logger> {
     Ok(log)
 }
 
+// TODO: This doesn't need to return Result anymore
 pub(crate) async fn handle_request<'a, H: SpHandler>(
     handler: &mut H,
     recv: Result<(&[u8], SocketAddrV6)>,
@@ -139,7 +140,8 @@ pub(crate) async fn handle_request<'a, H: SpHandler>(
     let (data, addr) =
         recv.with_context(|| format!("recv on {:?}", port_num))?;
 
-    let n = sp_impl::handle_message(addr, port_num, data, handler, out);
+    let response = sp_impl::handle_message(addr, port_num, data, handler, out)
+        .map(|n| (&out[..n], addr));
 
-    Ok(Some((&out[..n], addr)))
+    Ok(response)
 }

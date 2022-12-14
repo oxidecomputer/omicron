@@ -5,8 +5,8 @@
 //! Interfaces for parsing configuration files and working with a gateway server
 //! configuration
 
+use crate::management_switch::SwitchConfig;
 use dropshot::ConfigLogging;
-use gateway_sp_comms::SwitchConfig;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
