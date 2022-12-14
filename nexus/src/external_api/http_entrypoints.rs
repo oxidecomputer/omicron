@@ -1891,15 +1891,20 @@ async fn project_policy_view(
 async fn project_policy_update_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<params::ProjectPath>,
+    query_params: Query<params::OptionalOrganizationSelector>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
+    let query = query_params.into_inner();
     let new_policy = new_policy.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(None, path.project);
+        let project_selector = params::ProjectSelector {
+            organization_selector: query.organization_selector,
+            project: path.project,
+        };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         nexus
             .project_update_policy(&opctx, &project_lookup, &new_policy)
