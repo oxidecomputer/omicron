@@ -4,6 +4,7 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use bytes::{BufMut, BytesMut};
 use hyper::body::Bytes;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -33,6 +34,25 @@ impl ArtifactStore {
     }
 
     pub(crate) fn get_artifact(&self, id: &ArtifactId) -> Option<Bytes> {
+        // This is a test artifact used by installinator.
+        if id.name == "installinator-test" {
+            // For testing, the version is the size of the artifact.
+            let size: usize = id
+                .version
+                .parse()
+                .map_err(|err| {
+                    slog::warn!(
+                        self.log,
+                        "for installinator-test, version should be a usize indicating the size but found {}: {err}",
+                        id.version
+                    );
+                })
+                .ok()?;
+            let mut bytes = BytesMut::with_capacity(size as usize);
+            bytes.put_bytes(0, size);
+            return Some(bytes.freeze());
+        }
+
         slog::debug!(self.log, "Artifact requested (this is a stub implementation which always 404s): {:?}", id);
         // TODO: implement this
         None

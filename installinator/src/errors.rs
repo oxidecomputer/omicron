@@ -2,22 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{net::Ipv6Addr, time::Duration};
+use std::{net::SocketAddrV6, time::Duration};
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum ArtifactFetchError {
     #[error("peer {peer} returned an HTTP error")]
-    HttpError { peer: Ipv6Addr, error: wicketd_client::Error },
+    HttpError { peer: SocketAddrV6, error: wicketd_client::Error },
 
     #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
-    Timeout { peer: Ipv6Addr, timeout: Duration, bytes_fetched: usize },
+    Timeout { peer: SocketAddrV6, timeout: Duration, bytes_fetched: usize },
 }
 
 #[derive(Debug, Error)]
 pub(crate) enum DiscoverPeersError {
     #[error("failed to discover peers (will retry)")]
+    #[allow(unused)]
     Retry(#[source] anyhow::Error),
 
     #[error("failed to discover peers (no more retries left, will abort)")]

@@ -2,15 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, future::Future, net::Ipv6Addr, str::FromStr, time::Duration};
+use std::{
+    fmt, future::Future, net::SocketAddrV6, str::FromStr, time::Duration,
+};
 
 use anyhow::{bail, Result};
 use buf_list::BufList;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
+use futures::StreamExt;
 use itertools::Itertools;
-use progenitor_client::ResponseValue;
-use reqwest::StatusCode;
 use tokio::{
     sync::{mpsc, oneshot},
     time::Instant,
@@ -18,10 +19,66 @@ use tokio::{
 
 use crate::errors::{ArtifactFetchError, DiscoverPeersError};
 
+/// A chosen discovery mechanism for peers, passed in over the command line.
+#[derive(Clone, Debug)]
+pub(crate) enum DiscoveryMechanism {
+    /// The default discovery mechanism: hit the bootstrap network.
+    Bootstrap,
+
+    /// A list of peers is manually specified.
+    List(Vec<SocketAddrV6>),
+}
+
+impl DiscoveryMechanism {
+    /// Discover peers.
+    pub(crate) async fn discover_peers(
+        &self,
+        log: &slog::Logger,
+    ) -> Result<Box<dyn PeersImpl>, DiscoverPeersError> {
+        let peers = match self {
+            Self::Bootstrap => {
+                todo!("bootstrap discovery mechanism");
+            }
+            Self::List(peers) => peers.clone(),
+        };
+
+        Ok(Box::new(HttpPeers::new(log, peers)))
+    }
+}
+
+impl fmt::Display for DiscoveryMechanism {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bootstrap => write!(f, "bootstrap"),
+            Self::List(peers) => {
+                write!(f, "list:{}", peers.iter().join(","))
+            }
+        }
+    }
+}
+
+impl FromStr for DiscoveryMechanism {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "bootstrap" {
+            Ok(Self::Bootstrap)
+        } else if let Some(peers) = s.strip_prefix("list:") {
+            let peers = peers
+                .split(',')
+                .map(|s| s.parse())
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Self::List(peers))
+        } else {
+            bail!("invalid discovery mechanism (expected \"bootstrap\" or \"list:[::1]:8000\"): {}", s);
+        }
+    }
+}
+
 /// A fetched artifact.
 pub(crate) struct FetchedArtifact {
     pub(crate) attempt: usize,
-    pub(crate) addr: Ipv6Addr,
+    pub(crate) addr: SocketAddrV6,
     pub(crate) artifact: BufList,
 }
 
@@ -45,7 +102,7 @@ impl FetchedArtifact {
             let peers = match discover_fn().await {
                 Ok(peers) => peers,
                 Err(DiscoverPeersError::Retry(error)) => {
-                    slog::debug!(
+                    slog::warn!(
                         log,
                         "(attempt {attempt}) failed to discover peers, retrying: {}",
                         DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
@@ -59,7 +116,7 @@ impl FetchedArtifact {
                 }
             };
 
-            slog::debug!(
+            slog::info!(
                 log,
                 "discovered {} peers: [{}]",
                 peers.peer_count(),
@@ -70,9 +127,9 @@ impl FetchedArtifact {
                     return Ok(Self { attempt, addr, artifact })
                 }
                 None => {
-                    slog::debug!(
+                    slog::warn!(
                         log,
-                        "unable to fetch artifact from peers, retrying",
+                        "unable to fetch artifact from peers, retrying discovery",
                     );
                     // Add a small delay here to avoid slamming the CPU.
                     tokio::time::sleep(Duration::from_millis(10)).await;
@@ -119,7 +176,7 @@ impl Peers {
     pub(crate) async fn fetch_artifact(
         &self,
         artifact_id: &ArtifactId,
-    ) -> Option<(Ipv6Addr, BufList)> {
+    ) -> Option<(SocketAddrV6, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
         let mut remaining_peers = self.peer_count();
@@ -142,7 +199,7 @@ impl Peers {
             match self.fetch_from_peer(peer, artifact_id).await {
                 Ok(artifact_bytes) => {
                     let elapsed = start.elapsed();
-                    slog::debug!(
+                    slog::info!(
                         log,
                         "fetched artifact from peer {peer} in {elapsed:?}"
                     );
@@ -150,7 +207,7 @@ impl Peers {
                 }
                 Err(error) => {
                     let elapsed = start.elapsed();
-                    slog::debug!(
+                    slog::warn!(
                         log,
                         "error after {elapsed:?}: {}",
                         DisplayErrorChain::new(&error);
@@ -163,7 +220,7 @@ impl Peers {
         None
     }
 
-    pub(crate) fn peers(&self) -> impl Iterator<Item = Ipv6Addr> + '_ {
+    pub(crate) fn peers(&self) -> impl Iterator<Item = SocketAddrV6> + '_ {
         self.imp.peers()
     }
 
@@ -177,15 +234,16 @@ impl Peers {
 
     async fn fetch_from_peer(
         &self,
-        peer: Ipv6Addr,
+        peer: SocketAddrV6,
         artifact_id: &ArtifactId,
     ) -> Result<BufList, ArtifactFetchError> {
+        let log = self.log.new(slog::o!("peer" => peer.to_string()));
         let (sender, mut receiver) = mpsc::channel(8);
         let (cancel_sender, cancel_receiver) = oneshot::channel();
 
         self.imp.start_fetch_artifact(
             peer,
-            artifact_id,
+            artifact_id.clone(),
             sender,
             cancel_receiver,
         );
@@ -195,9 +253,19 @@ impl Peers {
         loop {
             match tokio::time::timeout(self.timeout, receiver.recv()).await {
                 Ok(Some(Ok(bytes))) => {
+                    slog::debug!(
+                        &log,
+                        "received chunk of {} bytes from peer",
+                        bytes.len()
+                    );
                     artifact_bytes.push_chunk(bytes);
                 }
                 Ok(Some(Err(error))) => {
+                    slog::debug!(
+                        &log,
+                        "received error from peer, sending cancellation: {}",
+                        DisplayErrorChain::new(&error),
+                    );
                     _ = cancel_sender.send(());
                     return Err(ArtifactFetchError::HttpError { peer, error });
                 }
@@ -220,41 +288,34 @@ impl Peers {
 }
 
 pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
-    fn peers(&self) -> Box<dyn Iterator<Item = Ipv6Addr> + '_>;
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_>;
     fn peer_count(&self) -> usize;
 
     fn start_fetch_artifact(
         &self,
-        peer: Ipv6Addr,
-        artifact_id: &ArtifactId,
+        peer: SocketAddrV6,
+        artifact_id: ArtifactId,
         sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
         cancel_receiver: oneshot::Receiver<()>,
     );
 }
 
-/// This is an example implementation of `PeersImpl` that will be deleted once the real
-/// implementation is up and running.
+/// A [`PeersImpl`] that uses HTTP to fetch artifacts from peers. This is the real implementation.
 #[derive(Clone, Debug)]
-pub(crate) struct ExamplePeers {
-    peers: Vec<Ipv6Addr>,
+pub(crate) struct HttpPeers {
+    log: slog::Logger,
+    peers: Vec<SocketAddrV6>,
 }
 
-impl ExamplePeers {
-    pub(crate) fn new(log: &slog::Logger) -> Result<Self> {
-        let log = log.new(slog::o!("component" => "ExamplePeers"));
-
-        // TODO: reach out to the bootstrap network
-        slog::debug!(
-            log,
-            "returning Ipv6Addr::LOCALHOST and UNSPECIFIED as example peer addresses"
-        );
-        let peers = vec![Ipv6Addr::LOCALHOST, Ipv6Addr::UNSPECIFIED];
-        Ok(Self { peers })
+impl HttpPeers {
+    pub(crate) fn new(log: &slog::Logger, peers: Vec<SocketAddrV6>) -> Self {
+        let log = log.new(slog::o!("component" => "HttpPeers"));
+        Self { log, peers }
     }
 }
 
-impl PeersImpl for ExamplePeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = Ipv6Addr> + '_> {
+impl PeersImpl for HttpPeers {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_> {
         Box::new(self.peers.iter().copied())
     }
 
@@ -264,34 +325,67 @@ impl PeersImpl for ExamplePeers {
 
     fn start_fetch_artifact(
         &self,
-        peer: Ipv6Addr,
-        artifact_id: &ArtifactId,
+        peer: SocketAddrV6,
+        artifact_id: ArtifactId,
         sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
-        // ExamplePeers doesn't need cancel_receiver (yet)
-        _cancel_receiver: oneshot::Receiver<()>,
+        cancel_receiver: oneshot::Receiver<()>,
     ) {
-        let artifact_id = artifact_id.clone();
-        tokio::spawn(async move {
-            let res = if peer == Ipv6Addr::LOCALHOST {
-                let mut bytes = BytesMut::new();
-                bytes.extend_from_slice(b"example");
-                bytes.extend_from_slice(artifact_id.to_string().as_bytes());
-                Ok(bytes.freeze())
-            } else if peer == Ipv6Addr::UNSPECIFIED {
-                Err(progenitor_client::Error::ErrorResponse(
-                    ResponseValue::new(
-                        (),
-                        StatusCode::NOT_FOUND,
-                        Default::default(),
-                    ),
-                ))
-            } else {
-                panic!("invalid peer, unknown to ExamplePeers: {peer}")
-            };
+        // TODO: be able to fetch from sled-agent clients as well
+        let artifact_client = ArtifactClient::new(peer, &self.log);
 
-            // Ignore errors in case the channel is dropped.
-            _ = sender.send(res).await;
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = artifact_client.fetch_artifact(artifact_id, sender) => {},
+                _ = cancel_receiver => {},
+            }
         });
+    }
+}
+
+#[derive(Debug)]
+struct ArtifactClient {
+    log: slog::Logger,
+    client: wicketd_client::Client,
+}
+
+impl ArtifactClient {
+    fn new(addr: SocketAddrV6, log: &slog::Logger) -> Self {
+        let endpoint = format!("http://[{}]:{}", addr.ip(), addr.port());
+        let log = log.new(
+            slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
+        );
+        let client = wicketd_client::Client::new(&endpoint, log.clone());
+        Self { log, client }
+    }
+
+    async fn fetch_artifact(
+        &self,
+        artifact_id: ArtifactId,
+        sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
+    ) {
+        let artifact_bytes = match self
+            .client
+            .get_artifact(&artifact_id.name, &artifact_id.version)
+            .await
+        {
+            Ok(artifact_bytes) => artifact_bytes,
+            Err(error) => {
+                // TODO: does this lose too much info wicketd_client::types::Error?
+                let _ = sender.send(Err(error.into_untyped())).await;
+                return;
+            }
+        };
+
+        slog::debug!(
+            &self.log,
+            "preparing to receive {:?} bytes from artifact",
+            artifact_bytes.content_length(),
+        );
+
+        let mut bytes = artifact_bytes.into_inner_stream();
+        while let Some(item) = bytes.next().await {
+            _ = sender.send(item.map_err(Into::into)).await;
+        }
     }
 }
 

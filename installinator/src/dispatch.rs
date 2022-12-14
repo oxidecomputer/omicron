@@ -11,10 +11,7 @@ use clap::{Args, Parser, Subcommand};
 use slog::Drain;
 use tokio::io::AsyncWriteExt;
 
-use crate::{
-    errors::DiscoverPeersError,
-    peers::{ArtifactId, ExamplePeers, FetchedArtifact, Peers},
-};
+use crate::peers::{ArtifactId, DiscoveryMechanism, FetchedArtifact, Peers};
 
 /// Installinator app.
 #[derive(Debug, Parser)]
@@ -46,10 +43,7 @@ impl InstallinatorApp {
         let file_drain =
             slog_term::FullFormat::new(file_decorator).build().fuse();
 
-        let stderr_decorator =
-            slog_term::PlainDecorator::new(std::io::stderr());
-        let stderr_drain =
-            slog_term::FullFormat::new(stderr_decorator).build().fuse();
+        let stderr_drain = stderr_env_drain("INSTALLINATOR_LOG");
 
         let drain = slog::Duplicate::new(file_drain, stderr_drain).fuse();
         let drain = slog_async::Async::new(drain).build().fuse();
@@ -65,17 +59,19 @@ enum InstallinatorCommand {
     Install(InstallOpts),
 }
 
+/// Perform discovery of peers.
 #[derive(Debug, Args)]
 #[command(version)]
 struct DebugDiscoverOpts {
-    // TODO: add options here
+    #[command(flatten)]
+    opts: DiscoverOpts,
 }
 
 impl DebugDiscoverOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
         let peers = Peers::new(
             &log,
-            Box::new(ExamplePeers::new(&log)?),
+            self.opts.mechanism.discover_peers(&log).await?,
             Duration::from_secs(10),
         );
         println!("discovered peers: {}", peers.display());
@@ -83,9 +79,20 @@ impl DebugDiscoverOpts {
     }
 }
 
+/// Options shared by both [`DebugDiscoverOpts`] and [`InstallOpts`].
+#[derive(Debug, Args)]
+struct DiscoverOpts {
+    /// The mechanism by which to discover peers: bootstrap or list:[::1]:8000
+    #[clap(long, default_value_t = DiscoveryMechanism::Bootstrap)]
+    mechanism: DiscoveryMechanism,
+}
+
 #[derive(Debug, Args)]
 #[command(version)]
 struct InstallOpts {
+    #[command(flatten)]
+    discover_opts: DiscoverOpts,
+
     // TODO: fetch this
     artifact_id: ArtifactId,
 
@@ -105,10 +112,10 @@ impl InstallOpts {
                 async {
                     Ok(Peers::new(
                         &log,
-                        Box::new(
-                            ExamplePeers::new(&log)
-                                .map_err(DiscoverPeersError::Retry)?,
-                        ),
+                        self.discover_opts
+                            .mechanism
+                            .discover_peers(&log)
+                            .await?,
                         Duration::from_secs(10),
                     ))
                 }
@@ -157,4 +164,20 @@ async fn write_artifact(
     })?;
 
     Ok(())
+}
+
+pub(crate) fn stderr_env_drain(
+    env_var: &str,
+) -> impl Drain<Ok = (), Err = slog::Never> {
+    let stderr_decorator = slog_term::TermDecorator::new().build();
+    let stderr_drain =
+        slog_term::FullFormat::new(stderr_decorator).build().fuse();
+    let mut builder = slog_envlogger::LogBuilder::new(stderr_drain);
+    if let Ok(s) = std::env::var(env_var) {
+        builder = builder.parse(&s);
+    } else {
+        // Log at the info level by default.
+        builder = builder.filter(None, slog::FilterLevel::Info);
+    }
+    builder.build()
 }

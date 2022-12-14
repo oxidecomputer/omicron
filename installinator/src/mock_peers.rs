@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeMap, fmt, net::Ipv6Addr, time::Duration};
+use std::{collections::BTreeMap, fmt, net::SocketAddrV6, time::Duration};
 
 use anyhow::{bail, Result};
 use bytes::Bytes;
@@ -16,7 +16,7 @@ use crate::peers::{ArtifactId, PeersImpl};
 
 struct MockPeersUniverse {
     artifact: Bytes,
-    peers: BTreeMap<Ipv6Addr, MockPeer>,
+    peers: BTreeMap<SocketAddrV6, MockPeer>,
     attempt_bitmaps: Vec<AttemptBitmap>,
 }
 
@@ -33,7 +33,7 @@ impl fmt::Debug for MockPeersUniverse {
 impl MockPeersUniverse {
     fn new(
         artifact: Bytes,
-        peers: BTreeMap<Ipv6Addr, MockPeer>,
+        peers: BTreeMap<SocketAddrV6, MockPeer>,
         attempt_bitmaps: Vec<AttemptBitmap>,
     ) -> Self {
         assert!(peers.len() <= 32, "this test only supports up to 32 peers");
@@ -54,7 +54,7 @@ impl MockPeersUniverse {
         // being unique identifiers. This means that this code can use a BTreeMap rather than a
         // fancier structure like an IndexMap.
         let peers_strategy = prop::collection::btree_map(
-            any::<Ipv6Addr>(),
+            any::<SocketAddrV6>(),
             any::<MockResponse_>(),
             0..max_peer_count,
         );
@@ -66,7 +66,7 @@ impl MockPeersUniverse {
         (artifact_strategy, peers_strategy, attempt_bitmaps_strategy).prop_map(
             |(artifact, peers, attempt_bitmaps): (
                 Vec<u8>,
-                BTreeMap<Ipv6Addr, MockResponse_>,
+                BTreeMap<SocketAddrV6, MockResponse_>,
                 Vec<AttemptBitmap>,
             )| {
                 let artifact = Bytes::from(artifact);
@@ -85,7 +85,10 @@ impl MockPeersUniverse {
         )
     }
 
-    fn expected_success(&self, timeout: Duration) -> Option<(usize, Ipv6Addr)> {
+    fn expected_success(
+        &self,
+        timeout: Duration,
+    ) -> Option<(usize, SocketAddrV6)> {
         self.attempts()
             .enumerate()
             .filter_map(|(attempt, peers)| {
@@ -147,20 +150,20 @@ enum AttemptBitmap {
 struct MockPeers {
     artifact: Bytes,
     // Peers within the universe that have been selected
-    selected_peers: BTreeMap<Ipv6Addr, MockPeer>,
+    selected_peers: BTreeMap<SocketAddrV6, MockPeer>,
 }
 
 impl MockPeers {
-    fn get(&self, addr: Ipv6Addr) -> Option<&MockPeer> {
+    fn get(&self, addr: SocketAddrV6) -> Option<&MockPeer> {
         self.selected_peers.get(&addr)
     }
 
-    fn peers(&self) -> impl Iterator<Item = (&Ipv6Addr, &MockPeer)> + '_ {
+    fn peers(&self) -> impl Iterator<Item = (&SocketAddrV6, &MockPeer)> + '_ {
         self.selected_peers.iter()
     }
 
     /// Returns the peer that can return the entire dataset within the timeout.
-    fn successful_peer(&self, timeout: Duration) -> Option<Ipv6Addr> {
+    fn successful_peer(&self, timeout: Duration) -> Option<SocketAddrV6> {
         self.peers()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
@@ -200,7 +203,7 @@ impl MockPeers {
 }
 
 impl PeersImpl for MockPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = Ipv6Addr> + '_> {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_> {
         Box::new(self.selected_peers.keys().copied())
     }
 
@@ -210,9 +213,9 @@ impl PeersImpl for MockPeers {
 
     fn start_fetch_artifact(
         &self,
-        peer: Ipv6Addr,
+        peer: SocketAddrV6,
         // For now, we ignore the artifact ID -- we assume that there's only one ID under test.
-        _artifact_id: &ArtifactId,
+        _artifact_id: ArtifactId,
         sender: mpsc::Sender<Result<Bytes, progenitor_client::Error>>,
         cancel_receiver: tokio::sync::oneshot::Receiver<()>,
     ) {
@@ -388,6 +391,7 @@ mod tests {
     use crate::{
         errors::DiscoverPeersError,
         peers::{FetchedArtifact, Peers},
+        stderr_env_drain,
     };
 
     use bytes::Buf;
@@ -474,15 +478,8 @@ mod tests {
     }
 
     fn test_logger() -> slog::Logger {
-        // To control logging, use RUST_LOG.
-        let decorator = slog_term::PlainDecorator::new(std::io::stderr());
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let mut builder = slog_envlogger::LogBuilder::new(drain);
-        if let Ok(s) = std::env::var("RUST_TEST_LOG") {
-            builder = builder.parse(&s);
-        }
-        let drain = builder.build();
-
+        // To control logging, use RUST_TEST_LOG.
+        let drain = stderr_env_drain("RUST_TEST_LOG");
         let drain = slog_async::Async::new(drain).build().fuse();
         slog::Logger::root(drain, slog::o!())
     }
