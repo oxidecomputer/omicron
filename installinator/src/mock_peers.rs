@@ -395,6 +395,7 @@ enum ResponseAction_ {
         after: Duration,
         count: prop::sample::Index,
     },
+    #[weight(1)]
     Error,
 }
 
