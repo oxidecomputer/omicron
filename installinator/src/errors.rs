@@ -9,7 +9,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub(crate) enum ArtifactFetchError {
     #[error("peer {peer} returned an HTTP error")]
-    HttpError { peer: SocketAddrV6, error: wicketd_client::Error },
+    HttpError { peer: SocketAddrV6, #[source] error: wicketd_client::Error },
 
     #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
     Timeout { peer: SocketAddrV6, timeout: Duration, bytes_fetched: usize },

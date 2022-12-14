@@ -34,8 +34,8 @@ impl ArtifactStore {
     }
 
     pub(crate) fn get_artifact(&self, id: &ArtifactId) -> Option<Bytes> {
-        // This is a test artifact used by installinator.
-        if id.name == "installinator-test" {
+        // This is a test artifact name used by the installinator.
+        if id.name == "__installinator-test" {
             // For testing, the version is the size of the artifact.
             let size: usize = id
                 .version
