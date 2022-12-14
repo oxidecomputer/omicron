@@ -40,9 +40,8 @@ impl super::Nexus {
                 disk: NameOrId::Id(id),
                 project_selector: None,
             } => {
-                let disk = LookupPath::new(opctx, &self.db_datastore)
-                    .disk_id(*id)
-                    .fetch();
+                let disk =
+                    LookupPath::new(opctx, &self.db_datastore).disk_id(*id);
                 Ok(disk)
             }
             params::DiskSelector {
@@ -51,8 +50,7 @@ impl super::Nexus {
             } => {
                 let disk = self
                     .project_lookup(opctx, project_selector)?
-                    .disk_name(name)
-                    .fetch();
+                    .disk_name(Name::ref_cast(name));
                 Ok(disk)
             }
             _ => Err(Error::invalid_request(

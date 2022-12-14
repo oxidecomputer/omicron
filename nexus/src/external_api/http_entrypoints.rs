@@ -2334,16 +2334,6 @@ async fn ip_pool_service_range_remove(
 
 // Disks
 
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskListParams {
-    /// Optional filter to narrow disks returned to those attached to the given instance
-    instance: Option<NameOrId>,
-    #[serde(flatten)]
-    selector: Option<params::ProjectSelector>,
-    #[serde(flatten)]
-    pagination: PaginatedByName,
-}
-
 #[endpoint {
     method = GET,
     path = "/v1/disks",
@@ -2351,7 +2341,7 @@ pub struct DiskListParams {
 }]
 async fn disk_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<DiskListParams>,
+    query_params: Query<Params::DiskList>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -2360,8 +2350,10 @@ async fn disk_list_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disks = if let Some(instance) = instance {
-            let instance_selector =
-                params::InstanceSelector::new(instance, &query.selector);
+            let instance_selector = params::InstanceSelector {
+                instance,
+                project_selector: &query.selector,
+            };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, &instance_selector)?;
             nexus
@@ -2420,12 +2412,10 @@ async fn disk_list(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let project_selector = params::ProjectSelector {
-        project: NameOrId::Name(project_name.clone().into()),
-        organization: Some(NameOrId::Name(organization_name.clone().into())),
-    };
+    let project_selector = params::ProjectSelector::new(
+        Some(path.organization_name.into()),
+        path.project_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let authz_project = nexus.project_lookup(&opctx, &project_selector)?;
@@ -2500,10 +2490,10 @@ async fn disk_create(
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
     let new_disk_params = &new_disk.into_inner();
-    let project_selector = params::ProjectSelector {
-        project: NameOrId::Name(project_name.clone().into()),
-        organization: Some(NameOrId::Name(organization_name.clone().into())),
-    };
+    let project_selector = params::ProjectSelector::new(
+        Some(organization_name.into()),
+        project_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
@@ -2515,24 +2505,6 @@ async fn disk_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Disk requests
-#[derive(Deserialize, JsonSchema)]
-struct DiskLookupPathParam {
-    /// If Name is used to reference the disk you must also include one of the following qualifiers as query parameters:
-    /// - `project_id`
-    /// - `project_name`, `organization_id`
-    /// - `project_name`, `organization_name`
-    ///
-    /// If Id is used the above qualifiers are will be ignored
-    disk: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct DiskViewParams {
-    #[serde(flatten)]
-    selector: Option<params::ProjectSelector>,
-}
-
 #[endpoint {
     method = GET,
     path = "/v1/disks/{disk}",
@@ -2540,14 +2512,17 @@ struct DiskViewParams {
 }]
 async fn disk_view_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<DiskLookupPathParam>,
-    query_params: Query<DiskViewParams>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let disk_selector = params::DiskSelector::new(path.disk, &query.selector);
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let (.., disk) =
@@ -2580,14 +2555,11 @@ async fn disk_view(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
-    let disk_selector = params::DiskSelector {
-        disk: NameOrId::Name(disk_name.clone().into()),
-        project: Some(NameOrId::Name(project_name.clone().into())),
-        organization: Some(NameOrId::Name(organization_name.clone().into())),
-    };
+    let disk_selector = params::DiskSelector::new(
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.disk_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let (.., disk) =
@@ -2612,8 +2584,7 @@ async fn disk_view_by_id(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
-    let disk_selector = params::DiskSelector::new(NameOrId::Id(*id), &None);
+    let disk_selector = params::DiskSelector::new(None, None, path.id.into());
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let (.., disk) =
@@ -2631,14 +2602,17 @@ async fn disk_view_by_id(
 }]
 async fn disk_delete_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<DiskLookupPathParam>,
-    query_params: Query<DiskViewParams>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
-    let disk_selector = params::DiskSelector::new(path.disk, &query.selector);
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
@@ -2662,14 +2636,11 @@ async fn disk_delete(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
-    let disk_selector = params::DiskSelector {
-        disk: NameOrId::Name(disk_name.clone().into()),
-        project: Some(NameOrId::Name(project_name.clone().into())),
-        organization: Some(NameOrId::Name(organization_name.clone().into())),
-    };
+    let disk_selector = params::DiskSelector::new(
+        Some(path.organization.into()),
+        Some(path.project.into()),
+        path.disk.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
@@ -2687,8 +2658,8 @@ async fn disk_delete(
 }]
 async fn disk_attach_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<DiskLookupPathParam>,
-    query_params: Query<DiskViewParams>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
     body: TypedBody<params::InstanceIdentifier>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
@@ -2696,9 +2667,14 @@ async fn disk_attach_v1(
     let path = path_params.into_inner();
     let query = query_params.into_inner();
     let body = body.into_inner();
-    let instance_selector =
-        params::InstanceSelector::new(body.instance, &query.selector);
-    let disk_selector = params::DiskSelector::new(path.disk, &query.selector);
+    let instance_selector = params::InstanceSelector {
+        instance: body.instance,
+        project_selector: query.project_selector,
+    };
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_lookup =

@@ -30,6 +30,11 @@ pub struct ProjectPath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct DiskPath {
+    pub disk: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct InstancePath {
     pub instance: NameOrId,
 }
@@ -102,6 +107,16 @@ impl DiskSelector {
             disk,
         }
     }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskList {
+    /// Optional filter to only return disks attached to the given instance
+    pub instance: Option<NameOrId>,
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    #[serde(flatten)]
+    pub pagination: PaginatedByName,
 }
 
 #[derive(Deserialize, JsonSchema)]
