@@ -175,22 +175,27 @@ impl MockPeers {
                     MockResponse::Response(actions) => {
                         let mut total_count = 0;
                         for action in actions {
-                            // Each action must finish under the timeout. Note that within Tokio,
-                            // timers of the same duration should fire in the order that they were
-                            // created, because that's the order they'll be added to the linked list
-                            // for that timer wheel slot. While this is not yet guaranteed in
-                            // Tokio's documentation, it is the only reasonable implementation so we
-                            // rely on it here.
-                            //
-                            // Since Peers creates the timeout BEFORE MockPeersUniverse sets its
-                            // delay, action.after must be less than timeout.
-                            if action.after >= timeout {
-                                return None;
-                            }
+                            match action {
+                                ResponseAction::Response { after, count } => {
+                                    // Each action must finish under the timeout. Note that within Tokio,
+                                    // timers of the same duration should fire in the order that they were
+                                    // created, because that's the order they'll be added to the linked list
+                                    // for that timer wheel slot. While this is not yet guaranteed in
+                                    // Tokio's documentation, it is the only reasonable implementation so we
+                                    // rely on it here.
+                                    //
+                                    // Since Peers creates the timeout BEFORE MockPeersUniverse sets its
+                                    // delay, action.after must be less than timeout.
+                                    if *after >= timeout {
+                                        return None;
+                                    }
 
-                            total_count += action.count;
-                            if total_count >= peer.artifact.len() {
-                                return Some(*addr);
+                                    total_count += count;
+                                    if total_count >= peer.artifact.len() {
+                                        return Some(*addr);
+                                    }
+                                }
+                                ResponseAction::Error => return None,
                             }
                         }
                         None
@@ -256,15 +261,32 @@ impl MockPeer {
         match self.response {
             MockResponse::Response(actions) => {
                 for action in actions {
-                    if !action.after.is_zero() {
-                        tokio::time::sleep(action.after).await;
-                    }
-                    let at = action.count.min(artifact.len());
-                    let value = artifact.split_to(at);
-                    _ = sender.send(Ok(value)).await;
-                    if artifact.is_empty() {
-                        // If there's no more data left, we're done.
-                        return;
+                    match action {
+                        ResponseAction::Response { after, count } => {
+                            if !after.is_zero() {
+                                tokio::time::sleep(after).await;
+                            }
+                            let at = count.min(artifact.len());
+                            let value = artifact.split_to(at);
+                            _ = sender.send(Ok(value)).await;
+                            if artifact.is_empty() {
+                                // If there's no more data left, we're done.
+                                return;
+                            }
+                        }
+                        ResponseAction::Error => {
+                            // The real implementation generates a reqwest::Error, which can't be
+                            // created outside of the reqwest library. Generate a different error.
+                            _ = sender
+                                .send(Err(
+                                    progenitor_client::Error::InvalidRequest(
+                                        "sending error".to_owned(),
+                                    ),
+                                ))
+                                .await;
+                            // Don't terminate the loop here -- keep going to ensure cancellation is
+                            // tested.
+                        }
                     }
                 }
 
@@ -318,9 +340,9 @@ enum MockResponse {
 }
 
 #[derive(Clone, Debug)]
-struct ResponseAction {
-    after: Duration,
-    count: usize,
+enum ResponseAction {
+    Response { after: Duration, count: usize },
+    Error,
 }
 
 /// This is an enum that has the same shape as `MockResponse`, except it uses `prop::sample::Index`
@@ -366,23 +388,32 @@ impl MockResponse_ {
 /// This is an enum that has the same shape as `ResponseAction_`, except it uses `prop::sample::Index`
 /// (within `ResponseAction_`) to represent an unresolved index into the artifact.
 #[derive(Debug, Arbitrary)]
-struct ResponseAction_ {
-    #[strategy((0..1000u64).prop_map(Duration::from_millis))]
-    after: Duration,
-    count: prop::sample::Index,
+enum ResponseAction_ {
+    #[weight(19)]
+    Response {
+        #[strategy((0..1000u64).prop_map(Duration::from_millis))]
+        after: Duration,
+        count: prop::sample::Index,
+    },
+    Error,
 }
 
 impl ResponseAction_ {
     fn into_actual(self, limit: usize) -> ResponseAction {
-        let limit = if limit == 0 {
-            // limit = 0 if it's an empty artifact. We can try and record that we're returning
-            // some bytes anyway.
-            8
-        } else {
-            limit
-        };
-        let count = self.count.index(limit);
-        ResponseAction { after: self.after, count }
+        match self {
+            Self::Response { after, count } => {
+                let limit = if limit == 0 {
+                    // limit = 0 if it's an empty artifact. We can try and record that we're returning
+                    // some bytes anyway.
+                    8
+                } else {
+                    limit
+                };
+                let count = count.index(limit);
+                ResponseAction::Response { after, count }
+            }
+            Self::Error => ResponseAction::Error,
+        }
     }
 }
 
