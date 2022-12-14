@@ -79,18 +79,6 @@ impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {
     }
 }
 
-/// Describes where the IP candidates for allocation come from: either
-/// from an IP pool, or from a project.
-///
-/// This ensures that a source is always specified, and a caller cannot
-/// request an external IP allocation without providing at least one of
-/// these options.
-#[derive(Debug, Clone, Copy)]
-pub enum IpSource {
-    Instance { pool_id: Uuid },
-    Service { pool_id: Uuid },
-}
-
 /// An incomplete external IP, used to store state required for issuing the
 /// database query that selects an available IP and stores the resulting record.
 #[derive(Debug, Clone)]
@@ -101,7 +89,7 @@ pub struct IncompleteExternalIp {
     time_created: DateTime<Utc>,
     kind: IpKind,
     instance_id: Option<Uuid>,
-    source: IpSource,
+    pool_id: Uuid,
 }
 
 impl IncompleteExternalIp {
@@ -117,7 +105,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::SNat,
             instance_id: Some(instance_id),
-            source: IpSource::Instance { pool_id },
+            pool_id,
         }
     }
 
@@ -129,7 +117,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
             instance_id: Some(instance_id),
-            source: IpSource::Instance { pool_id },
+            pool_id,
         }
     }
 
@@ -146,7 +134,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Floating,
             instance_id: None,
-            source: IpSource::Instance { pool_id },
+            pool_id,
         }
     }
 
@@ -158,7 +146,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Service,
             instance_id: None,
-            source: IpSource::Service { pool_id },
+            pool_id,
         }
     }
 
@@ -186,8 +174,8 @@ impl IncompleteExternalIp {
         &self.instance_id
     }
 
-    pub fn source(&self) -> &IpSource {
-        &self.source
+    pub fn pool_id(&self) -> &Uuid {
+        &self.pool_id
     }
 }
 

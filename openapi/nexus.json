@@ -10340,11 +10340,6 @@
               }
             ]
           },
-          "project_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
-          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -10372,12 +10367,6 @@
             "type": "string"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "organization": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "project": {
             "$ref": "#/components/schemas/Name"
           }
         },

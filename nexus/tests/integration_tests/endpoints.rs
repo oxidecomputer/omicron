@@ -263,7 +263,7 @@ lazy_static! {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![
-                params::ExternalIpCreate::Ephemeral { pool_name: None }
+                params::ExternalIpCreate::Ephemeral { pool_name: Some(DEMO_IP_POOL_NAME.clone()) }
             ],
             disks: vec![],
             start: true,

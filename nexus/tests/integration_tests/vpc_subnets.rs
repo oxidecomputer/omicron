@@ -14,8 +14,8 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
-    create_instance, create_ip_pool, create_organization, create_project,
-    create_vpc,
+    create_instance, create_organization, create_project, create_vpc,
+    populate_ip_pool,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -40,7 +40,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     let project_name = "springfield-squidport";
     create_organization(&client, &org_name).await;
     let _ = create_project(&client, org_name, project_name).await;
-    create_ip_pool(client, "pool0", None).await;
+    populate_ip_pool(client, "default", None).await;
 
     let vpcs_url =
         format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);

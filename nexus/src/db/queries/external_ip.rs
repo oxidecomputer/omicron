@@ -9,7 +9,6 @@ use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpKindEnum;
-use crate::db::model::IpSource;
 use crate::db::model::Name;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
@@ -424,18 +423,9 @@ impl NextExternalIp {
         out.push_sql(") AS candidate_ip FROM ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
-        match self.ip.source() {
-            IpSource::Instance { pool_id } => {
-                out.push_identifier(dsl::ip_pool_id::NAME)?;
-                out.push_sql(" = ");
-                out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
-            }
-            IpSource::Service { pool_id } => {
-                out.push_identifier(dsl::ip_pool_id::NAME)?;
-                out.push_sql(" = ");
-                out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
-            }
-        }
+        out.push_identifier(dsl::ip_pool_id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.pool_id())?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
