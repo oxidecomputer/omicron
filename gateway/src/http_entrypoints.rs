@@ -21,6 +21,7 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use futures::StreamExt;
+use gateway_messages::ignition;
 use gateway_messages::IgnitionCommand;
 use gateway_sp_comms::error::Error as SpCommsError;
 use gateway_sp_comms::Timeout as SpTimeout;
@@ -85,6 +86,10 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
+/// State of an ignition target.
+///
+/// TODO: Ignition returns much more information than we're reporting here: do
+/// we want to expand this?
 #[derive(
     Debug,
     Clone,
@@ -97,13 +102,12 @@ pub struct SpIgnitionInfo {
     JsonSchema,
 )]
 #[serde(tag = "present")]
-#[allow(dead_code)] // TODO remove once `Absent` is used
 pub enum SpIgnition {
     #[serde(rename = "no")]
     Absent,
     #[serde(rename = "yes")]
     Present {
-        id: u16,
+        id: SpIgnitionSystemType,
         power: bool,
         ctrl_detect_0: bool,
         ctrl_detect_1: bool,
@@ -112,6 +116,27 @@ pub enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
+}
+
+/// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "system_type", rename_all = "snake_case")]
+pub enum SpIgnitionSystemType {
+    Gimlet,
+    Sidecar,
+    Psc,
+    Unknown { id: u16 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -418,7 +443,11 @@ async fn sp_get(
         .await
         .map_err(http_err_from_comms_err)?;
 
-    let details = if state.is_powered_on() {
+    let details = if state
+        .target
+        .map(|t| t.power_state == ignition::SystemPowerState::On)
+        .unwrap_or(false)
+    {
         // ignition indicates the SP is on; ask it for its state
         match comms.get_state(sp.into()).await {
             Ok(state) => SpState::from(state),

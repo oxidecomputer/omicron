@@ -21,7 +21,7 @@ oximeter = { version = "0.1.0", path = "../../oximeter/oximeter" }
 oximeter-client = { path = "../../oximeter-client" }
 oximeter-collector = { version = "0.1.0",  path = "../../oximeter/collector" }
 oximeter-producer = { version = "0.1.0",  path = "../../oximeter/producer" }
-parse-display = "0.6.0"
+parse-display = "0.7.0"
 serde = { version = "1.0",  features = [ "derive" ] }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
@@ -31,4 +31,4 @@ uuid = { version = "1.2.2", features = [ "serde", "v4" ] }
 [build-dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 omicron-test-utils = { path = "../../test-utils" }
-tokio = { version = "1.22" }
+tokio = { version = "1.23" }

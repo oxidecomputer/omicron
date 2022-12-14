@@ -7,6 +7,7 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
@@ -22,47 +23,39 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn project_lookup(
-        &self,
-        opctx: &OpContext,
-        project_selector: params::ProjectSelector,
-    ) -> LookupResult<authz::Project> {
+    pub fn project_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        project_selector: &'a params::ProjectSelector,
+    ) -> LookupResult<lookup::Project<'a>> {
         match project_selector {
             params::ProjectSelector { project: NameOrId::Id(id), .. } => {
                 // TODO: 400 if organization is present
-                let (.., authz_project) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .project_id(id)
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_project)
+                let project =
+                    LookupPath::new(opctx, &self.db_datastore).project_id(*id);
+                Ok(project)
             }
             params::ProjectSelector {
                 project: NameOrId::Name(project_name),
                 organization: Some(NameOrId::Id(organization_id)),
             } => {
-                let (.., authz_project) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .organization_id(organization_id)
-                        .project_name(&Name(project_name))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_project)
+                let project = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_id(*organization_id)
+                    .project_name(Name::ref_cast(project_name));
+                Ok(project)
             }
             params::ProjectSelector {
                 project: NameOrId::Name(project_name),
                 organization: Some(NameOrId::Name(organization_name)),
             } => {
-                let (.., authz_project) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .organization_name(&Name(organization_name))
-                        .project_name(&Name(project_name))
-                        .lookup_for(authz::Action::Read)
-                        .await?;
-                Ok(authz_project)
+                let project = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_name(Name::ref_cast(organization_name))
+                    .project_name(Name::ref_cast(project_name));
+                Ok(project)
             }
             _ => Err(Error::InvalidRequest {
                 message: "
