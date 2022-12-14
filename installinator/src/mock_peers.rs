@@ -260,7 +260,11 @@ impl MockPeer {
                             }
                             let at = count.min(artifact.len());
                             let value = artifact.split_to(at);
-                            _ = sender.send(Ok(value)).await;
+                            if let Err(_) = sender.send(Ok(value)).await {
+                                // The receiver has been dropped, which indicates that this task
+                                // should be cancelled.
+                                return;
+                            }
                             if artifact.is_empty() {
                                 // If there's no more data left, we're done.
                                 return;
@@ -276,8 +280,7 @@ impl MockPeer {
                                     ),
                                 ))
                                 .await;
-                            // Don't terminate the loop here -- keep going to ensure cancellation is
-                            // tested.
+                            return;
                         }
                     }
                 }

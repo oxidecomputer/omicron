@@ -13,10 +13,7 @@ use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use futures::StreamExt;
 use itertools::Itertools;
-use tokio::{
-    sync::{mpsc, oneshot},
-    time::Instant,
-};
+use tokio::{sync::mpsc, time::Instant};
 
 use crate::errors::{ArtifactFetchError, DiscoverPeersError};
 
@@ -240,17 +237,11 @@ impl Peers {
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
         let (sender, mut receiver) = mpsc::channel(8);
-        let (cancel_sender, cancel_receiver) = oneshot::channel();
 
         let fetch =
             self.imp.fetch_from_peer_impl(peer, artifact_id.clone(), sender);
 
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = fetch => {},
-                _ = cancel_receiver => {},
-            }
-        });
+        tokio::spawn(fetch);
 
         let mut artifact_bytes = BufList::new();
 
@@ -270,7 +261,6 @@ impl Peers {
                         "received error from peer, sending cancellation: {}",
                         DisplayErrorChain::new(&error),
                     );
-                    _ = cancel_sender.send(());
                     return Err(ArtifactFetchError::HttpError { peer, error });
                 }
                 Ok(None) => {
@@ -279,7 +269,6 @@ impl Peers {
                 }
                 Err(_) => {
                     // The operation timed out.
-                    _ = cancel_sender.send(());
                     return Err(ArtifactFetchError::Timeout {
                         peer,
                         timeout: self.timeout,
@@ -368,8 +357,8 @@ impl ArtifactClient {
         {
             Ok(artifact_bytes) => artifact_bytes,
             Err(error) => {
-                // TODO: does this lose too much info wicketd_client::types::Error?
-                let _ = sender.send(Err(error.into_untyped())).await;
+                // TODO: does this lose too much info (wicketd_client::types::Error)?
+                _ = sender.send(Err(error.into_untyped())).await;
                 return;
             }
         };
@@ -382,7 +371,10 @@ impl ArtifactClient {
 
         let mut bytes = artifact_bytes.into_inner_stream();
         while let Some(item) = bytes.next().await {
-            _ = sender.send(item.map_err(Into::into)).await;
+            if let Err(_) = sender.send(item.map_err(Into::into)).await {
+                // The sender was dropped, which indicates that the job was cancelled.
+                return;
+            }
         }
     }
 }
