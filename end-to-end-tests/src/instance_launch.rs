@@ -2,7 +2,7 @@
 
 use crate::helpers::{ctx::Context, generate_name};
 use anyhow::{ensure, Context as _, Result};
-use futures::future::Ready;
+use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, Distribution, ExternalIpCreate,
@@ -12,7 +12,7 @@ use oxide_client::types::{
 use oxide_client::{
     ClientDisksExt, ClientInstancesExt, ClientSessionExt, ClientSystemExt,
 };
-use russh::{client::Session, ChannelMsg, Disconnect};
+use russh::{ChannelMsg, Disconnect};
 use russh_keys::key::{KeyPair, PublicKey};
 use russh_keys::PublicKeyBase64;
 use std::sync::Arc;
@@ -159,7 +159,7 @@ async fn instance_launch() -> Result<()> {
     eprintln!("connecting ssh");
     let mut session = russh::client::connect(
         Default::default(),
-        (ip_addr, 22).into(),
+        (ip_addr, 22),
         SshClient { host_key },
     )
     .await?;
@@ -253,24 +253,15 @@ struct SshClient {
     host_key: PublicKey,
 }
 
+#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
-    type FutureUnit = Ready<Result<(Self, Session)>>;
-    type FutureBool = Ready<Result<(Self, bool)>>;
 
-    fn finished_bool(self, b: bool) -> Self::FutureBool {
-        futures::future::ready(Ok((self, b)))
-    }
-
-    fn finished(self, session: Session) -> Self::FutureUnit {
-        futures::future::ready(Ok((self, session)))
-    }
-
-    fn check_server_key(
+    async fn check_server_key(
         self,
         server_public_key: &PublicKey,
-    ) -> Self::FutureBool {
+    ) -> Result<(Self, bool), Self::Error> {
         let b = &self.host_key == server_public_key;
-        self.finished_bool(b)
+        Ok((self, b))
     }
 }

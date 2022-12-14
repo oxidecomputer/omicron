@@ -1632,15 +1632,15 @@ name = "end-to-end-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64",
- "futures",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
  "rand 0.8.5",
  "reqwest",
  "russh",
- "russh-keys 0.22.0",
+ "russh-keys",
  "tokio",
 ]
 
@@ -4955,7 +4955,7 @@ dependencies = [
  "poly1305 0.8.0",
  "rand 0.8.5",
  "russh-cryptovec",
- "russh-keys 0.23.0-beta.1",
+ "russh-keys",
  "sha1",
  "sha2 0.10.6",
  "subtle",
@@ -4972,42 +4972,6 @@ checksum = "e89fd30a2ef98dfa621409d5bc56a2479d5810bf13a5eea3de89d859437b7e2e"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "russh-keys"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac7f4ec55d4cecf14e2745ca944909cb34d781515627c4c80431c2a735f2dae6"
-dependencies = [
- "aes",
- "bcrypt-pbkdf",
- "bit-vec",
- "block-padding",
- "byteorder",
- "cbc",
- "ctr",
- "data-encoding",
- "dirs",
- "ed25519-dalek",
- "futures",
- "hmac 0.12.1",
- "inout",
- "log",
- "md5",
- "num-bigint",
- "num-integer",
- "pbkdf2",
- "rand 0.7.3",
- "rand_core 0.5.1",
- "russh-cryptovec",
- "serde",
- "serde_derive",
- "sha2 0.10.6",
- "thiserror",
- "tokio",
- "tokio-stream",
- "yasna",
 ]
 
 [[package]]
