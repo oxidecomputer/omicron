@@ -1156,7 +1156,7 @@ async fn organization_view_by_id(
         let (.., organization) = nexus
             .organization_lookup(
                 &opctx,
-                &params::OrganizationSelector(NameOrId::Id(path.id.into())),
+                &params::OrganizationSelector(NameOrId::Id(path.id)),
             )?
             .fetch()
             .await?;
@@ -1310,7 +1310,7 @@ async fn organization_policy_view_v1(
         let policy = nexus
             .organization_fetch_policy(&opctx, &organization_lookup)
             .await?;
-        Ok(HttpResponseOk(policy.into()))
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1868,7 +1868,7 @@ async fn project_policy_view_v1(
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let policy =
             nexus.project_fetch_policy(&opctx, &project_lookup).await?;
-        Ok(HttpResponseOk(policy.into()))
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
