@@ -2007,12 +2007,11 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2e0b41543425ef374ee08c313dcc25b07b98a05e#2e0b41543425ef374ee08c313dcc25b07b98a05e"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1a27a661d7824712aeb4d1b9801938888139eaa7#1a27a661d7824712aeb4d1b9801938888139eaa7"
 dependencies = [
  "bitflags",
  "hubpack",
  "serde",
- "serde-big-array 0.4.1",
  "serde_repr",
  "smoltcp",
  "static_assertions",
@@ -2023,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2e0b41543425ef374ee08c313dcc25b07b98a05e#2e0b41543425ef374ee08c313dcc25b07b98a05e"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1a27a661d7824712aeb4d1b9801938888139eaa7#1a27a661d7824712aeb4d1b9801938888139eaa7"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2032,12 +2031,10 @@ dependencies = [
  "nix",
  "once_cell",
  "serde",
- "serde_with",
  "slog",
  "thiserror",
  "tlvc",
  "tokio",
- "tokio-stream",
  "usdt",
  "uuid",
  "zip",
@@ -2356,7 +2353,7 @@ dependencies = [
 [[package]]
 name = "hubpack"
 version = "0.1.0"
-source = "git+https://github.com/cbiffle/hubpack.git?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
+source = "git+https://github.com/cbiffle/hubpack?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
 dependencies = [
  "hubpack_derive",
  "serde",
@@ -2365,7 +2362,7 @@ dependencies = [
 [[package]]
 name = "hubpack_derive"
 version = "0.1.0"
-source = "git+https://github.com/cbiffle/hubpack.git?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
+source = "git+https://github.com/cbiffle/hubpack?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3390,17 +3387,20 @@ dependencies = [
  "hyper",
  "omicron-common",
  "omicron-test-utils",
+ "once_cell",
  "openapi-lint",
  "openapiv3",
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "slog",
  "slog-dtrace",
  "sp-sim",
  "subprocess",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite",
  "toml",
  "uuid",
