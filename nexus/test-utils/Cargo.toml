@@ -21,7 +21,7 @@ oximeter = { version = "0.1.0", path = "../../oximeter/oximeter" }
 oximeter-client = { path = "../../oximeter-client" }
 oximeter-collector = { version = "0.1.0",  path = "../../oximeter/collector" }
 oximeter-producer = { version = "0.1.0",  path = "../../oximeter/producer" }
-parse-display = "0.6.0"
+parse-display = "0.7.0"
 serde = { version = "1.0",  features = [ "derive" ] }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
