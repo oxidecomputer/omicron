@@ -98,11 +98,7 @@ impl InstanceSelector {
         instance: NameOrId,
     ) -> Self {
         InstanceSelector {
-            project_selector: if let Some(p) = project {
-                Some(ProjectSelector::new(organization, p))
-            } else {
-                None
-            },
+            project_selector: project.map(|p| ProjectSelector::new(organization, p) ),
             instance,
         }
     }

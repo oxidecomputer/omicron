@@ -8865,6 +8865,14 @@
               "$ref": "#/components/schemas/NameOrId"
             },
             "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            },
+            "style": "form"
           }
         ],
         "requestBody": {
