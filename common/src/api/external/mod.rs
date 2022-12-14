@@ -288,6 +288,18 @@ impl TryFrom<String> for NameOrId {
     }
 }
 
+impl From<Name> for NameOrId {
+    fn from(name: Name) -> Self {
+        NameOrId::Name(name)
+    }
+}
+
+impl From<Uuid> for NameOrId {
+    fn from(id: Uuid) -> Self {
+        NameOrId::Id(id)
+    }
+}
+
 impl JsonSchema for NameOrId {
     fn schema_name() -> String {
         "NameOrId".to_string()

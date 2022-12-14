@@ -1125,9 +1125,7 @@ async fn organization_view(
         let (.., organization) = nexus
             .organization_lookup(
                 &opctx,
-                &params::OrganizationSelector(NameOrId::Name(
-                    path.organization_name.into(),
-                )),
+                &params::OrganizationSelector(path.organization_name.into()),
             )?
             .fetch()
             .await?;
@@ -1156,7 +1154,7 @@ async fn organization_view_by_id(
         let (.., organization) = nexus
             .organization_lookup(
                 &opctx,
-                &params::OrganizationSelector(NameOrId::Id(path.id)),
+                &params::OrganizationSelector(path.id.into()),
             )?
             .fetch()
             .await?;
@@ -1206,9 +1204,8 @@ async fn organization_delete(
     let params = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector(
-            NameOrId::Name(params.organization_name.into()),
-        );
+        let organization_selector =
+            &params::OrganizationSelector(params.organization_name.into());
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         nexus.organization_delete(&opctx, &organization_lookup).await?;
@@ -1271,9 +1268,8 @@ async fn organization_update(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector(
-            NameOrId::Name(path.organization_name.into()),
-        );
+        let organization_selector =
+            &params::OrganizationSelector(path.organization_name.into());
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let new_organization = nexus
@@ -1334,9 +1330,8 @@ async fn organization_policy_view(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector(
-            NameOrId::Name(path.organization_name.into()),
-        );
+        let organization_selector =
+            &params::OrganizationSelector(path.organization_name.into());
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let policy = nexus
@@ -1406,9 +1401,8 @@ async fn organization_policy_update(
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector(
-            NameOrId::Name(path.organization_name.into()),
-        );
+        let organization_selector =
+            &params::OrganizationSelector(path.organization_name.into());
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let policy = nexus
@@ -1509,9 +1503,8 @@ async fn project_list(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector(
-            NameOrId::Name(path.organization_name.into()),
-        );
+        let organization_selector =
+            &params::OrganizationSelector(path.organization_name.into());
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let params = ScanByNameOrId::from_query(&query)?;
@@ -1612,9 +1605,8 @@ async fn project_create(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector(
-            NameOrId::Name(path.organization_name.into()),
-        );
+        let organization_selector =
+            &params::OrganizationSelector(path.organization_name.into());
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let project = nexus
@@ -1686,8 +1678,8 @@ async fn project_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
-            Some(NameOrId::Name(path.organization_name.into())),
-            NameOrId::Name(path.project_name.into()),
+            Some(path.organization_name.into()),
+            path.project_name.into(),
         );
         let (.., project) =
             nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
@@ -1714,7 +1706,7 @@ async fn project_view_by_id(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector =
-            params::ProjectSelector::new(None, NameOrId::Id(path.id));
+            params::ProjectSelector::new(None, path.id.into());
         let (.., project) =
             nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
         Ok(HttpResponseOk(project.into()))
@@ -1766,8 +1758,8 @@ async fn project_delete(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
-            Some(NameOrId::Name(path.organization_name.into())),
-            NameOrId::Name(path.project_name.into()),
+            Some(path.organization_name.into()),
+            path.project_name.into(),
         );
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         nexus.project_delete(&opctx, &project_lookup).await?;
@@ -1830,8 +1822,8 @@ async fn project_update(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
-            Some(NameOrId::Name(path.organization_name.into())),
-            NameOrId::Name(path.project_name.into()),
+            Some(path.organization_name.into()),
+            path.project_name.into(),
         );
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let new_project = nexus
@@ -1891,8 +1883,8 @@ async fn project_policy_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
-            Some(NameOrId::Name(path.organization_name.into())),
-            NameOrId::Name(path.project_name.into()),
+            Some(path.organization_name.into()),
+            path.project_name.into(),
         );
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let policy =
@@ -1950,8 +1942,8 @@ async fn project_policy_update(
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
-            Some(NameOrId::Name(path.organization_name.into())),
-            NameOrId::Name(path.project_name.into()),
+            Some(path.organization_name.into()),
+            path.project_name.into(),
         );
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let policy = nexus
@@ -2623,8 +2615,8 @@ async fn instance_list(
     let query = query_params.into_inner();
     let path = path_params.into_inner();
     let project_selector = params::ProjectSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        NameOrId::Name(path.project_name.into()),
+        Some(path.organization_name.into()),
+        path.project_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -2709,8 +2701,8 @@ async fn instance_create(
     let path = path_params.into_inner();
     let new_instance_params = &new_instance.into_inner();
     let project_selector = params::ProjectSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        NameOrId::Name(path.project_name.into()),
+        Some(path.organization_name.into()),
+        path.project_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -2797,9 +2789,9 @@ async fn instance_view(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -2824,13 +2816,12 @@ async fn instance_view_by_id(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let (.., instance) = nexus
             .instance_lookup(
                 &opctx,
-                &params::InstanceSelector::new(None, None, NameOrId::Id(*id)),
+                &params::InstanceSelector::new(None, None, path.id.into()),
             )?
             .fetch()
             .await?;
@@ -2882,9 +2873,9 @@ async fn instance_delete(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -2951,9 +2942,9 @@ async fn instance_migrate(
     let path = path_params.into_inner();
     let migrate_instance_params = migrate_params.into_inner();
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -3014,9 +3005,9 @@ async fn instance_reboot(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -3072,9 +3063,9 @@ async fn instance_start(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -3129,9 +3120,9 @@ async fn instance_stop(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -3201,9 +3192,9 @@ async fn instance_serial_console(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
@@ -3262,9 +3253,9 @@ async fn instance_serial_console_stream(
     let path = path_params.into_inner();
     let opctx = OpContext::for_external_api(&rqctx).await?;
     let instance_selector = params::InstanceSelector::new(
-        Some(NameOrId::Name(path.organization_name.into())),
-        Some(NameOrId::Name(path.project_name.into())),
-        NameOrId::Name(path.instance_name.into()),
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
     );
     let instance_lookup = nexus.instance_lookup(&opctx, &instance_selector)?;
     nexus.instance_serial_console_stream(conn, &instance_lookup).await?;
@@ -4231,8 +4222,8 @@ async fn vpc_create(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
-            Some(NameOrId::Name(path.organization_name.into())),
-            NameOrId::Name(path.project_name.into()),
+            Some(path.organization_name.into()),
+            path.project_name.into(),
         );
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let vpc = nexus

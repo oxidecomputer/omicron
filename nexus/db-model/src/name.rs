@@ -37,7 +37,11 @@ use serde::{Deserialize, Serialize};
 #[display("{0}")]
 pub struct Name(pub external::Name);
 
-// impl Into<external::Name> for Name {}
+impl From<Name> for external::NameOrId {
+    fn from(name: Name) -> Self {
+        Self::Name(name.0)
+    }
+}
 
 NewtypeFrom! { () pub struct Name(external::Name); }
 NewtypeDeref! { () pub struct Name(external::Name); }
