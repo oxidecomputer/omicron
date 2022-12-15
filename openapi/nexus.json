@@ -6290,8 +6290,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SystemMetricName"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -6300,8 +6299,7 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6311,8 +6309,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6323,8 +6320,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6333,8 +6329,7 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6343,8 +6338,7 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
