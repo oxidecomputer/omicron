@@ -53,8 +53,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -62,8 +61,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -100,8 +98,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -109,8 +106,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -140,8 +136,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -149,8 +144,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -180,8 +174,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -221,8 +214,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -230,8 +222,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -268,8 +259,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -277,8 +267,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -314,8 +303,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -325,8 +313,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -334,8 +321,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -345,8 +331,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -382,8 +367,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -393,8 +377,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -402,8 +385,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -432,8 +414,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -443,8 +424,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -452,8 +432,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -482,8 +461,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -493,8 +471,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -502,8 +479,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -531,8 +507,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -542,8 +517,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -551,8 +525,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -581,8 +554,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -592,8 +564,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -601,8 +572,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -641,8 +611,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -652,8 +621,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -661,8 +629,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -701,8 +668,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -712,8 +678,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -721,8 +686,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -759,8 +723,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -768,8 +731,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -804,8 +766,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -813,8 +774,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -853,8 +813,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -862,8 +821,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
