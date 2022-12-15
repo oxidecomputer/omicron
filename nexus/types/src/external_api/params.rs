@@ -98,7 +98,8 @@ impl InstanceSelector {
         instance: NameOrId,
     ) -> Self {
         InstanceSelector {
-            project_selector: project.map(|p| ProjectSelector::new(organization, p) ),
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
             instance,
         }
     }
