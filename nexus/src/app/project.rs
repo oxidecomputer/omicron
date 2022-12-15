@@ -51,8 +51,16 @@ impl super::Nexus {
                     .project_name(Name::ref_cast(name));
                 Ok(project)
             }
+            params::ProjectSelector {
+                project: NameOrId::Id(_),
+                organization_selector: Some(_)
+            } => {
+                Err(Error::invalid_request(
+                    "when providing project as an ID, organization should not be specified",
+                ))
+            }
             _ => Err(Error::invalid_request(
-                    "project should either be UUID or organization should be specified"
+                    "project should either be specified by id or organization should be specified"
             )),
         }
     }
