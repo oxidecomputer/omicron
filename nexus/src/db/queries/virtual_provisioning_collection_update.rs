@@ -293,16 +293,17 @@ impl VirtualProvisioningCollectionUpdate {
         Self { cte }
     }
 
-    pub fn new_insert_disk(
+    pub fn new_insert_storage(
         id: uuid::Uuid,
         disk_byte_diff: i64,
         project_id: uuid::Uuid,
+        storage_type: crate::db::datastore::StorageType,
     ) -> Self {
         use virtual_provisioning_collection::dsl as collection_dsl;
         use virtual_provisioning_resource::dsl as resource_dsl;
 
         let mut provision =
-            VirtualProvisioningResource::new(id, ResourceTypeProvisioned::Disk);
+            VirtualProvisioningResource::new(id, storage_type.into());
         provision.virtual_disk_bytes_provisioned = disk_byte_diff;
 
         Self::apply_update(
@@ -326,7 +327,7 @@ impl VirtualProvisioningCollectionUpdate {
         )
     }
 
-    pub fn new_delete_disk(
+    pub fn new_delete_storage(
         id: uuid::Uuid,
         disk_byte_diff: i64,
         project_id: uuid::Uuid,

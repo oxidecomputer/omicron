@@ -121,6 +121,27 @@ impl oximeter::Producer for Producer {
     }
 }
 
+/// The types of resources which can consume storage space.
+pub enum StorageType {
+    Disk,
+    Snapshot,
+}
+
+impl From<StorageType> for crate::db::model::ResourceTypeProvisioned {
+    fn from(
+        storage_type: StorageType,
+    ) -> crate::db::model::ResourceTypeProvisioned {
+        match storage_type {
+            StorageType::Disk => {
+                crate::db::model::ResourceTypeProvisioned::Disk
+            }
+            StorageType::Snapshot => {
+                crate::db::model::ResourceTypeProvisioned::Snapshot
+            }
+        }
+    }
+}
+
 impl DataStore {
     /// Create a [`VirtualProvisioningCollection`] object.
     pub async fn virtual_provisioning_collection_create(
@@ -220,7 +241,6 @@ impl DataStore {
     // I think we just need to validate that the model exists when we make these
     // calls? Maybe it could be an optional helper?
 
-    /// Transitively updates all provisioned disk provisions from project -> fleet.
     pub async fn virtual_provisioning_collection_insert_disk(
         &self,
         opctx: &OpContext,
@@ -228,20 +248,59 @@ impl DataStore {
         project_id: Uuid,
         disk_byte_diff: i64,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
-        let provisions = VirtualProvisioningCollectionUpdate::new_insert_disk(
+        self.virtual_provisioning_collection_insert_storage(
+            opctx,
             id,
-            disk_byte_diff,
             project_id,
+            disk_byte_diff,
+            StorageType::Disk,
         )
-        .get_results_async(self.pool_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+    }
+
+    pub async fn virtual_provisioning_collection_insert_snapshot(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        disk_byte_diff: i64,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        self.virtual_provisioning_collection_insert_storage(
+            opctx,
+            id,
+            project_id,
+            disk_byte_diff,
+            StorageType::Snapshot,
+        )
+        .await
+    }
+
+    /// Transitively updates all provisioned disk provisions from project -> fleet.
+    async fn virtual_provisioning_collection_insert_storage(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        disk_byte_diff: i64,
+        storage_type: StorageType,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        let provisions =
+            VirtualProvisioningCollectionUpdate::new_insert_storage(
+                id,
+                disk_byte_diff,
+                project_id,
+                storage_type,
+            )
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
         self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions);
         Ok(provisions)
     }
 
-    /// Transitively updates all provisioned disk provisions from project -> fleet.
     pub async fn virtual_provisioning_collection_delete_disk(
         &self,
         opctx: &OpContext,
@@ -249,14 +308,50 @@ impl DataStore {
         project_id: Uuid,
         disk_byte_diff: i64,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
-        let provisions = VirtualProvisioningCollectionUpdate::new_delete_disk(
+        self.virtual_provisioning_collection_delete_storage(
+            opctx,
             id,
-            disk_byte_diff,
             project_id,
+            disk_byte_diff,
         )
-        .get_results_async(self.pool_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+    }
+
+    pub async fn virtual_provisioning_collection_delete_snapshot(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        disk_byte_diff: i64,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        self.virtual_provisioning_collection_delete_storage(
+            opctx,
+            id,
+            project_id,
+            disk_byte_diff,
+        )
+        .await
+    }
+
+    // Transitively updates all provisioned disk provisions from project -> fleet.
+    async fn virtual_provisioning_collection_delete_storage(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        project_id: Uuid,
+        disk_byte_diff: i64,
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+        let provisions =
+            VirtualProvisioningCollectionUpdate::new_delete_storage(
+                id,
+                disk_byte_diff,
+                project_id,
+            )
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
         self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions);
         Ok(provisions)

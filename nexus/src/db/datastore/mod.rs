@@ -72,6 +72,7 @@ mod volume;
 mod vpc;
 mod zpool;
 
+pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
 
 // Number of unique datasets required to back a region.

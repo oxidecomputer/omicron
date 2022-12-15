@@ -156,6 +156,15 @@ CREATE TABLE omicron.public.virtual_provisioning_collection (
 -- - Disks
 -- - Instances
 -- - Snapshots
+--
+-- NOTE: You might think to yourself: "This table looks an awful lot like
+-- the 'virtual_provisioning_collection' table, could they be condensed into
+-- a single table?"
+-- The answer to this question is unfortunately: "No". We use CTEs to both
+-- UPDATE the collection table while INSERTing rows in the resource table, and
+-- this would not be allowed if they came from the same table due to:
+-- https://www.cockroachlabs.com/docs/v22.2/known-limitations#statements-containing-multiple-modification-subqueries-of-the-same-table-are-disallowed
+-- However, by using separate tables, the CTE is able to function correctly.
 CREATE TABLE omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,

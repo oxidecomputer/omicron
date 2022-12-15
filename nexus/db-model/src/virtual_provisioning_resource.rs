@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub enum ResourceTypeProvisioned {
     Instance,
     Disk,
+    Snapshot,
 }
 
 impl std::fmt::Display for ResourceTypeProvisioned {
@@ -16,6 +17,7 @@ impl std::fmt::Display for ResourceTypeProvisioned {
         match self {
             ResourceTypeProvisioned::Instance => write!(f, "instance"),
             ResourceTypeProvisioned::Disk => write!(f, "disk"),
+            ResourceTypeProvisioned::Snapshot => write!(f, "snapshot"),
         }
     }
 }
