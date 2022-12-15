@@ -1,6 +1,5 @@
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result};
-use omicron_sled_agent::params::ServiceType;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use oxide_client::types::{Name, OrganizationCreate, ProjectCreate};
 use oxide_client::{Client, ClientOrganizationsExt, ClientProjectsExt};

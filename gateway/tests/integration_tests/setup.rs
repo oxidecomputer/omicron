@@ -7,8 +7,8 @@
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
-use gateway_sp_comms::SpType;
 use omicron_gateway::MgsArguments;
+use omicron_gateway::SpType;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 use slog::o;
