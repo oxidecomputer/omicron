@@ -10,6 +10,8 @@ mod conversions;
 
 use self::conversions::component_from_str;
 use crate::error::http_err_from_comms_err;
+use crate::error::SpCommsError;
+use crate::timeout::Timeout as SpTimeout;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -23,8 +25,6 @@ use dropshot::TypedBody;
 use futures::StreamExt;
 use gateway_messages::ignition;
 use gateway_messages::IgnitionCommand;
-use gateway_sp_comms::error::Error as SpCommsError;
-use gateway_sp_comms::Timeout as SpTimeout;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::warn;

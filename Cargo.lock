@@ -1476,7 +1476,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#2529126352fde3745fce92420a22aadf58c7677d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ee99418c30d2fae0f7a6e0553b157603b487f481"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1516,7 +1516,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#2529126352fde3745fce92420a22aadf58c7677d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ee99418c30d2fae0f7a6e0553b157603b487f481"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1638,8 +1638,8 @@ name = "end-to-end-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.20.0",
- "futures",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
@@ -2007,12 +2007,11 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2e0b41543425ef374ee08c313dcc25b07b98a05e#2e0b41543425ef374ee08c313dcc25b07b98a05e"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1a27a661d7824712aeb4d1b9801938888139eaa7#1a27a661d7824712aeb4d1b9801938888139eaa7"
 dependencies = [
  "bitflags",
  "hubpack",
  "serde",
- "serde-big-array 0.4.1",
  "serde_repr",
  "smoltcp",
  "static_assertions",
@@ -2023,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2e0b41543425ef374ee08c313dcc25b07b98a05e#2e0b41543425ef374ee08c313dcc25b07b98a05e"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1a27a661d7824712aeb4d1b9801938888139eaa7#1a27a661d7824712aeb4d1b9801938888139eaa7"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2032,12 +2031,10 @@ dependencies = [
  "nix",
  "once_cell",
  "serde",
- "serde_with",
  "slog",
  "thiserror",
  "tlvc",
  "tokio",
- "tokio-stream",
  "usdt",
  "uuid",
  "zip",
@@ -2356,7 +2353,7 @@ dependencies = [
 [[package]]
 name = "hubpack"
 version = "0.1.0"
-source = "git+https://github.com/cbiffle/hubpack.git?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
+source = "git+https://github.com/cbiffle/hubpack?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
 dependencies = [
  "hubpack_derive",
  "serde",
@@ -2365,7 +2362,7 @@ dependencies = [
 [[package]]
 name = "hubpack_derive"
 version = "0.1.0"
-source = "git+https://github.com/cbiffle/hubpack.git?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
+source = "git+https://github.com/cbiffle/hubpack?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3390,17 +3387,20 @@ dependencies = [
  "hyper",
  "omicron-common",
  "omicron-test-utils",
+ "once_cell",
  "openapi-lint",
  "openapiv3",
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "slog",
  "slog-dtrace",
  "sp-sim",
  "subprocess",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite",
  "toml",
  "uuid",
@@ -4962,12 +4962,13 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.35.0-beta.2"
+version = "0.35.0-beta.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3aa615836d9689fa7b5e03ee5941300b15bdbd39df0af42bddbaa45695f41a73"
+checksum = "704448b526df0f4b98b4ed0fa18a06f9f09b787078360b881bde881f8f911b7f"
 dependencies = [
  "aes",
  "aes-gcm",
+ "async-trait",
  "bitflags",
  "byteorder",
  "chacha20 0.9.0",
@@ -5006,9 +5007,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.22.0"
+version = "0.23.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac7f4ec55d4cecf14e2745ca944909cb34d781515627c4c80431c2a735f2dae6"
+checksum = "583adc8a2d6a70b86abb6fb9b0564b85df58198586a7665920d46ffaf7ac383d"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",
@@ -5368,9 +5369,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.149"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "256b9932320c590e707b94576e3cc1f7c9024d0ee6612dfbcf1cb106cbe8e055"
+checksum = "e326c9ec8042f1b5da33252c8a37e9ffbd2c9bef0155215b6e6c80c790e05f91"
 dependencies = [
  "serde_derive",
 ]
@@ -5405,9 +5406,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.149"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4eae9b04cbffdfd550eb462ed33bc6a1b68c935127d008b27444d08380f94e4"
+checksum = "42a3df25b0713732468deadad63ab9da1f1fd75a48a15024b50363f128db627e"
 dependencies = [
  "proc-macro2",
  "quote",
