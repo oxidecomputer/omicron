@@ -184,8 +184,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 /// Pool restriction
 /// ----------------
 ///
-/// Clients may optionally request an external address from a specific IP Pool.
-/// If they don't provide a pool, the query is restricted to all IP Pools.
+/// Clients must supply the UUID of an IP pool from which they are allocating.
 #[derive(Debug, Clone)]
 pub struct NextExternalIp {
     ip: IncompleteExternalIp,
@@ -974,7 +973,6 @@ mod tests {
         let context =
             TestContext::new("test_next_external_ip_for_service").await;
 
-        // Create an IP pool without an associated project.
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 2),
@@ -1033,7 +1031,6 @@ mod tests {
         )
         .await;
 
-        // Create an IP pool without an associated project.
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 2),
@@ -1078,7 +1075,6 @@ mod tests {
         )
         .await;
 
-        // Create an IP pool without an associated project.
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 1),
@@ -1182,7 +1178,7 @@ mod tests {
             TestContext::new("test_next_external_ip_is_restricted_to_pools")
                 .await;
 
-        // Create two pools, neither project-restricted.
+        // Create two pools
         let first_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 3),
@@ -1227,7 +1223,6 @@ mod tests {
         )
         .await;
 
-        // Create two pools, neither project-restricted.
         let first_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 3),

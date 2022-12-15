@@ -121,7 +121,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 Error::Forbidden => {
-                    LookupType::ByCompositeId(format!("Service IP Pool"))
+                    LookupType::ByCompositeId("Service IP Pool".to_string())
                         .into_not_found(ResourceType::IpPool)
                 }
                 _ => e,
@@ -140,7 +140,9 @@ impl DataStore {
                     authz::IpPool::new(
                         authz::FLEET,
                         ip_pool.id(),
-                        LookupType::ByCompositeId(format!("Service IP Pool")),
+                        LookupType::ByCompositeId(
+                            "Service IP Pool".to_string(),
+                        ),
                     ),
                     ip_pool,
                 )
