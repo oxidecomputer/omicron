@@ -7,7 +7,7 @@
 use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    http_pagination::{PaginatedByName, PaginatedByNameOrId},
+    http_pagination::{PaginatedByName, PaginatedByNameOrId, PaginationParams},
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
@@ -39,7 +39,7 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -56,7 +56,7 @@ pub struct OptionalOrganizationSelector {
     pub organization_selector: Option<OrganizationSelector>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct ProjectSelector {
     #[serde(flatten)]
     pub organization_selector: Option<OrganizationSelector>,
@@ -113,10 +113,20 @@ impl DiskSelector {
 pub struct DiskList {
     /// Optional filter to only return disks attached to the given instance
     pub instance: Option<NameOrId>,
+    /// If `instance` is supplied as an ID this field should be left empty
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
     #[serde(flatten)]
     pub pagination: PaginatedByName,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskMetricsList {
+    #[serde(flatten)]
+    pub pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
+
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
 }
 
 #[derive(Deserialize, JsonSchema)]

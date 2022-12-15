@@ -45,7 +45,7 @@ use crate::api::external::Name;
 use crate::api::external::ObjectIdentity;
 use crate::api::external::PaginationOrder;
 use dropshot::HttpError;
-use dropshot::PaginationParams;
+pub use dropshot::PaginationParams;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
