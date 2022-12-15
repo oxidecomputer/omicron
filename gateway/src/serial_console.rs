@@ -4,7 +4,10 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use crate::communicator::Communicator;
 use crate::error::Error;
+use crate::error::SpCommsError;
+use crate::management_switch::SpIdentifier;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
 use futures::SinkExt;
@@ -12,8 +15,6 @@ use futures::StreamExt;
 use gateway_messages::SpComponent;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::AttachedSerialConsoleSend;
-use gateway_sp_comms::Communicator;
-use gateway_sp_comms::SpIdentifier;
 use http::header;
 use hyper::upgrade;
 use hyper::upgrade::Upgraded;
@@ -232,7 +233,7 @@ impl SerialConsoleTask {
                     console_tx
                         .write(data)
                         .await
-                        .map_err(gateway_sp_comms::error::Error::from)
+                        .map_err(SpCommsError::from)
                         .map_err(Error::from)?;
                 }
                 Ok(Message::Close(_)) => {

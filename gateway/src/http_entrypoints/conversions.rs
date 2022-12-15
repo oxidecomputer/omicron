@@ -130,7 +130,7 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
     }
 }
 
-impl From<SpType> for gateway_sp_comms::SpType {
+impl From<SpType> for crate::management_switch::SpType {
     fn from(typ: SpType) -> Self {
         match typ {
             SpType::Sled => Self::Sled,
@@ -140,17 +140,17 @@ impl From<SpType> for gateway_sp_comms::SpType {
     }
 }
 
-impl From<gateway_sp_comms::SpType> for SpType {
-    fn from(typ: gateway_sp_comms::SpType) -> Self {
+impl From<crate::management_switch::SpType> for SpType {
+    fn from(typ: crate::management_switch::SpType) -> Self {
         match typ {
-            gateway_sp_comms::SpType::Sled => Self::Sled,
-            gateway_sp_comms::SpType::Power => Self::Power,
-            gateway_sp_comms::SpType::Switch => Self::Switch,
+            crate::management_switch::SpType::Sled => Self::Sled,
+            crate::management_switch::SpType::Power => Self::Power,
+            crate::management_switch::SpType::Switch => Self::Switch,
         }
     }
 }
 
-impl From<SpIdentifier> for gateway_sp_comms::SpIdentifier {
+impl From<SpIdentifier> for crate::management_switch::SpIdentifier {
     fn from(id: SpIdentifier) -> Self {
         Self {
             typ: id.typ.into(),
@@ -161,12 +161,12 @@ impl From<SpIdentifier> for gateway_sp_comms::SpIdentifier {
     }
 }
 
-impl From<gateway_sp_comms::SpIdentifier> for SpIdentifier {
-    fn from(id: gateway_sp_comms::SpIdentifier) -> Self {
+impl From<crate::management_switch::SpIdentifier> for SpIdentifier {
+    fn from(id: crate::management_switch::SpIdentifier) -> Self {
         Self {
             typ: id.typ.into(),
-            // id.slot comes from a trusted source (gateway_sp_comms) and will
-            // not exceed u32::MAX
+            // id.slot comes from a trusted source (crate::management_switch)
+            // and will not exceed u32::MAX
             slot: u32::try_from(id.slot).unwrap(),
         }
     }
