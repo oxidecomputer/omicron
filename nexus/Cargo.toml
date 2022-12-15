@@ -11,7 +11,7 @@ path = "../rpaths"
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
 async-trait = "0.1.59"
-base64 = "0.13.1"
+base64 = "0.20.0"
 bb8 = "0.8.0"
 clap = { version = "4.0", features = ["derive"] }
 cookie = "0.16"
@@ -44,7 +44,7 @@ openssl-probe = "0.1.2"
 oso = "0.26"
 oximeter-client = { path = "../oximeter-client" }
 oximeter-db = { path = "../oximeter/db/" }
-parse-display = "0.6.0"
+parse-display = "0.7.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b596e72b6b93bc412d675358f782ae7d53f8bf7a", features = [ "generated" ] }

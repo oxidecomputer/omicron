@@ -1046,6 +1046,7 @@
         ]
       },
       "SpIgnition": {
+        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?",
         "oneOf": [
           {
             "type": "object",
@@ -1083,9 +1084,7 @@
                 "type": "boolean"
               },
               "id": {
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0
+                "$ref": "#/components/schemas/SpIgnitionSystemType"
               },
               "power": {
                 "type": "boolean"
@@ -1124,6 +1123,73 @@
         "required": [
           "details",
           "id"
+        ]
+      },
+      "SpIgnitionSystemType": {
+        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "sidecar"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "psc"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "system_type"
+            ]
+          }
         ]
       },
       "SpInfo": {
