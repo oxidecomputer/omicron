@@ -594,7 +594,6 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
-    use nexus_test_utils::RACK_UUID;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -976,7 +975,6 @@ mod tests {
             TestContext::new("test_next_external_ip_for_service").await;
 
         // Create an IP pool without an associated project.
-        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 2),
@@ -989,7 +987,7 @@ mod tests {
         let id1 = Uuid::new_v4();
         let ip1 = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id1, rack_id)
+            .allocate_service_ip(&context.opctx, id1)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip1.kind, IpKind::Service);
@@ -1002,7 +1000,7 @@ mod tests {
         let id2 = Uuid::new_v4();
         let ip2 = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id2, rack_id)
+            .allocate_service_ip(&context.opctx, id2)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip2.kind, IpKind::Service);
@@ -1015,7 +1013,7 @@ mod tests {
         let id3 = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id3, rack_id)
+            .allocate_service_ip(&context.opctx, id3)
             .await
             .expect_err("Should have failed to allocate after pool exhausted");
         assert_eq!(
@@ -1036,7 +1034,6 @@ mod tests {
         .await;
 
         // Create an IP pool without an associated project.
-        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 2),
@@ -1049,7 +1046,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip.kind, IpKind::Service);
@@ -1060,7 +1057,7 @@ mod tests {
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
 
@@ -1082,7 +1079,6 @@ mod tests {
         .await;
 
         // Create an IP pool without an associated project.
-        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 1),
@@ -1095,7 +1091,7 @@ mod tests {
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip.kind, IpKind::Service);
@@ -1106,7 +1102,7 @@ mod tests {
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
 

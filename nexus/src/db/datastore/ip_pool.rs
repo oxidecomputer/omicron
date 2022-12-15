@@ -105,15 +105,12 @@ impl DataStore {
         Ok((authz_pool, pool))
     }
 
-    /// Looks up an IP pool by a particular Rack ID.
+    /// Looks up an IP pool intended for internal services.
     ///
-    /// An index exists to look up pools by rack ID, but it is not a primary
-    /// key, which requires this lookup function to be used instead of the
-    /// [`crate::db::lookup::LookupPath`] utility.
-    pub async fn ip_pools_lookup_by_rack_id(
+    /// This method may require an index by Availability Zone in the future.
+    pub async fn ip_pools_service_lookup(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use db::schema::ip_pool::dsl;
 
@@ -124,7 +121,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 Error::Forbidden => {
-                    LookupType::ByCompositeId(format!("Rack ID: {rack_id}"))
+                    LookupType::ByCompositeId(format!("Service IP Pool"))
                         .into_not_found(ResourceType::IpPool)
                 }
                 _ => e,
@@ -143,9 +140,7 @@ impl DataStore {
                     authz::IpPool::new(
                         authz::FLEET,
                         ip_pool.id(),
-                        LookupType::ByCompositeId(format!(
-                            "Rack ID: {rack_id}"
-                        )),
+                        LookupType::ByCompositeId(format!("Service IP Pool")),
                     ),
                     ip_pool,
                 )
@@ -155,8 +150,7 @@ impl DataStore {
 
     /// Creates a new IP pool.
     ///
-    /// - If `rack_id` is provided, this IP pool is used for Oxide
-    /// services.
+    /// - If `internal_only` is set, this IP pool is used for Oxide services.
     pub async fn ip_pool_create(
         &self,
         opctx: &OpContext,

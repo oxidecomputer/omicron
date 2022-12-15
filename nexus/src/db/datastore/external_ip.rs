@@ -78,10 +78,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        rack_id: Uuid,
     ) -> CreateResult<ExternalIp> {
-        let (.., pool) =
-            self.ip_pools_lookup_by_rack_id(opctx, rack_id).await?;
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
 
         let data = IncompleteExternalIp::for_service(ip_id, pool.id());
         self.allocate_external_ip(opctx, data).await

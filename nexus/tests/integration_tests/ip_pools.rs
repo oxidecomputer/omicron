@@ -661,8 +661,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 #[nexus_test]
 async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pool_url =
-        format!("/system/ip-pools-service/{}", nexus_test_utils::RACK_UUID);
+    let ip_pool_url = "/system/ip-pools-service".to_string();
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
     let ip_pool_remove_range_url = format!("{}/remove", ip_pool_ranges_url);
