@@ -28,6 +28,10 @@ pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
 
+    /// If true, identifies that this IP pool is dedicated to "Control-Plane
+    /// Services", such as Nexus.
+    ///
+    /// Otherwise, this IP pool is intended for usage by customer VMs.
     pub internal_only: bool,
 
     /// Child resource generation number, for optimistic concurrency control of
