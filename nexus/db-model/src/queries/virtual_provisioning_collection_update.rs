@@ -24,12 +24,6 @@ table! {
 }
 
 table! {
-    parent_fleet {
-        id -> Uuid,
-    }
-}
-
-table! {
     all_collections {
         id -> Uuid,
     }
@@ -48,7 +42,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     virtual_provisioning_collection,
     parent_org,
     parent_silo,
-    parent_fleet,
     all_collections,
     do_update,
 );

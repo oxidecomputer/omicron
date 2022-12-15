@@ -22,6 +22,5 @@ lazy_static! {
             identity_mode: shared::SiloIdentityMode::LocalOnly,
             admin_group_name: None,
         },
-        *super::FLEET_ID,
     );
 }

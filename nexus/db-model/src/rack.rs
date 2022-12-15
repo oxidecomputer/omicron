@@ -13,16 +13,14 @@ use uuid::Uuid;
 pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
-    pub fleet_id: Uuid,
     pub initialized: bool,
     pub tuf_base_url: Option<String>,
 }
 
 impl Rack {
-    pub fn new(id: Uuid, fleet_id: Uuid) -> Self {
+    pub fn new(id: Uuid) -> Self {
         Self {
             identity: RackIdentity::new(id),
-            fleet_id,
             initialized: false,
             tuf_base_url: None,
         }

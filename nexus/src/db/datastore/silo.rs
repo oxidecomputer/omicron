@@ -91,11 +91,7 @@ impl DataStore {
 
         let silo_create_query = Self::silo_create_query(
             opctx,
-            db::model::Silo::new_with_id(
-                silo_id,
-                new_silo_params.clone(),
-                *db::fixed_data::FLEET_ID,
-            ),
+            db::model::Silo::new_with_id(silo_id, new_silo_params.clone()),
         )
         .await?;
 

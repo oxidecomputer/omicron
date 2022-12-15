@@ -85,7 +85,6 @@ pub struct Silo {
     #[diesel(embed)]
     identity: SiloIdentity,
 
-    pub fleet_id: Uuid,
     pub discoverable: bool,
 
     pub authentication_mode: AuthenticationMode,
@@ -97,18 +96,13 @@ pub struct Silo {
 
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: params::SiloCreate, fleet_id: Uuid) -> Self {
-        Self::new_with_id(Uuid::new_v4(), params, fleet_id)
+    pub fn new(params: params::SiloCreate) -> Self {
+        Self::new_with_id(Uuid::new_v4(), params)
     }
 
-    pub fn new_with_id(
-        id: Uuid,
-        params: params::SiloCreate,
-        fleet_id: Uuid,
-    ) -> Self {
+    pub fn new_with_id(id: Uuid, params: params::SiloCreate) -> Self {
         Self {
             identity: SiloIdentity::new(id, params.identity),
-            fleet_id,
             discoverable: params.discoverable,
             authentication_mode: params
                 .identity_mode

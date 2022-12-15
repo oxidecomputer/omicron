@@ -20,7 +20,7 @@ use diesel::{
     NullableExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper,
 };
 use nexus_db_model::queries::virtual_provisioning_collection_update::{
-    all_collections, do_update, parent_fleet, parent_org, parent_silo,
+    all_collections, do_update, parent_org, parent_silo,
 };
 
 #[derive(Subquery, QueryId)]
@@ -68,29 +68,6 @@ impl ParentSilo {
 }
 
 #[derive(Subquery, QueryId)]
-#[subquery(name = parent_fleet)]
-struct ParentFleet {
-    query: Box<dyn CteQuery<SqlType = parent_fleet::SqlType>>,
-}
-
-impl ParentFleet {
-    fn new(parent_silo: &ParentSilo) -> Self {
-        use crate::db::schema::silo::dsl;
-        Self {
-            query: Box::new(
-                dsl::silo
-                    .filter(dsl::id.eq_any(
-                        parent_silo.query_source().select(parent_silo::id),
-                    ))
-                    .select((ExpressionAlias::new::<parent_fleet::dsl::id>(
-                        dsl::fleet_id,
-                    ),)),
-            ),
-        }
-    }
-}
-
-#[derive(Subquery, QueryId)]
 #[subquery(name = all_collections)]
 struct AllCollections {
     query: Box<dyn CteQuery<SqlType = all_collections::SqlType>>,
@@ -101,15 +78,15 @@ impl AllCollections {
         project_id: uuid::Uuid,
         parent_org: &ParentOrg,
         parent_silo: &ParentSilo,
-        parent_fleet: &ParentFleet,
+        fleet_id: uuid::Uuid,
     ) -> Self {
+        let project_id = project_id.into_sql::<sql_types::Uuid>();
+        let fleet_id = fleet_id.into_sql::<sql_types::Uuid>();
         Self {
             query: Box::new(
                 diesel::select((ExpressionAlias::new::<
                     all_collections::dsl::id,
-                >(
-                    project_id.into_sql::<sql_types::Uuid>()
-                ),))
+                >(project_id),))
                 .union(parent_org.query_source().select((
                     ExpressionAlias::new::<all_collections::dsl::id>(
                         parent_org::id,
@@ -120,11 +97,9 @@ impl AllCollections {
                         parent_silo::id,
                     ),
                 )))
-                .union(parent_fleet.query_source().select((
-                    ExpressionAlias::new::<all_collections::dsl::id>(
-                        parent_fleet::id,
-                    ),
-                ))),
+                .union(diesel::select((ExpressionAlias::new::<
+                    all_collections::dsl::id,
+                >(fleet_id),))),
             ),
         }
     }
@@ -289,12 +264,11 @@ impl VirtualProvisioningCollectionUpdate {
     {
         let parent_org = ParentOrg::new(project_id);
         let parent_silo = ParentSilo::new(&parent_org);
-        let parent_fleet = ParentFleet::new(&parent_silo);
         let all_collections = AllCollections::new(
             project_id,
             &parent_org,
             &parent_silo,
-            &parent_fleet,
+            *crate::db::fixed_data::FLEET_ID,
         );
         let updated_collections =
             UpdatedProvisions::new(&all_collections, &do_update, values);
@@ -310,7 +284,6 @@ impl VirtualProvisioningCollectionUpdate {
         let cte = CteBuilder::new()
             .add_subquery(parent_org)
             .add_subquery(parent_silo)
-            .add_subquery(parent_fleet)
             .add_subquery(all_collections)
             .add_subquery(do_update)
             .add_subquery(update)

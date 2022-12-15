@@ -46,7 +46,6 @@ mod dataset;
 mod device_auth;
 mod disk;
 mod external_ip;
-mod fleet;
 mod global_image;
 mod identity_provider;
 mod instance;
@@ -262,7 +261,6 @@ mod test {
     use crate::db::model::BlockSize;
     use crate::db::model::Dataset;
     use crate::db::model::ExternalIp;
-    use crate::db::model::Fleet;
     use crate::db::model::Rack;
     use crate::db::model::Region;
     use crate::db::model::Service;
@@ -1025,7 +1023,7 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a Rack, insert it into the DB.
-        let rack = Rack::new(Uuid::new_v4(), *db::fixed_data::FLEET_ID);
+        let rack = Rack::new(Uuid::new_v4());
         let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
@@ -1048,26 +1046,6 @@ mod test {
             .await
             .unwrap();
         assert!(result.initialized);
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_fleet_initialize_is_idempotent() {
-        let logctx = dev::test_setup_log("test_fleet_initialize_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        // Create a Fleet, insert it into the DB.
-        let fleet = Fleet::new(Uuid::new_v4());
-        let result = datastore.fleet_insert(&opctx, &fleet).await.unwrap();
-        assert_eq!(result.id(), fleet.id());
-
-        // Re-insert the Fleet (check for idempotency).
-        let result2 = datastore.fleet_insert(&opctx, &fleet).await.unwrap();
-        assert_eq!(result2.id(), fleet.id());
-        assert_eq!(result2.time_modified(), result.time_modified());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

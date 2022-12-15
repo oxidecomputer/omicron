@@ -197,7 +197,6 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
 
-        fleet_id -> Uuid,
         discoverable -> Bool,
         authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
@@ -361,19 +360,10 @@ table! {
 }
 
 table! {
-    fleet (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-    }
-}
-
-table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        fleet_id -> Uuid,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
     }
