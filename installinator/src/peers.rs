@@ -30,8 +30,8 @@ pub(crate) enum DiscoveryMechanism {
     List(Vec<SocketAddrV6>),
 }
 
-// TODO: This currently hardcodes this wicketd port, will probably want to sync up on this.
-const WICKETD_PORT: u16 = 14000;
+// TODO: This currently hardcodes this port for the artifact server, will want to sync on this.
+const ARTIFACT_SERVER_PORT: u16 = 14000;
 
 impl DiscoveryMechanism {
     /// Discover peers.
@@ -41,7 +41,7 @@ impl DiscoveryMechanism {
     ) -> Result<Box<dyn PeersImpl>, DiscoverPeersError> {
         let peers = match self {
             Self::Bootstrap => {
-                // TODO: add aborts to this after a certain number of tries?
+                // XXX: consider adding aborts to this after a certain number of tries.
 
                 let ddm_admin_client =
                     DdmAdminClient::new(log).map_err(|err| {
@@ -53,8 +53,7 @@ impl DiscoveryMechanism {
                     })?;
                 addrs
                     .map(|addr| {
-                        // TODO: this currently hardcodes the wicketd port.
-                        SocketAddrV6::new(addr, WICKETD_PORT, 0, 0)
+                        SocketAddrV6::new(addr, ARTIFACT_SERVER_PORT, 0, 0)
                     })
                     .collect()
             }
@@ -357,6 +356,9 @@ impl PeersImpl for HttpPeers {
 #[derive(Debug)]
 struct ArtifactClient {
     log: slog::Logger,
+    // TODO: this currently uses a wicketd client. However, because the standard wicketd server is
+    // not going to listen on the bootstrap network, we'll want to instead set up a separate
+    // artifact server. This artifact server will be shared by both wicketd and sled-agent.
     client: wicketd_client::Client,
 }
 

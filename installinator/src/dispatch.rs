@@ -93,7 +93,6 @@ struct InstallOpts {
     #[command(flatten)]
     discover_opts: DiscoverOpts,
 
-    // TODO: fetch this
     artifact_id: ArtifactId,
 
     // TODO: checksum?
@@ -104,7 +103,9 @@ struct InstallOpts {
 
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        // TODO: is buffering up the entire artifact in memory OK?
+        // Assume that buffering up the entire artifact in memory is OK, because we expect to have
+        // much more RAM available than the size of the host image. (If this changes in the future,
+        // we'll need to have some sort of streaming here.)
         let artifact = FetchedArtifact::loop_fetch_from_peers(
             &log,
             || {
