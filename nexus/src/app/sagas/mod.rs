@@ -154,7 +154,7 @@ macro_rules! __action_name {
 ///
 /// For this input:
 ///
-/// ```
+/// ```ignore
 /// declare_saga_actions! {
 ///     my_saga;
 ///     SAGA_NODE1 -> "output1" {
