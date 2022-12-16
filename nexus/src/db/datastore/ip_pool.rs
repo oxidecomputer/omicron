@@ -49,7 +49,7 @@ impl DataStore {
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
         paginated(dsl::ip_pool, dsl::name, pagparams)
-            .filter(dsl::internal_only.eq(false))
+            .filter(dsl::internal.eq(false))
             .filter(dsl::time_deleted.is_null())
             .select(db::model::IpPool::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
@@ -68,7 +68,7 @@ impl DataStore {
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
         paginated(dsl::ip_pool, dsl::id, pagparams)
-            .filter(dsl::internal_only.eq(false))
+            .filter(dsl::internal.eq(false))
             .filter(dsl::time_deleted.is_null())
             .select(db::model::IpPool::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
@@ -85,7 +85,7 @@ impl DataStore {
         use db::schema::ip_pool::dsl;
 
         let (authz_pool, pool) = dsl::ip_pool
-            .filter(dsl::internal_only.eq(false))
+            .filter(dsl::internal.eq(false))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.to_string()))
             .select(IpPool::as_select())
@@ -129,7 +129,7 @@ impl DataStore {
 
         // Look up this IP pool by rack ID.
         let (authz_pool, pool) = dsl::ip_pool
-            .filter(dsl::internal_only.eq(true))
+            .filter(dsl::internal.eq(true))
             .filter(dsl::time_deleted.is_null())
             .select(IpPool::as_select())
             .get_result_async(self.pool_authorized(opctx).await?)
@@ -152,18 +152,18 @@ impl DataStore {
 
     /// Creates a new IP pool.
     ///
-    /// - If `internal_only` is set, this IP pool is used for Oxide services.
+    /// - If `internal` is set, this IP pool is used for Oxide services.
     pub async fn ip_pool_create(
         &self,
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
-        internal_only: bool,
+        internal: bool,
     ) -> CreateResult<IpPool> {
         use db::schema::ip_pool::dsl;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
-        let pool = IpPool::new(&new_pool.identity, internal_only);
+        let pool = IpPool::new(&new_pool.identity, internal);
         let pool_name = pool.name().as_str().to_string();
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
@@ -212,7 +212,7 @@ impl DataStore {
         // in between the above check for children and this query.
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::ip_pool)
-            .filter(dsl::internal_only.eq(false))
+            .filter(dsl::internal.eq(false))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
@@ -244,7 +244,7 @@ impl DataStore {
         use db::schema::ip_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         diesel::update(dsl::ip_pool)
-            .filter(dsl::internal_only.eq(false))
+            .filter(dsl::internal.eq(false))
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .set(updates)

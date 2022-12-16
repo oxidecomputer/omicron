@@ -628,14 +628,14 @@ mod tests {
             &self,
             name: &str,
             range: IpRange,
-            internal_only: bool,
+            internal: bool,
         ) {
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                internal_only,
+                internal,
             );
 
             diesel::insert_into(crate::db::schema::ip_pool::dsl::ip_pool)
@@ -662,17 +662,12 @@ mod tests {
         }
 
         async fn create_service_ip_pool(&self, name: &str, range: IpRange) {
-            self.create_ip_pool_internal(
-                name, range, /*internal_only=*/ true,
-            )
-            .await;
+            self.create_ip_pool_internal(name, range, /*internal=*/ true).await;
         }
 
         async fn create_ip_pool(&self, name: &str, range: IpRange) {
-            self.create_ip_pool_internal(
-                name, range, /*internal_only=*/ false,
-            )
-            .await;
+            self.create_ip_pool_internal(name, range, /*internal=*/ false)
+                .await;
         }
 
         async fn default_pool_id(&self) -> Uuid {

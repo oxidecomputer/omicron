@@ -149,7 +149,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        internal_only -> Bool,
+        internal -> Bool,
         rcgen -> Int8,
     }
 }

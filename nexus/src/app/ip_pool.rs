@@ -29,7 +29,7 @@ impl super::Nexus {
         new_pool: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
         self.db_datastore
-            .ip_pool_create(opctx, new_pool, /* internal_only= */ false)
+            .ip_pool_create(opctx, new_pool, /* internal= */ false)
             .await
     }
 
@@ -39,7 +39,7 @@ impl super::Nexus {
         new_pool: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
         self.db_datastore
-            .ip_pool_create(opctx, new_pool, /* internal_only= */ true)
+            .ip_pool_create(opctx, new_pool, /* internal= */ true)
             .await
     }
 
@@ -122,7 +122,7 @@ impl super::Nexus {
                 .ip_pool_name(pool_name)
                 .fetch_for(authz::Action::ListChildren)
                 .await?;
-        if db_pool.internal_only {
+        if db_pool.internal {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 pool_name,
@@ -145,7 +145,7 @@ impl super::Nexus {
                 .ip_pool_name(pool_name)
                 .fetch_for(authz::Action::Modify)
                 .await?;
-        if db_pool.internal_only {
+        if db_pool.internal {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 pool_name,
@@ -165,7 +165,7 @@ impl super::Nexus {
                 .ip_pool_name(pool_name)
                 .fetch_for(authz::Action::Modify)
                 .await?;
-        if db_pool.internal_only {
+        if db_pool.internal {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 pool_name,

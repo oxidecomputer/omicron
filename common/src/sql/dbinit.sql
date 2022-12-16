@@ -1109,7 +1109,9 @@ CREATE TABLE omicron.public.ip_pool (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    internal_only BOOL NOT NULL,
+
+    /* Identifies if the IP Pool is dedicated to Control Plane services */
+    internal BOOL NOT NULL,
 
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL

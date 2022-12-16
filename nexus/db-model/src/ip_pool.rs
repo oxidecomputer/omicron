@@ -32,7 +32,7 @@ pub struct IpPool {
     /// Services", such as Nexus.
     ///
     /// Otherwise, this IP pool is intended for usage by customer VMs.
-    pub internal_only: bool,
+    pub internal: bool,
 
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
@@ -42,14 +42,14 @@ pub struct IpPool {
 impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
-        internal_only: bool,
+        internal: bool,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
                 Uuid::new_v4(),
                 pool_identity.clone(),
             ),
-            internal_only,
+            internal,
             rcgen: 0,
         }
     }

@@ -290,7 +290,7 @@ impl Populator for PopulateRack {
                 },
             };
             datastore
-                .ip_pool_create(opctx, &params, /*internal_only=*/ true)
+                .ip_pool_create(opctx, &params, /*internal=*/ true)
                 .await
                 .map(|_| ())
                 .or_else(|e| match e {
@@ -305,7 +305,7 @@ impl Populator for PopulateRack {
                 },
             };
             datastore
-                .ip_pool_create(opctx, &params, /*internal_only=*/ false)
+                .ip_pool_create(opctx, &params, /*internal=*/ false)
                 .await
                 .map(|_| ())
                 .or_else(|e| match e {
