@@ -6,33 +6,17 @@ use crate::communicator::Communicator;
 use crate::error::ConfigError;
 use crate::management_switch::SwitchConfig;
 use slog::Logger;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 /// Shared state used by API request handlers
 pub struct ServerContext {
     pub sp_comms: Arc<Communicator>,
-    pub timeouts: Timeouts,
     pub log: Logger,
-}
-
-pub struct Timeouts {
-    pub bulk_request_default: Duration,
-}
-
-impl From<&'_ crate::config::Timeouts> for Timeouts {
-    fn from(timeouts: &'_ crate::config::Timeouts) -> Self {
-        Self {
-            bulk_request_default: Duration::from_millis(
-                timeouts.bulk_request_default_millis,
-            ),
-        }
-    }
 }
 
 impl ServerContext {
     pub async fn new(
         switch_config: SwitchConfig,
-        timeouts: crate::config::Timeouts,
         log: &Logger,
     ) -> Result<Arc<Self>, ConfigError> {
         let comms = Arc::new(
@@ -45,7 +29,6 @@ impl ServerContext {
         );
         Ok(Arc::new(ServerContext {
             sp_comms: Arc::clone(&comms),
-            timeouts: Timeouts::from(&timeouts),
             log: log.clone(),
         }))
     }

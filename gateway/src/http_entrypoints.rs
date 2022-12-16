@@ -11,7 +11,6 @@ mod conversions;
 use self::conversions::component_from_str;
 use crate::error::http_err_from_comms_err;
 use crate::error::SpCommsError;
-use crate::timeout::Timeout as SpTimeout;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -19,18 +18,17 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
-use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use futures::StreamExt;
-use gateway_messages::ignition;
+use futures::FutureExt;
 use gateway_messages::IgnitionCommand;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use slog::warn;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use std::time::Duration;
+use tokio_stream::StreamExt;
+use tokio_util::either::Either;
 use uuid::Uuid;
 
 #[derive(
@@ -62,11 +60,12 @@ pub struct SpInfo {
 )]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SpState {
-    Disabled,
-    Unresponsive,
     Enabled {
         serial_number: String,
         // TODO more stuff
+    },
+    CommunicationFailed {
+        message: String,
     },
 }
 
@@ -116,6 +115,8 @@ pub enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
+    #[serde(rename = "error")]
+    CommunicationFailed { message: String },
 }
 
 /// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
@@ -216,17 +217,6 @@ pub enum SpComponentPresence {
     Timeout,
     /// The SP's attempt to determine the presence of the component failed.
     Error,
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct Timeout {
-    timeout_millis: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct TimeoutSelector<T> {
-    last: T,
-    start_time: u64, // TODO
 }
 
 #[derive(
@@ -367,58 +357,87 @@ struct PathSpComponent {
 }]
 async fn sp_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query: Query<Timeout>,
 ) -> Result<HttpResponseOk<Vec<SpInfo>>, HttpError> {
     let apictx = rqctx.context();
-    let timeout = query.into_inner();
 
-    let timeout = timeout
-        .timeout_millis
-        .map(|t| Duration::from_millis(u64::from(t)))
-        .unwrap_or(apictx.timeouts.bulk_request_default);
-    let timeout = SpTimeout::from_now(timeout);
+    // Build a `FuturesUnordered` to query every SP for its state.
+    let all_sps_stream = apictx
+        .sp_comms
+        .query_all_sps(|id, handle| async move {
+            let result = handle.state().await.map_err(SpCommsError::from);
+            (id, result)
+        })
+        .map_err(http_err_from_comms_err)?
+        .map(Either::Left);
 
+    // Build a future to query our local ignition controller for the ignition
+    // state of all SPs.
     // query ignition controller to find out which SPs are powered on
-    let all_sps = apictx
+    let bulk_ignition_stream = apictx
         .sp_comms
         .get_ignition_state_all()
-        .await
-        .map_err(http_err_from_comms_err)?;
-    let communicator = Arc::clone(&apictx.sp_comms);
-    let response_stream =
-        apictx.sp_comms.query_all_online_sps(&all_sps, timeout, move |sp| {
-            let communicator = Arc::clone(&communicator);
-            async move { communicator.get_state(sp).await }
-        });
+        .into_stream()
+        .map(Either::Right);
 
-    // Convert the response tuple of (SpIdentifier, IgnitionState,
-    // Option<Result<Result<SpState, Error>, Elapsed>>) to Vec<SpInfo>;
-    let responses: Vec<_> = response_stream
-        .map(|(id, ignition_details, result)| {
-            // Unpack the nasty nested type:
-            // 1. None => ignition indicated power was off; treat that as
-            //    success (with state = disabled)
-            // 2. Outer err => timeout; treat that as "success"
-            //    (with state = unresponsive)
-            // 3. Inner success => true success
-            // 4. Inner error => Log it (with state = unresponsive)
-            let id = id.into();
-            let details = ignition_details.into();
-            let state = match result {
-                None => SpState::Disabled,
-                Some(Err(_)) => SpState::Unresponsive,
-                Some(Ok(result)) => match result {
-                    Ok(state) => SpState::from(state),
-                    Err(err) => {
-                        warn!(apictx.log, "SP {id}: {err}");
-                        SpState::Unresponsive
-                    }
+    let combo_stream = all_sps_stream.merge(bulk_ignition_stream);
+    tokio::pin!(combo_stream);
+
+    // Wait for all our results to come back. As SP states return, we stash them
+    // in `sp_state`. When the one and only ignition result comes back, we put
+    // it into `bulk_ignition_state`.
+    let mut sp_state = HashMap::new();
+    let mut bulk_ignition_state = None;
+
+    while let Some(item) = combo_stream.next().await {
+        match item {
+            // Result from a single SP.
+            Either::Left((id, state)) => {
+                sp_state.insert(id, state);
+            }
+            // Result from our ignition controller.
+            Either::Right(ignition_state) => {
+                bulk_ignition_state = Some(ignition_state);
+            }
+        }
+    }
+
+    // We inserted exactly one future for the bulk ignition state into
+    // combo_stream; if combo_stream is exhausted, all our futures have
+    // completed, and we know we've populated `bulk_ignition_state`.
+    let bulk_ignition_state = bulk_ignition_state.unwrap();
+
+    // Build up a list of responses. For any given SP, we might or might not
+    // have its state, and we might or might not have what our ignition
+    // controller thinks its ignition state is.
+    let mut responses = Vec::with_capacity(sp_state.len());
+    for (id, state) in sp_state {
+        let ignition_details =
+            match bulk_ignition_state.as_ref().map(|m| m.get(&id)) {
+                // Happy path
+                Ok(Some(state)) => SpIgnition::from(*state),
+                // Confusing path - we got a response from our ignition
+                // controller, but it didn't include the state for SP `id`. If
+                // we're on a rev-b sidecar, this could be the 36th ignition
+                // target (i.e., the ignition controller does not return
+                // information about itself as a target). For now we'll just
+                // mark this as a failure; hopefully future sidecar revisions
+                // add the 36th target
+                // (https://github.com/oxidecomputer/hardware-sidecar/issues/735).
+                Ok(None) => SpIgnition::CommunicationFailed {
+                    message: format!(
+                        "ignition response missing info for SP {:?}",
+                        id
+                    ),
                 },
+                Err(err) => {
+                    SpIgnition::CommunicationFailed { message: err.to_string() }
+                }
             };
-            SpInfo { info: SpIgnitionInfo { id, details }, details: state }
-        })
-        .collect()
-        .await;
+        responses.push(SpInfo {
+            info: SpIgnitionInfo { id: id.into(), details: ignition_details },
+            details: SpState::from(state),
+        });
+    }
 
     Ok(HttpResponseOk(responses))
 }
@@ -436,31 +455,15 @@ async fn sp_get(
     let comms = &apictx.sp_comms;
     let sp = path.into_inner().sp;
 
-    // ping the ignition controller first; if it says the SP is off or otherwise
-    // unavailable, we're done.
-    let state = comms
-        .get_ignition_state(sp.into())
-        .await
-        .map_err(http_err_from_comms_err)?;
+    // Send concurrent requests to our ignition controller and the target SP.
+    let ignition_fut = comms.get_ignition_state(sp.into());
+    let sp_fut = comms.get_state(sp.into());
 
-    let details = if state
-        .target
-        .map(|t| t.power_state == ignition::SystemPowerState::On)
-        .unwrap_or(false)
-    {
-        // ignition indicates the SP is on; ask it for its state
-        match comms.get_state(sp.into()).await {
-            Ok(state) => SpState::from(state),
-            Err(SpCommsError::Timeout { .. }) => SpState::Unresponsive,
-            Err(other) => return Err(http_err_from_comms_err(other)),
-        }
-    } else {
-        SpState::Disabled
-    };
+    let (ignition_state, sp_state) = tokio::join!(ignition_fut, sp_fut);
 
     let info = SpInfo {
-        info: SpIgnitionInfo { id: sp, details: state.into() },
-        details,
+        info: SpIgnitionInfo { id: sp, details: ignition_state.into() },
+        details: sp_state.into(),
     };
 
     Ok(HttpResponseOk(info))
@@ -504,7 +507,6 @@ async fn sp_component_list(
 async fn sp_component_get(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSpComponent>,
-    _query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
 }

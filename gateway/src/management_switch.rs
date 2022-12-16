@@ -203,14 +203,28 @@ impl ManagementSwitch {
         self.location_map().map(|m| m.location_name())
     }
 
-    /// Get the socket to use to communicate with an SP and the socket address
-    /// of that SP.
-    pub(crate) fn sp(&self, port: SwitchPort) -> Option<&SingleSp> {
-        self.sockets.get(&port)
+    /// Get the handle for communicating with an SP by its switch port.
+    pub(crate) fn sp(&self, port: SwitchPort) -> &SingleSp {
+        // `SwitchPort` is an opaque type; we're guaranteed to have an entry for
+        // every port.
+        self.sockets.get(&port).unwrap()
+    }
+
+    /// Get an iterator providing the ID and handle to communicate with every SP
+    /// we know about.
+    ///
+    /// This function can only fail if we have not yet completed discovery (and
+    /// therefore can't map our switch ports to SP identities).
+    pub(crate) fn all_sps(
+        &self,
+    ) -> Result<impl Iterator<Item = (SpIdentifier, &SingleSp)>, SpCommsError>
+    {
+        let location_map = self.location_map()?;
+        Ok(location_map.all_sp_ids().map(|(port, id)| (id, self.sp(port))))
     }
 
     /// Get the socket connected to the local ignition controller.
-    pub(crate) fn ignition_controller(&self) -> Option<&SingleSp> {
+    pub(crate) fn ignition_controller(&self) -> &SingleSp {
         self.sp(self.local_ignition_controller_port)
     }
 

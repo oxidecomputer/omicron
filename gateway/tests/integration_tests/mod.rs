@@ -29,7 +29,7 @@ impl SpStateExt for SpState {
     fn is_enabled(&self) -> bool {
         match self {
             SpState::Enabled { .. } => true,
-            SpState::Disabled | SpState::Unresponsive => false,
+            SpState::CommunicationFailed { .. } => false,
         }
     }
 }
@@ -80,7 +80,9 @@ async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
             if matches!(target_state.power_state, SystemPowerState::On) {
                 SpState::Enabled { serial_number: sp.serial_number() }
             } else {
-                SpState::Disabled
+                SpState::CommunicationFailed {
+                    message: "powered off".to_string(),
+                }
             };
 
         all_sps.push(SpInfo {
