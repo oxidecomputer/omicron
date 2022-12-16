@@ -35,6 +35,11 @@ pub struct InstancePath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct VpcPath {
+    pub vpc: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -120,6 +125,36 @@ pub struct InstanceSerialConsole {
 
     #[serde(flatten)]
     pub console_params: InstanceSerialConsoleRequest,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct VpcSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub vpc: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl VpcSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: NameOrId,
+    ) -> Self {
+        VpcSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            vpc,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct VpcList {
+    #[serde(flatten)]
+    pub pagination: PaginatedByName,
+    #[serde(flatten)]
+    pub project_selector: ProjectSelector,
 }
 
 // Silos

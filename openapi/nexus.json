@@ -7913,8 +7913,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -7923,16 +7922,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8004,8 +8001,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -8039,8 +8035,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -8084,8 +8079,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -8114,8 +8108,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -8149,8 +8142,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -8200,8 +8192,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -8209,8 +8200,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -8219,16 +8209,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8263,8 +8251,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "requestBody": {
@@ -8310,16 +8297,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8354,16 +8339,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "requestBody": {
@@ -8408,16 +8391,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8447,16 +8428,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8491,16 +8470,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "requestBody": {
@@ -8523,6 +8500,277 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpcs": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vpc"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpcs/{vpc}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vpc"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vpc"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

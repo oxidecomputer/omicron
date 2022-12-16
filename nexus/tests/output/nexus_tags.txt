@@ -185,10 +185,13 @@ updates_refresh                          /system/updates/refresh
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH
 vpc_create                               /organizations/{organization_name}/projects/{project_name}/vpcs
+vpc_create_v1                            /v1/vpcs
 vpc_delete                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+vpc_delete_v1                            /v1/vpcs/{vpc}
 vpc_firewall_rules_update                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
 vpc_firewall_rules_view                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
 vpc_list                                 /organizations/{organization_name}/projects/{project_name}/vpcs
+vpc_list_v1                              /v1/vpcs
 vpc_router_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
 vpc_router_delete                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
 vpc_router_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
@@ -209,6 +212,8 @@ vpc_subnet_update                        /organizations/{organization_name}/proj
 vpc_subnet_view                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnet_view_by_id                    /by-id/vpc-subnets/{id}
 vpc_update                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+vpc_update_v1                            /v1/vpcs/{vpc}
 vpc_view                                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 vpc_view_by_id                           /by-id/vpcs/{id}
+vpc_view_v1                              /v1/vpcs/{vpc}
 

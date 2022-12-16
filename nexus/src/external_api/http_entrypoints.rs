@@ -196,6 +196,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_update)?;
         api.register(vpc_delete)?;
 
+        api.register(vpc_list_v1)?;
+        api.register(vpc_create_v1)?;
+        api.register(vpc_view_v1)?;
+        api.register(vpc_update_v1)?;
+        api.register(vpc_delete_v1)?;
+
         api.register(vpc_subnet_list)?;
         api.register(vpc_subnet_view)?;
         api.register(vpc_subnet_view_by_id)?;
@@ -4047,6 +4053,43 @@ async fn snapshot_delete(
 
 // VPCs
 
+#[endpoint {
+    method = GET,
+    path = "/v1/vpcs",
+    tags = ["vpcs"],
+}]
+async fn vpc_list_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<params::VpcList>,
+) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, &query.project_selector)?;
+        let vpcs = nexus
+            .project_list_vpcs(
+                &opctx,
+                &project_lookup,
+                &data_page_params_for(&rqctx, &query.pagination)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query.pagination,
+            vpcs,
+            &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List VPCs
 #[endpoint {
     method = GET,
@@ -4062,15 +4105,17 @@ async fn vpc_list(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
+    let project_selector = params::ProjectSelector::new(
+        Some(path.organization_name.into()),
+        path.project_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let vpcs = nexus
             .project_list_vpcs(
                 &opctx,
-                &organization_name,
-                &project_name,
+                &project_lookup,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -4088,58 +4133,27 @@ async fn vpc_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for VPC requests
-#[derive(Deserialize, JsonSchema)]
-struct VpcPathParam {
-    organization_name: Name,
-    project_name: Name,
-    vpc_name: Name,
-}
-
-/// Fetch a VPC
 #[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    method = POST,
+    path = "/v1/vpcs",
     tags = ["vpcs"],
 }]
-async fn vpc_view(
+async fn vpc_create_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    query_params: Query<params::ProjectSelector>,
+    body: TypedBody<params::VpcCreate>,
+) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let vpc_name = &path.vpc_name;
+    let query = query_params.into_inner();
+    let new_vpc_params = body.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
         let vpc = nexus
-            .vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
+            .project_create_vpc(&opctx, &project_lookup, &new_vpc_params)
             .await?;
-        Ok(HttpResponseOk(vpc.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a VPC
-#[endpoint {
-    method = GET,
-    path = "/by-id/vpcs/{id}",
-    tags = ["vpcs"],
-}]
-async fn vpc_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let vpc = nexus.vpc_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(vpc.into()))
+        Ok(HttpResponseCreated(vpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4174,6 +4188,123 @@ async fn vpc_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = GET,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
+async fn vpc_view_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::VpcPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector {
+            project_selector: query.project_selector,
+            vpc: path.vpc,
+        };
+        let (.., vpc) =
+            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for VPC requests
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    organization_name: Name,
+    project_name: Name,
+    vpc_name: Name,
+}
+
+/// Fetch a VPC
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    tags = ["vpcs"],
+}]
+async fn vpc_view(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let (.., vpc) =
+            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a VPC
+#[endpoint {
+    method = GET,
+    path = "/by-id/vpcs/{id}",
+    tags = ["vpcs"],
+}]
+async fn vpc_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(None, None, path.id.into());
+        let (.., vpc) =
+            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
+async fn vpc_update_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::VpcPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    updated_vpc: TypedBody<params::VpcUpdate>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let updated_vpc_params = &updated_vpc.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector {
+            project_selector: query.project_selector,
+            vpc: path.vpc,
+        };
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        let vpc = nexus
+            .project_update_vpc(&opctx, &vpc_lookup, &updated_vpc_params)
+            .await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Update a VPC
 #[endpoint {
     method = PUT,
@@ -4190,16 +4321,43 @@ async fn vpc_update(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let newvpc = nexus
-            .project_update_vpc(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &updated_vpc.into_inner(),
-            )
+            .project_update_vpc(&opctx, &vpc_lookup, &updated_vpc.into_inner())
             .await?;
         Ok(HttpResponseOk(newvpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
+async fn vpc_delete_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::VpcPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector {
+            project_selector: query.project_selector,
+            vpc: path.vpc,
+        };
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        nexus.project_delete_vpc(&opctx, &vpc_lookup).await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4217,19 +4375,15 @@ async fn vpc_delete(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let vpc_name = &path.vpc_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_vpc(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &vpc_name,
-            )
-            .await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        nexus.project_delete_vpc(&opctx, &vpc_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

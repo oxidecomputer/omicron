@@ -25,12 +25,14 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use ref_cast::RefCast;
 use sled_agent_client::types::IpNet;
 use sled_agent_client::types::NetworkInterface;
 
@@ -42,6 +44,41 @@ use uuid::Uuid;
 
 impl super::Nexus {
     // VPCs
+
+    pub fn vpc_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        vpc_selector: &'a params::VpcSelector,
+    ) -> LookupResult<lookup::Vpc<'a>> {
+        match vpc_selector {
+            params::VpcSelector {
+                vpc: NameOrId::Id(id),
+                project_selector: None,
+            } => {
+                let vpc =
+                    LookupPath::new(opctx, &self.db_datastore).vpc_id(*id);
+                Ok(vpc)
+            }
+            params::VpcSelector {
+                vpc: NameOrId::Name(name),
+                project_selector: Some(selector),
+            } => {
+                let vpc = self
+                    .project_lookup(opctx, selector)?
+                    .vpc_name(Name::ref_cast(name));
+                Ok(vpc)
+            }
+            params::VpcSelector {
+                vpc: NameOrId::Id(_),
+                project_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing vpc as an ID, project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "vpc should either be an ID or project should be specified",
+            )),
+        }
+    }
 
     pub async fn project_create_vpc(
         &self,
@@ -192,62 +229,24 @@ impl super::Nexus {
     pub async fn project_list_vpcs(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Vpc> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .project_list_vpcs(&opctx, &authz_project, pagparams)
             .await
     }
 
-    pub async fn vpc_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-    ) -> LookupResult<db::model::Vpc> {
-        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .fetch()
-            .await?;
-        Ok(db_vpc)
-    }
-
-    pub async fn vpc_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        vpc_id: &Uuid,
-    ) -> LookupResult<db::model::Vpc> {
-        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_id(*vpc_id)
-            .fetch()
-            .await?;
-        Ok(db_vpc)
-    }
-
     pub async fn project_update_vpc(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
         params: &params::VpcUpdate,
     ) -> UpdateResult<db::model::Vpc> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
             .await
@@ -256,17 +255,9 @@ impl super::Nexus {
     pub async fn project_delete_vpc(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
     ) -> DeleteResult {
-        let (.., authz_vpc, db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .fetch()
-                .await?;
+        let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),
