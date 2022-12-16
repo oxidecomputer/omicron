@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -14,6 +15,7 @@ use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
+use crate::db::lookup::LookupPath;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
 use crate::db::model::IpPoolUpdate;
@@ -33,8 +35,10 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::Name as ExternalName;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -76,32 +80,35 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Looks up an IP pool by name.
-    pub(crate) async fn ip_pools_lookup_by_name_no_auth(
+    /// Looks up the default IP pool by name.
+    pub(crate) async fn ip_pools_fetch_default_for(
         &self,
         opctx: &OpContext,
-        name: &str,
+        action: authz::Action,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
-        use db::schema::ip_pool::dsl;
+        self.ip_pools_fetch_for(
+            opctx,
+            action,
+            &Name(ExternalName::from_str("default").unwrap()),
+        )
+        .await
+    }
 
-        let (authz_pool, pool) = dsl::ip_pool
-            .filter(dsl::internal.eq(false))
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::name.eq(name.to_string()))
-            .select(IpPool::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-            .map(|ip_pool| {
-                (
-                    authz::IpPool::new(
-                        authz::FLEET,
-                        ip_pool.id(),
-                        LookupType::ByName(name.to_string()),
-                    ),
-                    ip_pool,
-                )
-            })?;
+    /// Looks up an IP pool by name.
+    pub(crate) async fn ip_pools_fetch_for(
+        &self,
+        opctx: &OpContext,
+        action: authz::Action,
+        name: &Name,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
+            .ip_pool_name(&name)
+            .fetch_for(action)
+            .await?;
+        if pool.internal {
+            return Err(authz_pool.not_found());
+        }
+
         Ok((authz_pool, pool))
     }
 

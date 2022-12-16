@@ -673,7 +673,10 @@ mod tests {
         async fn default_pool_id(&self) -> Uuid {
             let (.., pool) = self
                 .db_datastore
-                .ip_pools_lookup_by_name_no_auth(&self.opctx, "default")
+                .ip_pools_fetch_default_for(
+                    &self.opctx,
+                    crate::authz::Action::ListChildren,
+                )
                 .await
                 .expect("Failed to lookup default ip pool");
             pool.identity.id

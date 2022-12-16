@@ -628,7 +628,7 @@ async fn sic_allocate_instance_snat_ip(
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
 
     let (.., pool) = datastore
-        .ip_pools_lookup_by_name_no_auth(&opctx, "default")
+        .ip_pools_fetch_default_for(&opctx, authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
     let pool_id = pool.identity.id;

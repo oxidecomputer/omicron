@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`ExternalIp`]s.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
@@ -23,6 +24,8 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::Name as ExternalName;
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -50,22 +53,12 @@ impl DataStore {
         instance_id: Uuid,
         pool_name: Option<Name>,
     ) -> CreateResult<ExternalIp> {
-        let name = if let Some(name) = pool_name {
-            name.as_str().to_string()
-        } else {
-            "default".to_string()
-        };
-
-        // We'd like to add authz checks here, and use the `LookupPath`
-        // methods on the project-scoped view of this resource. It's not
-        // entirely clear how that'll work in the API, so see RFD 288 and
-        // https://github.com/oxidecomputer/omicron/issues/1470 for more
-        // details.
-        //
-        // For now, we just ensure that the pool is either unreserved, or
-        // reserved for the instance's project.
-        let (.., pool) =
-            self.ip_pools_lookup_by_name_no_auth(opctx, &name).await?;
+        let name = pool_name.unwrap_or_else(|| {
+            Name(ExternalName::from_str("default").unwrap())
+        });
+        let (.., pool) = self
+            .ip_pools_fetch_for(opctx, authz::Action::CreateChild, &name)
+            .await?;
         let pool_id = pool.identity.id;
 
         let data =
