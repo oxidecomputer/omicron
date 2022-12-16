@@ -21,6 +21,7 @@ pub mod common;
 // Modules for the non-simulated sled agent.
 pub mod bootstrap;
 pub mod config;
+mod hardware;
 mod http_entrypoints;
 pub mod illumos;
 mod instance;
@@ -33,6 +34,7 @@ mod serial;
 pub mod server;
 mod services;
 mod sled_agent;
+mod smf_helper;
 pub mod sp;
 mod storage_manager;
 mod updates;

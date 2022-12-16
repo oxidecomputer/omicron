@@ -268,6 +268,48 @@ impl Name {
     }
 }
 
+#[derive(Serialize, Deserialize, Display, Clone)]
+#[display("{0}")]
+#[serde(untagged)]
+pub enum NameOrId {
+    Id(Uuid),
+    Name(Name),
+}
+
+impl TryFrom<String> for NameOrId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(NameOrId::Id(id))
+        } else {
+            Ok(NameOrId::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl JsonSchema for NameOrId {
+    fn schema_name() -> String {
+        "NameOrId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    label_schema("id", gen.subschema_for::<Uuid>()),
+                    label_schema("name", gen.subschema_for::<Name>()),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// Name for a built-in role
 #[derive(
     Clone,

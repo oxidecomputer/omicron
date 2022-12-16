@@ -480,10 +480,14 @@ mod test {
         let resource_id =
             uuid::Uuid::parse_str("223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8")
                 .unwrap();
-        let create_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
-        let modify_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
+        let create_time = DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
+            Utc,
+        );
+        let modify_time = DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
+            Utc,
+        );
         let insert = Collection::insert_resource(
             collection_id,
             diesel::insert_into(resource::table).values(vec![(
@@ -595,10 +599,14 @@ mod test {
             .await
             .unwrap();
 
-        let create_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
-        let modify_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
+        let create_time = DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
+            Utc,
+        );
+        let modify_time = DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
+            Utc,
+        );
         let resource = Collection::insert_resource(
             collection_id,
             diesel::insert_into(resource::table).values(vec![(

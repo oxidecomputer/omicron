@@ -10,3 +10,4 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main" 
 internal-dns-client = { path = "../../internal-dns-client" }
 omicron-common = { path = "../../common" }
 slog = { version = "2.7" }
+uuid = { version = "1.2.1", features = [ "serde", "v4" ] }

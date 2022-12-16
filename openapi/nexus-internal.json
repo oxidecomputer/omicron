@@ -21,8 +21,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/UpdateArtifactKind"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -30,8 +29,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -40,8 +38,7 @@
             "schema": {
               "type": "integer",
               "format": "int64"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -74,8 +71,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -113,8 +109,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -152,8 +147,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -247,19 +241,14 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "title": "Array_of_ServicePutRequest",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ServicePutRequest"
-                }
+                "$ref": "#/components/schemas/RackInitializationRequest"
               }
             }
           },
@@ -290,8 +279,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -329,8 +317,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -339,8 +326,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -386,69 +372,12 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/zpools/{zpool_id}/dataset/{dataset_id}": {
-      "put": {
-        "summary": "Report that a dataset within a pool has come online.",
-        "operationId": "dataset_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetPutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetPutResponse"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -704,6 +633,27 @@
           "value"
         ]
       },
+      "DatasetCreateRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request": {
+            "$ref": "#/components/schemas/DatasetPutRequest"
+          },
+          "zpool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "request",
+          "zpool_id"
+        ]
+      },
       "DatasetKind": {
         "description": "Describes the purpose of the dataset.",
         "type": "string",
@@ -734,30 +684,6 @@
           "address",
           "kind"
         ]
-      },
-      "DatasetPutResponse": {
-        "description": "Describes which ZFS properties should be set for a particular allocated dataset.",
-        "type": "object",
-        "properties": {
-          "quota": {
-            "nullable": true,
-            "description": "A maximum quota on filesystem usage. Refer to ZFS native properties for more detail.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          },
-          "reservation": {
-            "nullable": true,
-            "description": "A minimum reservation size for a filesystem. Refer to ZFS native properties for more detail.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          }
-        }
       },
       "Datum": {
         "description": "A `Datum` is a single sampled data point from a metric.",
@@ -1800,6 +1726,27 @@
           }
         ]
       },
+      "RackInitializationRequest": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetCreateRequest"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServicePutRequest"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "services"
+        ]
+      },
       "Sample": {
         "description": "A concrete type representing a single, timestamped measurement from a timeseries.",
         "type": "object",
@@ -1832,14 +1779,104 @@
       },
       "ServiceKind": {
         "description": "Describes the purpose of the service.",
-        "type": "string",
-        "enum": [
-          "internal_d_n_s",
-          "nexus",
-          "oximeter",
-          "dendrite",
-          "tfport",
-          "crucible_pantry"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_d_n_s"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "external_address": {
+                    "type": "string",
+                    "format": "ip"
+                  }
+                },
+                "required": [
+                  "external_address"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dendrite"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tfport"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "ServicePutRequest": {

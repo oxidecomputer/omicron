@@ -22,4 +22,4 @@ if_exists = "append"
 
 # Configuration for interacting with the timeseries database
 [timeseries_db]
-address = "[fd00:1122:3344:0101::5]:8123"
+address = "[fd00:1122:3344:0101::6]:8123"

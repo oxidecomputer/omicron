@@ -22,6 +22,7 @@ use crossterm::terminal::{
 use futures::StreamExt;
 use slog::{error, info, Drain};
 use std::io::{stdout, Stdout};
+use std::net::SocketAddrV6;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
@@ -29,14 +30,15 @@ use tui::Terminal;
 
 pub(crate) mod defaults;
 pub(crate) mod inventory;
-mod mgs;
 mod screens;
 pub mod update;
+mod wicketd;
 mod widgets;
 
-use inventory::{Component, ComponentId, Inventory, PowerState};
-use mgs::{MgsHandle, MgsManager};
+use inventory::Inventory;
 use screens::{Height, ScreenId, Screens};
+use wicketd::{WicketdHandle, WicketdManager};
+use wicketd_client::types::RackV1Inventory;
 use widgets::RackState;
 
 pub const MARGIN: Height = Height(5);
@@ -47,8 +49,8 @@ pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 
 /// The core type of this library is the `Wizard`.
 ///
-/// A `Wizard` manages a set of [`Screen`]s, where each screen represents a
-/// specific step in the user process. Each [`Screen`] is drawable, and the
+/// A `Wizard` manages a set of screens, where each screen represents a
+/// specific step in the user process. Each screen is drawable, and the
 /// active screen is rendered on every tick. The [`Wizard`] manages which
 /// screen is active, issues the rendering operation to the terminal, and
 /// communicates with other threads and async tasks to receive user input
@@ -83,13 +85,13 @@ pub struct Wizard {
     // This contains all updatable data
     state: State,
 
-    // A mechanism for interacting with MGS
+    // A mechanism for interacting with `wicketd`
     #[allow(unused)]
-    mgs: MgsHandle,
+    wicketd: WicketdHandle,
 
     // When the Wizard is run, this will be extracted and moved
     // into a tokio task.
-    mgs_manager: Option<MgsManager>,
+    wicketd_manager: Option<WicketdManager>,
 
     // The terminal we are rendering to
     terminal: Term,
@@ -104,26 +106,28 @@ pub struct Wizard {
 #[allow(clippy::new_without_default)]
 impl Wizard {
     pub fn new() -> Wizard {
+        // TODO: make this configurable?
+        let wicketd_addr: SocketAddrV6 = "[::1]:8000".parse().unwrap();
         let log = Self::setup_log("/tmp/wicket.log").unwrap();
         let screens = Screens::new(&log);
         let (events_tx, events_rx) = channel();
         let state = State::new();
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).unwrap();
-        let log = Self::setup_log("/tmp/wicket.log").unwrap();
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
-        let (mgs, mgs_manager) = MgsManager::new(&log, events_tx.clone());
+        let (wicketd, wicketd_manager) =
+            WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
         Wizard {
             screens,
             active_screen: ScreenId::Splash,
             events_rx,
             events_tx,
             state,
-            mgs,
-            mgs_manager: Some(mgs_manager),
+            wicketd,
+            wicketd_manager: Some(wicketd_manager),
             terminal,
             log,
             tokio_rt,
@@ -163,6 +167,7 @@ impl Wizard {
     }
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
+        info!(self.log, "Starting main loop");
         let rect = self.terminal.get_frame().size();
         // Size the rack for the initial draw
         self.state.rack_state.resize(rect.width, rect.height, &MARGIN);
@@ -206,30 +211,14 @@ impl Wizard {
                     );
                     self.handle_actions(actions)?;
                 }
-                Event::Power(component_id, power_state) => {
-                    if let Err(e) = self
-                        .state
-                        .inventory
-                        .update_power_state(component_id, power_state)
+                Event::Inventory(inventory) => {
+                    if let Err(e) =
+                        self.state.inventory.update_inventory(inventory)
                     {
-                        error!(
-                            self.log,
-                            "Failed to update power state for {}: {e}",
-                            component_id.name()
-                        );
-                    }
-                }
-                Event::Inventory(component_id, component) => {
-                    if let Err(e) = self
-                        .state
-                        .inventory
-                        .update_inventory(component_id, component)
-                    {
-                        error!(
-                            self.log,
-                            "Failed to update inventory for {}: {e}",
-                            component_id.name()
-                        );
+                        error!(self.log, "Failed to update inventory: {e}",);
+                    } else {
+                        // Inventory changed. Redraw the screen.
+                        screen.draw(&self.state, &mut self.terminal)?;
                     }
                 }
                 _ => info!(self.log, "{:?}", event),
@@ -276,14 +265,12 @@ impl Wizard {
     fn start_tokio_runtime(&mut self) {
         let events_tx = self.events_tx.clone();
         let log = self.log.clone();
-        let mgs_manager = self.mgs_manager.take().unwrap();
+        let wicketd_manager = self.wicketd_manager.take().unwrap();
         self.tokio_rt.block_on(async {
             run_event_listener(log.clone(), events_tx).await;
             tokio::spawn(async move {
-                mgs_manager.run().await;
-            })
-            .await
-            .unwrap();
+                wicketd_manager.run().await;
+            });
         });
     }
 }
@@ -379,12 +366,7 @@ pub enum Event {
     Term(TermEvent),
 
     /// An Inventory Update Event
-    ///
-    /// TODO: This should be real information returned from MGS
-    Inventory(ComponentId, Component),
-
-    /// PowerState changes
-    Power(ComponentId, PowerState),
+    Inventory(RackV1Inventory),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal

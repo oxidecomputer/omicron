@@ -4,39 +4,58 @@
 
 //! Error handling facilities for the management gateway.
 
-use std::borrow::Borrow;
-
+use crate::management_switch::SpIdentifier;
 use dropshot::HttpError;
-use gateway_messages::ResponseError;
-use gateway_sp_comms::error::Error as SpCommsError;
-use gateway_sp_comms::error::SpCommunicationError;
+use gateway_messages::SpError;
+use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
+use std::borrow::Borrow;
+use std::time::Duration;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("invalid configuration file: {}", .reasons.join(", "))]
+    InvalidConfig { reasons: Vec<String> },
+}
+
+#[derive(Debug, Error)]
+pub enum SpCommsError {
+    #[error("discovery process not yet complete")]
+    DiscoveryNotYetComplete,
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
+    #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
+    SpDoesNotExist(SpIdentifier),
+    #[error("unknown socket address for local ignition controller")]
+    LocalIgnitionControllerAddressUnknown,
+    #[error(
+        "unknown socket address for SP (type {:?}, slot {})",
+        .0.typ,
+        .0.slot,
+    )]
+    SpAddressUnknown(SpIdentifier),
+    #[error(
+        "timeout ({timeout:?}) elapsed communicating with {sp:?} on port {port}"
+    )]
+    Timeout { timeout: Duration, port: usize, sp: Option<SpIdentifier> },
+    #[error("error communicating with SP: {0}")]
+    SpCommunicationFailed(#[from] CommunicationError),
+    #[error("updating SP failed: {0}")]
+    UpdateFailed(#[from] UpdateError),
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    #[error("invalid page token ({0})")]
-    InvalidPageToken(InvalidPageToken),
     #[error("websocket connection failure: {0}")]
     BadWebsocketConnection(&'static str),
     #[error(transparent)]
     CommunicationsError(#[from] SpCommsError),
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum InvalidPageToken {
-    #[error("no such ID")]
-    NoSuchId,
-    #[error("invalid value for last seen item")]
-    InvalidLastSeenItem,
-}
-
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::InvalidPageToken(_) => HttpError::for_bad_request(
-                Some("InvalidPageToken".to_string()),
-                err.to_string(),
-            ),
             Error::CommunicationsError(err) => http_err_from_comms_err(err),
             Error::BadWebsocketConnection(_) => HttpError::for_bad_request(
                 Some("BadWebsocketConnection".to_string()),
@@ -56,26 +75,26 @@ where
             Some("InvalidSp".to_string()),
             err.to_string(),
         ),
-        SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::SerialConsoleAlreadyAttached,
+        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
+            SpError::SerialConsoleAlreadyAttached,
         )) => HttpError::for_bad_request(
             Some("SerialConsoleAttached".to_string()),
             err.to_string(),
         ),
-        SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::RequestUnsupportedForSp,
+        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
+            SpError::RequestUnsupportedForSp,
         )) => HttpError::for_bad_request(
             Some("RequestUnsupportedForSp".to_string()),
             err.to_string(),
         ),
-        SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::RequestUnsupportedForComponent,
+        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
+            SpError::RequestUnsupportedForComponent,
         )) => HttpError::for_bad_request(
             Some("RequestUnsupportedForComponent".to_string()),
             err.to_string(),
         ),
-        SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
-            ResponseError::InvalidSlotForComponent,
+        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
+            SpError::InvalidSlotForComponent,
         )) => HttpError::for_bad_request(
             Some("InvalidSlotForComponent".to_string()),
             err.to_string(),
@@ -87,15 +106,13 @@ where
             )
         }
         SpCommsError::UpdateFailed(UpdateError::Communication(
-            SpCommunicationError::SpError(ResponseError::UpdateSlotBusy),
+            CommunicationError::SpError(SpError::UpdateSlotBusy),
         )) => HttpError::for_unavail(
             Some("UpdateSlotBusy".to_string()),
             err.to_string(),
         ),
         SpCommsError::UpdateFailed(UpdateError::Communication(
-            SpCommunicationError::SpError(ResponseError::UpdateInProgress {
-                ..
-            }),
+            CommunicationError::SpError(SpError::UpdateInProgress { .. }),
         )) => HttpError::for_unavail(
             Some("UpdateInProgress".to_string()),
             err.to_string(),
@@ -107,7 +124,6 @@ where
         SpCommsError::SpAddressUnknown(_)
         | SpCommsError::DiscoveryFailed { .. }
         | SpCommsError::Timeout { .. }
-        | SpCommsError::BadIgnitionTarget(_)
         | SpCommsError::LocalIgnitionControllerAddressUnknown
         | SpCommsError::SpCommunicationFailed(_)
         | SpCommsError::UpdateFailed(_) => {

@@ -14,9 +14,11 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
+use crate::db::model::Dataset;
 use crate::db::model::Rack;
 use crate::db::model::Service;
 use crate::db::model::Sled;
+use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -83,19 +85,21 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: Uuid,
         services: Vec<Service>,
+        datasets: Vec<Dataset>,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
-        use db::schema::service::dsl as service_dsl;
 
         #[derive(Debug)]
         enum RackInitError {
             ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
             RackUpdate(PoolError),
         }
         type TxnError = TransactionError<RackInitError>;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
+        let log = opctx.log.clone();
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
@@ -111,25 +115,25 @@ impl DataStore {
                         ))
                     })?;
                 if rack.initialized {
+                    info!(log, "Early exit: Rack already initialized");
                     return Ok(rack);
                 }
 
-                // Otherwise, insert services and set rack.initialized = true.
+                // Otherwise, insert services and datasets
                 for svc in services {
+                    use db::schema::service::dsl;
                     let sled_id = svc.sled_id;
                     <Sled as DatastoreCollection<Service>>::insert_resource(
                         sled_id,
-                        diesel::insert_into(service_dsl::service)
+                        diesel::insert_into(dsl::service)
                             .values(svc.clone())
-                            .on_conflict(service_dsl::id)
+                            .on_conflict(dsl::id)
                             .do_update()
                             .set((
-                                service_dsl::time_modified.eq(Utc::now()),
-                                service_dsl::sled_id
-                                    .eq(excluded(service_dsl::sled_id)),
-                                service_dsl::ip.eq(excluded(service_dsl::ip)),
-                                service_dsl::kind
-                                    .eq(excluded(service_dsl::kind)),
+                                dsl::time_modified.eq(Utc::now()),
+                                dsl::sled_id.eq(excluded(dsl::sled_id)),
+                                dsl::ip.eq(excluded(dsl::ip)),
+                                dsl::kind.eq(excluded(dsl::kind)),
                             )),
                     )
                     .insert_and_get_result_async(&conn)
@@ -142,7 +146,36 @@ impl DataStore {
                         })
                     })?;
                 }
-                diesel::update(rack_dsl::rack)
+                info!(log, "Inserted services");
+                for dataset in datasets {
+                    use db::schema::dataset::dsl;
+                    let zpool_id = dataset.pool_id;
+                    <Zpool as DatastoreCollection<Dataset>>::insert_resource(
+                        zpool_id,
+                        diesel::insert_into(dsl::dataset)
+                            .values(dataset.clone())
+                            .on_conflict(dsl::id)
+                            .do_update()
+                            .set((
+                                dsl::time_modified.eq(Utc::now()),
+                                dsl::pool_id.eq(excluded(dsl::pool_id)),
+                                dsl::ip.eq(excluded(dsl::ip)),
+                                dsl::port.eq(excluded(dsl::port)),
+                                dsl::kind.eq(excluded(dsl::kind)),
+                            )),
+                    )
+                    .insert_and_get_result_async(&conn)
+                    .await
+                    .map_err(|err| {
+                        TxnError::CustomError(RackInitError::DatasetInsert {
+                            err,
+                            zpool_id,
+                        })
+                    })?;
+                }
+                info!(log, "Inserted datasets");
+
+                let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
                     .set((
                         rack_dsl::initialized.eq(true),
@@ -155,10 +188,25 @@ impl DataStore {
                         TxnError::CustomError(RackInitError::RackUpdate(
                             PoolError::from(e),
                         ))
-                    })
+                    })?;
+                Ok(rack)
             })
             .await
             .map_err(|e| match e {
+                TxnError::CustomError(RackInitError::DatasetInsert {
+                    err,
+                    zpool_id,
+                }) => match err {
+                    AsyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::Zpool,
+                            lookup_type: LookupType::ById(zpool_id),
+                        }
+                    }
+                    AsyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    }
+                },
                 TxnError::CustomError(RackInitError::ServiceInsert {
                     err,
                     sled_id,

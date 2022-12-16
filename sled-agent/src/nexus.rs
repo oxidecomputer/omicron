@@ -13,8 +13,12 @@ use internal_dns_client::{
 };
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
+use std::future::Future;
 use std::net::Ipv6Addr;
+use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 struct Inner {
     log: Logger,
@@ -57,5 +61,44 @@ impl LazyNexusClient {
             &format!("http://[{}]:{}", address, NEXUS_INTERNAL_PORT),
             self.inner.log.clone(),
         ))
+    }
+}
+
+type NexusRequestFut = dyn Future<Output = ()> + Send;
+type NexusRequest = Pin<Box<NexusRequestFut>>;
+
+/// A queue of futures which represent requests to Nexus.
+pub struct NexusRequestQueue {
+    tx: mpsc::UnboundedSender<NexusRequest>,
+    _worker: JoinHandle<()>,
+}
+
+impl NexusRequestQueue {
+    /// Creates a new request queue, along with a worker which executes
+    /// any incoming tasks.
+    pub fn new() -> Self {
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
+        // In the future, this should basically just be a wrapper around a
+        // generation number, and we shouldn't be serializing requests to Nexus.
+        //
+        // In the meanwhile, we're using an unbounded_channel for simplicity, so
+        // that we don't need to cope with dropped notifications /
+        // retransmissions.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let _worker = tokio::spawn(async move {
+            while let Some(fut) = rx.recv().await {
+                fut.await;
+            }
+        });
+
+        Self { tx, _worker }
+    }
+
+    /// Gets access to the sending portion of the request queue.
+    ///
+    /// Callers can use this to add their own requests.
+    pub fn sender(&self) -> &mpsc::UnboundedSender<NexusRequest> {
+        &self.tx
     }
 }

@@ -5,7 +5,7 @@
 //! Utilities for poking at data links.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::vnic::VnicKind;
+use crate::illumos::link::{Link, LinkKind};
 use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
@@ -158,7 +158,7 @@ impl Dladm {
 
     /// Creates a VNIC on top of the etherstub.
     ///
-    /// This VNIC is not tracked like [`crate::illumos::vnic::Vnic`], because
+    /// This VNIC is not tracked like [`crate::illumos::link::Link`], because
     /// it is expected to exist for the lifetime of the sled.
     pub fn ensure_etherstub_vnic(
         source: &Etherstub,
@@ -219,6 +219,21 @@ impl Dladm {
             execute(cmd)?;
         }
         Ok(())
+    }
+
+    /// Verify that the given link exists
+    pub fn verify_link(link: &str) -> Result<Link, FindPhysicalLinkError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[DLADM, "show-link", "-p", "-o", "LINK", link]);
+        let output = execute(cmd)?;
+        match String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .map(|s| s.trim())
+        {
+            Some(x) if x == link => Ok(Link::wrap_physical(link)),
+            _ => Err(FindPhysicalLinkError::NoPhysicalLinkFound),
+        }
     }
 
     /// Returns the name of the first observed physical data link.
@@ -322,7 +337,7 @@ impl Dladm {
             .filter_map(|name| {
                 // Ensure this is a kind of VNIC that the sled agent could be
                 // responsible for.
-                match VnicKind::from_name(name) {
+                match LinkKind::from_name(name) {
                     Some(_) => Some(name.to_owned()),
                     None => None,
                 }

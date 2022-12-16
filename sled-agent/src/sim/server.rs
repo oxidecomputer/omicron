@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use internal_dns_client::names::{ServiceName, AAAA, SRV};
 
 use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{Drain, Logger};
 use std::net::{SocketAddr, SocketAddrV6};
@@ -100,7 +100,7 @@ impl Server {
                 "error" => ?error);
         };
         retry_notify(
-            internal_service_policy(),
+            retry_policy_internal_service_aggressive(),
             notify_nexus,
             log_notification_failure,
         )

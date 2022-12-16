@@ -18,10 +18,10 @@ use omicron_zone_package::target::Target;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use slog::debug;
-use slog::info;
 use slog::o;
 use slog::Drain;
 use slog::Logger;
+use slog::{info, warn};
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
@@ -419,11 +419,15 @@ async fn do_install(
     do_activate(config, install_dir)
 }
 
-fn uninstall_all_omicron_zones() -> Result<()> {
-    zone::Zones::get()?.into_par_iter().try_for_each(|zone| -> Result<()> {
-        zone::Zones::halt_and_remove(zone.name())?;
-        Ok(())
-    })?;
+async fn uninstall_all_omicron_zones() -> Result<()> {
+    const CONCURRENCY_CAP: usize = 32;
+    futures::stream::iter(zone::Zones::get().await?)
+        .map(Ok::<_, anyhow::Error>)
+        .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
+            zone::Zones::halt_and_remove(zone.name()).await?;
+            Ok(())
+        })
+        .await?;
     Ok(())
 }
 
@@ -450,7 +454,14 @@ fn get_all_omicron_datasets() -> Result<Vec<String>> {
 }
 
 fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = get_all_omicron_datasets()?;
+    let datasets = match get_all_omicron_datasets() {
+        Err(e) => {
+            warn!(config.log, "Failed to get omicron datasets: {}", e);
+            return Ok(());
+        }
+        Ok(datasets) => datasets,
+    };
+
     if datasets.is_empty() {
         return Ok(());
     }
@@ -538,7 +549,7 @@ fn remove_all_except<P: AsRef<Path>>(
 
 async fn do_deactivate(config: &Config) -> Result<()> {
     info!(&config.log, "Removing all Omicron zones");
-    uninstall_all_omicron_zones()?;
+    uninstall_all_omicron_zones().await?;
     info!(config.log, "Uninstalling all packages");
     uninstall_all_packages(config);
     info!(config.log, "Removing networking resources");

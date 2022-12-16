@@ -6,11 +6,11 @@
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::dladm::Etherstub;
+use crate::illumos::link::VnicAllocator;
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
@@ -114,7 +114,7 @@ async fn wait_for_http_server(
     };
 
     backoff::retry_notify(
-        backoff::internal_service_policy(),
+        backoff::retry_policy_local(),
         || async {
             // This request is nonsensical - we don't expect an instance to
             // exist - but getting a response that isn't a connection-based
@@ -198,7 +198,6 @@ impl Drop for RunningState {
 
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
-    addr: SocketAddr,
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
     port_tickets: Option<Vec<PortTicket>>,
@@ -313,7 +312,7 @@ impl InstanceInner {
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { addr, client, running_zone, port_tickets } = setup;
+        let PropolisSetup { client, running_zone, port_tickets } = setup;
 
         let nics = running_zone
             .opte_ports()
@@ -355,11 +354,14 @@ impl InstanceInner {
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
-        client.instance_ensure().body(request).send().await?;
+        let result = client.instance_ensure().body(request).send().await;
+        info!(self.log, "result of instance_ensure call is {:?}", result);
+        result?;
 
         // Monitor propolis for state changes in the background.
+        let monitor_client = client.clone();
         let monitor_task = Some(tokio::task::spawn(async move {
-            let r = instance.monitor_state_task(addr).await;
+            let r = instance.monitor_state_task(monitor_client).await;
             let log = &instance.inner.lock().await.log;
             match r {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
@@ -579,6 +581,7 @@ impl Instance {
             opte_ports,
             // physical_nic=
             None,
+            vec![],
         )
         .await?;
 
@@ -607,7 +610,7 @@ impl Instance {
             inner.log, "Adding service"; "smf_name" => &smf_instance_name
         );
         backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_local(),
             || async {
                 running_zone
                     .run_cmd(&[
@@ -696,8 +699,13 @@ impl Instance {
 
         inner.state.current_mut().propolis_addr = Some(server_addr);
 
-        let client =
-            Arc::new(PropolisClient::new(&format!("http://{}", server_addr)));
+        // We use a custom client builder here because the default progenitor
+        // one has a timeout of 15s but we want to be able to wait indefinitely.
+        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
+        let client = Arc::new(PropolisClient::new_with_client(
+            &format!("http://{}", server_addr),
+            reqwest_client,
+        ));
 
         // Although the instance is online, the HTTP server may not be running
         // yet. Wait for it to respond to requests, so users of the instance
@@ -705,7 +713,6 @@ impl Instance {
         wait_for_http_server(&inner.log, &client).await?;
 
         Ok(PropolisSetup {
-            addr: server_addr,
             client,
             running_zone,
             port_tickets: Some(port_tickets),
@@ -736,7 +743,7 @@ impl Instance {
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&inner.log, &zname).unwrap();
+        Zones::halt_and_remove_logged(&inner.log, &zname).await.unwrap();
 
         // Remove ourselves from the instance manager's map of instances.
         let running_state = inner.running_state.as_mut().unwrap();
@@ -761,15 +768,10 @@ impl Instance {
     // Monitors propolis until explicitly told to disconnect.
     //
     // Intended to be spawned in a tokio task within [`Instance::start`].
-    async fn monitor_state_task(&self, addr: SocketAddr) -> Result<(), Error> {
-        // We use a custom client builder here because the default progenitor
-        // one has a timeout of 15s but we want to be able to wait indefinitely.
-        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
-        let client = PropolisClient::new_with_client(
-            &format!("http://{}", addr),
-            reqwest_client,
-        );
-
+    async fn monitor_state_task(
+        &self,
+        client: Arc<PropolisClient>,
+    ) -> Result<(), Error> {
         let mut gen = 0;
         loop {
             // State monitoring always returns the most recent state/gen pair

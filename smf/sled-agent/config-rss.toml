@@ -11,6 +11,9 @@ rack_subnet = "fd00:1122:3344:0100::"
 # For values less than 2, no rack secret will be generated.
 rack_secret_threshold = 1
 
+# NOTE: In the lab, use "172.20.15.226"
+nexus_external_address = "192.168.1.20"
+
 [gateway]
 
 # IP address of Internet gateway
@@ -27,84 +30,10 @@ rack_secret_threshold = 1
 # how-to-run.adoc for details on how to determine the value for your network.
 mac = "00:0d:b9:54:fe:e4"
 
-[[request]]
-
-# TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
-# should allocate crucible datasets.
-[[request.dataset]]
-id = "09a9a25f-2602-4e2f-9630-31af9c492c3e"
-zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:0101::6]:32345"
-dataset_kind.type = "crucible"
-
-[[request.dataset]]
-id = "2713b37a-3043-4ed5-aaff-f38200e45cfb"
-zpool_id = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1122:3344:0101::7]:32345"
-dataset_kind.type = "crucible"
-
-[[request.dataset]]
-id = "ffd16cad-e5d5-495e-9c59-4312a3857d91"
-zpool_id = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1122:3344:0101::8]:32345"
-dataset_kind.type = "crucible"
-
-[[request.dataset]]
-id = "4d08fc19-3d5f-4f6b-9c48-925f8eac7255"
-zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:0101::2]:32221"
-dataset_kind.type = "cockroach_db"
-dataset_kind.all_addresses = [ "[fd00:1122:3344:0101::2]:32221" ]
-
-# TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
-# should allocate clickhouse datasets.
-[[request.dataset]]
-id = "a3505b41-a592-420b-84f2-3d76bf0e0a81"
-zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:0101::5]:8123"
-dataset_kind.type = "clickhouse"
-
-[[request.service_zone]]
-id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
-zone_name = "nexus"
-addresses = [ "fd00:1122:3344:0101::3" ]
-gz_addresses = []
-[[request.service_zone.services]]
-type = "nexus"
-internal_ip = "fd00:1122:3344:0101::3"
-# NOTE: In the lab, use "172.20.15.226"
-external_ip = "192.168.1.20"
-
-# TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
-# should allocate Oximeter services.
-[[request.service_zone]]
-id = "1da65e5b-210c-4859-a7d7-200c1e659972"
-zone_name = "oximeter"
-addresses = [ "fd00:1122:3344:0101::4" ]
-gz_addresses = []
-[[request.service_zone.services]]
-type = "oximeter"
-
-[[request.service_zone]]
-id = "a0fe5ebc-9261-6f77-acc1-972481755789"
-zone_name = "switch"
-addresses = [ "fd00:1122:3344:0101::9" ]
-gz_addresses = []
-[[request.service_zone.services]]
-type = "dendrite"
-asic = "tofino_stub"
-#[[request.service_zone.services]]
-# The tfport service will not work with the tofino_stub asic,
-# as there is no network traffic to multiplex or network device
-# to layer over.
-#type = "tfport"
-#pkt_source = "tfpkt0"
-
-[[request.service_zone]]
-id = "1fa25cf1-147b-4179-8f8b-c601333733bf"
-zone_name = "crucible-pantry"
-addresses = [ "fd00:1122:3344:0101::10" ]
-gz_addresses = []
-[[request.service_zone.services]]
-type = "crucible_pantry"
-
+# [[request.service_zone]]
+# id = "1fa25cf1-147b-4179-8f8b-c601333733bf"
+# zone_name = "crucible-pantry"
+# addresses = [ "fd00:1122:3344:0101::10" ]
+# gz_addresses = []
+# [[request.service_zone.services]]
+# type = "crucible_pantry"

@@ -9,28 +9,26 @@
 mod conversions;
 
 use self::conversions::component_from_str;
-use crate::bulk_state_get::BulkSpStateSingleResult;
-use crate::bulk_state_get::BulkStateProgress;
-use crate::bulk_state_get::SpStateRequestId;
 use crate::error::http_err_from_comms_err;
+use crate::error::SpCommsError;
+use crate::timeout::Timeout as SpTimeout;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
-use dropshot::PaginationParams;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
-use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use dropshot::WhichPage;
+use futures::StreamExt;
+use gateway_messages::ignition;
 use gateway_messages::IgnitionCommand;
-use gateway_sp_comms::error::Error as SpCommsError;
-use gateway_sp_comms::Timeout as SpTimeout;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog::warn;
+use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -88,6 +86,10 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
+/// State of an ignition target.
+///
+/// TODO: Ignition returns much more information than we're reporting here: do
+/// we want to expand this?
 #[derive(
     Debug,
     Clone,
@@ -100,13 +102,12 @@ pub struct SpIgnitionInfo {
     JsonSchema,
 )]
 #[serde(tag = "present")]
-#[allow(dead_code)] // TODO remove once `Absent` is used
 pub enum SpIgnition {
     #[serde(rename = "no")]
     Absent,
     #[serde(rename = "yes")]
     Present {
-        id: u16,
+        id: SpIgnitionSystemType,
         power: bool,
         ctrl_detect_0: bool,
         ctrl_detect_1: bool,
@@ -115,6 +116,27 @@ pub enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
+}
+
+/// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "system_type", rename_all = "snake_case")]
+pub enum SpIgnitionSystemType {
+    Gimlet,
+    Sidecar,
+    Psc,
+    Unknown { id: u16 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -202,12 +224,6 @@ struct Timeout {
 }
 
 #[derive(Serialize, Deserialize)]
-struct SpStatePageSelector {
-    last: SpIdentifier,
-    request_id: SpStateRequestId,
-}
-
-#[derive(Serialize, Deserialize)]
 struct TimeoutSelector<T> {
     last: T,
     start_time: u64, // TODO
@@ -249,6 +265,12 @@ pub struct SpIdentifier {
     pub typ: SpType,
     #[serde(deserialize_with = "deserializer_u32_from_string")]
     pub slot: u32,
+}
+
+impl Display for SpIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?} {}", self.typ, self.slot)
+    }
 }
 
 /// See RFD 81.
@@ -329,17 +351,12 @@ struct PathSpComponent {
 /// Since communication with SPs may be unreliable, consumers may specify an
 /// optional timeout to override the default.
 ///
-/// This interface may return a page of SPs prior to reaching either the
-/// timeout with the expectation that callers will keep calling this interface
-/// until the terminal page is reached. If the timeout is reached, the final
-/// call will result in an error.
-///
 /// This interface makes use of Ignition as well as the management network.
 /// SPs that are powered off (and therefore cannot respond over the
 /// management network) are represented in the output set. SPs that Ignition
 /// reports as powered on, but that do not respond within the allotted timeout
 /// will similarly be represented in the output; these will only be included in
-/// the terminal output page when the allotted timeout has expired.
+/// the output when the allotted timeout has expired.
 ///
 /// Note that Ignition provides the full set of SPs that are plugged into the
 /// system so the gateway service knows prior to waiting for responses the
@@ -350,86 +367,60 @@ struct PathSpComponent {
 }]
 async fn sp_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query: Query<PaginationParams<Timeout, SpStatePageSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<SpInfo>>, HttpError> {
+    query: Query<Timeout>,
+) -> Result<HttpResponseOk<Vec<SpInfo>>, HttpError> {
     let apictx = rqctx.context();
-    let page_params = query.into_inner();
-    let page_limit = rqctx.page_limit(&page_params)?.get() as usize;
+    let timeout = query.into_inner();
 
-    let (request_id, last_seen_target) = match page_params.page {
-        WhichPage::First(timeout) => {
-            // build overall timeout for the entire request
-            let timeout = timeout
-                .timeout_millis
-                .map(|t| Duration::from_millis(u64::from(t)))
-                .unwrap_or(apictx.timeouts.bulk_request_default)
-                // TODO do we also want a floor for the timeout?
-                .min(apictx.timeouts.bulk_request_max);
-            let timeout = SpTimeout::from_now(timeout);
+    let timeout = timeout
+        .timeout_millis
+        .map(|t| Duration::from_millis(u64::from(t)))
+        .unwrap_or(apictx.timeouts.bulk_request_default);
+    let timeout = SpTimeout::from_now(timeout);
 
-            let request_id = apictx
-                .bulk_sp_state_requests
-                .start(
-                    timeout,
-                    apictx.timeouts.bulk_request_retain_grace_period,
-                )
-                .await?;
+    // query ignition controller to find out which SPs are powered on
+    let all_sps = apictx
+        .sp_comms
+        .get_ignition_state_all()
+        .await
+        .map_err(http_err_from_comms_err)?;
+    let communicator = Arc::clone(&apictx.sp_comms);
+    let response_stream =
+        apictx.sp_comms.query_all_online_sps(&all_sps, timeout, move |sp| {
+            let communicator = Arc::clone(&communicator);
+            async move { communicator.get_state(sp).await }
+        });
 
-            (request_id, None)
-        }
-        WhichPage::Next(page_selector) => {
-            (page_selector.request_id, Some(page_selector.last))
-        }
-    };
-
-    let progress = apictx
-        .bulk_sp_state_requests
-        .get(
-            &request_id,
-            last_seen_target.map(Into::into),
-            SpTimeout::from_now(apictx.timeouts.bulk_request_page),
-            page_limit,
-        )
-        .await?;
-
-    // TODO it's weird that we're dropping information here. maybe "page timeout
-    // reached" and "page limit reached" really are equivalent from the client's
-    // point of view (as long as it doesn't interpret "fewer than limit" items
-    // as the end), but ideally we'd omit sending a page token back if we're in
-    // "complete". this is dependent on dropshot changes; see
-    // <https://github.com/oxidecomputer/dropshot/issues/20>.
-    let items = match progress {
-        BulkStateProgress::PageTimeoutReached(items) => items,
-        BulkStateProgress::PageLimitReached(items) => items,
-        BulkStateProgress::Complete(items) => items,
-    };
-
-    let items = items
-        .into_iter()
-        .map(|BulkSpStateSingleResult { sp, state, result }| {
-            let details = match result {
-                Ok(details) => details,
-                Err(err) => match &*err {
-                    SpCommsError::Timeout { .. } => SpState::Unresponsive,
-                    _ => return Err(err),
+    // Convert the response tuple of (SpIdentifier, IgnitionState,
+    // Option<Result<Result<SpState, Error>, Elapsed>>) to Vec<SpInfo>;
+    let responses: Vec<_> = response_stream
+        .map(|(id, ignition_details, result)| {
+            // Unpack the nasty nested type:
+            // 1. None => ignition indicated power was off; treat that as
+            //    success (with state = disabled)
+            // 2. Outer err => timeout; treat that as "success"
+            //    (with state = unresponsive)
+            // 3. Inner success => true success
+            // 4. Inner error => Log it (with state = unresponsive)
+            let id = id.into();
+            let details = ignition_details.into();
+            let state = match result {
+                None => SpState::Disabled,
+                Some(Err(_)) => SpState::Unresponsive,
+                Some(Ok(result)) => match result {
+                    Ok(state) => SpState::from(state),
+                    Err(err) => {
+                        warn!(apictx.log, "SP {id}: {err}");
+                        SpState::Unresponsive
+                    }
                 },
             };
-            Ok(SpInfo {
-                info: SpIgnitionInfo { id: sp.into(), details: state.into() },
-                details,
-            })
+            SpInfo { info: SpIgnitionInfo { id, details }, details: state }
         })
-        .collect::<Result<Vec<_>, Arc<SpCommsError>>>()
-        .map_err(http_err_from_comms_err)?;
+        .collect()
+        .await;
 
-    Ok(HttpResponseOk(ResultsPage::new(
-        items,
-        &request_id,
-        |sp_info, &request_id| SpStatePageSelector {
-            last: sp_info.info.id,
-            request_id,
-        },
-    )?))
+    Ok(HttpResponseOk(responses))
 }
 
 /// Get info on an SP
@@ -452,7 +443,11 @@ async fn sp_get(
         .await
         .map_err(http_err_from_comms_err)?;
 
-    let details = if state.is_powered_on() {
+    let details = if state
+        .target
+        .map(|t| t.power_state == ignition::SystemPowerState::On)
+        .unwrap_or(false)
+    {
         // ignition indicates the SP is on; ask it for its state
         match comms.get_state(sp.into()).await {
             Ok(state) => SpState::from(state),

@@ -4,6 +4,7 @@ members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "end-to-end-tests",
     "gateway",
     "gateway-cli",
     "gateway-client",
@@ -34,7 +35,8 @@ members = [
     "oximeter-client",
     "test-utils",
     "wicket",
-    "end-to-end-tests",
+    "wicketd",
+    "wicketd-client",
 ]
 
 default-members = [
@@ -68,6 +70,9 @@ default-members = [
     "oximeter/oximeter-macro-impl",
     "oximeter-client",
     "test-utils",
+    "wicket",
+    "wicketd",
+    "wicketd-client",
 ]
 resolver = "2"
 
@@ -114,8 +119,8 @@ panic = "abort"
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }
 #[patch."https://github.com/oxidecomputer/crucible"]
-#crucible-client-types = { path = "../crucible/crucible-client-types" }
 #crucible-agent-client = { path = "../crucible/agent-client" }
+#crucible-client-types = { path = "../crucible/crucible-client-types" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
 
 #

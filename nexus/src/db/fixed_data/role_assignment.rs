@@ -25,6 +25,20 @@ lazy_static! {
                 role_builtin::FLEET_ADMIN.role_name,
             ),
 
+            // The "USER_SERVICE_BALANCER" user gets the "admin" role on the
+            // Fleet.
+            //
+            // This is necessary as services exist as resources implied by
+            // "FLEET" - if they ever become more fine-grained, this scope
+            // could also become smaller.
+            RoleAssignment::new(
+                IdentityType::UserBuiltin,
+                user_builtin::USER_SERVICE_BALANCER.id,
+                role_builtin::FLEET_ADMIN.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_ADMIN.role_name,
+            ),
+
             // The "internal-read" user gets the "viewer" role on the sole
             // Fleet.  This will grant them the ability to read various control
             // plane data (like the list of sleds), which is in turn used to

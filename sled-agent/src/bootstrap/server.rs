@@ -84,7 +84,6 @@ impl Server {
         info!(log, "detecting (real or simulated) SP");
         let sp = SpHandle::detect(
             config.sp_config.as_ref().map(|c| &c.local_sp),
-            &sled_config,
             &log,
         )
         .await
@@ -113,7 +112,7 @@ impl Server {
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
-        if let Err(e) = server.bootstrap_agent.initialize(&config).await {
+        if let Err(e) = server.bootstrap_agent.start_rss(&config).await {
             server.inner.abort();
             return Err(e.to_string());
         }

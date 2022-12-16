@@ -433,8 +433,7 @@ async fn ssc_regions_ensure(
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
-            // gen of 0 is here, these regions were just allocated.
-            gen: 0,
+            gen: 1,
             opts: CrucibleOpts {
                 id: destination_volume_id,
                 target: datasets_and_regions
@@ -1145,7 +1144,7 @@ async fn ssc_create_volume_record(
 
     let disk_volume = osagactx
         .datastore()
-        .volume_get(disk.volume_id)
+        .volume_checkout(disk.volume_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1257,7 +1256,6 @@ fn create_snapshot_from_disk(
     // snapshot:
     //
     // - generate new IDs for each layer
-    // - bump any generation numbers
     // - set read-only
     // - remove any control sockets
 
@@ -1316,7 +1314,7 @@ fn create_snapshot_from_disk(
             Ok(VolumeConstructionRequest::Region {
                 block_size: *block_size,
                 opts,
-                gen: gen + 1,
+                gen: *gen,
             })
         }
 
@@ -1510,62 +1508,6 @@ mod test {
         };
 
         assert_ne!(snapshot_second_opts.id, disk_second_opts.id);
-
-        // validate generation numbers were bumped
-
-        let snapshot_gen_1 = match &snapshot {
-            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                match &sub_volumes[0] {
-                    VolumeConstructionRequest::Region { gen, .. } => gen,
-                    _ => panic!("enum changed shape!"),
-                }
-            }
-            _ => panic!("enum changed shape!"),
-        };
-
-        let disk_gen_1 = match &disk {
-            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                match &sub_volumes[0] {
-                    VolumeConstructionRequest::Region { gen, .. } => gen,
-                    _ => panic!("enum changed shape!"),
-                }
-            }
-            _ => panic!("enum changed shape!"),
-        };
-
-        assert_eq!(*snapshot_gen_1, *disk_gen_1 + 1);
-
-        let snapshot_gen_2 = match &snapshot {
-            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
-                match read_only_parent.as_ref().unwrap().as_ref() {
-                    VolumeConstructionRequest::Volume {
-                        sub_volumes, ..
-                    } => match &sub_volumes[0] {
-                        VolumeConstructionRequest::Region { gen, .. } => gen,
-                        _ => panic!("enum changed shape!"),
-                    },
-                    _ => panic!("enum changed shape!"),
-                }
-            }
-            _ => panic!("enum changed shape!"),
-        };
-
-        let disk_gen_2 = match &disk {
-            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
-                match read_only_parent.as_ref().unwrap().as_ref() {
-                    VolumeConstructionRequest::Volume {
-                        sub_volumes, ..
-                    } => match &sub_volumes[0] {
-                        VolumeConstructionRequest::Region { gen, .. } => gen,
-                        _ => panic!("enum changed shape!"),
-                    },
-                    _ => panic!("enum changed shape!"),
-                }
-            }
-            _ => panic!("enum changed shape!"),
-        };
-
-        assert_eq!(*snapshot_gen_2, disk_gen_2 + 1);
 
         // validate only the top level targets were changed
 
