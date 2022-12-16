@@ -9,6 +9,7 @@ buf-list = "0.1.3"
 bytes = "1.3.0"
 camino = "1.1"
 clap = { version = "4.0", features = ["derive"] }
+ddm-admin-client = { path = "../ddm-admin-client" }
 display-error-chain = "0.1.1"
 futures = "0.3.25"
 itertools = "0.10.5"

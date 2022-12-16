@@ -2575,6 +2575,7 @@ dependencies = [
  "bytes",
  "camino",
  "clap 4.0.29",
+ "ddm-admin-client",
  "display-error-chain",
  "futures",
  "itertools",

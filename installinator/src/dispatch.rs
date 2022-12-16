@@ -43,7 +43,7 @@ impl InstallinatorApp {
         let file_drain =
             slog_term::FullFormat::new(file_decorator).build().fuse();
 
-        let stderr_drain = stderr_env_drain("INSTALLINATOR_LOG");
+        let stderr_drain = stderr_env_drain("RUST_LOG");
 
         let drain = slog::Duplicate::new(file_drain, stderr_drain).fuse();
         let drain = slog_async::Async::new(drain).build().fuse();

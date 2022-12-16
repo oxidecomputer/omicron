@@ -15,7 +15,10 @@ use futures::StreamExt;
 use itertools::Itertools;
 use tokio::{sync::mpsc, time::Instant};
 
-use crate::errors::{ArtifactFetchError, DiscoverPeersError};
+use crate::{
+    ddm_admin_client::DdmAdminClient,
+    errors::{ArtifactFetchError, DiscoverPeersError},
+};
 
 /// A chosen discovery mechanism for peers, passed in over the command line.
 #[derive(Clone, Debug)]
@@ -27,6 +30,9 @@ pub(crate) enum DiscoveryMechanism {
     List(Vec<SocketAddrV6>),
 }
 
+// TODO: This currently hardcodes this wicketd port, will probably want to sync up on this.
+const WICKETD_PORT: u16 = 14000;
+
 impl DiscoveryMechanism {
     /// Discover peers.
     pub(crate) async fn discover_peers(
@@ -35,7 +41,22 @@ impl DiscoveryMechanism {
     ) -> Result<Box<dyn PeersImpl>, DiscoverPeersError> {
         let peers = match self {
             Self::Bootstrap => {
-                todo!("bootstrap discovery mechanism");
+                // TODO: add aborts to this after a certain number of tries?
+
+                let ddm_admin_client =
+                    DdmAdminClient::new(log).map_err(|err| {
+                        DiscoverPeersError::Retry(anyhow::anyhow!(err))
+                    })?;
+                let addrs =
+                    ddm_admin_client.peer_addrs().await.map_err(|err| {
+                        DiscoverPeersError::Retry(anyhow::anyhow!(err))
+                    })?;
+                addrs
+                    .map(|addr| {
+                        // TODO: this currently hardcodes the wicketd port.
+                        SocketAddrV6::new(addr, WICKETD_PORT, 0, 0)
+                    })
+                    .collect()
             }
             Self::List(peers) => peers.clone(),
         };
