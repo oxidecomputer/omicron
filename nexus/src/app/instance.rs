@@ -265,7 +265,7 @@ impl super::Nexus {
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
     pub async fn project_destroy_instance(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> DeleteResult {
@@ -275,16 +275,14 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Delete).await?;
 
-        self.db_datastore
-            .project_delete_instance(opctx, &authz_instance)
-            .await?;
-        self.db_datastore
-            .instance_delete_all_network_interfaces(opctx, &authz_instance)
-            .await?;
-        // Ignore the count of addresses deleted
-        self.db_datastore
-            .deallocate_external_ip_by_instance_id(opctx, authz_instance.id())
-            .await?;
+        let saga_params = sagas::instance_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_instance,
+        };
+        self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
+            saga_params,
+        )
+        .await?;
         Ok(())
     }
 

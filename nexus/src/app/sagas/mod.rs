@@ -22,6 +22,7 @@ use uuid::Uuid;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod instance_create;
+pub mod instance_delete;
 pub mod instance_migrate;
 pub mod snapshot_create;
 pub mod volume_delete;
@@ -93,6 +94,9 @@ fn make_action_registry() -> ActionRegistry {
     <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
     <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
     <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_delete::SagaInstanceDelete as NexusSaga>::register_actions(
         &mut registry,
     );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
