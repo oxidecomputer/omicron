@@ -4,15 +4,13 @@
 
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas;
-use crate::app::sagas::NexusAction;
+use crate::app::sagas::declare_saga_actions;
 use crate::db;
-use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
-use std::sync::Arc;
-use steno::{new_action_noop_undo, ActionError, ActionFunc, Node};
+use steno::{ActionError, Node};
 use uuid::Uuid;
 
 // Volume remove read only parent saga: input parameters
@@ -24,7 +22,8 @@ pub struct Params {
 
 // Volume remove_read_only_parent saga: actions
 
-lazy_static! {
+declare_saga_actions! {
+    volume_remove_rop;
     // A read-only parent is a structure in a volume that indicates that the
     // volume is logically created from this parent. The initial data for the
     // volume (implicitly) comes from the parent volume. In the background,
@@ -43,17 +42,14 @@ lazy_static! {
     // then delete that temporary volume.
 
     // Create the temporary volume
-    static ref CREATE_TEMP_VOLUME: NexusAction = ActionFunc::new_action(
-        "volume-remove-rop.create-temp-volume",
-        svr_create_temp_volume,
-        svr_create_temp_volume_undo
-    );
-
+    CREATE_TEMP_VOLUME -> "temp_volume" {
+        + svr_create_temp_volume
+        - svr_create_temp_volume_undo
+    }
     // remove the read_only_parent,  attach it to the temp volume.
-    static ref REMOVE_READ_ONLY_PARENT: NexusAction = new_action_noop_undo(
-        "volume-remove-rop.remove-read-only-parent",
-        svr_remove_read_only_parent
-    );
+    REMOVE_READ_ONLY_PARENT -> "no_result_1" {
+        + svr_remove_read_only_parent
+    }
 }
 
 // volume remove read only parent saga: definition
@@ -65,8 +61,7 @@ impl NexusSaga for SagaVolumeRemoveROP {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*CREATE_TEMP_VOLUME));
-        registry.register(Arc::clone(&*REMOVE_READ_ONLY_PARENT));
+        volume_remove_rop_register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -97,18 +92,9 @@ impl NexusSaga for SagaVolumeRemoveROP {
         ));
 
         // Create the temporary volume
-        builder.append(Node::action(
-            "temp_volume",
-            "CreateTempVolume",
-            CREATE_TEMP_VOLUME.as_ref(),
-        ));
-
+        builder.append(create_temp_volume_action());
         // Remove the read only parent, attach to temp volume
-        builder.append(Node::action(
-            "no_result_1",
-            "RemoveReadOnlyParent",
-            REMOVE_READ_ONLY_PARENT.as_ref(),
-        ));
+        builder.append(remove_read_only_parent_action());
 
         // Build the params for the subsaga to delete the temp volume
         builder.append(Node::constant(

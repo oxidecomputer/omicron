@@ -85,7 +85,7 @@ use super::{
     common_storage::ensure_all_datasets_and_regions, ActionRegistry,
     NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
 };
-use crate::app::sagas::NexusAction;
+use crate::app::sagas::declare_saga_actions;
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
@@ -93,7 +93,6 @@ use crate::external_api::params;
 use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
-use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -105,10 +104,7 @@ use sled_agent_client::types::{
 };
 use slog::info;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use steno::new_action_noop_undo;
 use steno::ActionError;
-use steno::ActionFunc;
 use steno::Node;
 use uuid::Uuid;
 
@@ -125,43 +121,35 @@ pub struct Params {
 
 // snapshot create saga: actions
 
-lazy_static! {
-    static ref REGIONS_ALLOC: NexusAction = new_action_noop_undo(
-        "snapshot-create.regions-alloc",
-        ssc_alloc_regions,
-    );
-    static ref REGIONS_ENSURE: NexusAction = new_action_noop_undo(
-        "snapshot-create.regions-ensure",
-        ssc_regions_ensure,
-    );
-    static ref CREATE_DESTINATION_VOLUME_RECORD: NexusAction =
-        ActionFunc::new_action(
-            "snapshot-create.create-destination-volume-record",
-            ssc_create_destination_volume_record,
-            ssc_create_destination_volume_record_undo,
-        );
-    static ref CREATE_SNAPSHOT_RECORD: NexusAction = ActionFunc::new_action(
-        "snapshot-create.create-snapshot-record",
-        ssc_create_snapshot_record,
-        ssc_create_snapshot_record_undo,
-    );
-    static ref SEND_SNAPSHOT_REQUEST: NexusAction = new_action_noop_undo(
-        "snapshot-create.send-snapshot-request",
-        ssc_send_snapshot_request,
-    );
-    static ref START_RUNNING_SNAPSHOT: NexusAction = new_action_noop_undo(
-        "snapshot-create.start-running-snapshot",
-        ssc_start_running_snapshot,
-    );
-    static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
-        "snapshot-create.create-volume-record",
-        ssc_create_volume_record,
-        ssc_create_volume_record_undo,
-    );
-    static ref FINALIZE_SNAPSHOT_RECORD: NexusAction = new_action_noop_undo(
-        "snapshot-create.finalize-snapshot-record",
-        ssc_finalize_snapshot_record,
-    );
+declare_saga_actions! {
+    snapshot_create;
+    REGIONS_ALLOC -> "datasets_and_regions" {
+        + ssc_alloc_regions
+    }
+    REGIONS_ENSURE -> "regions_ensure" {
+        + ssc_regions_ensure
+    }
+    CREATE_DESTINATION_VOLUME_RECORD -> "created_destination_volume" {
+        + ssc_create_destination_volume_record
+        - ssc_create_destination_volume_record_undo
+    }
+    CREATE_SNAPSHOT_RECORD -> "created_snapshot" {
+        + ssc_create_snapshot_record
+        - ssc_create_snapshot_record_undo
+    }
+    SEND_SNAPSHOT_REQUEST -> "snapshot_request" {
+        + ssc_send_snapshot_request
+    }
+    START_RUNNING_SNAPSHOT -> "replace_sockets_map" {
+        + ssc_start_running_snapshot
+    }
+    CREATE_VOLUME_RECORD -> "created_volume" {
+        + ssc_create_volume_record
+        - ssc_create_volume_record_undo
+    }
+    FINALIZE_SNAPSHOT_RECORD -> "finalized_snapshot" {
+        + ssc_finalize_snapshot_record
+    }
 }
 
 // snapshot create saga: definition
@@ -173,14 +161,7 @@ impl NexusSaga for SagaSnapshotCreate {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*REGIONS_ALLOC));
-        registry.register(Arc::clone(&*REGIONS_ENSURE));
-        registry.register(Arc::clone(&*CREATE_DESTINATION_VOLUME_RECORD));
-        registry.register(Arc::clone(&*CREATE_SNAPSHOT_RECORD));
-        registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST));
-        registry.register(Arc::clone(&*START_RUNNING_SNAPSHOT));
-        registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
-        registry.register(Arc::clone(&*FINALIZE_SNAPSHOT_RECORD));
+        snapshot_create_register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -207,58 +188,17 @@ impl NexusSaga for SagaSnapshotCreate {
         ));
 
         // Allocate region space for snapshot to store blocks post-scrub
-        builder.append(Node::action(
-            "datasets_and_regions",
-            "RegionsAlloc",
-            REGIONS_ALLOC.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "regions_ensure",
-            "RegionsEnsure",
-            REGIONS_ENSURE.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "created_destination_volume",
-            "CreateDestinationVolumeRecord",
-            CREATE_DESTINATION_VOLUME_RECORD.as_ref(),
-        ));
-
-        // Create the Snapshot DB object
-        builder.append(Node::action(
-            "created_snapshot",
-            "CreateSnapshotRecord",
-            CREATE_SNAPSHOT_RECORD.as_ref(),
-        ));
-
-        // Send a snapshot request to a sled-agent
-        builder.append(Node::action(
-            "snapshot_request",
-            "SendSnapshotRequest",
-            SEND_SNAPSHOT_REQUEST.as_ref(),
-        ));
-
+        builder.append(regions_alloc_action());
+        builder.append(regions_ensure_action());
+        builder.append(create_destination_volume_record_action());
+        builder.append(create_snapshot_record_action());
+        builder.append(send_snapshot_request_action());
         // Validate with crucible agent and start snapshot downstairs
-        builder.append(Node::action(
-            "replace_sockets_map",
-            "StartRunningSnapshot",
-            START_RUNNING_SNAPSHOT.as_ref(),
-        ));
-
+        builder.append(start_running_snapshot_action());
         // Copy and modify the disk volume construction request to point to the new
         // running snapshot
-        builder.append(Node::action(
-            "created_volume",
-            "CreateVolumeRecord",
-            CREATE_VOLUME_RECORD.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "finalized_snapshot",
-            "FinalizeSnapshotRecord",
-            FINALIZE_SNAPSHOT_RECORD.as_ref(),
-        ));
+        builder.append(create_volume_record_action());
+        builder.append(finalize_snapshot_record_action());
 
         Ok(builder.build()?)
     }

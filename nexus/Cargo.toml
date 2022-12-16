@@ -45,6 +45,7 @@ oso = "0.26"
 oximeter-client = { path = "../oximeter-client" }
 oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.7.0"
+paste = "1.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b596e72b6b93bc412d675358f782ae7d53f8bf7a", features = [ "generated" ] }
