@@ -7913,8 +7913,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -7923,16 +7922,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8004,8 +8001,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -8039,8 +8035,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -8084,8 +8079,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -8114,8 +8108,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -8149,8 +8142,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -8200,8 +8192,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -8209,8 +8200,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -8219,16 +8209,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8263,8 +8251,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "requestBody": {
@@ -8310,16 +8297,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8354,16 +8339,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "requestBody": {
@@ -8408,16 +8391,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8447,16 +8428,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -8491,16 +8470,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
             "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            },
-            "style": "form"
+            }
           }
         ],
         "requestBody": {
