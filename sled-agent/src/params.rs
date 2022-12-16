@@ -4,7 +4,8 @@
 
 use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
-    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
+    OXIMETER_PORT,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
