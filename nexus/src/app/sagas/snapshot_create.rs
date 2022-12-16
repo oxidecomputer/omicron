@@ -791,7 +791,7 @@ macro_rules! retry_until_known_result {
         }
 
         backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_internal_service(),
             || async {
                 match ($func).await {
                     Err(crucible_pantry_client::Error::CommunicationError(
@@ -858,7 +858,7 @@ async fn ssc_call_pantry_attach_for_disk(
 
     let disk_volume = osagactx
         .datastore()
-        .volume_get(disk.volume_id)
+        .volume_checkout(disk.volume_id)
         .await
         .map_err(ActionError::action_failed)?;
 
