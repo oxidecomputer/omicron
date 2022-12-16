@@ -135,6 +135,7 @@ impl fmt::Display for ServiceKind {
     }
 }
 
+/*
 impl FromStr for ServiceKind {
     type Err = omicron_common::api::external::Error;
 
@@ -153,6 +154,7 @@ impl FromStr for ServiceKind {
         }
     }
 }
+*/
 
 /// Describes a service on a sled
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

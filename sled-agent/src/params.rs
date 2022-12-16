@@ -553,14 +553,15 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
     }
 }
 
+/*
 impl From<ServiceType> for nexus_client::types::ServiceKind {
     fn from(s: ServiceType) -> Self {
         match s {
             ServiceType::InternalDns { .. } => {
                 nexus_client::types::ServiceKind::InternalDNS
             }
-            ServiceType::Nexus { .. } => {
-                nexus_client::types::ServiceKind::Nexus
+            ServiceType::Nexus { internal_ip, .. } => {
+                nexus_client::types::ServiceKind::Nexus { internal_ip }
             }
             ServiceType::Oximeter => nexus_client::types::ServiceKind::Oximeter,
             ServiceType::Dendrite { .. } => {
@@ -575,6 +576,7 @@ impl From<ServiceType> for nexus_client::types::ServiceKind {
         }
     }
 }
+*/
 
 /// Used to request that the Sled initialize certain services on initialization.
 ///
