@@ -40,6 +40,11 @@ pub struct VpcPath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct SubnetPath {
+    pub subnet: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -155,6 +160,37 @@ pub struct VpcList {
     pub pagination: PaginatedByName,
     #[serde(flatten)]
     pub project_selector: ProjectSelector,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+    pub subnet: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SubnetSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        subnet: NameOrId,
+    ) -> Self {
+        SubnetSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            subnet,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetList {
+    #[serde(flatten)]
+    pub pagination: PaginatedByName,
+    #[serde(flatten)]
+    pub vpc_selector: VpcSelector,
 }
 
 // Silos

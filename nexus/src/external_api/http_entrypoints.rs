@@ -210,6 +210,13 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_update)?;
         api.register(vpc_subnet_list_network_interfaces)?;
 
+        api.register(vpc_subnet_list_v1)?;
+        api.register(vpc_subnet_view_v1)?;
+        // api.register(vpc_subnet_create_v1)?;
+        // api.register(vpc_subnet_delete_v1)?;
+        // api.register(vpc_subnet_update_v1)?;
+        // api.register(vpc_subnet_list_network_interfaces_v1)?;
+
         api.register(instance_network_interface_create)?;
         api.register(instance_network_interface_list)?;
         api.register(instance_network_interface_view)?;
@@ -4263,7 +4270,6 @@ async fn vpc_view_by_id(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let vpc_selector = params::VpcSelector::new(None, None, path.id.into());
@@ -4389,6 +4395,41 @@ async fn vpc_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-subnets",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_list_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<params::SubnetList>,
+) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &query.vpc_selector)?;
+        let vpcs = nexus
+            .vpc_list_subnets(
+                &opctx,
+                &vpc_lookup,
+                &data_page_params_for(&rqctx, &query.pagination)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|vpc| vpc.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query.pagination,
+            vpcs,
+            &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List subnets
 #[endpoint {
     method = GET,
@@ -4406,12 +4447,16 @@ async fn vpc_subnet_list(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let vpcs = nexus
             .vpc_list_subnets(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
+                &vpc_lookup,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -4424,6 +4469,33 @@ async fn vpc_subnet_list(
             vpcs,
             &marker_for_name,
         )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-subnets/{subnet}",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_view_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<params::VpcSelector>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: Some(query),
+            subnet: path.subnet,
+        };
+        let (.., subnet) =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
+        Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4452,15 +4524,14 @@ async fn vpc_subnet_view(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let subnet = nexus
-            .vpc_subnet_fetch(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
-            )
-            .await?;
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let (.., subnet) =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
         Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4479,10 +4550,14 @@ async fn vpc_subnet_view_by_id(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let subnet = nexus.vpc_subnet_fetch_by_id(&opctx, id).await?;
+        let subnet_selector = params::SubnetSelector {
+            subnet: path.id.into(),
+            vpc_selector: None,
+        };
+        let (.., subnet) =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
         Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
