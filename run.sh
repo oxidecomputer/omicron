@@ -10,5 +10,7 @@ cd "$(dirname ${BASH_SOURCE[0]})"
 #export TMP=$PWD/tmpdir
 #export TMPDIR=$TMP
 export PATH=$PATH:$PWD/out/clickhouse:$PWD/out/cockroachdb/bin
+#export PATH=$PWD/debug-bin:$PATH
+export PATH=$PWD/maybefixed-bin/bin:$PATH
 id=$$
 exec nohup bash -c "env; time while time cargo test -p omicron-nexus --lib -- db:: ; do :; done" > run-$id.out 2>&1

@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# wrapper around `cockroach` for running `cockroach version` under DTrace
+
+set -o errexit
+set -o xtrace
+
+dir="$(dirname "${BASH_SOURCE[0]}")"
+cd $dir/..
+
+real_cockroach="$PWD/out/cockroachdb/bin/cockroach"
+
+if [[ $1 != "version" ]]; then
+	echo "debug-bin/cockroach: not instrumenting this invocation"
+	exec "$real_cockroach" "$@"
+fi
+
+#gotracemem="$HOME/issues/go-memory/gotracemem.d"
+gotracemem="$HOME/issues/go-memory/gotracesigs.d"
+output_dtrace_base="$PWD/dtrace-output/dtrace-$$"
+
+for (( i = 0; ; i++ )) {
+	output_dtrace="$output_dtrace_base.$i.out"
+	if ! [[ -e $output_dtrace ]]; then
+		break
+	fi
+}
+
+echo "debug-bin/cockroach: using $output_dtrace" >&2
+
+GOTRACEBACK=crash \
+    GODEBUG=clobberfree=1 \
+    pfexec "$gotracemem" \
+        -o $output_dtrace \
+	-c "$real_cockroach $*"
