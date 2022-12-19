@@ -9,10 +9,14 @@ use db_macros::Resource;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
 /// Describes a project within the database.
-#[derive(Selectable, Queryable, Insertable, Debug, Resource)]
+#[derive(
+    Selectable, Queryable, Insertable, Debug, Resource, Serialize, Deserialize,
+)]
 #[diesel(table_name = project)]
 pub struct Project {
     #[diesel(embed)]
