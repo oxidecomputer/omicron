@@ -13,7 +13,7 @@ version = "1.3.0"
 features = ["serde"]
 
 [dependencies.proc-macro2]
-version = "1.0.47"
+version = "1.0.49"
 
 [dependencies.quote]
 version = "1.0.21"
