@@ -2440,12 +2440,6 @@ async fn disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskCreateParams {
-    #[serde(flatten)]
-    selector: params::ProjectSelector,
-}
-
 /// Create a disk
 #[endpoint {
     method = POST,
@@ -2454,7 +2448,7 @@ pub struct DiskCreateParams {
 }]
 async fn disk_create_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<DiskCreateParams>,
+    query_params: Query<params::ProjectSelector>,
     new_disk: TypedBody<params::DiskCreate>,
 ) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
@@ -2463,7 +2457,7 @@ async fn disk_create_v1(
     let new_disk_params = &new_disk.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_lookup = nexus.project_lookup(&opctx, &query.selector)?;
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
         let disk = nexus
             .project_create_disk(&opctx, &project_lookup, new_disk_params)
             .await?;

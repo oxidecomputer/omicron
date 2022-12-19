@@ -53,6 +53,12 @@ impl super::Nexus {
                     .disk_name(Name::ref_cast(name));
                 Ok(disk)
             }
+            params::DiskSelector {
+                disk: NameOrId::Id(_),
+                project_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing disk as an ID, project should not be specified",
+            )),
             _ => Err(Error::invalid_request(
                 "disk should either be UUID or project should be specified",
             )),

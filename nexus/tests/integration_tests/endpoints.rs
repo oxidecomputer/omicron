@@ -218,8 +218,9 @@ lazy_static! {
         format!("/v1/disks/{}/detach?{}", *DEMO_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_DISK_METRICS_URL: String =
         format!(
-            "/v1/disks/{}/metrics/activated?start_time={:?}&end_time={:?}",
+            "/v1/disks/{}/metrics/activated?{}&start_time={:?}&end_time={:?}",
             *DEMO_DISK_NAME,
+            *DEMO_PROJECT_SELECTOR,
             Utc::now(),
             Utc::now(),
         );
