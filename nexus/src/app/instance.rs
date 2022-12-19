@@ -79,10 +79,18 @@ impl super::Nexus {
                     .instance_name(Name::ref_cast(name));
                 Ok(instance)
             }
+            params::InstanceSelector {
+                project_selector: Some(_),
+                instance: NameOrId::Id(_),
+            } => {
+                Err(Error::invalid_request(
+                    "when providing instance as an ID, project should not be specified",
+                ))
+            }
             _ => {
-                return Err(Error::invalid_request(
+                Err(Error::invalid_request(
                     "instance should either be UUID or project should be specified",
-                ));
+                ))
             }
         }
     }
