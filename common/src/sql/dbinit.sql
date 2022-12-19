@@ -537,6 +537,9 @@ CREATE TABLE omicron.public.project (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
+    /* child resource generation number, per RFD 192 */
+    rcgen INT NOT NULL,
+
     /* Which organization this project belongs to */
     organization_id UUID NOT NULL /* foreign key into "Organization" table */
 );

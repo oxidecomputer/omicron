@@ -172,6 +172,7 @@ impl DataStore {
             .await?;
         let pool = IpPool::new(&new_pool.identity, internal);
         let pool_name = pool.name().as_str().to_string();
+
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
             .returning(IpPool::as_returning())

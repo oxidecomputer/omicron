@@ -200,9 +200,15 @@ async fn sdc_create_disk_record(
         ActionError::action_failed(Error::invalid_request(&e.to_string()))
     })?;
 
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let disk_created = osagactx
         .datastore()
-        .project_create_disk(disk)
+        .project_create_disk(&opctx, &authz_project, disk)
         .await
         .map_err(ActionError::action_failed)?;
 

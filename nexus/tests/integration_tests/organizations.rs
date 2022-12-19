@@ -124,7 +124,27 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("failed to make request");
 
-    // Delete the project, then delete the organization
+    // Delete:
+    // - The default subnet within the default VPC for the project
+    // - The default VPC for the project
+    // - The project
+    // - The organization
+    NexusRequest::object_delete(
+        &client,
+        &format!("{project_url}/vpcs/default/subnets/default"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::object_delete(
+        &client,
+        &format!("{project_url}/vpcs/default"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
     NexusRequest::object_delete(&client, &project_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
