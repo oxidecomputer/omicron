@@ -5,7 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = { version = "1.0.58", features = ["backtrace"] }
+anyhow = { version = "1.0.68", features = ["backtrace"] }
 async-trait = "0.1.60"
 base64 = "0.20.0"
 omicron-sled-agent = { path = "../sled-agent" }

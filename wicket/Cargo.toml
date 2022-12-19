@@ -6,7 +6,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0.65"
+anyhow = "1.0.68"
 clap = {version = "4.0", features = ["derive"]}
 crossterm = { version = "0.25.0", features = ["event-stream"] }
 futures = "0.3.25"
