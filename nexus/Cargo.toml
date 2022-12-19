@@ -62,7 +62,7 @@ steno = "0.3"
 tempfile = "3.3"
 thiserror = "1.0"
 tokio-tungstenite = "0.18.0"
-toml = "0.5.9"
+toml = "0.5.10"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.4"
 
