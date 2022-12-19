@@ -16,7 +16,7 @@ serde_derive = "1.0"
 sp-sim = { path = "../sp-sim" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 thiserror = "1.0"
-toml = "0.5.9"
+toml = "0.5.10"
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
