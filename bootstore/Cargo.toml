@@ -27,7 +27,7 @@ sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "7
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 thiserror = "1.0"
 uuid = { version = "1.2.2", features = [ "serde", "v4" ] }
-vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
+vsss-rs = { version = "2.3.1", default-features = false, features = ["std"] }
 zeroize = { version = "1.5.7", features = ["zeroize_derive", "std"] }
 
 [dev-dependencies]
