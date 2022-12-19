@@ -362,6 +362,7 @@
           "vpcs"
         ],
         "summary": "Fetch a subnet by id",
+        "description": "Use `GET /v1/vpc-subnets/{id}` instead.",
         "operationId": "vpc_subnet_view_by_id",
         "parameters": [
           {
@@ -391,7 +392,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/vpcs/{id}": {
@@ -400,6 +402,7 @@
           "vpcs"
         ],
         "summary": "Fetch a VPC",
+        "description": "Use `GET /v1/vpcs/{id}` instead.",
         "operationId": "vpc_view_by_id",
         "parameters": [
           {
@@ -429,7 +432,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/device/auth": {
@@ -3411,6 +3415,7 @@
           "vpcs"
         ],
         "summary": "List VPCs",
+        "description": "Use `GET /v1/vpcs` instead.",
         "operationId": "vpc_list",
         "parameters": [
           {
@@ -3477,6 +3482,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -3484,6 +3490,7 @@
           "vpcs"
         ],
         "summary": "Create a VPC",
+        "description": "Use `POST /v1/vpcs` instead.",
         "operationId": "vpc_create",
         "parameters": [
           {
@@ -3532,7 +3539,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}": {
@@ -3541,6 +3549,7 @@
           "vpcs"
         ],
         "summary": "Fetch a VPC",
+        "description": "Use `GET /v1/vpcs/{vpc}` instead.",
         "operationId": "vpc_view",
         "parameters": [
           {
@@ -3585,13 +3594,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "vpcs"
         ],
         "summary": "Update a VPC",
+        "description": "Use `PUT /v1/vpcs/{vpc}` instead.",
         "operationId": "vpc_update",
         "parameters": [
           {
@@ -3646,13 +3657,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "vpcs"
         ],
         "summary": "Delete a VPC",
+        "description": "Use `DELETE /v1/vpcs/{vpc}` instead.",
         "operationId": "vpc_delete",
         "parameters": [
           {
@@ -3690,7 +3703,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules": {
@@ -4502,6 +4516,7 @@
           "vpcs"
         ],
         "summary": "List subnets",
+        "description": "Use `GET /v1/vpc-subnets` instead.",
         "operationId": "vpc_subnet_list",
         "parameters": [
           {
@@ -4574,6 +4589,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -4581,6 +4597,7 @@
           "vpcs"
         ],
         "summary": "Create a subnet",
+        "description": "Use `POST /v1/vpc-subnets` instead.",
         "operationId": "vpc_subnet_create",
         "parameters": [
           {
@@ -4635,7 +4652,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}": {
@@ -4644,6 +4662,7 @@
           "vpcs"
         ],
         "summary": "Fetch a subnet",
+        "description": "Use `GET /v1/vpc-subnets/{subnet}` instead.",
         "operationId": "vpc_subnet_view",
         "parameters": [
           {
@@ -4696,7 +4715,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
@@ -4772,6 +4792,7 @@
           "vpcs"
         ],
         "summary": "Delete a subnet",
+        "description": "Use `DELETE /v1/vpc-subnets/{subnet}` instead",
         "operationId": "vpc_subnet_delete",
         "parameters": [
           {
@@ -4817,7 +4838,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces": {
@@ -8519,28 +8541,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "vpc",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -8608,6 +8608,64 @@
           }
         },
         "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_subnet_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcSubnetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/vpc-subnets/{subnet}": {
@@ -8658,6 +8716,54 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_subnet_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

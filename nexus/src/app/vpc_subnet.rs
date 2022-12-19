@@ -250,19 +250,10 @@ impl super::Nexus {
     pub async fn vpc_delete_subnet(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
+        vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
     ) -> DeleteResult {
         let (.., authz_subnet, db_subnet) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .vpc_subnet_name(subnet_name)
-                .fetch_for(authz::Action::Delete)
-                .await?;
+            vpc_subnet_lookup.fetch_for(authz::Action::Delete).await?;
         self.db_datastore
             .vpc_delete_subnet(opctx, &db_subnet, &authz_subnet)
             .await

@@ -139,6 +139,12 @@ pub struct VpcSelector {
     pub vpc: NameOrId,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalVpcSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+}
+
 // TODO-v1: delete this post migration
 impl VpcSelector {
     pub fn new(

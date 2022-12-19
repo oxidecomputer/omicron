@@ -213,7 +213,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_list_v1)?;
         api.register(vpc_subnet_view_v1)?;
         api.register(vpc_subnet_create_v1)?;
-        // api.register(vpc_subnet_delete_v1)?;
+        api.register(vpc_subnet_delete_v1)?;
         // api.register(vpc_subnet_update_v1)?;
         // api.register(vpc_subnet_list_network_interfaces_v1)?;
 
@@ -4098,10 +4098,12 @@ async fn vpc_list_v1(
 }
 
 /// List VPCs
+/// Use `GET /v1/vpcs` instead.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4166,10 +4168,12 @@ async fn vpc_create_v1(
 }
 
 /// Create a VPC
+/// Use `POST /v1/vpcs` instead.
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4231,10 +4235,12 @@ struct VpcPathParam {
 }
 
 /// Fetch a VPC
+/// Use `GET /v1/vpcs/{vpc}` instead.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4258,10 +4264,12 @@ async fn vpc_view(
 }
 
 /// Fetch a VPC
+/// Use `GET /v1/vpcs/{id}` instead.
 #[endpoint {
     method = GET,
     path = "/by-id/vpcs/{id}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4312,10 +4320,12 @@ async fn vpc_update_v1(
 }
 
 /// Update a VPC
+/// Use `PUT /v1/vpcs/{vpc}` instead.
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4369,10 +4379,12 @@ async fn vpc_delete_v1(
 }
 
 /// Delete a VPC
+/// Use `DELETE /v1/vpcs/{vpc}` instead.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4431,10 +4443,12 @@ async fn vpc_subnet_list_v1(
 }
 
 /// List subnets
+/// Use `GET /v1/vpc-subnets` instead.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_subnet_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4566,10 +4580,12 @@ struct VpcSubnetPathParam {
 }
 
 /// Fetch a subnet
+/// Use `GET /v1/vpc-subnets/{subnet}` instead.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_subnet_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4594,10 +4610,12 @@ async fn vpc_subnet_view(
 }
 
 /// Fetch a subnet by id
+/// Use `GET /v1/vpc-subnets/{id}` instead.
 #[endpoint {
     method = GET,
     path = "/by-id/vpc-subnets/{id}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_subnet_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4619,11 +4637,41 @@ async fn vpc_subnet_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = DELETE,
+    path = "/v1/vpc-subnets/{subnet}",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_delete_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<params::OptionalVpcSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: query.vpc_selector,
+            subnet: path.subnet,
+        };
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        nexus.vpc_delete_subnet(&opctx, &subnet_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete a subnet
+/// Use `DELETE /v1/vpc-subnets/{subnet}` instead
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_subnet_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4634,15 +4682,15 @@ async fn vpc_subnet_delete(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .vpc_delete_subnet(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
-            )
-            .await?;
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        nexus.vpc_delete_subnet(&opctx, &subnet_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

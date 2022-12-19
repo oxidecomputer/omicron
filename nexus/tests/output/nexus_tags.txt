@@ -205,7 +205,9 @@ vpc_router_update                        /organizations/{organization_name}/proj
 vpc_router_view                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
 vpc_router_view_by_id                    /by-id/vpc-routers/{id}
 vpc_subnet_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
+vpc_subnet_create_v1                     /v1/vpc-subnets
 vpc_subnet_delete                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+vpc_subnet_delete_v1                     /v1/vpc-subnets/{subnet}
 vpc_subnet_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnet_list_network_interfaces       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
 vpc_subnet_list_v1                       /v1/vpc-subnets

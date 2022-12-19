@@ -412,7 +412,7 @@ async fn test_project_deletion_with_ip_pool(
             name: String::from(pool_name).parse().unwrap(),
             description: String::from("description"),
         },
-        project: Some(params::ProjectPath {
+        project: Some(params::OldProjectPath {
             organization: org_name.parse().unwrap(),
             project: name.parse().unwrap(),
         }),
