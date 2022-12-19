@@ -154,9 +154,11 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
     ) -> DeleteResult {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::Delete).await?;
-        self.db_datastore.project_delete(opctx, &authz_project).await
+        let (.., authz_project, db_project) =
+            project_lookup.fetch_for(authz::Action::Delete).await?;
+        self.db_datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
     }
 
     // Role assignments
