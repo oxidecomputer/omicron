@@ -12,7 +12,7 @@ path = "../rpaths"
 bcs = "0.1.4"
 derive_more = "0.99.17"
 diesel = { version = "2.0.2", features = ["sqlite", "uuid"] }
-p256 = "0.9.0"
+p256 = "0.11.1"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 # We don't actually need `pq-sys` here, other than to satisfy
 # `[build-dependencies.omicron-rpaths]`, which are needed by `omicron-test-

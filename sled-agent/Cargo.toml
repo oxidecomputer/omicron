@@ -29,7 +29,7 @@ once_cell = "1.16"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "23fdf5856f10f23e2d26865d2d7e2d3bc537bca3", features = [ "api", "std" ] }
 oximeter = { version = "0.1.0", path = "../oximeter/oximeter" }
 oximeter-producer = { version = "0.1.0", path = "../oximeter/producer" }
-p256 = "0.9.0"
+p256 = "0.11.1"
 percent-encoding = "2.2.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "666ded451b13bba0895485c0b34515c0e59c2c6e", features = [ "generated-migration" ] }
