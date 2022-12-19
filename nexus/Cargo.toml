@@ -10,7 +10,7 @@ path = "../rpaths"
 [dependencies]
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.59"
+async-trait = "0.1.60"
 base64 = "0.20.0"
 bb8 = "0.8.0"
 clap = { version = "4.0", features = ["derive"] }
@@ -63,9 +63,9 @@ steno = "0.3"
 tempfile = "3.3"
 thiserror = "1.0"
 tokio-tungstenite = "0.18.0"
-toml = "0.5.9"
+toml = "0.5.10"
 tough = { version = "0.12", features = [ "http" ] }
-usdt = "0.3.4"
+usdt = "0.3.5"
 
 authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
