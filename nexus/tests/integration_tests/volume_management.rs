@@ -1741,6 +1741,8 @@ fn create_region(
 ) -> VolumeConstructionRequest {
     VolumeConstructionRequest::Region {
         block_size,
+        blocks_per_extent: 1,
+        extent_count: 1,
         gen,
         opts: CrucibleOpts {
             id,
@@ -1782,6 +1784,8 @@ fn volume_match_gen(
                 match sv {
                     VolumeConstructionRequest::Region {
                         block_size: _,
+                        blocks_per_extent: _,
+                        extent_count: _,
                         gen,
                         opts: _,
                     } => {
