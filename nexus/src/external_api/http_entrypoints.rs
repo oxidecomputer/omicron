@@ -212,7 +212,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(vpc_subnet_list_v1)?;
         api.register(vpc_subnet_view_v1)?;
-        // api.register(vpc_subnet_create_v1)?;
+        api.register(vpc_subnet_create_v1)?;
         // api.register(vpc_subnet_delete_v1)?;
         // api.register(vpc_subnet_update_v1)?;
         // api.register(vpc_subnet_list_network_interfaces_v1)?;
@@ -4474,6 +4474,62 @@ async fn vpc_subnet_list(
 }
 
 #[endpoint {
+    method = POST,
+    path = "/v1/vpc-subnets",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_create_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<params::VpcSelector>,
+    create_params: TypedBody<params::VpcSubnetCreate>,
+) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let create = create_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &query)?;
+        let subnet =
+            nexus.vpc_create_subnet(&opctx, &vpc_lookup, &create).await?;
+        Ok(HttpResponseCreated(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a subnet
+/// Use `POST /v1/vpc-subnets` instead.
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
+    tags = ["vpcs"],
+    deprecated = true
+}]
+async fn vpc_subnet_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VpcPathParam>,
+    create_params: TypedBody<params::VpcSubnetCreate>,
+) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        let subnet = nexus
+            .vpc_create_subnet(&opctx, &vpc_lookup, &create_params.into_inner())
+            .await?;
+        Ok(HttpResponseCreated(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}",
     tags = ["vpcs"],
@@ -4559,36 +4615,6 @@ async fn vpc_subnet_view_by_id(
         let (.., subnet) =
             nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
         Ok(HttpResponseOk(subnet.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a subnet
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["vpcs"],
-}]
-async fn vpc_subnet_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcPathParam>,
-    create_params: TypedBody<params::VpcSubnetCreate>,
-) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let subnet = nexus
-            .vpc_create_subnet(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &create_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -67,18 +67,10 @@ impl super::Nexus {
     pub async fn vpc_create_subnet(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
         params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
-        let (.., authz_vpc, db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .fetch()
-                .await?;
+        let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
 
         // Validate IPv4 range
         if !params.ipv4_block.network().is_private() {
