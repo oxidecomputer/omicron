@@ -775,7 +775,7 @@ impl DataStore {
                         }
                     }
                     VolumeConstructionRequest::File { id: _, block_size: _, path: _ }
-                    | VolumeConstructionRequest::Region { 
+                    | VolumeConstructionRequest::Region {
                         block_size: _,
                         blocks_per_extent: _,
                         extent_count: _,
