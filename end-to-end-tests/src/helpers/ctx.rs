@@ -2,7 +2,9 @@ use crate::helpers::generate_name;
 use anyhow::{Context as _, Result};
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use oxide_client::types::{Name, OrganizationCreate, ProjectCreate};
-use oxide_client::{Client, ClientOrganizationsExt, ClientProjectsExt};
+use oxide_client::{
+    Client, ClientOrganizationsExt, ClientProjectsExt, ClientVpcsExt,
+};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::Url;
 use std::net::SocketAddr;
@@ -49,6 +51,21 @@ impl Context {
     }
 
     pub async fn cleanup(self) -> Result<()> {
+        self.client
+            .vpc_subnet_delete()
+            .organization_name(self.org_name.clone())
+            .project_name(self.project_name.clone())
+            .vpc_name("default")
+            .subnet_name("default")
+            .send()
+            .await?;
+        self.client
+            .vpc_delete()
+            .organization_name(self.org_name.clone())
+            .project_name(self.project_name.clone())
+            .vpc_name("default")
+            .send()
+            .await?;
         self.client
             .project_delete()
             .organization_name(self.org_name.clone())
