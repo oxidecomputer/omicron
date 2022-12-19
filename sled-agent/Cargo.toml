@@ -54,7 +54,7 @@ thiserror = "1.0"
 tokio = { version = "1.23", features = [ "full" ] }
 tokio-tungstenite = "0.18.0"
 tokio-util = { version = "0.7", features = ["codec"] }
-toml = "0.5.9"
+toml = "0.5.10"
 uuid = { version = "1.2.2", features = [ "serde", "v4" ] }
 vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
 zone = { version = "0.2", default-features = false, features = ["async"] }

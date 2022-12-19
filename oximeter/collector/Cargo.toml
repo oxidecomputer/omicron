@@ -19,7 +19,7 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 slog-dtrace = "0.2"
 thiserror = "1.0.37"
 tokio = "1.23"
-toml = "0.5.9"
+toml = "0.5.10"
 uuid = { version = "1.2.2", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
