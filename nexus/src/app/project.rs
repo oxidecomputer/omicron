@@ -197,12 +197,15 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
     ) -> DeleteResult {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::Delete)
-            .await?;
-        self.db_datastore.project_delete(opctx, &authz_project).await
+        let (.., authz_project, db_project) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+        self.db_datastore
+            .project_delete(opctx, &authz_project, &db_project)
+            .await
     }
 
     // Role assignments

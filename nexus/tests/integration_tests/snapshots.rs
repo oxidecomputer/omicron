@@ -397,16 +397,16 @@ async fn test_reject_creating_disk_from_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     let snapshot = datastore
         .project_ensure_snapshot(
             &opctx,
-            &authz_silo,
+            &authz_project,
             db::model::Snapshot {
                 identity: db::model::SnapshotIdentity {
                     id: Uuid::new_v4(),
@@ -554,16 +554,16 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     let snapshot = datastore
         .project_ensure_snapshot(
             &opctx,
-            &authz_silo,
+            &authz_project,
             db::model::Snapshot {
                 identity: db::model::SnapshotIdentity {
                     id: Uuid::new_v4(),
@@ -735,21 +735,21 @@ async fn test_create_snapshot_record_idempotent(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     // Test project_ensure_snapshot is idempotent
 
     let snapshot_created_1 = datastore
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot.clone())
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot.clone())
         .await
         .unwrap();
 
     let snapshot_created_2 = datastore
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
         .unwrap();
 

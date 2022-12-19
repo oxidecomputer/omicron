@@ -405,15 +405,15 @@ async fn ssc_create_snapshot_record(
         size: disk.size,
     };
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &osagactx.datastore())
-        .silo_id(params.silo_id)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
 
     let snapshot_created = osagactx
         .datastore()
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
         .map_err(ActionError::action_failed)?;
 
