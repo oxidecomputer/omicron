@@ -214,7 +214,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_view_v1)?;
         api.register(vpc_subnet_create_v1)?;
         api.register(vpc_subnet_delete_v1)?;
-        // api.register(vpc_subnet_update_v1)?;
+        api.register(vpc_subnet_update_v1)?;
         // api.register(vpc_subnet_list_network_interfaces_v1)?;
 
         api.register(instance_network_interface_create)?;
@@ -4696,11 +4696,45 @@ async fn vpc_subnet_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = PUT,
+    path = "/v1/vpc-subnets/{subnet}",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_update_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<params::OptionalVpcSelector>,
+    subnet_params: TypedBody<params::VpcSubnetUpdate>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let subnet_params = subnet_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: query.vpc_selector,
+            subnet: path.subnet,
+        };
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        let subnet = nexus
+            .vpc_update_subnet(&opctx, &subnet_lookup, &subnet_params)
+            .await?;
+        Ok(HttpResponseOk(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Update a subnet
+/// Use `PUT /v1/vpc-subnets/{subnet}` instead
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_subnet_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4712,13 +4746,18 @@ async fn vpc_subnet_update(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
         let subnet = nexus
             .vpc_update_subnet(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
+                &subnet_lookup,
                 &subnet_params.into_inner(),
             )
             .await?;

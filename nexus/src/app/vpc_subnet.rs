@@ -227,19 +227,11 @@ impl super::Nexus {
     pub async fn vpc_update_subnet(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
+        vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
         params: &params::VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
-        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_subnet) =
+            vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
             .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
             .await
