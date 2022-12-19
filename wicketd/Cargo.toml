@@ -16,7 +16,7 @@ schemars = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 slog-dtrace = "0.2"
 snafu = "0.7"
-toml = "0.5.9"
+toml = "0.5.10"
 uuid = "1.2.2"
 
 gateway-client = { path = "../gateway-client" }
