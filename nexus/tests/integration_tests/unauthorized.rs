@@ -213,15 +213,15 @@ lazy_static! {
         },
         // Create an Organization
         SetupReq::Post {
-            url: "/organizations",
+            url: "/v1/organizations",
             body: serde_json::to_value(&*DEMO_ORG_CREATE).unwrap(),
-            id_routes: vec!["/by-id/organizations/{id}"],
+            id_routes: vec![],
         },
         // Create a Project in the Organization
         SetupReq::Post {
             url: &*DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
-            id_routes: vec!["/by-id/projects/{id}"],
+            id_routes: vec![],
         },
         // Create a VPC in the Project
         SetupReq::Post {
