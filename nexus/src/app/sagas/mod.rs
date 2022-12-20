@@ -10,7 +10,7 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -82,12 +82,11 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
     }
 }
 
-lazy_static! {
-    pub(super) static ref ACTION_GENERATE_ID: NexusAction =
-        new_action_noop_undo("common.uuid_generate", saga_generate_uuid);
-    pub static ref ACTION_REGISTRY: Arc<ActionRegistry> =
-        Arc::new(make_action_registry());
-}
+pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
+    new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
+});
+pub static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
+    Lazy::new(|| Arc::new(make_action_registry()));
 
 fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
@@ -162,6 +161,13 @@ macro_rules! __action_name {
 
 /// A macro intended to reduce boilerplate when writing saga actions.
 ///
+/// This macro aims to reduce this boilerplate, by requiring only the following:
+/// - The name of the saga
+/// - The name of each action
+/// - The output of each action
+/// - The "forward" action function
+/// - (Optional) The "undo" action function
+///
 /// For this input:
 ///
 /// ```ignore
@@ -213,21 +219,23 @@ macro_rules! declare_saga_actions {
     // Basically, everything to the left of "<>" is just us propagating state
     // through the macro, and everything to the right of it is user input.
     (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
-        lazy_static::lazy_static! {
-            static ref $node: crate::app::sagas::NexusAction = ::steno::ActionFunc::new_action(
-                crate::app::sagas::__action_name!($saga, $node), $a, $u,
-            );
-        }
+        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
+            ::once_cell::sync::Lazy::new(|| {
+                ::steno::ActionFunc::new_action(
+                    crate::app::sagas::__action_name!($saga, $node), $a, $u,
+                )
+            });
         crate::app::sagas::__emit_action!($node, $out);
         declare_saga_actions!(S = $saga $($nodes,)* $node <> $($tail)*);
     };
     // Same as the prior match, but without the undo action.
     (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident } $($tail:tt)*) => {
-        lazy_static::lazy_static! {
-            static ref $node: crate::app::sagas::NexusAction = ::steno::new_action_noop_undo(
-                crate::app::sagas::__action_name!($saga, $node), $a,
-            );
-        }
+        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
+            ::once_cell::sync::Lazy::new(|| {
+                ::steno::new_action_noop_undo(
+                    crate::app::sagas::__action_name!($saga, $node), $a,
+                )
+            });
         crate::app::sagas::__emit_action!($node, $out);
         declare_saga_actions!(S = $saga $($nodes,)* $node <> $($tail)*);
     };

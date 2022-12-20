@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -30,6 +31,61 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
+
+// Generates internal functions used for validation during project deletion.
+// Used simply to reduce boilerplate.
+//
+// It assumes:
+//
+// - $i is an identifier for a type of resource.
+// - $i has a corresponding "db::schema::$i", which has a project_id,
+// time_deleted, and $label field.
+// - If $label is supplied, it must be a mandatory column of the table
+// which is (1) looked up, and (2) used in an error message, if the resource.
+// exists in the project. Otherwise, it is assumbed to be a "Uuid" named "id".
+macro_rules! generate_fn_to_ensure_none_in_project {
+    ($i:ident, $label:ident, $label_ty:ty) => {
+        ::paste::paste! {
+            async fn [<ensure_no_ $i s_in_project>](
+                &self,
+                opctx: &OpContext,
+                authz_project: &authz::Project,
+            ) -> DeleteResult {
+                use db::schema::$i;
+
+                let maybe_label = diesel_pool_result_optional(
+                    $i::dsl::$i
+                        .filter($i::dsl::project_id.eq(authz_project.id()))
+                        .filter($i::dsl::time_deleted.is_null())
+                        .select($i::dsl::$label)
+                        .limit(1)
+                        .first_async::<$label_ty>(self.pool_authorized(opctx).await?)
+                        .await,
+                )
+                .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+
+                if let Some(label) = maybe_label {
+                    let object = stringify!($i).replace('_', " ");
+                    const VOWELS: [char; 5] = ['a', 'e', 'i', 'o', 'u'];
+                    let article = if VOWELS.iter().any(|&v| object.starts_with(v)) {
+                        "an"
+                    } else {
+                        "a"
+                    };
+
+                    return Err(Error::InvalidRequest {
+                        message: format!("project to be deleted contains {article} {object}: {label}"),
+                    });
+                }
+
+                Ok(())
+            }
+        }
+    };
+    ($i:ident) => {
+        generate_fn_to_ensure_none_in_project!($i, id, Uuid);
+    };
+}
 
 impl DataStore {
     /// Create a project
@@ -65,26 +121,38 @@ impl DataStore {
         })
     }
 
+    generate_fn_to_ensure_none_in_project!(instance, name, String);
+    generate_fn_to_ensure_none_in_project!(disk, name, String);
+    generate_fn_to_ensure_none_in_project!(image, name, String);
+    generate_fn_to_ensure_none_in_project!(snapshot, name, String);
+    generate_fn_to_ensure_none_in_project!(vpc, name, String);
+
     /// Delete a project
-    // TODO-correctness This needs to check whether there are any resources that
-    // depend on the Project (Disks, Instances).  We can do this with a
-    // generation counter that gets bumped when these resources are created.
     pub async fn project_delete(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
+        db_project: &db::model::Project,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_project).await?;
+
+        // Verify that child resources do not exist.
+        self.ensure_no_instances_in_project(opctx, authz_project).await?;
+        self.ensure_no_disks_in_project(opctx, authz_project).await?;
+        self.ensure_no_images_in_project(opctx, authz_project).await?;
+        self.ensure_no_snapshots_in_project(opctx, authz_project).await?;
+        self.ensure_no_vpcs_in_project(opctx, authz_project).await?;
 
         use db::schema::project::dsl;
 
         let now = Utc::now();
-        diesel::update(dsl::project)
+        let updated_rows = diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_project.id()))
+            .filter(dsl::rcgen.eq(db_project.rcgen))
             .set(dsl::time_deleted.eq(now))
             .returning(Project::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -92,6 +160,13 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_project),
                 )
             })?;
+
+        if updated_rows == 0 {
+            return Err(Error::InvalidRequest {
+                message: "deletion failed due to concurrent modification"
+                    .to_string(),
+            });
+        }
         Ok(())
     }
 

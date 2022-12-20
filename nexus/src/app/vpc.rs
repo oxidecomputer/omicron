@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::identity::Resource;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
@@ -41,31 +42,18 @@ impl super::Nexus {
     pub async fn project_create_vpc(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        self.project_create_vpc_by_authz(opctx, &authz_project, params).await
-    }
-
-    pub async fn project_create_vpc_by_authz(
-        self: &Arc<Self>,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        params: &params::VpcCreate,
-    ) -> CreateResult<db::model::Vpc> {
-        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
 
         let saga_params = sagas::vpc_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             vpc_create: params.clone(),
-            authz_project: authz_project.clone(),
+            authz_project,
         };
 
         let saga_outputs = self

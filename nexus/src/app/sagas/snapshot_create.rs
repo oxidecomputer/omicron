@@ -269,6 +269,8 @@ async fn ssc_regions_ensure(
     .await?;
 
     let block_size = datasets_and_regions[0].1.block_size;
+    let blocks_per_extent = datasets_and_regions[0].1.extent_size;
+    let extent_count = datasets_and_regions[0].1.extent_count;
 
     // Create volume construction request
     let mut rng = StdRng::from_entropy();
@@ -277,6 +279,8 @@ async fn ssc_regions_ensure(
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
+            blocks_per_extent,
+            extent_count: extent_count.try_into().unwrap(),
             gen: 1,
             opts: CrucibleOpts {
                 id: destination_volume_id,
@@ -405,15 +409,15 @@ async fn ssc_create_snapshot_record(
         size: disk.size,
     };
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &osagactx.datastore())
-        .silo_id(params.silo_id)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
 
     let snapshot_created = osagactx
         .datastore()
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -815,7 +819,13 @@ fn create_snapshot_from_disk(
             })
         }
 
-        VolumeConstructionRequest::Region { block_size, opts, gen } => {
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            opts,
+            gen,
+        } => {
             let mut opts = opts.clone();
 
             if let Some(socket_map) = socket_map {
@@ -835,6 +845,8 @@ fn create_snapshot_from_disk(
 
             Ok(VolumeConstructionRequest::Region {
                 block_size: *block_size,
+                blocks_per_extent: *blocks_per_extent,
+                extent_count: *extent_count,
                 opts,
                 gen: *gen,
             })
@@ -875,6 +887,8 @@ mod test {
                     sub_volumes: vec![
                         VolumeConstructionRequest::Region {
                             block_size: 512,
+                            blocks_per_extent: 10,
+                            extent_count: 20,
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
@@ -899,6 +913,8 @@ mod test {
             sub_volumes: vec![
                 VolumeConstructionRequest::Region {
                     block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 80,
                     gen: 100,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),

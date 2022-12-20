@@ -585,13 +585,15 @@ async fn sic_allocate_instance_snat_ip(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+
+    let (.., pool) = datastore
+        .ip_pools_fetch_default_for(&opctx, authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let pool_id = pool.identity.id;
+
     datastore
-        .allocate_instance_snat_ip(
-            &opctx,
-            ip_id,
-            saga_params.project_id,
-            instance_id,
-        )
+        .allocate_instance_snat_ip(&opctx, ip_id, instance_id, pool_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -643,13 +645,7 @@ async fn sic_allocate_instance_external_ip(
         }
     };
     datastore
-        .allocate_instance_ephemeral_ip(
-            &opctx,
-            ip_id,
-            saga_params.project_id,
-            instance_id,
-            pool_name,
-        )
+        .allocate_instance_ephemeral_ip(&opctx, ip_id, instance_id, pool_name)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -778,6 +774,7 @@ async fn sic_create_instance_record(
 ) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id")?;
@@ -807,9 +804,15 @@ async fn sic_create_instance_record(
         runtime.into(),
     );
 
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let instance = osagactx
         .datastore()
-        .project_create_instance(new_instance)
+        .project_create_instance(&opctx, &authz_project, new_instance)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -951,9 +954,9 @@ mod test {
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
@@ -970,7 +973,7 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
+        populate_ip_pool(&client, "default", None).await;
         create_organization(&client, ORG_NAME).await;
         let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
         create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
