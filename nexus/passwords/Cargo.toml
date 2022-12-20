@@ -6,12 +6,12 @@ license = "MPL-2.0"
 
 [dependencies]
 argon2 = { version = "0.4.1", features = ["alloc", "password-hash", "rand", "std"] }
-rand = "0.8.5"
-thiserror = "1.0.38"
+rand.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 argon2alt = { package = "rust-argon2", version = "1.0" }
-criterion = { version = "0.4", features = [ "async_tokio" ] }
+criterion.workspace = true
 
 [[bench]]
 name = "argon2"

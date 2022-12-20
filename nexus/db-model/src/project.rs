@@ -2,13 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{
-    Disk, ExternalIp, Generation, Image, Instance, IpPool, Name, Snapshot, Vpc,
-};
+use super::{Disk, Generation, Image, Instance, Name, Snapshot, Vpc};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{
-    disk, external_ip, image, instance, ip_pool, project, snapshot, vpc,
-};
+use crate::schema::{disk, image, instance, project, snapshot, vpc};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -81,26 +77,6 @@ impl DatastoreCollectionConfig<Vpc> for Project {
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = vpc::dsl::project_id;
-}
-
-// NOTE: "IpPoolRange" also contains a reference to "project_id", but
-// ranges should only exist within IP Pools.
-impl DatastoreCollectionConfig<IpPool> for Project {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = project::dsl::rcgen;
-    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
-    type CollectionIdColumn = ip_pool::dsl::project_id;
-}
-
-// TODO(https://github.com/oxidecomputer/omicron/issues/1482): Not yet utilized,
-// but needed for project deletion safety.
-// TODO(https://github.com/oxidecomputer/omicron/issues/1334): Cannot be
-// utilized until floating IPs are implemented.
-impl DatastoreCollectionConfig<ExternalIp> for Project {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = project::dsl::rcgen;
-    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
-    type CollectionIdColumn = external_ip::dsl::project_id;
 }
 
 /// Describes a set of updates for the [`Project`] model.
