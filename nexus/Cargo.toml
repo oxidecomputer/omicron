@@ -8,139 +8,97 @@ license = "MPL-2.0"
 path = "../rpaths"
 
 [dependencies]
-anyhow = "1.0"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.59"
-base64 = "0.20.0"
-bb8 = "0.8.0"
-clap = { version = "4.0", features = ["derive"] }
-cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "861a09c350fd0e127b6105c8099e31a0bc3b711a" }
-diesel = { version = "2.0.2", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
-# TODO(luqman): Update once merged & new release is cut
-# https://github.com/rafalh/rust-fatfs/pull/76
-fatfs = { git = "https://github.com/luqmana/rust-fatfs", branch = "stable-0.3" }
-#fatfs = "0.3.5"
-futures = "0.3.25"
-headers = "0.3.8"
-hex = "0.4.3"
-http = "0.2.7"
-hyper = "0.14"
-internal-dns-client = { path = "../internal-dns-client" }
-ipnetwork = "0.20"
-lazy_static = "1.4.0"
-macaddr = { version = "1.0.1", features = [ "serde_std" ]}
-mime_guess = "2.0.4"
-newtype_derive = "0.1.6"
+anyhow.workspace = true
+async-bb8-diesel.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+bb8.workspace = true
+clap.workspace = true
+chrono.workspace = true
+cookie.workspace = true
+crucible-agent-client.workspace = true
+diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel-dtrace.workspace = true
+dropshot.workspace = true
+fatfs.workspace = true
+futures.workspace = true
+headers.workspace = true
+hex.workspace = true
+http.workspace = true
+hyper.workspace = true
+internal-dns-client.workspace = true
+ipnetwork.workspace = true
+lazy_static.workspace = true
+macaddr.workspace = true
+mime_guess.workspace = true
+newtype_derive.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
-nexus-test-interface = { path = "test-interface" }
-num-integer = "0.1.45"
-# must match samael's crate!
-openssl = "0.10"
-openssl-sys = "0.9"
-openssl-probe = "0.1.2"
-oso = "0.26"
-oximeter-client = { path = "../oximeter-client" }
-oximeter-db = { path = "../oximeter/db/" }
-parse-display = "0.7.0"
+nexus-test-interface.workspace = true
+num-integer.workspace = true
+once_cell.workspace = true
+openssl.workspace = true
+openssl-sys.workspace = true
+openssl-probe.workspace = true
+oso.workspace = true
+oximeter-client.workspace = true
+oximeter-db.workspace = true
+parse-display.workspace = true
+paste = "1.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b596e72b6b93bc412d675358f782ae7d53f8bf7a", features = [ "generated" ] }
-rand = "0.8.5"
-ref-cast = "1.0"
-reqwest = { version = "0.11.13", features = [ "json" ] }
-ring = "0.16"
-samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
-serde_json = "1.0"
-serde_urlencoded = "0.7.1"
-serde_with = "2.1.0"
-sled-agent-client = { path = "../sled-agent-client" }
-slog-dtrace = "0.2"
-steno = "0.3"
-tempfile = "3.3"
-thiserror = "1.0"
-tokio-tungstenite = "0.18.0"
-toml = "0.5.9"
-tough = { version = "0.12", features = [ "http" ] }
-usdt = "0.3.4"
+propolis-client.workspace = true
+rand.workspace = true
+ref-cast.workspace = true
+reqwest = { workspace = true, features = [ "json" ] }
+ring.workspace = true
+samael.workspace = true
+schemars = { workspace = true, features = ["chrono", "uuid1"] }
+serde.workspace = true
+serde_json.workspace = true
+serde_urlencoded.workspace = true
+serde_with.workspace = true
+sled-agent-client.workspace = true
+slog.workspace = true
+slog-dtrace.workspace = true
+steno.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+tokio-postgres = { workspace = true, features = [ "with-serde_json-1" ] }
+tokio-tungstenite.workspace = true
+toml.workspace = true
+tough.workspace = true
+uuid.workspace = true
+usdt.workspace = true
 
-authz-macros = { path = "authz-macros" }
-db-macros = { path = "db-macros" }
-nexus-defaults = { path = "defaults" }
-nexus-db-model = { path = "db-model" }
-nexus-passwords = { path = "passwords" }
-nexus-types = { path = "types" }
-
-[dependencies.chrono]
-version = "0.4"
-features = [ "serde" ]
-
-[dependencies.dropshot]
-git = "https://github.com/oxidecomputer/dropshot"
-branch = "main"
-features = [ "usdt-probes" ]
-
-[dependencies.omicron-common]
-path = "../common"
-
-[dependencies.oximeter]
-version = "0.1.0"
-path = "../oximeter/oximeter"
-
-[dependencies.oximeter-instruments]
-version = "0.1.0"
-path = "../oximeter/instruments"
-features = [ "http-instruments" ]
-
-[dependencies.oximeter-producer]
-version = "0.1.0"
-path = "../oximeter/producer"
-
-[dependencies.schemars]
-version = "0.8.10"
-features = [ "chrono", "uuid1" ]
-
-[dependencies.serde]
-version = "1.0"
-features = [ "derive" ]
-
-[dependencies.slog]
-version = "2.7"
-features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.tokio]
-version = "1.23"
-features = [ "full" ]
-
-[dependencies.tokio-postgres]
-version = "0.7"
-features = [ "with-chrono-0_4", "with-serde_json-1", "with-uuid-1" ]
-
-[dependencies.uuid]
-version = "1.2.2"
-features = [ "serde", "v4" ]
+authz-macros.workspace = true
+db-macros.workspace = true
+nexus-defaults.workspace = true
+nexus-db-model.workspace = true
+nexus-passwords.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+oximeter.workspace = true
+oximeter-instruments = { workspace = true, features = ["http-instruments"] }
+oximeter-producer.workspace = true
 
 [dev-dependencies]
-criterion = { version = "0.4", features = [ "async_tokio" ] }
-expectorate = "1.0.5"
-itertools = "0.10.5"
-nexus-test-utils-macros = { path = "test-utils-macros" }
-nexus-test-utils = { path = "test-utils" }
-omicron-test-utils = { path = "../test-utils" }
-omicron-sled-agent = { path = "../sled-agent" }
-openapiv3 = "1.0"
+criterion.workspace = true
+expectorate.workspace = true
+itertools.workspace = true
+nexus-test-utils-macros.workspace = true
+nexus-test-utils.workspace = true
+omicron-sled-agent.workspace = true
+omicron-test-utils.workspace = true
+openapi-lint.workspace = true
+openapiv3.workspace = true
 petgraph = "0.6.2"
-regex = "1.7.0"
-subprocess = "0.2.9"
-term = "0.7"
-httptest = "0.15.4"
-strum = { version = "0.24", features = [ "derive" ] }
-
-[dev-dependencies.openapi-lint]
-git = "https://github.com/oxidecomputer/openapi-lint"
-branch = "main"
+regex.workspace = true
+subprocess.workspace = true
+term.workspace = true
+httptest.workspace = true
+strum.workspace = true
 
 [[bench]]
 name = "setup_benchmark"

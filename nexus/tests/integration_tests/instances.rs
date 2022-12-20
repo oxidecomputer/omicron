@@ -13,6 +13,7 @@ use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -48,7 +49,6 @@ use nexus_test_utils_macros::nexus_test;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-static POOL_NAME: &str = "p0";
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
@@ -61,7 +61,7 @@ fn get_instances_url() -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -127,7 +127,7 @@ async fn test_instances_access_before_create_returns_not_found(
 async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     let org = create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -190,14 +190,11 @@ async fn test_instances_create_reboot_halt(
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
 
-    // Create an IP pool and  project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
@@ -516,14 +513,11 @@ async fn test_instances_create_stopped_start(
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
 
-    // Create an IP pool and  project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create an instance in a stopped state.
     let instance: Instance = object_create(
@@ -572,14 +566,11 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
 
-    // Create an IP pool and project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
@@ -698,13 +689,11 @@ async fn test_instance_create_saga_removes_instance_database_record(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
@@ -810,14 +799,11 @@ async fn test_instance_with_single_explicit_ip_address(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
@@ -886,14 +872,11 @@ async fn test_instance_with_new_custom_network_interfaces(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create a VPC Subnet other than the default.
     //
@@ -1044,14 +1027,11 @@ async fn test_instance_create_delete_network_interface(
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1295,14 +1275,11 @@ async fn test_instance_update_network_interfaces(
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1778,15 +1755,9 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Create the "probablydata" disk
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
@@ -1872,15 +1843,9 @@ async fn test_instance_fails_to_boot_with_disk(
     // see: https://github.com/oxidecomputer/omicron/issues/1713
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Create the "probablydata" disk
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
@@ -2175,15 +2140,9 @@ async fn test_attach_eight_disks_to_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2388,17 +2347,9 @@ async fn test_cannot_attach_nine_disks_to_instance(
 #[nexus_test]
 async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-
-    // Test pre-reqs
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2527,15 +2478,9 @@ async fn test_disks_detached_when_instance_destroyed(
 ) {
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2778,14 +2723,11 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
 
-    // Create a project that we'll use for testing.
-    create_ip_pool(client, POOL_NAME, None, None).await;
-    create_organization(client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Make sure we get a 404 if we try to access the serial console before creation.
     let instance_serial_url =
@@ -2863,27 +2805,23 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_instance_ephemeral_ip_from_correct_project(
+async fn test_instance_ephemeral_ip_from_correct_pool(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test organization and two projects.
+    // Create test organization and projects.
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
-    let _ = create_project(&client, ORGANIZATION_NAME, "restricted").await;
 
     // Create two IP pools.
     //
-    // The first is restricted to the "restricted" project, the second unrestricted.
-    let project_path = params::OldProjectPath {
-        organization: Name::try_from(ORGANIZATION_NAME.to_string()).unwrap(),
-        project: Name::try_from("restricted".to_string()).unwrap(),
-    };
+    // The first is given to the "default" pool, the provided to a distinct
+    // explicit pool.
     let first_range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 1),
@@ -2898,17 +2836,10 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         )
         .unwrap(),
     );
-    create_ip_pool(
-        &client,
-        "restricted-pool",
-        Some(first_range),
-        Some(project_path),
-    )
-    .await;
-    create_ip_pool(&client, "unrestricted-pool", Some(second_range), None)
-        .await;
+    populate_ip_pool(&client, "default", Some(first_range)).await;
+    create_ip_pool(&client, "other-pool", Some(second_range)).await;
 
-    // Create an instance in the default project, not the "dummy" project
+    // Create an instance explicitly using the "other-pool".
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("ip-pool-test")).unwrap(),
@@ -2920,7 +2851,9 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: None,
+            pool_name: Some(
+                Name::try_from(String::from("other-pool")).unwrap(),
+            ),
         }],
         disks: vec![],
         start: true,
@@ -2951,8 +2884,8 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         ips.items[0].ip >= second_range.first_address()
             && ips.items[0].ip <= second_range.last_address(),
         "Expected the Ephemeral IP to come from the second address \
-        range, since the first is reserved for a project different from \
-        the instance's project."
+        range, since the first is reserved for the default pool, not \
+        the requested pool."
     );
 }
 

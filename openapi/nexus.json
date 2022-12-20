@@ -6135,24 +6135,13 @@
         }
       }
     },
-    "/system/ip-pools-service/{rack_id}": {
+    "/system/ip-pools-service": {
       "get": {
         "tags": [
           "system"
         ],
-        "summary": "Fetch an IP pool used for Oxide services.",
+        "summary": "Fetch the IP pool used for Oxide services.",
         "operationId": "ip_pool_service_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -6173,24 +6162,15 @@
         }
       }
     },
-    "/system/ip-pools-service/{rack_id}/ranges": {
+    "/system/ip-pools-service/ranges": {
       "get": {
         "tags": [
           "system"
         ],
-        "summary": "List ranges for an IP pool used for Oxide services.",
+        "summary": "List ranges for the IP pool used for Oxide services.",
         "description": "Ranges are ordered by their first address.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
           {
             "in": "query",
             "name": "limit",
@@ -6233,24 +6213,13 @@
         "x-dropshot-pagination": true
       }
     },
-    "/system/ip-pools-service/{rack_id}/ranges/add": {
+    "/system/ip-pools-service/ranges/add": {
       "post": {
         "tags": [
           "system"
         ],
         "summary": "Add a range to an IP pool used for Oxide services.",
         "operationId": "ip_pool_service_range_add",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6281,24 +6250,13 @@
         }
       }
     },
-    "/system/ip-pools-service/{rack_id}/ranges/remove": {
+    "/system/ip-pools-service/ranges/remove": {
       "post": {
         "tags": [
           "system"
         ],
         "summary": "Remove a range from an IP pool used for Oxide services.",
         "operationId": "ip_pool_service_range_remove",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -11072,11 +11030,6 @@
               }
             ]
           },
-          "project_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
-          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -11104,12 +11057,6 @@
             "type": "string"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "organization": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "project": {
             "$ref": "#/components/schemas/Name"
           }
         },
