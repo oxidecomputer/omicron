@@ -165,9 +165,15 @@ async fn sdc_create_disk_record(
         ActionError::action_failed(Error::invalid_request(&e.to_string()))
     })?;
 
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let disk_created = osagactx
         .datastore()
-        .project_create_disk(disk)
+        .project_create_disk(&opctx, &authz_project, disk)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -249,6 +255,8 @@ async fn sdc_regions_ensure(
     .await?;
 
     let block_size = datasets_and_regions[0].1.block_size;
+    let blocks_per_extent = datasets_and_regions[0].1.extent_size;
+    let extent_count = datasets_and_regions[0].1.extent_count;
 
     // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
@@ -374,6 +382,8 @@ async fn sdc_regions_ensure(
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
+            blocks_per_extent,
+            extent_count: extent_count.try_into().unwrap(),
             gen: 1,
             opts: CrucibleOpts {
                 id: disk_id,
@@ -541,12 +551,20 @@ fn randomize_volume_construction_request_ids(
             })
         }
 
-        VolumeConstructionRequest::Region { block_size, opts, gen } => {
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            opts,
+            gen,
+        } => {
             let mut opts = opts.clone();
             opts.id = Uuid::new_v4();
 
             Ok(VolumeConstructionRequest::Region {
                 block_size: *block_size,
+                blocks_per_extent: *blocks_per_extent,
+                extent_count: *extent_count,
                 opts,
                 gen: *gen,
             })
@@ -589,7 +607,7 @@ mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
+        create_ip_pool(&client, "p0", None).await;
         create_organization(&client, ORG_NAME).await;
         let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
         project.identity.id
