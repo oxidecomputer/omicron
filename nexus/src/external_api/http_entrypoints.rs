@@ -107,23 +107,21 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
 
-        // Customer-Accessible IP Pools API
+        // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_view_by_id)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
-
-        // Operator-Accessible IP Pools API
+        // Variants for internal services
         api.register(ip_pool_service_view)?;
 
-        // Customer-Accessible IP Pool Range API (used by instances)
+        // Operator-Accessible IP Pool Range API
         api.register(ip_pool_range_list)?;
         api.register(ip_pool_range_add)?;
         api.register(ip_pool_range_remove)?;
-
-        // Operator-Accessible IP Pool Range API (used by Oxide services)
+        // Variants for internal services
         api.register(ip_pool_service_range_list)?;
         api.register(ip_pool_service_range_add)?;
         api.register(ip_pool_service_range_remove)?;
@@ -1569,23 +1567,20 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an IP pool used for Oxide services.
+/// Fetch the IP pool used for Oxide services.
 #[endpoint {
     method = GET,
-    path = "/system/ip-pools-service/{rack_id}",
+    path = "/system/ip-pools-service",
     tags = ["system"],
 }]
 async fn ip_pool_service_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<IpPoolServicePathParam>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let rack_id = path.rack_id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let pool = nexus.ip_pool_service_fetch(&opctx, rack_id).await?;
+        let pool = nexus.ip_pool_service_fetch(&opctx).await?;
         Ok(HttpResponseOk(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1687,29 +1682,21 @@ async fn ip_pool_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct IpPoolServicePathParam {
-    pub rack_id: Uuid,
-}
-
-/// List ranges for an IP pool used for Oxide services.
+/// List ranges for the IP pool used for Oxide services.
 ///
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
-    path = "/system/ip-pools-service/{rack_id}/ranges",
+    path = "/system/ip-pools-service/ranges",
     tags = ["system"],
 }]
 async fn ip_pool_service_range_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<IpPoolServicePathParam>,
     query_params: Query<IpPoolRangePaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let rack_id = path.rack_id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let marker = match query.page {
@@ -1722,7 +1709,7 @@ async fn ip_pool_service_range_list(
             marker,
         };
         let ranges = nexus
-            .ip_pool_service_list_ranges(&opctx, rack_id, &pag_params)
+            .ip_pool_service_list_ranges(&opctx, &pag_params)
             .await?
             .into_iter()
             .map(|range| range.into())
@@ -1741,23 +1728,19 @@ async fn ip_pool_service_range_list(
 /// Add a range to an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
-    path = "/system/ip-pools-service/{rack_id}/ranges/add",
+    path = "/system/ip-pools-service/ranges/add",
     tags = ["system"],
 }]
 async fn ip_pool_service_range_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<IpPoolServicePathParam>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let rack_id = path.rack_id;
     let range = range_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let out =
-            nexus.ip_pool_service_add_range(&opctx, rack_id, &range).await?;
+        let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
         Ok(HttpResponseCreated(out.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1766,22 +1749,19 @@ async fn ip_pool_service_range_add(
 /// Remove a range from an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
-    path = "/system/ip-pools-service/{rack_id}/ranges/remove",
+    path = "/system/ip-pools-service/ranges/remove",
     tags = ["system"],
 }]
 async fn ip_pool_service_range_remove(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<IpPoolServicePathParam>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = &rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let rack_id = path.rack_id;
     let range = range_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus.ip_pool_service_delete_range(&opctx, rack_id, &range).await?;
+        nexus.ip_pool_service_delete_range(&opctx, &range).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
