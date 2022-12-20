@@ -77,6 +77,8 @@ table! {
         disk_id -> Uuid,
         volume_id -> Uuid,
 
+        destination_volume_id -> Nullable<Uuid>,
+
         gen -> Int8,
         state -> crate::SnapshotStateEnum,
         block_size -> crate::BlockSizeEnum,
@@ -147,8 +149,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        project_id -> Nullable<Uuid>,
-        rack_id -> Nullable<Uuid>,
+        internal -> Bool,
         rcgen -> Int8,
     }
 }
@@ -162,7 +163,6 @@ table! {
         first_address -> Inet,
         last_address -> Inet,
         ip_pool_id -> Uuid,
-        project_id -> Nullable<Uuid>,
         rcgen -> Int8,
     }
 }
@@ -177,7 +177,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        project_id -> Nullable<Uuid>,
         instance_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
@@ -196,6 +195,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         discoverable -> Bool,
+        authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
 
         rcgen -> Int8,
@@ -211,6 +211,14 @@ table! {
 
         silo_id -> Uuid,
         external_id -> Text,
+    }
+}
+
+table! {
+    silo_user_password_hash (silo_user_id) {
+        silo_user_id -> Uuid,
+        hash -> Text,
+        time_created -> Timestamptz,
     }
 }
 
@@ -233,6 +241,7 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(silo_user, silo_user_password_hash);
 allow_tables_to_appear_in_same_query!(silo_group, silo_group_membership);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
@@ -318,6 +327,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
         organization_id -> Uuid,
     }
 }

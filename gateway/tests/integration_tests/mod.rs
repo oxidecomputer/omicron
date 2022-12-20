@@ -4,18 +4,19 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use gateway_messages::IgnitionFlags;
+use gateway_messages::ignition::SystemPowerState;
+use gateway_messages::ignition::SystemType;
 use omicron_gateway::http_entrypoints::SpIdentifier;
 use omicron_gateway::http_entrypoints::SpIgnitionInfo;
 use omicron_gateway::http_entrypoints::SpInfo;
 use omicron_gateway::http_entrypoints::SpState;
 use omicron_gateway::http_entrypoints::SpType;
-use sp_sim::ignition_id;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
 
 mod bulk_state_get;
 mod commands;
+mod component_list;
 mod location_discovery;
 mod serial_console;
 mod setup;
@@ -41,11 +42,16 @@ async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
     let mut all_sps: Vec<SpInfo> = Vec::new();
     let mut slot = 0;
     for state in sim_state {
-        let typ = match state.id {
-            ignition_id::SIDECAR => SpType::Switch,
-            ignition_id::GIMLET => SpType::Sled,
-            // TODO ignition_id::POWER_SHELF_CONTROLLER
-            other => panic!("unknown ignition ID {:#x}", other),
+        let Some(target_state) = state.target else { continue; };
+        let typ = match target_state.system_type {
+            SystemType::Sidecar => SpType::Switch,
+            SystemType::Gimlet => SpType::Sled,
+            SystemType::Psc => {
+                todo!("testing simulated PSC not yet implemented")
+            }
+            SystemType::Unknown(id) => {
+                panic!("unknown ignition id ({id}) not implemented in tests")
+            }
         };
 
         // we assume the simulator ignition state is grouped by type and ordered
@@ -70,11 +76,12 @@ async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
             SpType::Power => todo!(),
         };
 
-        let details = if state.flags.intersects(IgnitionFlags::POWER) {
-            SpState::Enabled { serial_number: sp.serial_number() }
-        } else {
-            SpState::Disabled
-        };
+        let details =
+            if matches!(target_state.power_state, SystemPowerState::On) {
+                SpState::Enabled { serial_number: sp.serial_number() }
+            } else {
+                SpState::Disabled
+            };
 
         all_sps.push(SpInfo {
             info: SpIgnitionInfo {

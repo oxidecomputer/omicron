@@ -454,7 +454,8 @@ lookup_resource! {
     children = [ "SshKey" ],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    visible_outside_silo = true
 }
 
 lookup_resource! {
@@ -495,7 +496,8 @@ lookup_resource! {
     soft_deletes = true,
     primary_key_columns = [
         { column_name = "id", rust_type = Uuid },
-    ]
+    ],
+    visible_outside_silo = true
 }
 
 lookup_resource! {

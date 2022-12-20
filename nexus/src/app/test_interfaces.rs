@@ -2,13 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::authz;
 use crate::context::OpContext;
 use crate::db::lookup::LookupPath;
-use crate::db::model::SiloUser;
 use async_trait::async_trait;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::LookupType;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -34,13 +31,6 @@ pub trait TestInterfaces {
     ) -> Result<Arc<SledAgentClient>, Error>;
 
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
-
-    async fn silo_user_create(
-        &self,
-        silo_id: Uuid,
-        silo_user_id: Uuid,
-        external_id: String,
-    ) -> Result<SiloUser, Error>;
 
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration);
 }
@@ -102,18 +92,6 @@ impl TestInterfaces for super::Nexus {
         self.db_datastore
             .disk_update_runtime(&opctx, &authz_disk, &new_runtime)
             .await
-    }
-
-    async fn silo_user_create(
-        &self,
-        silo_id: Uuid,
-        silo_user_id: Uuid,
-        external_id: String,
-    ) -> Result<SiloUser, Error> {
-        let authz_silo =
-            authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
-        let silo_user = SiloUser::new(silo_id, silo_user_id, external_id);
-        Ok(self.db_datastore.silo_user_create(&authz_silo, silo_user).await?.1)
     }
 
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration) {

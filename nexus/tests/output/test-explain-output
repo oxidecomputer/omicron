@@ -3,5 +3,5 @@ vectorized: true
 
 • scan
   missing stats
-  table: test_users@primary
+  table: test_users@test_users_pkey
   spans: [/'00000000-0000-0000-0000-000000000000' - /'00000000-0000-0000-0000-000000000000']

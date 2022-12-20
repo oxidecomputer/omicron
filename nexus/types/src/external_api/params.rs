@@ -8,15 +8,43 @@ use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::net::IpAddr;
+use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectSelector {
+    pub project: NameOrId,
+    pub organization: Option<NameOrId>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceSelector {
+    pub instance: NameOrId,
+    pub project: Option<NameOrId>,
+    pub organization: Option<NameOrId>,
+}
+
+impl InstanceSelector {
+    pub fn new(
+        instance: NameOrId,
+        project_selector: &Option<ProjectSelector>,
+    ) -> InstanceSelector {
+        InstanceSelector {
+            instance,
+            organization: project_selector
+                .as_ref()
+                .and_then(|s| s.organization.clone()),
+            project: project_selector.as_ref().map(|s| s.project.clone()),
+        }
+    }
+}
 
 // Silos
 
@@ -28,7 +56,7 @@ pub struct SiloCreate {
 
     pub discoverable: bool,
 
-    pub user_provision_type: shared::UserProvisionType,
+    pub identity_mode: shared::SiloIdentityMode,
 
     /// If set, this group will be created during Silo creation and granted the
     /// "Silo Admin" role. Identity providers can assert that users belong to
@@ -38,6 +66,156 @@ pub struct SiloCreate {
     /// group_attribute_name must be set for users to be considered part of a
     /// group. See [`SamlIdentityProviderCreate`] for more information.
     pub admin_group_name: Option<String>,
+}
+
+/// Create-time parameters for a [`User`](crate::external_api::views::User)
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+pub struct UserCreate {
+    /// username used to log in
+    pub external_id: UserId,
+    /// password used to log in
+    pub password: UserPassword,
+}
+
+/// A username for a local-only user
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct UserId(String);
+
+impl AsRef<str> for UserId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl FromStr for UserId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        UserId::try_from(String::from(value))
+    }
+}
+
+/// Used to impl `Deserialize`
+impl TryFrom<String> for UserId {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Mostly, this validation exists to cap the input size.  The specific
+        // length is not critical here.  For convenience and consistency, we use
+        // the same rules as `Name`.
+        let _ = Name::try_from(value.clone())?;
+        Ok(UserId(value))
+    }
+}
+
+impl JsonSchema for UserId {
+    fn schema_name() -> String {
+        "UserId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Name::json_schema(gen)
+    }
+}
+
+/// A password used for authenticating a local-only user
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
+// We store both the raw String and nexus_passwords::Password forms of the
+// password.  That's because `nexus_passwords::Password` does not support
+// getting the String back out (by design), but we may need to do that in order
+// to impl Serialize.  See the `From<Password> for String` impl below.
+pub struct Password(String, nexus_passwords::Password);
+
+impl FromStr for Password {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Password::try_from(String::from(value))
+    }
+}
+
+// Used to impl `Deserialize`
+impl TryFrom<String> for Password {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let inner = nexus_passwords::Password::new(&value)
+            .map_err(|e| format!("unsupported password: {:#}", e))?;
+        // TODO-security If we want to apply password policy rules, this seems
+        // like the place.  We presumably want to also document them in the
+        // OpenAPI schema below.
+        Ok(Password(value, inner))
+    }
+}
+
+// This "From" impl only exists to make it easier to derive `Serialize`.  That
+// in turn is only to make this easier to use from the test suite.  (There's no
+// other reason structs in this file should need to impl Serialize at all.)
+impl From<Password> for String {
+    fn from(password: Password) -> Self {
+        password.0
+    }
+}
+
+impl JsonSchema for Password {
+    fn schema_name() -> String {
+        "Password".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some(
+                    "A password used to authenticate a user".to_string(),
+                ),
+                // TODO-doc If we apply password strength rules, they should
+                // presumably be documented here.
+                description: Some(
+                    "Passwords may be subject to additional constraints."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(
+                    u32::try_from(nexus_passwords::MAX_PASSWORD_LENGTH)
+                        .unwrap(),
+                ),
+                min_length: None,
+                pattern: None,
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl AsRef<nexus_passwords::Password> for Password {
+    fn as_ref(&self) -> &nexus_passwords::Password {
+        &self.1
+    }
+}
+
+/// Parameters for setting a user's password
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "user_password_value", content = "details")]
+pub enum UserPassword {
+    /// Sets the user's password to the provided value
+    Password(Password),
+    /// Invalidates any current password (disabling password authentication)
+    InvalidPassword,
+}
+
+/// Credentials for local user login
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+pub struct UsernamePasswordCredentials {
+    pub username: UserId,
+    pub password: Password,
 }
 
 // Silo identity providers
@@ -330,14 +508,6 @@ pub struct NetworkInterfaceUpdate {
 
 // IP POOLS
 
-// Type used to identify a Project in request bodies, where one may not have
-// the path in the request URL.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct ProjectPath {
-    pub organization: Name,
-    pub project: Name,
-}
-
 /// Create-time parameters for an IP Pool.
 ///
 /// See [`IpPool`](crate::external_api::views::IpPool)
@@ -345,8 +515,6 @@ pub struct ProjectPath {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    #[serde(flatten)]
-    pub project: Option<ProjectPath>,
 }
 
 /// Parameters for updating an IP Pool
@@ -727,21 +895,6 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-const EXTENT_SIZE: u32 = 64_u32 << 20; // 64 MiB
-
-impl DiskCreate {
-    pub fn extent_size(&self) -> i64 {
-        EXTENT_SIZE as i64
-    }
-
-    pub fn extent_count(&self) -> i64 {
-        let extent_size = EXTENT_SIZE as i64;
-        let size = self.size.to_bytes() as i64;
-        size / extent_size
-            + ((size % extent_size) + extent_size - 1) / extent_size
-    }
-}
-
 /// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -868,72 +1021,4 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use std::convert::TryFrom;
-
-    const BLOCK_SIZE: u32 = 4096;
-
-    fn new_disk_create_params(size: ByteCount) -> DiskCreate {
-        DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from("myobject".to_string()).unwrap(),
-                description: "desc".to_string(),
-            },
-            disk_source: DiskSource::Blank {
-                block_size: BlockSize(BLOCK_SIZE),
-            },
-            size,
-        }
-    }
-
-    #[test]
-    fn test_extent_count() {
-        let params = new_disk_create_params(ByteCount::try_from(0u64).unwrap());
-        assert_eq!(0, params.extent_count());
-
-        let params = new_disk_create_params(ByteCount::try_from(1u64).unwrap());
-        assert_eq!(1, params.extent_count());
-        let params = new_disk_create_params(
-            ByteCount::try_from(EXTENT_SIZE - 1).unwrap(),
-        );
-        assert_eq!(1, params.extent_count());
-        let params =
-            new_disk_create_params(ByteCount::try_from(EXTENT_SIZE).unwrap());
-        assert_eq!(1, params.extent_count());
-
-        let params = new_disk_create_params(
-            ByteCount::try_from(EXTENT_SIZE + 1).unwrap(),
-        );
-        assert_eq!(2, params.extent_count());
-
-        // Mostly just checking we don't blow up on an unwrap here.
-        let _params =
-            new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
-
-        // Note that i64::MAX bytes is an invalid disk size as it's not
-        // divisible by 4096.
-        let max_disk_size = i64::MAX - (i64::MAX % (BLOCK_SIZE as i64));
-        let params =
-            new_disk_create_params(ByteCount::try_from(max_disk_size).unwrap());
-        let blocks_per_extent: u64 =
-            params.extent_size() as u64 / BLOCK_SIZE as u64;
-
-        // We should still be rounding up to the nearest extent size.
-        assert_eq!(
-            params.extent_count() as u128 * EXTENT_SIZE as u128,
-            i64::MAX as u128 + 1,
-        );
-
-        // Assert that the regions allocated will fit this disk
-        assert!(
-            params.size.to_bytes() as u64
-                <= (params.extent_count() as u64)
-                    * blocks_per_extent
-                    * BLOCK_SIZE as u64
-        );
-    }
 }

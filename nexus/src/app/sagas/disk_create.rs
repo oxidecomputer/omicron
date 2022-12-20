@@ -3,8 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
+    common_storage::{
+        delete_crucible_regions, ensure_all_datasets_and_regions,
+    },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID, MAX_CONCURRENT_REGION_REQUESTS,
+    ACTION_GENERATE_ID,
 };
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
@@ -12,22 +15,13 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::{authn, authz, db};
-use anyhow::anyhow;
-use crucible_agent_client::{
-    types::{CreateRegion, RegionId, State as RegionState},
-    Client as CrucibleAgentClient,
-};
-use futures::StreamExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
-use omicron_common::backoff::{self, BackoffError};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
-use slog::warn;
-use slog::Logger;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::sync::Arc;
 use steno::ActionError;
 use steno::ActionFunc;
@@ -51,10 +45,16 @@ lazy_static! {
         sdc_create_disk_record,
         sdc_create_disk_record_undo
     );
-    static ref REGIONS_ALLOC: NexusAction =
-        new_action_noop_undo("disk-create.regions-alloc", sdc_alloc_regions,);
-    static ref REGIONS_ENSURE: NexusAction =
-        new_action_noop_undo("disk-create.regions-ensure", sdc_regions_ensure,);
+    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
+        "disk-create.regions-alloc",
+        sdc_alloc_regions,
+        sdc_alloc_regions_undo,
+    );
+    static ref REGIONS_ENSURE: NexusAction = ActionFunc::new_action(
+        "disk-create.regions-ensure",
+        sdc_regions_ensure,
+        sdc_regions_ensure_undo,
+    );
     static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
         "disk-create.create-volume-record",
         sdc_create_volume_record,
@@ -200,9 +200,15 @@ async fn sdc_create_disk_record(
         ActionError::action_failed(Error::invalid_request(&e.to_string()))
     })?;
 
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let disk_created = osagactx
         .datastore()
-        .project_create_disk(disk)
+        .project_create_disk(&opctx, &authz_project, disk)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -240,67 +246,32 @@ async fn sdc_alloc_regions(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(&opctx, volume_id, &params.create_params)
+        .region_allocate(
+            &opctx,
+            volume_id,
+            &params.create_params.disk_source,
+            params.create_params.size,
+        )
         .await
         .map_err(ActionError::action_failed)?;
     Ok(datasets_and_regions)
 }
 
-/// Call out to Crucible agent and perform region creation.
-async fn ensure_region_in_dataset(
-    log: &Logger,
-    dataset: &db::model::Dataset,
-    region: &db::model::Region,
-) -> Result<crucible_agent_client::types::Region, Error> {
-    let url = format!("http://{}", dataset.address());
-    let client = CrucibleAgentClient::new(&url);
+async fn sdc_alloc_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
 
-    let region_request = CreateRegion {
-        block_size: region.block_size().to_bytes(),
-        extent_count: region.extent_count().try_into().unwrap(),
-        extent_size: region.blocks_per_extent().try_into().unwrap(),
-        // TODO: Can we avoid casting from UUID to string?
-        // NOTE: This'll require updating the crucible agent client.
-        id: RegionId(region.id().to_string()),
-        encrypted: region.encrypted(),
-        cert_pem: None,
-        key_pem: None,
-        root_pem: None,
-    };
+    let region_ids = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.id())
+        .collect::<Vec<Uuid>>();
 
-    let create_region = || async {
-        let region = client
-            .region_create(&region_request)
-            .await
-            .map_err(|e| BackoffError::Permanent(e.into()))?;
-        match region.state {
-            RegionState::Requested => Err(BackoffError::transient(anyhow!(
-                "Region creation in progress"
-            ))),
-            RegionState::Created => Ok(region),
-            _ => Err(BackoffError::Permanent(anyhow!(
-                "Failed to create region, unexpected state: {:?}",
-                region.state
-            ))),
-        }
-    };
-
-    let log_create_failure = |_, delay| {
-        warn!(
-            log,
-            "Region requested, not yet created. Retrying in {:?}", delay
-        );
-    };
-
-    let region = backoff::retry_notify(
-        backoff::internal_service_policy(),
-        create_region,
-        log_create_failure,
-    )
-    .await
-    .map_err(|e| Error::internal_error(&e.to_string()))?;
-
-    Ok(region.into_inner())
+    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
 }
 
 /// Call out to Crucible agent and perform region creation.
@@ -310,62 +281,21 @@ async fn sdc_regions_ensure(
     let log = sagactx.user_data().log();
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 
-    let datasets_and_regions = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+    let datasets_and_regions = ensure_all_datasets_and_regions(
+        &log,
+        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
-        )?;
-
-    let request_count = datasets_and_regions.len();
-
-    // Allocate regions, and additionally return the dataset that the region was
-    // allocated in.
-    let datasets_and_regions: Vec<(
-        db::model::Dataset,
-        crucible_agent_client::types::Region,
-    )> = futures::stream::iter(datasets_and_regions)
-        .map(|(dataset, region)| async move {
-            match ensure_region_in_dataset(log, &dataset, &region).await {
-                Ok(result) => Ok((dataset, result)),
-                Err(e) => Err(e),
-            }
-        })
-        // Execute the allocation requests concurrently.
-        .buffer_unordered(std::cmp::min(
-            request_count,
-            MAX_CONCURRENT_REGION_REQUESTS,
-        ))
-        .collect::<Vec<
-            Result<
-                (db::model::Dataset, crucible_agent_client::types::Region),
-                Error,
-            >,
-        >>()
-        .await
-        .into_iter()
-        .collect::<Result<
-            Vec<(db::model::Dataset, crucible_agent_client::types::Region)>,
-            Error,
-        >>()
-        .map_err(ActionError::action_failed)?;
-
-    // Assert each region has the same block size, otherwise Volume creation
-    // will fail.
-    let all_region_have_same_block_size = datasets_and_regions
-        .windows(2)
-        .all(|w| w[0].1.block_size == w[1].1.block_size);
-
-    if !all_region_have_same_block_size {
-        return Err(ActionError::action_failed(Error::internal_error(
-            "volume creation will fail due to block size mismatch",
-        )));
-    }
+        )?,
+    )
+    .await?;
 
     let block_size = datasets_and_regions[0].1.block_size;
+    let blocks_per_extent = datasets_and_regions[0].1.extent_size;
+    let extent_count = datasets_and_regions[0].1.extent_count;
 
     // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let log = osagactx.log();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
@@ -390,7 +320,7 @@ async fn sdc_regions_ensure(
 
                 let volume = osagactx
                     .datastore()
-                    .volume_get(db_snapshot.volume_id)
+                    .volume_checkout(db_snapshot.volume_id)
                     .await
                     .map_err(ActionError::action_failed)?;
 
@@ -443,7 +373,7 @@ async fn sdc_regions_ensure(
 
                 let volume = osagactx
                     .datastore()
-                    .volume_get(global_image.volume_id)
+                    .volume_checkout(global_image.volume_id)
                     .await
                     .map_err(ActionError::action_failed)?;
 
@@ -487,8 +417,9 @@ async fn sdc_regions_ensure(
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
-            // gen of 0 is here, these regions were just allocated.
-            gen: 0,
+            blocks_per_extent,
+            extent_count: extent_count.try_into().unwrap(),
+            gen: 1,
             opts: CrucibleOpts {
                 id: disk_id,
                 target: datasets_and_regions
@@ -519,8 +450,6 @@ async fn sdc_regions_ensure(
                 key_pem: None,
                 root_cert_pem: None,
 
-                // TODO open a control socket for the whole volume, not
-                // in the sub volumes
                 control: None,
 
                 read_only: false,
@@ -535,6 +464,21 @@ async fn sdc_regions_ensure(
         })?;
 
     Ok(volume_data)
+}
+
+async fn sdc_regions_ensure_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
+    delete_crucible_regions(
+        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?,
+    )
+    .await?;
+    info!(log, "sdc_regions_ensure_undo: Deleted crucible regions");
+    Ok(())
 }
 
 async fn sdc_create_volume_record(
@@ -642,12 +586,20 @@ fn randomize_volume_construction_request_ids(
             })
         }
 
-        VolumeConstructionRequest::Region { block_size, opts, gen } => {
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            opts,
+            gen,
+        } => {
             let mut opts = opts.clone();
             opts.id = Uuid::new_v4();
 
             Ok(VolumeConstructionRequest::Region {
                 block_size: *block_size,
+                blocks_per_extent: *blocks_per_extent,
+                extent_count: *extent_count,
                 opts,
                 gen: *gen,
             })
@@ -661,4 +613,195 @@ fn randomize_volume_construction_request_ids(
             })
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        app::saga::create_saga_dag, app::sagas::disk_create::Params,
+        app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
+        context::OpContext, db::datastore::DataStore, external_api::params,
+    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use dropshot::test_util::ClientTestContext;
+    use nexus_test_utils::resource_helpers::create_ip_pool;
+    use nexus_test_utils::resource_helpers::create_organization;
+    use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_sled_agent::sim::SledAgent;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    const ORG_NAME: &str = "test-org";
+    const PROJECT_NAME: &str = "springfield-squidport";
+
+    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+        create_ip_pool(&client, "p0", None).await;
+        create_organization(&client, ORG_NAME).await;
+        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+        project.identity.id
+    }
+
+    // Helper for creating disk create parameters
+    fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
+        Params {
+            serialized_authn: Serialized::for_opctx(opctx),
+            project_id,
+            create_params: params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-disk".parse().expect("Invalid disk name"),
+                    description: "My disk".to_string(),
+                },
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize(512),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
+            },
+        }
+    }
+
+    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+        OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            cptestctx.server.apictx.nexus.datastore().clone(),
+        )
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_basic_usage_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_and_project(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(cptestctx);
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+
+        // Actually run the saga
+        let output = nexus.run_saga(runnable_saga).await.unwrap();
+
+        let disk = output
+            .lookup_node_output::<crate::db::model::Disk>("created_disk")
+            .unwrap();
+        assert_eq!(disk.project_id, project_id);
+    }
+
+    async fn no_disk_records_exist(datastore: &DataStore) -> bool {
+        use crate::db::model::Disk;
+        use crate::db::schema::disk::dsl;
+
+        dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .select(Disk::as_select())
+            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn no_region_allocations_exist(
+        datastore: &DataStore,
+        test: &DiskTest,
+    ) -> bool {
+        for zpool in &test.zpools {
+            for dataset in &zpool.datasets {
+                if datastore
+                    .regions_total_occupied_size(dataset.id)
+                    .await
+                    .unwrap()
+                    != 0
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    async fn no_regions_ensured(
+        sled_agent: &SledAgent,
+        test: &DiskTest,
+    ) -> bool {
+        for zpool in &test.zpools {
+            for dataset in &zpool.datasets {
+                let crucible_dataset =
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
+                if !crucible_dataset.is_empty().await {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_and_project(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(cptestctx);
+
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
+
+        for node in dag.get_nodes() {
+            // Create a new saga for this node.
+            info!(
+                log,
+                "Creating new saga which will fail at index {:?}", node.index();
+                "node_name" => node.name().as_ref(),
+                "label" => node.label(),
+            );
+            let runnable_saga =
+                nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+            // Inject an error instead of running the node.
+            //
+            // This should cause the saga to unwind.
+            nexus
+                .sec()
+                .saga_inject_error(runnable_saga.id(), node.index())
+                .await
+                .unwrap();
+            nexus
+                .run_saga(runnable_saga)
+                .await
+                .expect_err("Saga should have failed");
+
+            let datastore = nexus.datastore();
+
+            // Check that no partial artifacts of disk creation exist:
+            assert!(no_disk_records_exist(datastore).await);
+            assert!(no_region_allocations_exist(datastore, &test).await);
+            assert!(
+                no_regions_ensured(&cptestctx.sled_agent.sled_agent, &test)
+                    .await
+            );
+        }
+    }
+
+    // TODO: We still need to test:
+    // - Can we repeat each action safely, without failing / leaving detritus?
+    // - Can we repeat each undo action safely?
+    // - Is each node atomic? (This seems harder to test)
 }

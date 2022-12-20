@@ -268,6 +268,48 @@ impl Name {
     }
 }
 
+#[derive(Serialize, Deserialize, Display, Clone)]
+#[display("{0}")]
+#[serde(untagged)]
+pub enum NameOrId {
+    Id(Uuid),
+    Name(Name),
+}
+
+impl TryFrom<String> for NameOrId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(NameOrId::Id(id))
+        } else {
+            Ok(NameOrId::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl JsonSchema for NameOrId {
+    fn schema_name() -> String {
+        "NameOrId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    label_schema("id", gen.subschema_for::<Uuid>()),
+                    label_schema("name", gen.subschema_for::<Name>()),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// Name for a built-in role
 #[derive(
     Clone,
@@ -1005,33 +1047,11 @@ impl JsonSchema for Ipv4Net {
             })),
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                // Addresses must be from an RFC 1918 private address space
                 pattern: Some(
                     concat!(
-                        r#"^("#,
-                        // 10.0.0.0/8 (10.0.0.0 .. 10.255.255.255)
-                        r#"10\."#,
+                        r#"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.){3}"#,
                         r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"\."#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"\."#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"\/([8-9]|1[0-9]|2[0-9]|3[0-2])|"#,
-                        // 172.16.0.0/12 (172.16.0.0 .. 172.31.255.255)
-                        r#"172\."#,
-                        r#"(1[6-9]|2[0-9]|3[0-1])"#,
-                        r#"\."#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"\."#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"\/(1[2-9]|2[0-9]|3[0-2])|"#,
-                        // 192.168.0.0/16 (192.168.0.0 .. 192.168.255.255)
-                        r#"192\.168\."#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"\."#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"\/(1[6-9]|2[0-9]|3[0-2])"#,
-                        r#")$"#,
+                        r#"/([8-9]|1[0-9]|2[0-9]|3[0-2])$"#,
                     )
                     .to_string(),
                 ),

@@ -12,4 +12,4 @@ proc-macro = true
 bytes = { workspace = true, features = [ "serde" ] }
 proc-macro2.workspace = true
 quote.workspace = true
-syn.workspace = true
+syn = { workspace = true, features = [ "full", "extra-traits" ] }

@@ -5,25 +5,29 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+async-trait.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gateway-messages.workspace = true
+gateway-sp-comms.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+omicron-common.workspace = true
+once_cell.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_with.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 toml.workspace = true
 uuid.workspace = true
 
-gateway-messages.workspace = true
-gateway-sp-comms.workspace = true
-omicron-common.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
@@ -35,3 +39,7 @@ serde_json.workspace = true
 sp-sim.workspace = true
 subprocess.workspace = true
 tokio-tungstenite.workspace = true
+
+[[bin]]
+name = "mgs"
+doc = false

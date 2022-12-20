@@ -1,0 +1,13 @@
+= End-to-end control plane tests
+
+These tests run in Buildomat. They are built by the xref:../.github/buildomat/jobs/package.sh[package] job and run by the xref:../.github/buildomat/jobs/deploy.sh[deploy] job.
+
+This package is not built or run by default (it is excluded from `default-members` in xref:../Cargo.toml[]).
+
+== Running these tests on your machine
+
+1. xref:../docs/how-to-run.adoc[Make yourself a Gimlet].
+2. Serve a Debian image over HTTP. The tests add a Debian image sourced from `http://[fd00:1122:3344:101::1]:54321/debian-11-genericcloud-amd64.raw`; that IP address belongs to the global zone. You can download the image from https://cloud.debian.org/images/cloud/bullseye/latest/. https://github.com/joseluisq/static-web-server[static-web-server] works well for this.
+3. Run the bootstrap bin target: `cargo run -p end-to-end-tests --bin bootstrap`
+
+Then you can `cargo test -p end-to-end-tests`.

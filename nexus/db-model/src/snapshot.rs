@@ -43,8 +43,12 @@ pub struct Snapshot {
     pub identity: SnapshotIdentity,
 
     pub project_id: Uuid,
+    // which disk is this a snapshot of
     pub disk_id: Uuid,
     pub volume_id: Uuid,
+
+    // destination of all snapshot blocks
+    pub destination_volume_id: Option<Uuid>,
 
     pub gen: Generation,
     pub state: SnapshotState,

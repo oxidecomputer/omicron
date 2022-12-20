@@ -1,0 +1,18 @@
+[package]
+name = "nexus-passwords"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+argon2 = { version = "0.4.1", features = ["alloc", "password-hash", "rand", "std"] }
+rand = "0.8.5"
+thiserror = "1.0.38"
+
+[dev-dependencies]
+argon2alt = { package = "rust-argon2", version = "1.0" }
+criterion = { version = "0.4", features = [ "async_tokio" ] }
+
+[[bench]]
+name = "argon2"
+harness = false

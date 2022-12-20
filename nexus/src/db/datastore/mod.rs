@@ -130,6 +130,13 @@ impl DataStore {
         Ok(self.pool.pool())
     }
 
+    #[cfg(test)]
+    pub async fn pool_for_tests(
+        &self,
+    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
+        Ok(self.pool.pool())
+    }
+
     /// Return the next available IPv6 address for an Oxide service running on
     /// the provided sled.
     pub async fn next_ipv6_address(
@@ -235,6 +242,7 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
+    use crate::db::model::BlockSize;
     use crate::db::model::Dataset;
     use crate::db::model::ExternalIp;
     use crate::db::model::Rack;
@@ -256,9 +264,7 @@ mod test {
     use omicron_test_utils::dev;
     use ref_cast::RefCast;
     use std::collections::HashSet;
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -506,8 +512,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -522,10 +527,16 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume1_id = Uuid::new_v4();
+
         // Currently, we only allocate one Region Set per volume.
         let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
         let dataset_and_regions = datastore
-            .region_allocate(&opctx, volume1_id, &params)
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
 
@@ -536,8 +547,11 @@ mod test {
             assert!(disk1_datasets.insert(dataset.id()));
             assert_eq!(volume1_id, region.volume_id());
             assert_eq!(ByteCount::from(4096), region.block_size());
-            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
-            assert_eq!(params.extent_count(), region.extent_count());
+            let (_, extent_count) = DataStore::get_crucible_allocation(
+                &BlockSize::AdvancedFormat,
+                params.size,
+            );
+            assert_eq!(extent_count, region.extent_count());
         }
 
         // Allocate regions for a second disk. Observe that we allocate from
@@ -548,17 +562,26 @@ mod test {
         );
         let volume2_id = Uuid::new_v4();
         let dataset_and_regions = datastore
-            .region_allocate(&opctx, volume2_id, &params)
+            .region_allocate(
+                &opctx,
+                volume2_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
+
         assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
             assert_eq!(volume2_id, region.volume_id());
             assert_eq!(ByteCount::from(4096), region.block_size());
-            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
-            assert_eq!(params.extent_count(), region.extent_count());
+            let (_, extent_count) = DataStore::get_crucible_allocation(
+                &BlockSize::AdvancedFormat,
+                params.size,
+            );
+            assert_eq!(extent_count, region.extent_count());
         }
 
         // Double-check that the datasets used for the first disk weren't
@@ -588,8 +611,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -605,11 +627,21 @@ mod test {
         );
         let volume_id = Uuid::new_v4();
         let mut dataset_and_regions1 = datastore
-            .region_allocate(&opctx, volume_id, &params)
+            .region_allocate(
+                &opctx,
+                volume_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
         let mut dataset_and_regions2 = datastore
-            .region_allocate(&opctx, volume_id, &params)
+            .region_allocate(
+                &opctx,
+                volume_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
 
@@ -655,8 +687,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -672,7 +703,12 @@ mod test {
         );
         let volume1_id = Uuid::new_v4();
         let err = datastore
-            .region_allocate(&opctx, volume1_id, &params)
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap_err();
 
@@ -707,8 +743,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -726,7 +761,12 @@ mod test {
         let volume1_id = Uuid::new_v4();
 
         assert!(datastore
-            .region_allocate(&opctx, volume1_id, &params)
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size
+            )
             .await
             .is_err());
 
@@ -979,14 +1019,14 @@ mod test {
 
         // Initialize the Rack.
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);
@@ -1045,7 +1085,6 @@ mod test {
                 time_deleted: None,
                 ip_pool_id: Uuid::new_v4(),
                 ip_pool_range_id: Uuid::new_v4(),
-                project_id: Some(Uuid::new_v4()),
                 instance_id: Some(instance_id),
                 kind: IpKind::Ephemeral,
                 ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
@@ -1104,7 +1143,6 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            project_id: Some(Uuid::new_v4()),
             instance_id: Some(Uuid::new_v4()),
             kind: IpKind::SNat,
             ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
@@ -1175,7 +1213,6 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            project_id: Some(Uuid::new_v4()),
             instance_id: Some(Uuid::new_v4()),
             kind: IpKind::Floating,
             ip: addresses.next().unwrap().into(),

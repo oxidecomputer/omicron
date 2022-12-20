@@ -25,6 +25,7 @@ libc.workspace = true
 macaddr.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
+once_cell.workspace = true
 oxide-vpc.workspace = true
 oximeter.workspace = true
 oximeter-producer.workspace = true
@@ -56,6 +57,7 @@ vsss-rs.workspace = true
 zone.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
+illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", rev = "8fca0709e5137a3758374cb41ab1bfc60b03e6a9" }
 opte-ioctl.workspace = true
 
 [dev-dependencies]

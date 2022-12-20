@@ -5,11 +5,14 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+base64.workspace = true
 chrono.workspace = true
 futures.workspace = true
 progenitor.workspace = true
+rand.workspace = true
 regress.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
 serde.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = [ "net" ] }
 uuid.workspace = true

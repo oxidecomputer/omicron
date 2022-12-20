@@ -25,13 +25,20 @@ use crate::{
 };
 use anyhow::Context;
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, Path, Query, RequestContext, TypedBody,
+    endpoint, http_response_found, http_response_see_other, HttpError,
+    HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseSeeOther, HttpResponseUpdatedNoContent, Path, Query,
+    RequestContext, ResultsPage, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
-use omicron_common::api::external::InternalContext;
+use nexus_types::external_api::params;
+use omicron_common::api::external::http_pagination::{
+    data_page_params_for, PaginatedById, ScanById, ScanParams,
+};
+use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
@@ -53,44 +60,55 @@ pub struct SpoofLoginBody {
    // console to use the generated client for this request
    tags = ["hidden"],
 }]
-pub async fn spoof_login(
+pub async fn login_spoof(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<SpoofLoginBody>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let params = params.into_inner();
-    let user_id: Option<Uuid> = match params.username.as_str() {
-        "privileged" => Some(USER_TEST_PRIVILEGED.id()),
-        "unprivileged" => Some(USER_TEST_UNPRIVILEGED.id()),
-        _ => None,
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let params = params.into_inner();
+        let user_id: Option<Uuid> = match params.username.as_str() {
+            "privileged" => Some(USER_TEST_PRIVILEGED.id()),
+            "unprivileged" => Some(USER_TEST_UNPRIVILEGED.id()),
+            _ => None,
+        };
+
+        if user_id.is_none() {
+            Err(Error::Unauthenticated {
+                internal_message: String::from("unknown user specified"),
+            })?;
+        }
+
+        let user_id = user_id.unwrap();
+
+        // For now, we use the external authn context to create the session.
+        // Once we have real SAML login, maybe we can cons up a real OpContext
+        // for this user and use their own privileges to create the session.
+        let authn_opctx = nexus.opctx_external_authn();
+        let session = nexus.session_create(&authn_opctx, user_id).await?;
+
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
+        {
+            let headers = response.headers_mut();
+            headers.append(
+                header::SET_COOKIE,
+                http::HeaderValue::from_str(&session_cookie_header_value(
+                    &session.token,
+                    apictx.session_idle_timeout(),
+                ))
+                .map_err(|error| {
+                    HttpError::for_internal_error(format!(
+                        "unsupported cookie value: {:#}",
+                        error
+                    ))
+                })?,
+            );
+        };
+        Ok(response)
     };
-
-    if user_id.is_none() {
-        return Ok(Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(header::SET_COOKIE, clear_session_cookie_header_value())
-            .body("".into())?); // TODO: failed login response body?
-    }
-
-    let user_id = user_id.unwrap();
-
-    // For now, we use the external authn context to create the session.
-    // Once we have real SAML login, maybe we can cons up a real OpContext for
-    // this user and use their own privileges to create the session.
-    let authn_opctx = nexus.opctx_external_authn();
-    let session = nexus.session_create(&authn_opctx, user_id).await?;
-
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::SET_COOKIE,
-            session_cookie_header_value(
-                &session.token,
-                apictx.session_idle_timeout(),
-            ),
-        )
-        .body("".into())?) // TODO: what do we return from login?
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Silos have one or more identity providers, and an unauthenticated user will
@@ -232,13 +250,13 @@ impl RelayState {
 /// to their identity provider.
 #[endpoint {
    method = GET,
-   path = "/login/{silo_name}/{provider_name}",
+   path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
-pub async fn login(
+pub async fn login_saml_begin(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -259,8 +277,8 @@ pub async fn login(
 
         match identity_provider {
             IdentityProviderType::Saml(saml_identity_provider) => {
-                // Relay state is sent to the IDP, to be sent back to the SP after a
-                // successful login.
+                // Relay state is sent to the IDP, to be sent back to the SP
+                // after a successful login.
                 let relay_state: Option<String> = if let Some(value) =
                     request.headers().get(hyper::header::REFERER)
                 {
@@ -298,39 +316,33 @@ pub async fn login(
                         |e| HttpError::for_internal_error(e.to_string()),
                     )?;
 
-                Ok(Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(http::header::LOCATION, sign_in_url)
-                    .body("".into())?)
+                http_response_found(sign_in_url)
             }
         }
     };
-    // TODO this doesn't work because the response is Response<Body>
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Authenticate a user
-///
-/// Either receive a username and password, or some sort of identity provider
-/// data (like a SAMLResponse). Use these to set the user's session cookie.
+/// Authenticate a user (i.e., log in) via SAML
 #[endpoint {
    method = POST,
-   path = "/login/{silo_name}/{provider_name}",
+   path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
-pub async fn consume_credentials(
+pub async fn login_saml(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseSeeOther, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
 
-        // Use opctx_external_authn because this request will be
-        // unauthenticated.
+        // By definition, this request is not authenticated.  These operations
+        // happen using the Nexus "external authentication" context, which we
+        // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
 
         let (authz_silo, db_silo, identity_provider) =
@@ -371,53 +383,85 @@ pub async fn consume_credentials(
             )
             .await?;
 
-        if user.is_none() {
-            info!(&apictx.log, "user is none");
-            return Ok(Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .header(header::SET_COOKIE, clear_session_cookie_header_value())
-                .body("".into())?); // TODO: failed login response body?
-        }
-
-        let user = user.unwrap();
-
-        // always create a new console session if the user is POSTing here.
-        let session = nexus.session_create(&opctx, user.id()).await?;
-
-        let next_url = if let Some(relay_state) = &relay_state {
-            if let Some(referer) = &relay_state.referer {
-                referer.clone()
-            } else {
-                "/".to_string()
-            }
-        } else {
-            "/".to_string()
-        };
-
-        debug!(
-            &apictx.log,
-            "successful login to silo {} using provider {}: authenticated subject {} = user id {}",
-            path_params.silo_name,
-            path_params.provider_name,
-            authenticated_subject.external_id,
-            user.id(),
-        );
-
-        Ok(Response::builder()
-            .status(StatusCode::FOUND)
-            .header(http::header::LOCATION, next_url)
-            .header(
-                header::SET_COOKIE,
-                session_cookie_header_value(
-                    &session.token,
-                    apictx.session_idle_timeout(),
-                ),
-            )
-            .body("".into())?) // TODO: what do we return from login?
+        login_finish(&opctx, apictx, user, relay_state.and_then(|r| r.referer))
+            .await
     };
-    // TODO this doesn't work because the response is Response<Body>
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginPathParam {
+    pub silo_name: crate::db::model::Name,
+}
+
+/// Authenticate a user (i.e., log in) via username and password
+#[endpoint {
+   method = POST,
+   path = "/login/{silo_name}/local",
+   tags = ["login"],
+}]
+pub async fn login_local(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<LoginPathParam>,
+    credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
+) -> Result<HttpResponseSeeOther, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+        let credentials = credentials.into_inner();
+
+        // By definition, this request is not authenticated.  These operations
+        // happen using the Nexus "external authentication" context, which we
+        // keep specifically for this purpose.
+        let opctx = nexus.opctx_external_authn();
+        let user = nexus
+            .login_local(&opctx, &path_params.silo_name, credentials)
+            .await?;
+        login_finish(&opctx, apictx, user, None).await
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+async fn login_finish(
+    opctx: &OpContext,
+    apictx: &ServerContext,
+    user: Option<crate::db::model::SiloUser>,
+    next_url: Option<String>,
+) -> Result<HttpResponseSeeOther, HttpError> {
+    let nexus = &apictx.nexus;
+
+    if user.is_none() {
+        Err(Error::Unauthenticated {
+            internal_message: String::from(
+                "no matching user found or credentials were not valid",
+            ),
+        })?;
+    }
+
+    let user = user.unwrap();
+    let session = nexus.session_create(&opctx, user.id()).await?;
+    let next_url = next_url.unwrap_or_else(|| "/".to_string());
+
+    let mut response_with_headers = http_response_see_other(next_url)?;
+
+    {
+        let headers = response_with_headers.headers_mut();
+        headers.append(
+            header::SET_COOKIE,
+            http::HeaderValue::from_str(&session_cookie_header_value(
+                &session.token,
+                apictx.session_idle_timeout(),
+            ))
+            .map_err(|error| {
+                HttpError::for_internal_error(format!(
+                    "unsupported cookie value: {:#}",
+                    error
+                ))
+            })?,
+        );
+    }
+    Ok(response_with_headers)
 }
 
 // Log user out of web console by deleting session in both server and browser
@@ -432,30 +476,50 @@ pub async fn consume_credentials(
 pub async fn logout(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     cookies: Cookies,
-) -> Result<Response<Body>, HttpError> {
-    let nexus = &rqctx.context().nexus;
-    let opctx = OpContext::for_external_api(&rqctx).await;
-    let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = OpContext::for_external_api(&rqctx).await;
+        let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
-    if let Ok(opctx) = opctx {
-        if let Some(token) = token {
-            nexus.session_hard_delete(&opctx, token.value()).await?;
+        if let Ok(opctx) = opctx {
+            if let Some(token) = token {
+                nexus.session_hard_delete(&opctx, token.value()).await?;
+            }
         }
-    }
 
-    // If user's session was already expired, they failed auth and their session
-    // was automatically deleted by the auth scheme. If they have no session
-    // (e.g., they cleared their cookies while sitting on the page) they will
-    // also fail auth.
+        // If user's session was already expired, they failed auth and their
+        // session was automatically deleted by the auth scheme. If they have no
+        // session (e.g., they cleared their cookies while sitting on the page)
+        // they will also fail auth.
 
-    // Even if the user failed auth, we don't want to send them back a 401 like
-    // we would for a normal request. They are in fact logged out like they
-    // intended, and we should send the standard success response.
+        // Even if the user failed auth, we don't want to send them back a 401
+        // like we would for a normal request. They are in fact logged out like
+        // they intended, and we should send the standard success response.
 
-    Ok(Response::builder()
-        .status(StatusCode::NO_CONTENT)
-        .header(header::SET_COOKIE, clear_session_cookie_header_value())
-        .body("".into())?)
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
+        {
+            let headers = response.headers_mut();
+            headers.append(
+                header::SET_COOKIE,
+                http::HeaderValue::from_str(
+                    &clear_session_cookie_header_value(),
+                )
+                .map_err(|error| {
+                    HttpError::for_internal_error(format!(
+                        "unsupported cookie value: {:#}",
+                        error
+                    ))
+                })?,
+            );
+        };
+
+        Ok(response)
+    };
+
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -473,7 +537,7 @@ pub struct RestPathParam {
    path = "/spoof_login",
    unpublished = true,
 }]
-pub async fn spoof_login_form(
+pub async fn login_spoof_begin(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx.context()).await
@@ -533,16 +597,18 @@ fn get_login_url(redirect_url: Option<String>) -> String {
    path = "/login",
    unpublished = true,
 }]
-pub async fn login_redirect(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+pub async fn login_begin(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<StateParam>,
-) -> Result<Response<Body>, HttpError> {
-    let query = query_params.into_inner();
-    let redirect_url = query.state.filter(|s| !s.trim().is_empty());
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(redirect_url))
-        .body("".into())?)
+) -> Result<HttpResponseFound, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let query = query_params.into_inner();
+        let redirect_url = query.state.filter(|s| !s.trim().is_empty());
+        let login_url = get_login_url(redirect_url);
+        http_response_found(login_url)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch the user associated with the current session
@@ -561,13 +627,44 @@ pub async fn session_me(
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("loading current user")?;
-        let user =
-            nexus.silo_user_fetch_by_id(&opctx, &actor.actor_id()).await?;
+        let user = nexus.silo_user_fetch_self(&opctx).await?;
         Ok(HttpResponseOk(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the silo groups the current user belongs to
+#[endpoint {
+    method = GET,
+    path = "/session/me/groups",
+    tags = ["hidden"],
+ }]
+pub async fn session_me_groups(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        // We don't care about authentication method, as long as they are authed
+        // as _somebody_. We could restrict this to session auth only, but it's
+        // not clear what the advantage would be.
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let groups = nexus
+            .silo_user_fetch_groups_for_self(
+                &opctx,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            groups,
+            &|_, group: &views::Group| group.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

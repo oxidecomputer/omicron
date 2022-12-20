@@ -17,4 +17,5 @@ serde_json.workspace = true
 uuid.workspace = true
 
 api_identity.workspace = true
+nexus-passwords.workspace = true
 omicron-common.workspace = true

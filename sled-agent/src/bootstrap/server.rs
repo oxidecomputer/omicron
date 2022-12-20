@@ -76,18 +76,14 @@ impl Server {
             );
         }
 
-        // Turn on the maghemite routing service.
-        // TODO-correctness Eventually we need mg-ddm to listen on multiple
-        // interfaces (link-local addresses of both NICs).
         info!(log, "Starting mg-ddm service");
-        maghemite::enable_mg_ddm_service(log.clone(), mg_addr_objs[0].clone())
+        maghemite::enable_mg_ddm_service(log.clone(), mg_addr_objs.clone())
             .await
             .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
 
         info!(log, "detecting (real or simulated) SP");
         let sp = SpHandle::detect(
             config.sp_config.as_ref().map(|c| &c.local_sp),
-            &sled_config,
             &log,
         )
         .await
@@ -116,7 +112,7 @@ impl Server {
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
-        if let Err(e) = server.bootstrap_agent.initialize(&config).await {
+        if let Err(e) = server.bootstrap_agent.start_rss(&config).await {
             server.inner.abort();
             return Err(e.to_string());
         }
@@ -192,11 +188,13 @@ impl Inner {
             let log = self.log.new(o!("remote_addr" => remote_addr));
             info!(log, "Accepted connection");
 
+            let bootstrap_agent = self.bootstrap_agent.clone();
             let sp = self.sp.clone();
             let trust_quorum = Arc::clone(&trust_quorum);
             tokio::spawn(async move {
                 match serve_request_after_quorum_initialization(
                     stream,
+                    bootstrap_agent,
                     sp,
                     trust_quorum.as_ref(),
                     &log,
@@ -339,6 +337,7 @@ async fn serve_request_before_quorum_initialization(
 
 async fn serve_request_after_quorum_initialization(
     stream: TcpStream,
+    bootstrap_agent: Arc<Agent>,
     // TODO-cleanup `sp` and `tx_share` are optional while we still allow
     // trust-quorum-free dev/test setups. Eventually they should be required.
     sp: Option<SpHandle>,
@@ -359,12 +358,24 @@ async fn serve_request_after_quorum_initialization(
     .map_err(|err| format!("Failed to establish sprockets session: {err}"))?;
 
     let response = match read_request(&mut stream).await? {
-        Request::SledAgentRequest(request, _trust_quorum_share) => {
-            warn!(
-                log, "Received sled agent request after we're initialized";
-                "request" => ?request,
-            );
-            Err("Sled agent already initialized".to_string())
+        Request::SledAgentRequest(request, trust_quorum_share) => {
+            let trust_quorum_share =
+                trust_quorum_share.map(ShareDistribution::from);
+
+            // The call to `request_agent` should be idempotent if the request
+            // was the same.
+            bootstrap_agent
+                .request_agent(&request, &trust_quorum_share)
+                .await
+                .map(|response| Response::SledAgentResponse(response))
+                .map_err(|err| {
+                    warn!(
+                        log, "Request to initialize sled agent failed";
+                        "request" => ?request,
+                        "err" => %err,
+                    );
+                    format!("Failed to initialize sled agent: {err}")
+                })
         }
         Request::ShareRequest => {
             match trust_quorum_share {

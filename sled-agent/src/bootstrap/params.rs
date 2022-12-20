@@ -6,13 +6,13 @@
 
 use super::trust_quorum::SerializableShareDistribution;
 use macaddr::MacAddr6;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
-use serde::{Deserialize, Serialize};
+use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::serde_as;
-use serde_with::DisplayFromStr;
+use serde_with::DeserializeAs;
 use serde_with::PickFirst;
 use std::borrow::Cow;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information about the internet gateway used for externally-facing services.
@@ -29,9 +29,28 @@ pub struct Gateway {
     // This uses the `serde_with` crate's `serde_as` attribute, which tries
     // each of the listed serialization types (starting with the default) until
     // one succeeds. This supports deserialization from either an array of u8,
-    // or the display-string representation.
-    #[serde_as(as = "PickFirst<(_, DisplayFromStr)>")]
+    // or the display-string representation. (Our custom `ZeroPadded` adapter
+    // works around non-zero-padded MAC address bytes as seen in illumos
+    // `dladm`, which the macaddr crate refuses to parse.)
+    #[serde_as(as = "PickFirst<(_, ZeroPadded)>")]
     pub mac: MacAddr6,
+}
+
+struct ZeroPadded;
+
+impl<'de> DeserializeAs<'de, MacAddr6> for ZeroPadded {
+    fn deserialize_as<D>(deserializer: D) -> Result<MacAddr6, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        <&str>::deserialize(deserializer)?
+            .split(':')
+            .map(|segment| format!("{:0>2}", segment))
+            .collect::<Vec<String>>()
+            .join(":")
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 /// Configuration information for launching a Sled Agent.
@@ -57,6 +76,16 @@ pub struct SledAgentRequest {
     // must come after non-table fields.
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+}
+
+impl SledAgentRequest {
+    pub fn sled_address(&self) -> SocketAddrV6 {
+        address::get_sled_address(self.subnet)
+    }
+
+    pub fn switch_zone_ip(&self) -> Ipv6Addr {
+        address::get_switch_zone_address(self.subnet)
+    }
 }
 
 // We intentionally DO NOT derive `Debug` or `Serialize`; both provide avenues

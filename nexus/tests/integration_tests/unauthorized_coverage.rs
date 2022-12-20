@@ -86,7 +86,7 @@ fn test_unauthorized_coverage() {
             let method_string = m.http_method().to_string().to_uppercase();
             let found = spec_operations.iter().find(|(op, regex)| {
                 op.method.to_uppercase() == method_string
-                    && regex.is_match(v.url)
+                    && regex.is_match(v.url.split('?').next().unwrap_or(v.url))
             });
             if let Some((op, _)) = found {
                 println!(
@@ -138,7 +138,20 @@ fn test_unauthorized_coverage() {
     let expected_uncovered_endpoints =
         std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
             .expect("failed to load file of allowed uncovered endpoints");
-    assert_eq!(expected_uncovered_endpoints, uncovered_endpoints);
+    let mut unexpected_uncovered_endpoints = "These endpoints were expected to be covered by the unauthorized_coverage test but were not:\n".to_string();
+    let mut has_uncovered_endpoints = false;
+    for endpoint in uncovered_endpoints.lines() {
+        if !expected_uncovered_endpoints.contains(endpoint) {
+            unexpected_uncovered_endpoints
+                .push_str(&format!("\t{}\n", endpoint));
+            has_uncovered_endpoints = true;
+        }
+    }
+    assert_eq!(
+        has_uncovered_endpoints, false,
+        "{}\nMake sure you've added a test for this endpoint in unauthorized.rs.",
+        unexpected_uncovered_endpoints
+    )
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]

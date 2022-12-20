@@ -6,6 +6,7 @@
 #: rust_toolchain = "nightly-2022-09-27"
 #: output_rules = [
 #:	"=/work/package.tar.gz",
+#:	"=/work/zones/*.tar.gz",
 #: ]
 #:
 
@@ -21,12 +22,13 @@ ptime -m ./tools/create_self_signed_cert.sh -yp
 
 ptime -m cargo run --locked --release --bin omicron-package -- package
 
-# TODO: write tests and add the resulting test bin here
 files=(
-	out/*.tar{,.gz}
+	out/*.tar
 	package-manifest.toml
 	smf/sled-agent/config.toml
 	target/release/omicron-package
-	tools/{create,destroy}_virtual_hardware.sh
+	tools/create_virtual_hardware.sh
 )
 ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
+mkdir -p /work/zones
+mv out/*.tar.gz /work/zones/

@@ -15,11 +15,15 @@ use crate::cidata::InstanceCiData;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
+use futures::future::Fuse;
+use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
 use nexus_db_model::Name;
+use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -29,31 +33,96 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use ref_cast::RefCast;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::Role as WebSocketRole;
+use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
+use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
 
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
 impl super::Nexus {
+    pub fn instance_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        instance_selector: &'a params::InstanceSelector,
+    ) -> LookupResult<lookup::Instance<'a>> {
+        match instance_selector {
+            params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
+                // TODO: 400 if project or organization are present
+                let instance =
+                    LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
+                Ok(instance)
+            }
+            params::InstanceSelector {
+                instance: NameOrId::Name(instance_name),
+                project: Some(NameOrId::Id(project_id)),
+                ..
+            } => {
+                // TODO: 400 if organization is present
+                let instance = LookupPath::new(opctx, &self.db_datastore)
+                    .project_id(*project_id)
+                    .instance_name(Name::ref_cast(instance_name));
+                Ok(instance)
+            }
+            params::InstanceSelector {
+                instance: NameOrId::Name(instance_name),
+                project: Some(NameOrId::Name(project_name)),
+                organization: Some(NameOrId::Id(organization_id)),
+            } => {
+                let instance = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_id(*organization_id)
+                    .project_name(Name::ref_cast(project_name))
+                    .instance_name(Name::ref_cast(instance_name));
+                Ok(instance)
+            }
+            params::InstanceSelector {
+                instance: NameOrId::Name(instance_name),
+                project: Some(NameOrId::Name(project_name)),
+                organization: Some(NameOrId::Name(organization_name)),
+            } => {
+                let instance = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_name(Name::ref_cast(organization_name))
+                    .project_name(Name::ref_cast(project_name))
+                    .instance_name(Name::ref_cast(instance_name));
+                Ok(instance)
+            }
+            // TODO: Add a better error message
+            _ => Err(Error::InvalidRequest {
+                message: "
+                Unable to resolve instance. Expected one of
+                    - instance: Uuid 
+                    - instance: Name, project: Uuid
+                    - instance: Name, project: Name, organization: Uuid
+                    - instance: Name, project: Name, organization: Name
+                "
+                .to_string(),
+            }),
+        }
+    }
+
     pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
@@ -122,8 +191,6 @@ impl super::Nexus {
 
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            organization_name: organization_name.clone().into(),
-            project_name: project_name.clone().into(),
             project_id: authz_project.id(),
             create_params: params.clone(),
         };
@@ -184,46 +251,14 @@ impl super::Nexus {
     pub async fn project_list_instances(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Instance> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .project_list_instances(opctx, &authz_project, pagparams)
             .await
-    }
-
-    pub async fn instance_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-    ) -> LookupResult<db::model::Instance> {
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .fetch()
-            .await?;
-        Ok(db_instance)
-    }
-
-    pub async fn instance_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        instance_id: &Uuid,
-    ) -> LookupResult<db::model::Instance> {
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(*instance_id)
-            .fetch()
-            .await?;
-        Ok(db_instance)
     }
 
     // This operation may only occur on stopped instances, which implies that
@@ -232,20 +267,13 @@ impl super::Nexus {
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> DeleteResult {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Delete).await?;
 
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
@@ -263,17 +291,11 @@ impl super::Nexus {
     pub async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
         params: params::InstanceMigrate,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         // Kick off the migration saga
         let saga_params = sagas::instance_migrate::Params {
@@ -327,9 +349,7 @@ impl super::Nexus {
     pub async fn instance_reboot(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
         // To implement reboot, we issue a call to the sled agent to set a
         // runtime state of "reboot". We cannot simply stop the Instance and
@@ -342,13 +362,7 @@ impl super::Nexus {
         // even if the whole rack powered off while this was going on, we would
         // never lose track of the fact that this Instance was supposed to be
         // running.
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Reboot,
             migration_params: None,
@@ -367,17 +381,9 @@ impl super::Nexus {
     pub async fn instance_start(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
             migration_params: None,
@@ -396,17 +402,9 @@ impl super::Nexus {
     pub async fn instance_stop(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
             migration_params: None,
@@ -503,14 +501,13 @@ impl super::Nexus {
 
         let mut disk_reqs = vec![];
         for (i, disk) in disks.iter().enumerate() {
-            let volume = self.db_datastore.volume_get(disk.volume_id).await?;
-            let gen: i64 = (&disk.runtime_state.gen.0).into();
+            let volume =
+                self.db_datastore.volume_checkout(disk.volume_id).await?;
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(i as u8),
                 read_only: false,
                 device: "nvme".to_string(),
-                gen: gen as u64,
                 volume_construction_request: serde_json::from_str(
                     &volume.data(),
                 )?,
@@ -556,6 +553,32 @@ impl super::Nexus {
         let source_nat =
             SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
+        // Gather the firewall rules for the VPC this instance is in.
+        // The NIC info we gathered above doesn't have VPC information
+        // because the sled agent doesn't care about that directly,
+        // so we fetch it via the first interface's VNI. (It doesn't
+        // matter which one we use because all NICs must be in the
+        // same VPC; see the check in project_create_instance.)
+        let firewall_rules = if let Some(nic) = nics.first() {
+            let vni = Vni::try_from(nic.vni.0)?;
+            let vpc = self
+                .db_datastore
+                .resolve_vni_to_vpc(opctx, db::model::Vni(vni))
+                .await?;
+            let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+                .vpc_id(vpc.id())
+                .lookup_for(authz::Action::Read)
+                .await?;
+            let rules = self
+                .db_datastore
+                .vpc_list_firewall_rules(opctx, &authz_vpc)
+                .await?;
+            self.resolve_firewall_rules_for_sled_agent(opctx, &vpc, &rules)
+                .await?
+        } else {
+            vec![]
+        };
+
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.
         // TODO-security: this should be replaced with a lookup based on
@@ -596,6 +619,7 @@ impl super::Nexus {
             nics,
             source_nat,
             external_ips,
+            firewall_rules,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
                 db_instance.generate_cidata(&public_keys)?,
@@ -1072,20 +1096,10 @@ impl super::Nexus {
     /// provided they are still in the sled-agent's cache.
     pub(crate) async fn instance_serial_console_data(
         &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let db_instance = self
-            .instance_fetch(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
+        let (.., db_instance) = instance_lookup.fetch().await?;
 
         let sa = self.instance_sled(&db_instance).await?;
         let data = sa
@@ -1103,5 +1117,219 @@ impl super::Nexus {
             data: sa_data.data,
             last_byte_offset: sa_data.last_byte_offset,
         })
+    }
+
+    pub(crate) async fn instance_serial_console_stream(
+        &self,
+        conn: dropshot::WebsocketConnection,
+        instance_lookup: &lookup::Instance<'_>,
+    ) -> Result<(), Error> {
+        // TODO: Technically the stream is two way so the user of this method can modify the instance in some way. Should we use different permissions?
+        let (.., instance) = instance_lookup.fetch().await?;
+        let ip_addr = instance
+            .runtime_state
+            .propolis_ip
+            .ok_or_else(|| {
+                Error::internal_error(
+                    "instance's propolis server ip address not found",
+                )
+            })?
+            .ip();
+        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
+        let client =
+            propolis_client::Client::new(&format!("http://{}", socket_addr));
+        let propolis_upgraded = client
+            .instance_serial()
+            .send()
+            .await
+            .map_err(|_| {
+                Error::internal_error(
+                    "failed to connect to instance's propolis server",
+                )
+            })?
+            .into_inner();
+
+        Self::proxy_instance_serial_ws(conn.into_inner(), propolis_upgraded)
+            .await
+            .map_err(|e| Error::internal_error(&format!("{}", e)))
+    }
+
+    async fn proxy_instance_serial_ws(
+        client_upgraded: impl AsyncRead + AsyncWrite + Unpin,
+        propolis_upgraded: impl AsyncRead + AsyncWrite + Unpin,
+    ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+        let (mut propolis_sink, mut propolis_stream) =
+            WebSocketStream::from_raw_socket(
+                propolis_upgraded,
+                WebSocketRole::Client,
+                None,
+            )
+            .await
+            .split();
+        let (mut nexus_sink, mut nexus_stream) =
+            WebSocketStream::from_raw_socket(
+                client_upgraded,
+                WebSocketRole::Server,
+                None,
+            )
+            .await
+            .split();
+
+        let mut buffered_output = None;
+        let mut buffered_input = None;
+        loop {
+            let (nexus_read, propolis_write) = match buffered_input.take() {
+                None => (nexus_stream.next().fuse(), Fuse::terminated()),
+                Some(msg) => {
+                    (Fuse::terminated(), propolis_sink.send(msg).fuse())
+                }
+            };
+            let (nexus_write, propolis_read) = match buffered_output.take() {
+                None => (Fuse::terminated(), propolis_stream.next().fuse()),
+                Some(msg) => (nexus_sink.send(msg).fuse(), Fuse::terminated()),
+            };
+            tokio::select! {
+                msg = nexus_read => {
+                    match msg {
+                        None => {
+                            propolis_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                                code: CloseCode::Abnormal,
+                                reason: std::borrow::Cow::from(
+                                    "nexus: websocket connection to client closed unexpectedly"
+                                ),
+                            }))).await?;
+                            break;
+                        }
+                        Some(Err(e)) => {
+                            propolis_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                                code: CloseCode::Error,
+                                reason: std::borrow::Cow::from(
+                                    format!("nexus: error in websocket connection to client: {}", e)
+                                ),
+                            }))).await?;
+                            return Err(e);
+                        }
+                        Some(Ok(WebSocketMessage::Close(details))) => {
+                            propolis_sink.send(WebSocketMessage::Close(details)).await?;
+                            break;
+                        }
+                        Some(Ok(WebSocketMessage::Text(_text))) => {
+                            // TODO: json payloads specifying client-sent metadata?
+                        }
+                        Some(Ok(WebSocketMessage::Binary(data))) => {
+                            buffered_input = Some(WebSocketMessage::Binary(data))
+                        }
+                        // Frame won't exist at this level, and ping reply is handled by tungstenite
+                        Some(Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_))) => {}
+                    }
+                }
+                result = nexus_write => {
+                    result?;
+                }
+                msg = propolis_read => {
+                    match msg {
+                        None => {
+                            nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                                code: CloseCode::Abnormal,
+                                reason: std::borrow::Cow::from(
+                                    "nexus: websocket connection to propolis closed unexpectedly"
+                                ),
+                            }))).await?;
+                            break;
+                        }
+                        Some(Err(e)) => {
+                            nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                                code: CloseCode::Error,
+                                reason: std::borrow::Cow::from(
+                                    format!("nexus: error in websocket connection to propolis: {}", e)
+                                ),
+                            }))).await?;
+                            return Err(e);
+                        }
+                        Some(Ok(WebSocketMessage::Close(details))) => {
+                            nexus_sink.send(WebSocketMessage::Close(details)).await?;
+                            break;
+                        }
+                        Some(Ok(WebSocketMessage::Text(_text))) => {
+                            // TODO: deserialize a json payload, specifying:
+                            //  - event: "migration"
+                            //  - address: the address of the new propolis-server
+                            //  - offset: what byte offset to start from (the last one sent from old propolis)
+                        }
+                        Some(Ok(WebSocketMessage::Binary(data))) => {
+                            buffered_output = Some(WebSocketMessage::Binary(data))
+                        }
+                        // Frame won't exist at this level, and ping reply is handled by tungstenite
+                        Some(Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_))) => {}
+                    }
+                }
+                result = propolis_write => {
+                    result?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::Nexus;
+    use core::time::Duration;
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::WebSocketStream;
+
+    #[tokio::test]
+    async fn test_serial_console_stream_proxying() {
+        let (nexus_client_conn, nexus_server_conn) = tokio::io::duplex(1024);
+        let (propolis_client_conn, propolis_server_conn) =
+            tokio::io::duplex(1024);
+        let jh = tokio::spawn(async move {
+            Nexus::proxy_instance_serial_ws(
+                nexus_server_conn,
+                propolis_client_conn,
+            )
+            .await
+        });
+        let mut nexus_client_ws = WebSocketStream::from_raw_socket(
+            nexus_client_conn,
+            Role::Client,
+            None,
+        )
+        .await;
+        let mut propolis_server_ws = WebSocketStream::from_raw_socket(
+            propolis_server_conn,
+            Role::Server,
+            None,
+        )
+        .await;
+
+        let sent = Message::Binary(vec![1, 2, 3, 42, 5]);
+        nexus_client_ws.send(sent.clone()).await.unwrap();
+        let received = propolis_server_ws.next().await.unwrap().unwrap();
+        assert_eq!(sent, received);
+
+        let sent = Message::Binary(vec![6, 7, 8, 90]);
+        propolis_server_ws.send(sent.clone()).await.unwrap();
+        let received = nexus_client_ws.next().await.unwrap().unwrap();
+        assert_eq!(sent, received);
+
+        let sent = Message::Close(Some(CloseFrame {
+            code: CloseCode::Normal,
+            reason: std::borrow::Cow::from("test done"),
+        }));
+        nexus_client_ws.send(sent.clone()).await.unwrap();
+        let received = propolis_server_ws.next().await.unwrap().unwrap();
+        assert_eq!(sent, received);
+
+        tokio::time::timeout(Duration::from_secs(1), jh)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 }

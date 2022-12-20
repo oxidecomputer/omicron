@@ -12,6 +12,7 @@ anyhow.workspace = true
 chrono.workspace = true
 diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 hex.workspace = true
+internal-dns-client.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
@@ -23,11 +24,12 @@ ref-cast.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
 steno.workspace = true
+uuid.workspace = true
 
 db-macros.workspace = true
 omicron-common.workspace = true
 nexus-defaults.workspace = true
+nexus-passwords.workspace = true
 nexus-types.workspace = true
 sled-agent-client.workspace = true

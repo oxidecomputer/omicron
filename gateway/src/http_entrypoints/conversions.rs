@@ -7,14 +7,17 @@
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
 use super::PowerState;
+use super::SpComponentInfo;
+use super::SpComponentList;
+use super::SpComponentPresence;
 use super::SpIdentifier;
 use super::SpIgnition;
+use super::SpIgnitionSystemType;
 use super::SpState;
 use super::SpType;
 use super::SpUpdateStatus;
 use super::UpdatePreparationProgress;
 use dropshot::HttpError;
-use gateway_messages::IgnitionFlags;
 use gateway_messages::SpComponent;
 use gateway_messages::UpdateStatus;
 
@@ -36,6 +39,13 @@ impl From<UpdateStatus> for SpUpdateStatus {
                 id: status.id.into(),
                 progress: status.progress.map(Into::into),
             },
+            UpdateStatus::SpUpdateAuxFlashChckScan {
+                id, total_size, ..
+            } => Self::InProgress {
+                id: id.into(),
+                bytes_received: 0,
+                total_bytes: total_size,
+            },
             UpdateStatus::InProgress(status) => Self::InProgress {
                 id: status.id.into(),
                 bytes_received: status.bytes_received,
@@ -43,6 +53,9 @@ impl From<UpdateStatus> for SpUpdateStatus {
             },
             UpdateStatus::Complete(id) => Self::Complete { id: id.into() },
             UpdateStatus::Aborted(id) => Self::Aborted { id: id.into() },
+            UpdateStatus::Failed { id, code } => {
+                Self::Failed { id: id.into(), code }
+            }
         }
     }
 }
@@ -83,21 +96,41 @@ impl From<gateway_messages::SpState> for SpState {
 
 impl From<gateway_messages::IgnitionState> for SpIgnition {
     fn from(state: gateway_messages::IgnitionState) -> Self {
-        // if we have a state, the SP was present
-        Self::Present {
-            id: state.id,
-            power: state.flags.intersects(IgnitionFlags::POWER),
-            ctrl_detect_0: state.flags.intersects(IgnitionFlags::CTRL_DETECT_0),
-            ctrl_detect_1: state.flags.intersects(IgnitionFlags::CTRL_DETECT_1),
-            flt_a3: state.flags.intersects(IgnitionFlags::FLT_A3),
-            flt_a2: state.flags.intersects(IgnitionFlags::FLT_A2),
-            flt_rot: state.flags.intersects(IgnitionFlags::FLT_ROT),
-            flt_sp: state.flags.intersects(IgnitionFlags::FLT_SP),
+        use gateway_messages::ignition::SystemPowerState;
+
+        if let Some(target_state) = state.target {
+            Self::Present {
+                id: target_state.system_type.into(),
+                power: matches!(
+                    target_state.power_state,
+                    SystemPowerState::On | SystemPowerState::PoweringOn
+                ),
+                ctrl_detect_0: target_state.controller0_present,
+                ctrl_detect_1: target_state.controller1_present,
+                flt_a3: target_state.faults.power_a3,
+                flt_a2: target_state.faults.power_a2,
+                flt_rot: target_state.faults.rot,
+                flt_sp: target_state.faults.sp,
+            }
+        } else {
+            Self::Absent
         }
     }
 }
 
-impl From<SpType> for gateway_sp_comms::SpType {
+impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
+    fn from(st: gateway_messages::ignition::SystemType) -> Self {
+        use gateway_messages::ignition::SystemType;
+        match st {
+            SystemType::Gimlet => Self::Gimlet,
+            SystemType::Sidecar => Self::Sidecar,
+            SystemType::Psc => Self::Psc,
+            SystemType::Unknown(id) => Self::Unknown { id },
+        }
+    }
+}
+
+impl From<SpType> for crate::management_switch::SpType {
     fn from(typ: SpType) -> Self {
         match typ {
             SpType::Sled => Self::Sled,
@@ -107,17 +140,17 @@ impl From<SpType> for gateway_sp_comms::SpType {
     }
 }
 
-impl From<gateway_sp_comms::SpType> for SpType {
-    fn from(typ: gateway_sp_comms::SpType) -> Self {
+impl From<crate::management_switch::SpType> for SpType {
+    fn from(typ: crate::management_switch::SpType) -> Self {
         match typ {
-            gateway_sp_comms::SpType::Sled => Self::Sled,
-            gateway_sp_comms::SpType::Power => Self::Power,
-            gateway_sp_comms::SpType::Switch => Self::Switch,
+            crate::management_switch::SpType::Sled => Self::Sled,
+            crate::management_switch::SpType::Power => Self::Power,
+            crate::management_switch::SpType::Switch => Self::Switch,
         }
     }
 }
 
-impl From<SpIdentifier> for gateway_sp_comms::SpIdentifier {
+impl From<SpIdentifier> for crate::management_switch::SpIdentifier {
     fn from(id: SpIdentifier) -> Self {
         Self {
             typ: id.typ.into(),
@@ -128,13 +161,45 @@ impl From<SpIdentifier> for gateway_sp_comms::SpIdentifier {
     }
 }
 
-impl From<gateway_sp_comms::SpIdentifier> for SpIdentifier {
-    fn from(id: gateway_sp_comms::SpIdentifier) -> Self {
+impl From<crate::management_switch::SpIdentifier> for SpIdentifier {
+    fn from(id: crate::management_switch::SpIdentifier) -> Self {
         Self {
             typ: id.typ.into(),
-            // id.slot comes from a trusted source (gateway_sp_comms) and will
-            // not exceed u32::MAX
+            // id.slot comes from a trusted source (crate::management_switch)
+            // and will not exceed u32::MAX
             slot: u32::try_from(id.slot).unwrap(),
         }
+    }
+}
+
+impl From<gateway_messages::DevicePresence> for SpComponentPresence {
+    fn from(p: gateway_messages::DevicePresence) -> Self {
+        match p {
+            gateway_messages::DevicePresence::Present => Self::Present,
+            gateway_messages::DevicePresence::NotPresent => Self::NotPresent,
+            gateway_messages::DevicePresence::Failed => Self::Failed,
+            gateway_messages::DevicePresence::Unavailable => Self::Unavailable,
+            gateway_messages::DevicePresence::Timeout => Self::Timeout,
+            gateway_messages::DevicePresence::Error => Self::Error,
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpDevice> for SpComponentInfo {
+    fn from(d: gateway_sp_comms::SpDevice) -> Self {
+        Self {
+            component: d.component.as_str().unwrap_or("???").to_string(),
+            device: d.device,
+            serial_number: None, // TODO populate when SP provides it
+            description: d.description,
+            capabilities: d.capabilities.bits(),
+            presence: d.presence.into(),
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpInventory> for SpComponentList {
+    fn from(inv: gateway_sp_comms::SpInventory) -> Self {
+        Self { components: inv.devices.into_iter().map(Into::into).collect() }
     }
 }

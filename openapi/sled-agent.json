@@ -21,8 +21,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -68,8 +67,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -139,8 +137,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -186,8 +183,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -196,8 +192,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -241,8 +236,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -253,8 +247,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -265,8 +258,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -277,8 +269,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -343,6 +334,70 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vpc/{vpc_id}/firewall/rules": {
+      "put": {
+        "operationId": "vpc_firewall_rules_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vpc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcFirewallRulesEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zpools": {
+      "get": {
+        "operationId": "zpools_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Zpool",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Zpool"
+                  }
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -548,11 +603,6 @@
           "device": {
             "type": "string"
           },
-          "gen": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
           "name": {
             "type": "string"
           },
@@ -568,7 +618,6 @@
         },
         "required": [
           "device",
-          "gen",
           "name",
           "read_only",
           "slot",
@@ -914,6 +963,12 @@
               "format": "ip"
             }
           },
+          "firewall_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          },
           "nics": {
             "type": "array",
             "items": {
@@ -930,6 +985,7 @@
         "required": [
           "disks",
           "external_ips",
+          "firewall_rules",
           "nics",
           "runtime",
           "source_nat"
@@ -1124,29 +1180,117 @@
       },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "type": "string",
-        "enum": [
-          "creating",
-          "starting",
-          "running",
-          "stopping",
-          "stopped",
-          "rebooting",
-          "migrating",
-          "repairing",
-          "failed",
-          "destroyed"
+        "oneOf": [
+          {
+            "description": "The instance is being created.",
+            "type": "string",
+            "enum": [
+              "creating"
+            ]
+          },
+          {
+            "description": "The instance is currently starting up.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The instance is currently running.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The instance is currently stopped.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The instance is attempting to recover from a failure.",
+            "type": "string",
+            "enum": [
+              "repairing"
+            ]
+          },
+          {
+            "description": "The instance has encountered a failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The instance has been deleted.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
         ]
       },
       "InstanceStateRequested": {
         "description": "Requestable running state of an Instance.\n\nA subset of [`external::InstanceState`].",
-        "type": "string",
-        "enum": [
-          "running",
-          "stopped",
-          "reboot",
-          "migrating",
-          "destroyed"
+        "oneOf": [
+          {
+            "description": "Start the instance if it is not already running.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "Stop the instance.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "Issue a reset command to the instance, such that it should stop and then immediately become running.",
+            "type": "string",
+            "enum": [
+              "reboot"
+            ]
+          },
+          {
+            "description": "Migrate the instance to another node.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "Stop the instance and delete it.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
         ]
       },
       "IpNet": {
@@ -1174,7 +1318,7 @@
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/([8-9]|1[0-9]|2[0-9]|3[0-2])|172\\.(1[6-9]|2[0-9]|3[0-1])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[2-9]|2[0-9]|3[0-2])|192\\.168\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[6-9]|2[0-9]|3[0-2]))$"
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([8-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
@@ -1182,6 +1326,15 @@
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
         "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      },
+      "L4PortRange": {
+        "example": "22",
+        "title": "A range of IP ports",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "type": "string",
+        "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+        "minLength": 1,
+        "maxLength": 11
       },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
@@ -1245,49 +1398,12 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ServiceRequest"
+              "$ref": "#/components/schemas/ServiceZoneRequest"
             }
           }
         },
         "required": [
           "services"
-        ]
-      },
-      "ServiceRequest": {
-        "description": "Describes a request to create a service. This information should be sufficient for a Sled Agent to start a zone containing the requested service.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
-          },
-          "gz_addresses": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "service_type": {
-            "$ref": "#/components/schemas/ServiceType"
-          }
-        },
-        "required": [
-          "addresses",
-          "id",
-          "name",
-          "service_type"
         ]
       },
       "ServiceType": {
@@ -1356,6 +1472,20 @@
           {
             "type": "object",
             "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "management_gateway_service"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "asic": {
                 "$ref": "#/components/schemas/DendriteAsic"
               },
@@ -1370,7 +1500,65 @@
               "asic",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pkt_source": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tfport"
+                ]
+              }
+            },
+            "required": [
+              "pkt_source",
+              "type"
+            ]
           }
+        ]
+      },
+      "ServiceZoneRequest": {
+        "description": "Describes a request to create a zone running one or more services.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          "gz_addresses": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceType"
+            }
+          },
+          "zone_type": {
+            "$ref": "#/components/schemas/ZoneType"
+          }
+        },
+        "required": [
+          "addresses",
+          "id",
+          "services",
+          "zone_type"
         ]
       },
       "Slot": {
@@ -1520,6 +1708,16 @@
                 "format": "uint64",
                 "minimum": 0
               },
+              "blocks_per_extent": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "extent_count": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
               "gen": {
                 "type": "integer",
                 "format": "uint64",
@@ -1537,6 +1735,8 @@
             },
             "required": [
               "block_size",
+              "blocks_per_extent",
+              "extent_count",
               "gen",
               "opts",
               "type"
@@ -1571,6 +1771,127 @@
               "type"
             ]
           }
+        ]
+      },
+      "VpcFirewallRule": {
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/VpcFirewallRuleAction"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+          },
+          "filter_hosts": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
+          "filter_ports": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "filter_protocols": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "VpcFirewallRuleAction": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "deny"
+        ]
+      },
+      "VpcFirewallRuleDirection": {
+        "type": "string",
+        "enum": [
+          "inbound",
+          "outbound"
+        ]
+      },
+      "VpcFirewallRuleProtocol": {
+        "description": "The protocols that may be specified in a firewall rule's filter",
+        "type": "string",
+        "enum": [
+          "TCP",
+          "UDP",
+          "ICMP"
+        ]
+      },
+      "VpcFirewallRuleStatus": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "enabled"
+        ]
+      },
+      "VpcFirewallRulesEnsureBody": {
+        "description": "Update firewall rules for a VPC",
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ]
+      },
+      "ZoneType": {
+        "description": "The type of zone which may be requested from Sled Agent",
+        "type": "string",
+        "enum": [
+          "internal_dns",
+          "nexus",
+          "oximeter",
+          "switch"
+        ]
+      },
+      "Zpool": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       }
     }

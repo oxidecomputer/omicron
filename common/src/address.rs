@@ -34,9 +34,11 @@ pub const SLED_AGENT_PORT: u16 = 12345;
 /// The port propolis-server listens on inside the propolis zone.
 pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
+pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
+pub const MGS_PORT: u16 = 12225;
 
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
@@ -53,7 +55,7 @@ const DNS_ADDRESS_INDEX: usize = 1;
 const GZ_ADDRESS_INDEX: usize = 2;
 
 /// The maximum number of addresses per sled reserved for RSS.
-pub const RSS_RESERVED_ADDRESSES: u16 = 10;
+pub const RSS_RESERVED_ADDRESSES: u16 = 16;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(
@@ -136,6 +138,7 @@ impl ReservedRackSubnet {
 }
 
 const SLED_AGENT_ADDRESS_INDEX: usize = 1;
+const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 
 /// Return the sled agent address for a subnet.
 ///
@@ -144,6 +147,15 @@ pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
     let sled_agent_ip =
         sled_subnet.net().iter().nth(SLED_AGENT_ADDRESS_INDEX).unwrap();
     SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
+}
+
+/// Return the switch zone address for a subnet.
+///
+/// This address will come from the second address of the [`SLED_PREFIX`] subnet.
+pub fn get_switch_zone_address(
+    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+) -> Ipv6Addr {
+    sled_subnet.net().iter().nth(SWITCH_ZONE_ADDRESS_INDEX).unwrap()
 }
 
 /// Returns a sled subnet within a rack subnet.

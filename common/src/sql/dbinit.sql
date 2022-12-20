@@ -305,8 +305,13 @@ CREATE INDEX on omicron.public.volume (
  * Silos
  */
 
+CREATE TYPE omicron.public.authentication_mode AS ENUM (
+  'local',
+  'saml'
+);
+
 CREATE TYPE omicron.public.user_provision_type AS ENUM (
-  'fixed',
+  'api_only',
   'jit'
 );
 
@@ -320,6 +325,7 @@ CREATE TABLE omicron.public.silo (
     time_deleted TIMESTAMPTZ,
 
     discoverable BOOL NOT NULL,
+    authentication_mode omicron.public.authentication_mode NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,
 
     /* child resource generation number, per RFD 192 */
@@ -350,6 +356,14 @@ CREATE UNIQUE INDEX ON omicron.public.silo_user (
     external_id
 ) WHERE
     time_deleted IS NULL;
+
+CREATE TABLE omicron.public.silo_user_password_hash (
+    silo_user_id UUID NOT NULL,
+    hash TEXT NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY(silo_user_id)
+);
 
 /*
  * Silo groups
@@ -523,6 +537,9 @@ CREATE TABLE omicron.public.project (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
+    /* child resource generation number, per RFD 192 */
+    rcgen INT NOT NULL,
+
     /* Which organization this project belongs to */
     organization_id UUID NOT NULL /* foreign key into "Organization" table */
 );
@@ -654,6 +671,8 @@ CREATE TABLE omicron.public.disk (
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
+
+    /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
     /* Every Disk is in exactly one Project at a time. */
@@ -771,6 +790,9 @@ CREATE TABLE omicron.public.snapshot (
 
     /* Every Snapshot consists of a root volume */
     volume_id UUID NOT NULL,
+
+    /* Where will the scrubbed blocks eventually land? */
+    destination_volume_id UUID,
 
     gen INT NOT NULL,
     state omicron.public.snapshot_state NOT NULL,
@@ -1090,16 +1112,9 @@ CREATE TABLE omicron.public.ip_pool (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Optional ID of the project for which this pool is reserved. */
-    project_id UUID,
 
-    /*
-     * Optional rack ID, indicating this is a reserved pool for internal
-     * services on a specific rack.
-     * TODO(https://github.com/oxidecomputer/omicron/issues/1276): This
-     * should probably point to an AZ or fleet, not a rack.
-     */
-    rack_id UUID,
+    /* Identifies if the IP Pool is dedicated to Control Plane services */
+    internal BOOL NOT NULL,
 
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL
@@ -1111,15 +1126,6 @@ CREATE TABLE omicron.public.ip_pool (
 CREATE UNIQUE INDEX ON omicron.public.ip_pool (
     name
 ) WHERE
-    time_deleted IS NULL;
-
-/*
- * Index ensuring uniqueness of IP pools by rack ID
- */
-CREATE UNIQUE INDEX ON omicron.public.ip_pool (
-    rack_id
-) WHERE
-    rack_id IS NOT NULL AND
     time_deleted IS NULL;
 
 /*
@@ -1136,20 +1142,11 @@ CREATE TABLE omicron.public.ip_pool_range (
     /* The range is inclusive of the last address. */
     last_address INET NOT NULL,
     ip_pool_id UUID NOT NULL,
-    /* Optional ID of the project for which this range is reserved.
-     *
-     * NOTE: This denormalizes the tables a bit, since the project_id is
-     * duplicated here and in the parent `ip_pool` table. We're allowing this
-     * for now, since it reduces the complexity of the already-bad IP allocation
-     * query, but we may want to revisit that, and JOIN with the parent table
-     * instead.
-     */
-    project_id UUID,
     /* Tracks child resources, IP addresses allocated out of this range. */
     rcgen INT8 NOT NULL
 );
 
-/* 
+/*
  * These help Nexus enforce that the ranges within an IP Pool do not overlap
  * with any other ranges. See `nexus/src/db/queries/ip_pool.rs` for the actual
  * query which does that.
@@ -1164,14 +1161,6 @@ CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
 )
 STORING (first_address)
 WHERE time_deleted IS NULL;
-
-/*
- * Index supporting allocation of IPs out of a Pool reserved for a project.
- */
-CREATE INDEX ON omicron.public.ip_pool_range (
-    project_id
-) WHERE
-    time_deleted IS NULL;
 
 
 /* The kind of external IP address. */
@@ -1223,9 +1212,6 @@ CREATE TABLE omicron.public.external_ip (
     /* FK to the `ip_pool_range` table. */
     ip_pool_range_id UUID NOT NULL,
 
-    /* FK to the `project` table. */
-    project_id UUID,
-
     /* FK to the `instance` table. See the constraints below. */
     instance_id UUID,
 
@@ -1240,15 +1226,6 @@ CREATE TABLE omicron.public.external_ip (
 
     /* The last port in the allowed range, also inclusive. */
     last_port INT4 NOT NULL,
-
-    /*
-     * The project can only be NULL for service IPs.
-     * Additionally, the project MUST be NULL for service IPs.
-     */
-    CONSTRAINT null_project CHECK(
-        (kind != 'service' AND project_id IS NOT NULL) OR
-        (kind = 'service' AND project_id IS NULL)
-    ),
 
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
@@ -1407,6 +1384,11 @@ CREATE INDEX ON omicron.public.console_session (
     time_created
 );
 
+-- This index is used to remove sessions for a user that's being deleted.
+CREATE INDEX ON omicron.public.console_session (
+    silo_user_id
+);
+
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
@@ -1519,6 +1501,11 @@ CREATE TABLE omicron.public.device_access_token (
 -- one token is ever created for a given device authorization flow.
 CREATE UNIQUE INDEX ON omicron.public.device_access_token (
     client_id, device_code
+);
+
+-- This index is used to remove tokens for a user that's being deleted.
+CREATE INDEX ON omicron.public.device_access_token (
+    silo_user_id
 );
 
 /*

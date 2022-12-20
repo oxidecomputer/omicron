@@ -6,13 +6,12 @@
 
 use crate::bootstrap::params::Gateway;
 use crate::config::ConfigError;
-use crate::params::{DatasetEnsureBody, ServiceRequest};
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
 use serde::Deserialize;
 use serde::Serialize;
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::Path;
 
 /// Configuration for the "rack setup service", which is controlled during
@@ -29,9 +28,6 @@ use std::path::Path;
 pub struct SetupServiceConfig {
     pub rack_subnet: Ipv6Addr,
 
-    #[serde(default, rename = "request")]
-    pub requests: Vec<HardcodedSledRequest>,
-
     /// The minimum number of sleds required to unlock the rack secret.
     ///
     /// If this value is less than 2, no rack secret will be created on startup;
@@ -40,22 +36,11 @@ pub struct SetupServiceConfig {
 
     /// Internet gateway information.
     pub gateway: Gateway,
-}
 
-/// A request to initialize a sled.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct HardcodedSledRequest {
-    /// Datasets to be created.
-    #[serde(default, rename = "dataset")]
-    pub datasets: Vec<DatasetEnsureBody>,
-
-    /// Services to be instantiated.
-    #[serde(default, rename = "service")]
-    pub services: Vec<ServiceRequest>,
-
-    /// DNS Services to be instantiated.
-    #[serde(default, rename = "dns_service")]
-    pub dns_services: Vec<ServiceRequest>,
+    /// The address on which Nexus should serve an external interface.
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
+    // this should be pulled from a pool of addresses.
+    pub nexus_external_address: IpAddr,
 }
 
 impl SetupServiceConfig {
@@ -63,9 +48,8 @@ impl SetupServiceConfig {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
-        Ok(config)
+        toml::from_str(&contents)
+            .map_err(|err| ConfigError::Parse { path: path.into(), err })
     }
 
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
@@ -91,9 +75,9 @@ mod test {
     fn test_subnets() {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
-            requests: vec![],
             rack_secret_threshold: 0,
             gateway: Gateway { address: None, mac: macaddr::MacAddr6::nil() },
+            nexus_external_address: "192.168.1.20".parse().unwrap(),
         };
 
         assert_eq!(

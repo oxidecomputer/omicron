@@ -12,10 +12,19 @@ pub const ZONE_ZFS_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
 
-/// Error returned by [`Zfs::list_filesystems`].
+/// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
-#[error("Could not list filesystems within zpool {name}: {err}")]
-pub struct ListFilesystemsError {
+#[error("Could not list datasets within zpool {name}: {err}")]
+pub struct ListDatasetsError {
+    name: String,
+    #[source]
+    err: crate::illumos::ExecutionError,
+}
+
+/// Error returned by [`Zfs::destroy_dataset`].
+#[derive(thiserror::Error, Debug)]
+#[error("Could not destroy dataset {name}: {err}")]
+pub struct DestroyDatasetError {
     name: String,
     #[source]
     err: crate::illumos::ExecutionError,
@@ -97,17 +106,13 @@ impl fmt::Display for Mountpoint {
 
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Zfs {
-    /// Lists all filesystems within a zpool.
-    pub fn list_filesystems(
-        name: &str,
-    ) -> Result<Vec<String>, ListFilesystemsError> {
+    /// Lists all datasets within a pool or existing dataset.
+    pub fn list_datasets(name: &str) -> Result<Vec<String>, ListDatasetsError> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&["list", "-d", "1", "-rHpo", "name", name]);
 
-        let output = execute(cmd).map_err(|err| ListFilesystemsError {
-            name: name.to_string(),
-            err,
-        })?;
+        let output = execute(cmd)
+            .map_err(|err| ListDatasetsError { name: name.to_string(), err })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let filesystems: Vec<String> = stdout
             .trim()
@@ -118,6 +123,17 @@ impl Zfs {
             })
             .collect();
         Ok(filesystems)
+    }
+
+    /// Destroys a dataset.
+    pub fn destroy_dataset(name: &str) -> Result<(), DestroyDatasetError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "destroy", "-r", name]);
+        execute(cmd).map_err(|err| DestroyDatasetError {
+            name: name.to_string(),
+            err,
+        })?;
+        Ok(())
     }
 
     /// Creates a new ZFS filesystem named `name`, unless one already exists.

@@ -30,8 +30,8 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
 /// Commands which should execute on a host building packages.
 #[derive(Debug, Subcommand)]
 pub enum BuildCommand {
-    /// Builds the packages specified in a manifest, and places them into a target
-    /// directory.
+    /// Builds the packages specified in a manifest, and places them into an
+    /// 'out' directory.
     Package {
         /// The output directory, where artifacts should be placed.
         ///
@@ -39,16 +39,15 @@ pub enum BuildCommand {
         #[clap(long = "out", default_value = "out", action)]
         artifact_dir: PathBuf,
     },
-    /// Checks the packages specified in a manifest, without building.
+    /// Checks the packages specified in a manifest, without building them.
     Check,
 }
 
 /// Commands which should execute on a host installing packages.
 #[derive(Debug, Subcommand)]
 pub enum DeployCommand {
-    /// Installs the packages to a target machine and starts the sled-agent
-    ///
-    /// This is a combination of `Unpack` and `Activate`
+    /// Installs the packages and starts the sled-agent. Shortcut for `unpack`
+    /// and `activate`.
     Install {
         /// The directory from which artifacts will be pulled.
         ///
@@ -62,21 +61,17 @@ pub enum DeployCommand {
         #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
-    /// Removes the packages from the target machine.
-    Uninstall {
-        /// The directory from which artifacts were be pulled.
-        ///
-        /// Should match the format from the Package subcommand.
-        #[clap(long = "in", default_value = "out", action)]
-        artifact_dir: PathBuf,
-
-        /// The directory to which artifacts were installed.
-        ///
-        /// Defaults to "/opt/oxide".
-        #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
-    },
-    // Unpacks the package files on the target machine
+    /// Unpacks the files created by `package` to an install directory.
+    /// Issues the `uninstall` command.
+    ///
+    /// This command performs uninstallation by default as a safety measure,
+    /// to ensure that we are not swapping packages underneath running services,
+    /// which may result in unexpected behavior.
+    /// The "uninstall before unpack" behavior can be disabled by setting
+    /// the environment variable OMICRON_NO_UNINSTALL.
+    ///
+    /// `unpack` does not actually start any services, but it prepares services
+    /// to be launched with the `activate` command.
     Unpack {
         /// The directory from which artifacts will be pulled.
         ///
@@ -90,9 +85,39 @@ pub enum DeployCommand {
         #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
-    // Installs the sled-agent illumos service and starts it
+    /// Imports and starts the sled-agent illumos service
+    ///
+    /// The necessary packages must exist in the installation directory
+    /// already; this can be done with the `unpack` command.
     Activate {
         /// The directory to which artifacts will be installed.
+        ///
+        /// Defaults to "/opt/oxide".
+        #[clap(long = "out", default_value = "/opt/oxide", action)]
+        install_dir: PathBuf,
+    },
+    /// Deletes all Omicron zones and stops all services.
+    ///
+    /// This command may be used to stop the currently executing Omicron
+    /// services, such that they could be restarted later.
+    Deactivate,
+    /// Uninstalls packages and deletes durable Omicron storage. Issues the
+    /// `deactivate` command.
+    ///
+    /// This command deletes all state used by Omicron services, but leaves
+    /// the packages in the installation directory. This means that a later
+    /// call to `activate` could re-install Omicron services.
+    Uninstall,
+    /// Uninstalls packages and removes them from the installation directory.
+    /// Issues the `uninstall` command.
+    Clean {
+        /// The directory from which artifacts were be pulled.
+        ///
+        /// Should match the format from the Package subcommand.
+        #[clap(long = "in", default_value = "out", action)]
+        artifact_dir: PathBuf,
+
+        /// The directory to which artifacts were installed.
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]

@@ -7,11 +7,11 @@ use nexus_types::internal_api;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
+    #[derive(Clone, SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "service_kind"))]
     pub struct ServiceKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 
@@ -20,6 +20,7 @@ impl_enum_type!(
     Nexus => b"nexus"
     Oximeter => b"oximeter"
     Dendrite => b"dendrite"
+    Tfport => b"tfport"
 );
 
 impl From<internal_api::params::ServiceKind> for ServiceKind {
@@ -28,13 +29,16 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::InternalDNS => {
                 ServiceKind::InternalDNS
             }
-            internal_api::params::ServiceKind::Nexus => ServiceKind::Nexus,
+            internal_api::params::ServiceKind::Nexus { .. } => {
+                ServiceKind::Nexus
+            }
             internal_api::params::ServiceKind::Oximeter => {
                 ServiceKind::Oximeter
             }
             internal_api::params::ServiceKind::Dendrite => {
                 ServiceKind::Dendrite
             }
+            internal_api::params::ServiceKind::Tfport => ServiceKind::Tfport,
         }
     }
 }

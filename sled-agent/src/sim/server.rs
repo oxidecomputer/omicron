@@ -11,7 +11,7 @@ use crate::nexus::NexusClient;
 use crucible_agent_client::types::State as RegionState;
 
 use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{Drain, Logger};
 use std::sync::Arc;
@@ -86,7 +86,7 @@ impl Server {
                 "error" => ?error);
         };
         retry_notify(
-            internal_service_policy(),
+            retry_policy_internal_service_aggressive(),
             notify_nexus,
             log_notification_failure,
         )

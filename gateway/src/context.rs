@@ -2,25 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::bulk_state_get::BulkSpStateRequests;
-use gateway_sp_comms::Communicator;
-use gateway_sp_comms::{error::StartupError, SwitchConfig};
+use crate::communicator::Communicator;
+use crate::error::ConfigError;
+use crate::management_switch::SwitchConfig;
 use slog::Logger;
 use std::{sync::Arc, time::Duration};
 
 /// Shared state used by API request handlers
 pub struct ServerContext {
     pub sp_comms: Arc<Communicator>,
-    pub bulk_sp_state_requests: BulkSpStateRequests,
     pub timeouts: Timeouts,
     pub log: Logger,
 }
 
 pub struct Timeouts {
     pub bulk_request_default: Duration,
-    pub bulk_request_max: Duration,
-    pub bulk_request_page: Duration,
-    pub bulk_request_retain_grace_period: Duration,
 }
 
 impl From<&'_ crate::config::Timeouts> for Timeouts {
@@ -28,15 +24,6 @@ impl From<&'_ crate::config::Timeouts> for Timeouts {
         Self {
             bulk_request_default: Duration::from_millis(
                 timeouts.bulk_request_default_millis,
-            ),
-            bulk_request_max: Duration::from_millis(
-                timeouts.bulk_request_max_millis,
-            ),
-            bulk_request_page: Duration::from_millis(
-                timeouts.bulk_request_page_millis,
-            ),
-            bulk_request_retain_grace_period: Duration::from_millis(
-                timeouts.bulk_request_retain_grace_period_millis,
             ),
         }
     }
@@ -47,13 +34,41 @@ impl ServerContext {
         switch_config: SwitchConfig,
         timeouts: crate::config::Timeouts,
         log: &Logger,
-    ) -> Result<Arc<Self>, StartupError> {
-        let comms = Arc::new(Communicator::new(switch_config, log).await?);
+    ) -> Result<Arc<Self>, ConfigError> {
+        let comms = Arc::new(
+            Communicator::new(
+                switch_config,
+                TempNoopHostPhase2RecoveryProvider,
+                log,
+            )
+            .await?,
+        );
         Ok(Arc::new(ServerContext {
             sp_comms: Arc::clone(&comms),
-            bulk_sp_state_requests: BulkSpStateRequests::new(comms, log),
             timeouts: Timeouts::from(&timeouts),
             log: log.clone(),
         }))
+    }
+}
+
+// TODO: Delete this and replace with real host phase 2 recovery provider
+// (probably hooked up to a new dropshot endpoint to allow wicketd to send us
+// recovery images to serve).
+#[derive(Debug, Clone)]
+struct TempNoopHostPhase2RecoveryProvider;
+
+#[async_trait::async_trait]
+impl gateway_sp_comms::HostPhase2Provider
+    for TempNoopHostPhase2RecoveryProvider
+{
+    async fn read_phase2_data(
+        &self,
+        hash: [u8; 32],
+        _offset: u64,
+        _out: &mut [u8],
+    ) -> Result<usize, gateway_sp_comms::error::HostPhase2Error> {
+        Err(gateway_sp_comms::error::HostPhase2Error::NoImage {
+            hash: hex::encode(hash),
+        })
     }
 }

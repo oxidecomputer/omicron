@@ -8,9 +8,10 @@ license = "MPL-2.0"
 chrono.workspace = true
 omicron-common.workspace = true
 progenitor.workspace = true
-reqwest = { workspace = true, default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
+schemars.workspace = true
 slog.workspace = true
 futures.workspace = true
 uuid.workspace = true

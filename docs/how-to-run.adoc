@@ -92,9 +92,7 @@ no changes are needed. If you're running elsewhere, you find the value with:
 
 [source,text]
 ----
-$ netstat -rn | grep default
-default              192.168.1.1          UG       10     431926 igb0
-$ arp -an | grep -w 192.168.1.1
+$ arp -an | grep $(netstat -rn | awk '{ if ($1 == "default") print $2 }')
 igb0   192.168.1.1          255.255.255.255          74:ac:b9:a4:dc:02
 ----
 
@@ -122,8 +120,16 @@ may be executed:
 
 [source,text]
 ----
-$ pfexec cargo run --release --bin omicron-package -- install
+$ cargo build --release --bin omicron-package
+$ pfexec ./target/release/omicron-package install
 ----
+
+[NOTE]
+====
+**Do not use `pfexec cargo run` directly**; it will cause files in `~/.cargo` and `target/` to be owned by root, which will cause problems down the road.
+
+If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) target ${CARGO_HOME:-~/.cargo}`.
+====
 
 This service installs a bootstrap service, which itself loads other
 requested services. The bootstrap service is currently the only
@@ -145,7 +151,8 @@ executed:
 
 [source,text]
 ----
-$ pfexec cargo run --release --bin omicron-package -- uninstall
+$ cargo build --release --bin omicron-package
+$ pfexec ./target/release/omicron-package uninstall
 ----
 
 === Test Environment
@@ -172,13 +179,14 @@ be set as a default route for the Nexus zone.
 | Service                    | Endpoint
 | Sled Agent: Bootstrap      | Derived from MAC address of physical data link.
 | Sled Agent: Dropshot API   | `[fd00:1122:3344:0101::1]:12345`
-| Cockroach DB               | `[fd00:1122:3344:0101::2]:32221`
-| Nexus: Internal API        | `[fd00:1122:3344:0101::3]:12221`
-| Oximeter                   | `[fd00:1122:3344:0101::4]:12223`
-| Clickhouse                 | `[fd00:1122:3344:0101::5]:8123`
-| Crucible Downstairs 1      | `[fd00:1122:3344:0101::6]:32345`
-| Crucible Downstairs 2      | `[fd00:1122:3344:0101::7]:32345`
-| Crucible Downstairs 3      | `[fd00:1122:3344:0101::8]:32345`
+| Switch Zone                | `[fd00:1122:3344:0101::2]`
+| Cockroach DB               | `[fd00:1122:3344:0101::3]:32221`
+| Nexus: Internal API        | `[fd00:1122:3344:0101::4]:12221`
+| Oximeter                   | `[fd00:1122:3344:0101::5]:12223`
+| Clickhouse                 | `[fd00:1122:3344:0101::6]:8123`
+| Crucible Downstairs 1      | `[fd00:1122:3344:0101::7]:32345`
+| Crucible Downstairs 2      | `[fd00:1122:3344:0101::8]:32345`
+| Crucible Downstairs 3      | `[fd00:1122:3344:0101::9]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | Nexus: External API        | `192.168.1.20:80`
 | Internet Gateway           | None, but can be set in `smf/sled-agent/config-rss.toml`
@@ -291,10 +299,6 @@ the exact addresses that are available depends on the environment.
     }
     EOF
 
-6. Optionally, attach to the propolis server serial console, though the serial console is under active development and these commands are subject to change:
+6. Optionally, attach to the proxied propolis server serial console (this requires https://github.com/oxidecomputer/cli/commit/adab246142270778db7208126fb03724f5d35858[this commit] or newer of the CLI.)
 
-  a. find the zone launched for the instance: `zoneadm list -c | grep oxz_propolis-server`
-  b. get the instance uuid from the zone name. if the zone's name is `oxz_propolis-server_3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`, then the uuid is `3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`
-  c. find the propolis server listen address: `pfexec zlogin oxz_propolis-server_3b03ad43-4e9b-4f3a-866c-238d9ec4ac45 svccfg -s svc:/system/illumos/propolis-server:vm-3b03ad43-4e9b-4f3a-866c-238d9ec4ac45 listprop config/server_addr`
-  d. build and launch propolis-cli, filling in values for IP and PORT based on the listen address: `./target/release/propolis-cli -s <IP> -p <PORT> serial`
-
+    oxide instance serial --interactive -p myproj -o myorg myinst

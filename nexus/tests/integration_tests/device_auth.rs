@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::device_auth::{
     DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
@@ -15,6 +14,9 @@ use omicron_nexus::external_api::views::{
 use http::{header, method::Method, StatusCode};
 use serde::Deserialize;
 use uuid::Uuid;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[derive(Deserialize)]
 struct OAuthError {

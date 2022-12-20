@@ -29,8 +29,10 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::start_sled_agent;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
@@ -240,8 +242,25 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.description, expected.identity.description);
     assert!(project.identity.description.len() > 0);
 
-    // Delete "simproject2".  We'll make sure that's reflected in the other
-    // requests.
+    // Delete "simproject2", but first delete:
+    // - The default subnet within the default VPC
+    // - The default VPC
+    NexusRequest::object_delete(
+        client,
+        "/organizations/test-org/projects/simproject2/vpcs/default/subnets/default",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::object_delete(
+        client,
+        "/organizations/test-org/projects/simproject2/vpcs/default",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
     NexusRequest::object_delete(
         client,
         "/organizations/test-org/projects/simproject2",
@@ -249,7 +268,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("expected request to fail");
+    .unwrap();
 
     // Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
     // "/organizations/test-org/projects/simproject2".

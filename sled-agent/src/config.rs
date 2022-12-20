@@ -10,15 +10,17 @@ use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    /// Unique id for the sled
-    pub id: Uuid,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
+    /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
+    /// if set to false).
+    pub stub_scrimlet: Option<bool>,
+    // TODO: Remove once this can be auto-detected.
+    pub sidecar_revision: String,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".

@@ -10,8 +10,10 @@ use http::StatusCode;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, objects_list_page_authz,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
@@ -122,7 +124,27 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("failed to make request");
 
-    // Delete the project, then delete the organization
+    // Delete:
+    // - The default subnet within the default VPC for the project
+    // - The default VPC for the project
+    // - The project
+    // - The organization
+    NexusRequest::object_delete(
+        &client,
+        &format!("{project_url}/vpcs/default/subnets/default"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::object_delete(
+        &client,
+        &format!("{project_url}/vpcs/default"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
     NexusRequest::object_delete(&client, &project_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

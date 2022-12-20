@@ -1,9 +1,8 @@
 error: The following required arguments were not provided:
-    <SA_UUID>
-    <SA_IP:PORT>
-    <NEXUS_IP:PORT>
+  <SA_UUID>
+  <SA_IP:PORT>
+  <NEXUS_IP:PORT>
 
-USAGE:
-    sled-agent-sim [OPTIONS] <SA_UUID> <SA_IP:PORT> <NEXUS_IP:PORT>
+Usage: sled-agent-sim <SA_UUID> <SA_IP:PORT> <NEXUS_IP:PORT>
 
-For more information try --help
+For more information try '--help'

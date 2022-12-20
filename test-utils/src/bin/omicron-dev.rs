@@ -78,7 +78,7 @@ struct DbRunArgs {
     // This unusual clap configuration makes "populate" default to true,
     // allowing a --no-populate override on the CLI.
     /// Do not populate the database with any schema
-    #[clap(long = "--no-populate", action(clap::ArgAction::SetFalse))]
+    #[clap(long = "no-populate", action(clap::ArgAction::SetFalse))]
     populate: bool,
 }
 

@@ -15,7 +15,7 @@ omicron-common.workspace = true
 omicron-sled-agent.workspace = true
 omicron-zone-package.workspace = true
 rayon.workspace = true
-reqwest = { workspace = true, default-features = false, features = ["rustls-tls"] }
+reqwest = { workspace = true, features = [ "rustls-tls" ] }
 ring.workspace = true
 serde.workspace = true
 serde_derive.workspace = true

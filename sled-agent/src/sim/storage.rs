@@ -15,9 +15,7 @@ use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
 use futures::lock::Mutex;
-use nexus_client::types::{
-    ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest,
-};
+use nexus_client::types::{ByteCount, ZpoolPutRequest};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -461,8 +459,12 @@ impl Storage {
             .expect("Failed to notify Nexus about new Zpool");
     }
 
-    /// Adds a Dataset to the sled's simulated storage and notifies Nexus.
-    pub async fn insert_dataset(&mut self, zpool_id: Uuid, dataset_id: Uuid) {
+    /// Adds a Dataset to the sled's simulated storage.
+    pub async fn insert_dataset(
+        &mut self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+    ) -> SocketAddr {
         // Update our local data
         let dataset = self
             .zpools
@@ -477,15 +479,7 @@ impl Storage {
 
         self.next_crucible_port += 100;
 
-        // Notify Nexus
-        let request = DatasetPutRequest {
-            address: dataset.address().to_string(),
-            kind: DatasetKind::Crucible,
-        };
-        self.nexus_client
-            .dataset_put(&zpool_id, &dataset_id, &request)
-            .await
-            .expect("Failed to notify Nexus about new Dataset");
+        dataset.address()
     }
 
     pub async fn get_dataset(

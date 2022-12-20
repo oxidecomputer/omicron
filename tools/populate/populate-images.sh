@@ -91,3 +91,20 @@ oxide api /system/images --method POST --input - <<EOF
   }
 }
 EOF
+
+echo "Populating windows"
+oxide api /system/images --method POST --input - <<EOF
+{
+  "name": "windows-server-2022",
+  "description": "Windows Server 2022",
+  "block_size": 512,
+  "distribution": {
+    "name": "windows-server",
+    "version": "2022"
+  },
+  "source": {
+      "type": "url",
+      "url": "http://${CATACOMB_TUNNEL}/media/cloud/windows-server-2022-genericcloud-amd64.raw"
+  }
+}
+EOF

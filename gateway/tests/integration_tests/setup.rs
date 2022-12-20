@@ -7,7 +7,8 @@
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
-use gateway_sp_comms::SpType;
+use omicron_gateway::MgsArguments;
+use omicron_gateway::SpType;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 use slog::o;
@@ -40,10 +41,9 @@ impl GatewayTestContext {
 
 pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
     let server_config_file_path = Path::new("tests/config.test.toml");
-    let mut server_config =
+    let server_config =
         omicron_gateway::Config::from_file(server_config_file_path)
             .expect("failed to load config.test.toml");
-    server_config.id = Uuid::new_v4();
 
     let sp_sim_config_file_path = Path::new("tests/sp_sim_config.test.toml");
     let sp_sim_config = sp_sim::Config::from_file(sp_sim_config_file_path)
@@ -101,12 +101,13 @@ pub async fn test_setup_with_config(
 
     let expected_location = expected_location(&server_config, sp_port);
 
-    // Update multicast addrs of `server_config` to point to the SP ports that
+    // Update discovery addrs of `server_config` to point to the SP ports that
     // will identify us as the expected location
-    for port_config in server_config.switch.port.values_mut() {
+    for port_description in server_config.switch.port.values_mut() {
         // we need to know whether this port points to a switch or sled; for now
         // assume that matches whether we end up as `switch0` or `switch1`
-        let target_sp = port_config.location.get(&expected_location).unwrap();
+        let target_sp =
+            port_description.location.get(&expected_location).unwrap();
         let sp_addr = match target_sp.typ {
             SpType::Switch => {
                 simrack.sidecars[target_sp.slot].local_addr(sp_port)
@@ -114,16 +115,30 @@ pub async fn test_setup_with_config(
             SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
             SpType::Power => todo!(),
         };
-        port_config.multicast_addr.set_port(sp_addr.unwrap().port());
+        port_description.config.discovery_addr = sp_addr.unwrap();
+
+        // The default listen address has a fixed port, which is fine on
+        // hardware because each port should be listening on a different vlan
+        // interface. For tests, change the listening port to 0 so all our
+        // listeners don't try binding to the same port.
+        port_description.config.listen_addr.set_port(0);
     }
 
     // Start gateway server
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    let server =
-        omicron_gateway::Server::start(server_config.clone(), rack_id, log)
-            .await
-            .unwrap();
+    let args = MgsArguments {
+        id: Uuid::new_v4(),
+        address: "[::1]:0".parse().unwrap(),
+    };
+    let server = omicron_gateway::Server::start(
+        server_config.clone(),
+        args,
+        rack_id,
+        log,
+    )
+    .await
+    .unwrap();
 
     // Build a list of all SPs defined in our config
     let mut all_sp_ids = Vec::new();

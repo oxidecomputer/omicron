@@ -19,10 +19,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::IdentityMetadata;
 use omicron_nexus::authn::external::spoof;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
 // unauthorized requests to make sure we get the expected behavior (generally:
@@ -68,7 +69,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap(),
+                    .expect(&format!("Failed to GET from URL: {url}")),
                 id_routes,
             ),
             SetupReq::Post { url, body, id_routes } => (
@@ -77,7 +78,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap(),
+                    .expect(&format!("Failed to POST to URL: {url}")),
                 id_routes,
             ),
         };
@@ -137,11 +138,11 @@ G GET  PUT  POST DEL  TRCE G  URL
 /// Describes a request made during the setup phase to create a resource that
 /// we'll use later in the verification phase
 ///
-/// The setup phase takes a list of `SetupReq` enums and issues a `GET` or `POST`
-/// request to each one's `url`. `id_results` is a list of URLs that are associated
-/// to the results of the setup request with any `{id}` params in the URL replaced with
-/// the result's URL. This is used to later verify ID endpoints without first having to
-/// know the ID.
+/// The setup phase takes a list of `SetupReq` enums and issues a `GET` or
+/// `POST` request to each one's `url`. `id_results` is a list of URLs that are
+/// associated to the results of the setup request with any `{id}` params in the
+/// URL replaced with the result's URL. This is used to later verify ID
+/// endpoints without first having to know the ID.
 
 enum SetupReq {
     Get {
@@ -183,19 +184,28 @@ lazy_static! {
 
     /// List of requests to execute at setup time
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
-        // Create a separate Silo (not used for anything else)
+        // Create a separate Silo
         SetupReq::Post {
             url: "/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
             id_routes: vec!["/system/by-id/silos/{id}"],
         },
-        // Create an IP pool
+        // Create a local User
         SetupReq::Post {
-            url: &*DEMO_IP_POOLS_URL,
-            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+            url: &*DEMO_SILO_USERS_CREATE_URL,
+            body: serde_json::to_value(&*DEMO_USER_CREATE).unwrap(),
+            id_routes: vec![
+                &*DEMO_SILO_USER_ID_GET_URL,
+                &*DEMO_SILO_USER_ID_DELETE_URL,
+                &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
+            ],
+        },
+        // Get the default IP pool
+        SetupReq::Get {
+            url: &*DEMO_IP_POOL_URL,
             id_routes: vec!["/system/by-id/ip-pools/{id}"],
         },
-        // Create an IP Pool range
+        // Create an IP pool range
         SetupReq::Post {
             url: &*DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
@@ -247,7 +257,7 @@ lazy_static! {
         SetupReq::Post {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
-            id_routes: vec!["/by-id/instances/{id}"],
+            id_routes: vec!["/v1/instances/{id}"],
         },
         // Lookup the previously created NIC
         SetupReq::Get {
@@ -279,6 +289,15 @@ lazy_static! {
             id_routes: vec![],
         },
     ];
+}
+
+/// Contents returned from an endpoint that creates a resource that has an id
+///
+/// This is a subset of `IdentityMetadata`.  `IdentityMetadata` includes other
+/// fields (like "name") that are not present on all objects.
+#[derive(serde::Deserialize)]
+struct IdMetadata {
+    id: String,
 }
 
 /// Verifies a single API endpoint, described with `endpoint`
@@ -358,7 +377,7 @@ async fn verify_endpoint(
             Some(response) => endpoint.url.replace(
                 "{id}",
                 response
-                    .parsed_body::<IdentityMetadata>()
+                    .parsed_body::<IdMetadata>()
                     .unwrap()
                     .id
                     .to_string()
@@ -377,7 +396,12 @@ async fn verify_endpoint(
     // might find a 404 because of something that actually doesn't exist rather
     // than something that's just hidden from unauthorized users.
     let get_allowed = endpoint.allowed_methods.iter().find(|allowed| {
-        matches!(allowed, AllowedMethod::Get | AllowedMethod::GetUnimplemented)
+        matches!(
+            allowed,
+            AllowedMethod::Get
+                | AllowedMethod::GetUnimplemented
+                | AllowedMethod::GetWebsocket
+        )
     });
     let resource_before = match get_allowed {
         Some(AllowedMethod::Get) => {
@@ -390,7 +414,7 @@ async fn verify_endpoint(
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap()
+                    .expect(&format!("Failed to GET: {uri}"))
                     .parsed_body::<serde_json::Value>()
                     .unwrap(),
             )
@@ -409,6 +433,19 @@ async fn verify_endpoint(
             .execute()
             .await
             .unwrap();
+            None
+        }
+        Some(AllowedMethod::GetWebsocket) => {
+            info!(log, "test: privileged GET WebSocket");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::SWITCHING_PROTOCOLS,
+            )));
+            NexusRequest::object_get(client, uri.as_str())
+                .authn_as(AuthnMode::PrivilegedUser)
+                .websocket_handshake()
+                .execute()
+                .await
+                .unwrap();
             None
         }
         Some(_) => unimplemented!(),
@@ -452,15 +489,16 @@ async fn verify_endpoint(
                 Some(_) => unauthz_status,
                 None => StatusCode::METHOD_NOT_ALLOWED,
             };
-            let response = NexusRequest::new(
+            let mut request = NexusRequest::new(
                 RequestBuilder::new(client, method.clone(), &uri)
                     .body(body.as_ref())
                     .expect_status(Some(expected_status)),
             )
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await
-            .unwrap();
+            .authn_as(AuthnMode::UnprivilegedUser);
+            if let Some(&AllowedMethod::GetWebsocket) = allowed {
+                request = request.websocket_handshake();
+            }
+            let response = request.execute().await.unwrap();
             verify_response(&response);
             record_operation(WhichTest::Unprivileged(&expected_status));
         } else {
@@ -474,13 +512,14 @@ async fn verify_endpoint(
             Some(_) => unauthn_status,
             None => StatusCode::METHOD_NOT_ALLOWED,
         };
-        let response =
+        let mut request =
             RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
-                .expect_status(Some(expected_status))
-                .execute()
-                .await
-                .unwrap();
+                .expect_status(Some(expected_status));
+        if let Some(&AllowedMethod::GetWebsocket) = allowed {
+            request = request.expect_websocket_handshake();
+        }
+        let response = request.execute().await.unwrap();
         verify_response(&response);
         record_operation(WhichTest::Unauthenticated(&expected_status));
 
@@ -502,34 +541,36 @@ async fn verify_endpoint(
         // actor.
         info!(log, "test: bogus creds: bad actor"; "method" => ?method);
         let bad_actor_authn_header = &spoof::SPOOF_HEADER_BAD_ACTOR;
-        let response =
+        let mut request =
             RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
                 .header(
                     &http::header::AUTHORIZATION,
                     bad_actor_authn_header.0.encode(),
-                )
-                .execute()
-                .await
-                .unwrap();
+                );
+        if let Some(&AllowedMethod::GetWebsocket) = allowed {
+            request = request.expect_websocket_handshake();
+        }
+        let response = request.execute().await.unwrap();
         verify_response(&response);
         record_operation(WhichTest::UnknownUser(&expected_status));
 
         // Now try a syntactically invalid authn header.
         info!(log, "test: bogus creds: bad cred syntax"; "method" => ?method);
         let bad_creds_authn_header = &spoof::SPOOF_HEADER_BAD_CREDS;
-        let response =
+        let mut request =
             RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
                 .header(
                     &http::header::AUTHORIZATION,
                     bad_creds_authn_header.0.encode(),
-                )
-                .execute()
-                .await
-                .unwrap();
+                );
+        if let Some(&AllowedMethod::GetWebsocket) = allowed {
+            request = request.expect_websocket_handshake();
+        }
+        let response = request.execute().await.unwrap();
         verify_response(&response);
         record_operation(WhichTest::InvalidHeader(&expected_status));
 
@@ -574,6 +615,10 @@ async fn verify_endpoint(
 
 /// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
 fn verify_response(response: &TestResponse) {
+    if response.status == StatusCode::SWITCHING_PROTOCOLS {
+        // websocket handshake. avoid trying to parse absent body as json.
+        return;
+    }
     let error: HttpErrorResponseBody = response.parsed_body().unwrap();
     match response.status {
         StatusCode::UNAUTHORIZED => {

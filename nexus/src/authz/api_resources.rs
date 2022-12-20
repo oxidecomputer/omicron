@@ -559,6 +559,63 @@ impl AuthorizedResource for SiloIdentityProviderList {
     }
 }
 
+/// Synthetic resource describing the list of Users in a Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloUserList(Silo);
+
+impl SiloUserList {
+    pub fn new(silo: Silo) -> SiloUserList {
+        SiloUserList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloUserList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloUserList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for SiloUserList {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, datastore, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Main resource hierarchy: Organizations, Projects, and their resources
 
 authz_resource! {
