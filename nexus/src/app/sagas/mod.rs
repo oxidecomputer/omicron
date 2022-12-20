@@ -151,6 +151,13 @@ macro_rules! __action_name {
 
 /// A macro intended to reduce boilerplate when writing saga actions.
 ///
+/// This macro aims to reduce this boilerplate, by requiring only the following:
+/// - The name of the saga
+/// - The name of each action
+/// - The output of each action
+/// - The "forward" action function
+/// - (Optional) The "undo" action function
+///
 /// For this input:
 ///
 /// ```ignore
