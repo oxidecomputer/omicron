@@ -37,6 +37,7 @@ newtype_derive = "0.1.6"
 # integration tests.
 nexus-test-interface = { path = "test-interface" }
 num-integer = "0.1.45"
+once_cell = "1.16.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"

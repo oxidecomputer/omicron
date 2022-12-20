@@ -3452,6 +3452,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
+ "once_cell",
  "openapi-lint",
  "openapiv3",
  "openssl",
