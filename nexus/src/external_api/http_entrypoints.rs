@@ -122,14 +122,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_policy_view_v1)?;
         api.register(project_policy_update_v1)?;
 
-        api.register(project_list_v1)?;
-        api.register(project_create_v1)?;
-        api.register(project_view_v1)?;
-        api.register(project_delete_v1)?;
-        api.register(project_update_v1)?;
-        api.register(project_policy_view_v1)?;
-        api.register(project_policy_update_v1)?;
-
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
@@ -167,6 +159,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
+
         api.register(instance_list_v1)?;
         api.register(instance_view_v1)?;
         api.register(instance_create_v1)?;
