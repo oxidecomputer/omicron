@@ -5,35 +5,21 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-async-trait = "0.1.60"
-clap = { version = "4.0", features = ["derive"] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3"
-hex = { version = "0.4.3", features = ["serde"] }
-omicron-common = { path = "../common" }
-slog-dtrace = "0.2"
-sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-thiserror = "1.0"
-toml = "0.5.10"
-
-[dependencies.gateway-messages]
-git = "https://github.com/oxidecomputer/management-gateway-service"
-rev = "1a27a661d7824712aeb4d1b9801938888139eaa7"
-default-features = false
-features = ["std"]
-
-[dependencies.serde]
-version = "1.0"
-features = [ "derive" ]
-
-[dependencies.slog]
-version = "2.7"
-features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.tokio]
-version = "1.23"
-features = [ "full" ]
+anyhow.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+gateway-messages.workspace = true
+hex = { workspace = true, features = [ "serde" ] }
+omicron-common.workspace = true
+serde.workspace = true
+slog.workspace = true
+slog-dtrace.workspace = true
+sprockets-rot.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+toml.workspace = true
 
 [[bin]]
 name = "sp-sim"

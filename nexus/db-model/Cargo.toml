@@ -8,29 +8,28 @@ license = "MPL-2.0"
 path = "../../rpaths"
 
 [dependencies]
-anyhow = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
-diesel = { version = "2.0.2", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-hex = "0.4.3"
-internal-dns-client = { path = "../../internal-dns-client" }
-ipnetwork = "0.20"
-macaddr = { version = "1.0.1", features = [ "serde_std" ]}
-newtype_derive = "0.1.6"
-parse-display = "0.7.0"
+anyhow.workspace = true
+chrono.workspace = true
+diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+hex.workspace = true
+internal-dns-client.workspace = true
+ipnetwork.workspace = true
+macaddr.workspace = true
+newtype_derive.workspace = true
+parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-rand = "0.8.5"
-ref-cast = "1.0"
-schemars = { version = "0.8.10", features = ["chrono", "uuid1"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1.2.2", features = ["serde", "v4"] }
+rand.workspace = true
+ref-cast.workspace = true
+schemars = { workspace = true, features = ["chrono", "uuid1"] }
+serde.workspace = true
+serde_json.workspace = true
+steno.workspace = true
+uuid.workspace = true
 
-steno = "0.3"
-
-db-macros = { path = "../db-macros" }
-omicron-common = { path = "../../common" }
-nexus-defaults = { path = "../defaults" }
-nexus-passwords = { path = "../passwords" }
-nexus-types = { path = "../types" }
-sled-agent-client = { path = "../../sled-agent-client" }
+db-macros.workspace = true
+omicron-common.workspace = true
+nexus-defaults.workspace = true
+nexus-passwords.workspace = true
+nexus-types.workspace = true
+sled-agent-client.workspace = true
