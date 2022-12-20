@@ -5,22 +5,10 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-reqwest = { version = "0.11.13", default-features = false, features = ["rustls-tls", "stream"] }
-schemars = "0.8"
-
-[dependencies.chrono]
-version = "0.4"
-features = [ "serde" ]
-
-[dependencies.serde]
-version = "1.0"
-features = [ "derive" ]
-
-[dependencies.slog]
-version = "2.5"
-features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.uuid]
-version = "1.2.2"
-features = [ "serde", "v4" ]
+chrono.workspace = true
+progenitor.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
+uuid.workspace = true

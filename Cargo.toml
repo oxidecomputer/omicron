@@ -133,6 +133,7 @@ nexus-client = { path = "nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-passwords = { path = "nexus/passwords" }
+nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
@@ -200,6 +201,7 @@ slog-dtrace = "0.2"
 slog-envlogger = "2.2"
 slog-term = "2.9"
 smf = "0.2"
+snafu = "0.7"
 sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }

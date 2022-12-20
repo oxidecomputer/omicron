@@ -5,39 +5,33 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-clap = { version = "4.0", features = ["derive"] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.25"
-http = "0.2.7"
-hyper = "0.14.23"
-reqwest = { version = "0.11.13" }
-schemars = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-slog-dtrace = "0.2"
-snafu = "0.7"
-toml = "0.5.10"
-uuid = "1.2.2"
+clap.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+http.workspace = true
+hyper.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
+slog-dtrace.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+snafu.workspace = true
+toml.workspace = true
+uuid.workspace = true
 
-gateway-client = { path = "../gateway-client" }
-omicron-common = { path = "../common" }
-
-[dependencies.slog]
-version = "2.7"
-features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.tokio]
-version = "1.23"
-features = [ "full" ]
+gateway-client.workspace = true
+omicron-common.workspace = true
 
 [[bin]]
 name = "wicketd"
 doc = false
 
 [dev-dependencies]
-expectorate = "1.0.5"
-http = "0.2.7"
-omicron-test-utils = { path = "../test-utils" }
-openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
-openapiv3 = "1.0"
-serde_json = "1.0"
-subprocess = "0.2.9"
+expectorate.workspace = true
+http.workspace = true
+omicron-test-utils.workspace = true
+openapi-lint.workspace = true
+openapiv3.workspace = true
+serde_json.workspace = true
+subprocess.workspace = true

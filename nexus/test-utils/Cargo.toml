@@ -12,7 +12,7 @@ dropshot.workspace = true
 headers.workspace = true
 http.workspace = true
 hyper.workspace = true
-nexus-test-interface = { path = "../test-interface" }
+nexus-test-interface.workspace = true
 omicron-common.workspace = true
 omicron-nexus.workspace = true
 omicron-sled-agent.workspace = true

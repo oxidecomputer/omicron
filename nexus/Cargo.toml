@@ -34,7 +34,7 @@ mime_guess.workspace = true
 newtype_derive.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
-nexus-test-interface = { path = "test-interface" }
+nexus-test-interface.workspace = true
 num-integer.workspace = true
 openssl.workspace = true
 openssl-sys.workspace = true
