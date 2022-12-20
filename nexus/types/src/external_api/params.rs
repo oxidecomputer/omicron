@@ -1024,6 +1024,7 @@ pub struct DiskIdentifier {
     pub name: Name,
 }
 
+// TODO-v1: Post merge, consolidate with paths
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceIdentifier {
     pub instance: NameOrId,

@@ -122,7 +122,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_policy_view_v1)?;
         api.register(project_policy_update_v1)?;
 
-        // Customer-Accessible IP Pools API
+        // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_view)?;
@@ -3506,7 +3506,7 @@ async fn instance_disk_list(
 }
 
 /// Attach a disk to an instance
-/// Use `POST /v1/disks/{disk}/attach { instance: <instance> } ` instead
+/// Use `POST /v1/disks/{disk}/attach` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
@@ -3546,7 +3546,7 @@ async fn instance_disk_attach(
 }
 
 /// Detach a disk from an instance
-/// Use `POST /v1/disks/{disk}/detach { instance: <instance> } ` instead
+/// Use `POST /v1/disks/{disk}/detach` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
