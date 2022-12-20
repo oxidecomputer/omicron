@@ -1979,7 +1979,6 @@ dependencies = [
  "futures",
  "gateway-client",
  "libc",
- "omicron-common",
  "slog",
  "slog-async",
  "slog-term",
@@ -1993,8 +1992,6 @@ name = "gateway-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "futures",
- "omicron-common",
  "progenitor",
  "reqwest",
  "schemars",
@@ -3345,7 +3342,6 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
- "smf",
  "steno",
  "thiserror",
  "tokio",
@@ -3585,7 +3581,6 @@ dependencies = [
  "sprockets-common",
  "sprockets-host",
  "subprocess",
- "tar",
  "tempfile",
  "thiserror",
  "tokio",
@@ -3927,7 +3922,6 @@ dependencies = [
 name = "oximeter-macro-impl"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "proc-macro2",
  "quote",
  "syn",
@@ -7095,7 +7089,6 @@ dependencies = [
  "crossterm",
  "futures",
  "hex",
- "omicron-common",
  "reqwest",
  "semver 1.0.16",
  "serde",
@@ -7122,7 +7115,6 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
- "hex",
  "http",
  "hyper",
  "omicron-common",

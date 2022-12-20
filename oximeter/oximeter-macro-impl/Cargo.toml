@@ -9,7 +9,6 @@ license = "MPL-2.0"
 proc-macro = true
 
 [dependencies]
-bytes = { workspace = true, features = [ "serde" ] }
 proc-macro2.workspace = true
 quote.workspace = true
 syn = { workspace = true, features = [ "full", "extra-traits" ] }

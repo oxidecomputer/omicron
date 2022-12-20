@@ -46,7 +46,6 @@ smf.workspace = true
 sp-sim.workspace = true
 sprockets-common.workspace = true
 sprockets-host.workspace = true
-tar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }

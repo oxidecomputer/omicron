@@ -17,4 +17,3 @@ tokio-tungstenite.workspace = true
 uuid.workspace = true
 
 gateway-client.workspace = true
-omicron-common.workspace = true
