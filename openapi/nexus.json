@@ -2233,7 +2233,7 @@
           "instances"
         ],
         "summary": "Attach a disk to an instance",
-        "description": "Use `POST /v1/disks/{disk}/attach { instance: <instance> } ` instead",
+        "description": "Use `POST /v1/disks/{disk}/attach` instead",
         "operationId": "instance_disk_attach",
         "parameters": [
           {
@@ -2298,7 +2298,7 @@
           "instances"
         ],
         "summary": "Detach a disk from an instance",
-        "description": "Use `POST /v1/disks/{disk}/detach { instance: <instance> } ` instead",
+        "description": "Use `POST /v1/disks/{disk}/detach` instead",
         "operationId": "instance_disk_detach",
         "parameters": [
           {
