@@ -63,9 +63,31 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("failed to make \"create\" request")
+        .expect(&format!("failed to make \"create\" request to {path}"))
         .parsed_body()
         .unwrap()
+}
+
+pub async fn populate_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) -> IpPoolRange {
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
+    let range = object_create(
+        client,
+        format!("/system/ip-pools/{}/ranges/add", pool_name).as_str(),
+        &ip_range,
+    )
+    .await;
+    range
 }
 
 /// Create an IP pool with a single range for testing.
@@ -77,16 +99,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-    project_path: Option<params::OldProjectPath>,
 ) -> (IpPool, IpPoolRange) {
-    let ip_range = ip_range.unwrap_or_else(|| {
-        use std::net::Ipv4Addr;
-        IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 0),
-            Ipv4Addr::new(10, 0, 255, 255),
-        ))
-        .unwrap()
-    });
     let pool = object_create(
         client,
         "/system/ip-pools",
@@ -95,16 +108,10 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
-            project: project_path,
         },
     )
     .await;
-    let range = object_create(
-        client,
-        format!("/system/ip-pools/{}/ranges/add", pool_name).as_str(),
-        &ip_range,
-    )
-    .await;
+    let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
 }
 

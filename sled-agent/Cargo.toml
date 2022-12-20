@@ -14,8 +14,8 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "4.0", features = ["derive"] }
 # Only used by the simulated sled agent.
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "861a09c350fd0e127b6105c8099e31a0bc3b711a" }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "861a09c350fd0e127b6105c8099e31a0bc3b711a" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
 ddm-admin-client = { path = "../ddm-admin-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.25"
@@ -32,7 +32,7 @@ oximeter-producer = { version = "0.1.0", path = "../oximeter/producer" }
 p256 = "0.9.0"
 percent-encoding = "2.2.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "b596e72b6b93bc412d675358f782ae7d53f8bf7a", features = [ "generated-migration" ] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "666ded451b13bba0895485c0b34515c0e59c2c6e", features = [ "generated-migration" ] }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.13", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
