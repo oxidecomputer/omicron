@@ -2435,13 +2435,12 @@ async fn disk_create_v1(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
-    let new_disk_params = &new_disk.into_inner();
+    let params = new_disk.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &query)?;
-        let disk = nexus
-            .project_create_disk(&opctx, &project_lookup, new_disk_params)
-            .await?;
+        let disk =
+            nexus.project_create_disk(&opctx, &project_lookup, &params).await?;
         Ok(HttpResponseCreated(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

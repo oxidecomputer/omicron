@@ -268,7 +268,7 @@ impl Name {
     }
 }
 
-#[derive(Serialize, Deserialize, Display, Clone)]
+#[derive(Debug, Serialize, Deserialize, Display, Clone)]
 #[display("{0}")]
 #[serde(untagged)]
 pub enum NameOrId {

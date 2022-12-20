@@ -1145,21 +1145,13 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &*DEMO_DISKS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-        VerifyEndpoint {
             url: &*DEMO_DISKS_ATTACH_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
-                    serde_json::to_value(params::DiskIdentifier {
-                        name: DEMO_DISK_NAME.clone()
+                    serde_json::to_value(params::InstanceIdentifier {
+                        instance: DEMO_INSTANCE_NAME.clone().into()
                     }).unwrap()
                 )
             ],
@@ -1170,8 +1162,8 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
-                    serde_json::to_value(params::DiskIdentifier {
-                        name: DEMO_DISK_NAME.clone()
+                    serde_json::to_value(params::InstanceIdentifier {
+                        instance: DEMO_INSTANCE_NAME.clone().into()
                     }).unwrap()
                 )
             ],

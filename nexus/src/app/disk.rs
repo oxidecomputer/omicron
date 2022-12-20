@@ -73,6 +73,7 @@ impl super::Nexus {
     ) -> CreateResult<db::model::Disk> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
         match &params.disk_source {
             params::DiskSource::Blank { block_size } => {
                 // Reject disks where the block size doesn't evenly divide the
