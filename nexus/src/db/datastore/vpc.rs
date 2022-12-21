@@ -283,6 +283,7 @@ impl DataStore {
             .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .set(dsl::time_deleted.eq(now));
 
+        let rules_is_empty = rules.is_empty();
         let insert_new_query = Vpc::insert_resource(
             authz_vpc.id(),
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
@@ -306,6 +307,9 @@ impl DataStore {
                 // The generation count update on the vpc table row will take a
                 // write lock on the row, ensuring that the vpc was not deleted
                 // concurently.
+                if rules_is_empty {
+                    return Ok(vec![]);
+                }
                 insert_new_query
                     .insert_and_get_results_async(&conn)
                     .await
