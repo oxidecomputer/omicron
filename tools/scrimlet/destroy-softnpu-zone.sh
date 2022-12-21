@@ -8,5 +8,5 @@ zoneadm -z softnpu uninstall
 zonecfg -z softnpu delete
 
 zfs destroy -r rpool/softnpu-zone
-rm -rf /opt/softnpu/stuff
+rm -rf /opt/oxide/softnpu/stuff
 rm -rf /softnpu-zone

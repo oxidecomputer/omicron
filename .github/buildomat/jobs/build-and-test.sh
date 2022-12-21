@@ -10,6 +10,9 @@
 #:	"!/var/tmp/omicron_tmp/rustc*",
 #: ]
 #:
+#: access_repos = [
+#:   "oxidecomputer/dendrite",
+#: ]
 
 set -o errexit
 set -o pipefail
@@ -62,6 +65,11 @@ ptime -m cargo build --locked --all-targets --verbose
 # We also don't use `--workspace` here because we're not prepared to run tests
 # from end-to-end-tests.
 #
+
+# TODO: we are bypassing calls to DPD during these tests for now. This env var
+# can be removed once we have dpd-stub added to the test setup
+export SKIP_ASIC_CONFIG=1
+
 banner test
 ptime -m cargo test --locked --verbose --no-fail-fast
 

@@ -24,11 +24,7 @@ if [[ -f "$MARKER" ]]; then
 fi
 
 # Select the physical link over which to simulate the Chelsio links
-if [[ $# -ge 1 ]]; then
-    PHYSICAL_LINK="$1"
-else
-    PHYSICAL_LINK="$(dladm show-phys -p -o LINK | head -1)"
-fi
+PHYSICAL_LINK=${PHYSICAL_LINK:=$(dladm show-phys -p -o LINK | head -1)}
 echo "Using $PHYSICAL_LINK as physical link"
 
 function success {
@@ -108,6 +104,59 @@ function ensure_run_as_root {
     fi
 }
 
+function ensure_softnpu_zone {
+    zoneadm list | grep -q softnpu || {
+        mkdir -p /softnpu-zone
+        mkdir -p /opt/oxide/softnpu/stuff
+        cp tools/scrimlet/softnpu.toml /opt/oxide/softnpu/stuff/
+        cp tools/scrimlet/softnpu-init.sh /opt/oxide/softnpu/stuff/
+        cp out/softnpu/libsidecar_lite.so /opt/oxide/softnpu/stuff/
+        cp out/softnpu/softnpu /opt/oxide/softnpu/stuff/
+        cp out/softnpu/scadm /opt/oxide/softnpu/stuff/
+
+        zfs create -p -o mountpoint=/softnpu-zone rpool/softnpu-zone
+
+        # TODO-remove
+        # Is this command still necessary with a omicron1 zone?
+        # pkg set-publisher --search-first helios-dev
+
+        zonecfg -z softnpu -f tools/scrimlet/softnpu-zone.txt
+        zoneadm -z softnpu install
+        zoneadm -z softnpu boot
+
+        # TODO-remove
+        # Is this command still necessary with a omicron1 zone?
+        # pkg set-publisher --search-first helios-netdev
+    }
+    success "softnpu zone exists"
+}
+
+function enable_softnpu {
+    zlogin softnpu uname -a || {
+        echo "softnpu zone not ready"
+        exit 1
+    }
+    zlogin softnpu pgrep softnpu || {
+        zlogin softnpu /stuff/softnpu /stuff/softnpu.toml &
+    }
+    success "softnpu started"
+}
+
+function ensure_ext_ip_hack_disabled {
+    grep "ext_ip_hack = 1;" /kernel/drv/xde.conf && {
+       sed -i 's/ext_ip_hack = 1;/ext_ip_hack = 0;/g' /kernel/drv/xde.conf
+    }
+
+    grep "ext_ip_hack = 0;" /kernel/drv/xde.conf || {
+        echo "failed to disable ext_ip_hack"
+        exit 1
+    }
+    success "ext_ip_hack disabled"
+}
+
 ensure_run_as_root
+ensure_ext_ip_hack_disabled
 ensure_zpools
 ensure_simulated_chelsios "$PHYSICAL_LINK"
+ensure_softnpu_zone
+enable_softnpu

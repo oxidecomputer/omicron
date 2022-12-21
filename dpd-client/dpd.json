@@ -1,0 +1,3771 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Switch Dataplane Controller",
+    "description": "API for managing the Oxide rack switch",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/all_settings": {
+      "delete": {
+        "summary": "Clear all settings.",
+        "description": "This removes all data entirely.",
+        "operationId": "reset_all",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/all_settings/{tag}": {
+      "delete": {
+        "summary": "Clear all settings associated with a specific tag.",
+        "description": "This removes:\n- All ARP or NDP table entries. - All routes - All switch ports",
+        "operationId": "reset_all_tagged",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/arp/ipv4/entries": {
+      "get": {
+        "summary": "Fetch the configured IPv4 ARP table entries.",
+        "operationId": "arp_ipv4_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArpEntryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Remove all entries in the IPv4 ARP tables.",
+        "operationId": "arp_ipv4_reset",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/arp/ipv4/entries/{ip}": {
+      "get": {
+        "summary": "Get a single IPv4 ARP table entry, by its IPv4 address.",
+        "operationId": "arp_ipv4_entry_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArpEntry"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add an IPv4 ARP table entry, mapping an IPv4 address to a MAC address.",
+        "operationId": "arp_ipv4_entry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArpEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove a single IPv4 ARP entry, by its IPv4 address.",
+        "operationId": "arp_ipv4_entry_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/arp/ipv6/entries": {
+      "get": {
+        "summary": "Fetch the IPv6 NDP table entries.",
+        "description": "This returns a paginated list of all IPv6 neighbors directly connected to the switch.",
+        "operationId": "neighbor_ipv6_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArpEntryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Remove all entries in the the IPv6 NDP tables.",
+        "operationId": "neighbor_ipv6_reset",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/arp/ipv6/entries/{ip}": {
+      "get": {
+        "summary": "Get a single IPv6 NDP table entry, by its IPv6 address.",
+        "operationId": "neighbor_ipv6_entry_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArpEntry"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add an IPv6 NDP entry, mapping an IPv6 address to a MAC address.",
+        "operationId": "neighbor_ipv6_entry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArpEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove an IPv6 NDP entry, by its IPv6 address.",
+        "operationId": "neighbor_ipv6_entry_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/fec": {
+      "get": {
+        "summary": "Get the FEC RS counters for all ports.",
+        "operationId": "port_get_fec_rs_counters_all",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_FecRSCounters",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FecRSCounters"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/fec/{port}": {
+      "get": {
+        "summary": "Get the FEC RS counters for the given port.",
+        "operationId": "port_get_fec_rs_counters",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FecRSCounters"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/p4": {
+      "get": {
+        "summary": "Get a list of all the available p4-defined counters.",
+        "operationId": "counter_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/p4/{counter}": {
+      "get": {
+        "summary": "Get the values for a given counter.",
+        "operationId": "counter_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "counter",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CounterValueResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Reset a single p4-defined counter.",
+        "operationId": "counter_reset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "counter",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/pcs": {
+      "get": {
+        "summary": "Get the physical coding sublayer (PCS) counters for all switch ports.",
+        "operationId": "port_get_pcs_counters_all",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_PcsCounters",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PcsCounters"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/pcs/{port}": {
+      "get": {
+        "summary": "Get the PCS counters for the given port.",
+        "operationId": "port_get_pcs_counters",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PcsCounters"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/rmon/{port}/all": {
+      "get": {
+        "summary": "Get the full set of traffic counters for the given port.",
+        "operationId": "port_get_rmon_counters_full",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RMonCountersAll"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/counters/rmon/{port}/subset": {
+      "get": {
+        "summary": "Get the most relevant subset of traffic counters for the given port.",
+        "operationId": "port_get_rmon_counters_short",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RMonCounters"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/dpd-uptime": {
+      "get": {
+        "summary": "Return the server uptime.",
+        "operationId": "get_dpd_uptime",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "int64",
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/dpd-version": {
+      "get": {
+        "summary": "Return the version of the `dpd` server itself.",
+        "operationId": "get_dpd_version",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/nat/ipv4": {
+      "get": {
+        "summary": "Get all of the external addresses in use for IPv4 NAT mappings.",
+        "operationId": "nat_addresses_ipv4",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ipv4ResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Clear all IPv4 NAT mappings.",
+        "operationId": "nat_reset_ipv4",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/nat/ipv4/{ipv4}": {
+      "get": {
+        "summary": "Get all of the external->internal NAT mappings for a given IPv4 address.",
+        "operationId": "nat_mappings_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv4",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ipv4NatResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/nat/ipv4/{ipv4}/{low}": {
+      "get": {
+        "summary": "Get the external->internal NAT mapping for the given address/port",
+        "operationId": "nat_get_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv4",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          {
+            "in": "path",
+            "name": "low",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NatTarget"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear the NAT mappings for an IPv4 address and starting L3 port.",
+        "operationId": "nat_delete_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv4",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          {
+            "in": "path",
+            "name": "low",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/nat/ipv4/{ipv4}/{low}/{high}": {
+      "post": {
+        "summary": "Add an external->internal NAT mapping for the given address/port range",
+        "description": "This maps an external IPv6 address and L3 port range to:  - A gimlet's IPv6 address  - A gimlet's MAC address  - A Geneve VNI\nThese identify the gimlet on which a guest is running, and gives OPTE the information it needs to  identify the guest VM that uses the external IPv6 and port range when making connections outside of an Oxide rack.",
+        "operationId": "nat_set_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "high",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "ipv4",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          {
+            "in": "path",
+            "name": "low",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NatTarget"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/nat/ipv6": {
+      "get": {
+        "summary": "Get all of the external addresses in use for NAT mappings.",
+        "operationId": "nat_addresses_ipv6",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ipv6ResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Clear all IPv6 NAT mappings.",
+        "operationId": "nat_reset_ipv6",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/nat/ipv6/{ipv6}": {
+      "get": {
+        "summary": "Get all of the external->internal NAT mappings for a given address.",
+        "operationId": "nat_mappings_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv6",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ipv6NatResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/nat/ipv6/{ipv6}/{low}": {
+      "get": {
+        "summary": "Get the external->internal NAT mapping for the given address and starting L3",
+        "description": "port.",
+        "operationId": "nat_get_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv6",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          {
+            "in": "path",
+            "name": "low",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NatTarget"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear the NAT mapping for an IPv6 address and starting L3 port.",
+        "operationId": "nat_delete_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv6",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          {
+            "in": "path",
+            "name": "low",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/nat/ipv6/{ipv6}/{low}/{high}": {
+      "post": {
+        "summary": "Add an external->internal NAT mapping for the given address and L3 port",
+        "description": "range.\nThis maps an external IPv6 address and L3 port range to:  - A gimlet's IPv6 address  - A gimlet's MAC address  - A Geneve VNI\nThese identify the gimlet on which a guest is running, and gives OPTE the information it needs to  identify the guest VM that uses the external IPv6 and port range when making connections outside of an Oxide rack.",
+        "operationId": "nat_set_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "high",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "ipv6",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          {
+            "in": "path",
+            "name": "low",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NatTarget"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/phys_ports": {
+      "get": {
+        "summary": "Get the set of available channels for all ports.",
+        "description": "This returns the unused PHY channels for each physical switch port. This can be used to determine how many additional MAC interfaces may be created on a physical port.",
+        "operationId": "port_get_avail",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_PortAvail",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortAvail"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port": {
+      "get": {
+        "summary": "Fetch the state for all ports.",
+        "operationId": "port_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "description": "Limit to ports updated after this time (in nanoseconds since UNIX epoch).",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortDataResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Clear the configured state for all ports.",
+        "operationId": "port_reset",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}": {
+      "post": {
+        "summary": "Create a switch port.",
+        "description": "This requires both the desired speed and forward error-correction (FEC) method for the port. The first available PHY channels from the physical port will be used, where the number of required channels is currently determined by the requested speed.",
+        "operationId": "port_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortSpeedFec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a switch port by name.",
+        "operationId": "port_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/autoneg": {
+      "get": {
+        "summary": "Return whether a port is configured to use autonegotiation with its peer",
+        "description": "link.",
+        "operationId": "port_get_autoneg",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Boolean",
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set whether a port is configured to use autonegotiation with its peer link.",
+        "operationId": "port_set_autoneg",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Boolean",
+                "type": "boolean"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/enabled": {
+      "get": {
+        "summary": "Return whether the port is enabled.",
+        "operationId": "port_get_enabled",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Boolean",
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Enable or disable a port.",
+        "operationId": "port_set_enabled",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Boolean",
+                "type": "boolean"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/ipv4": {
+      "get": {
+        "summary": "Get a port's IPv4 addresses.",
+        "operationId": "port_get_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Ipv4Entry",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ipv4Entry"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add an IPv4 address to a port.",
+        "operationId": "port_set_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Ipv4Entry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear all of a port's IPv4 addresses.",
+        "operationId": "port_clear_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/ipv4/{ipv4}": {
+      "delete": {
+        "summary": "Remove one of a port's IPv4 addresses.",
+        "operationId": "port_delete_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv4",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/ipv6": {
+      "get": {
+        "summary": "Get a port's IPv6 addresses.",
+        "operationId": "port_get_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Ipv6Entry",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ipv6Entry"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add an IPv6 address to a port.",
+        "operationId": "port_set_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Ipv6Entry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear a port's IPv6 addresses.",
+        "operationId": "port_clear_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/ipv6/{ipv6}": {
+      "delete": {
+        "summary": "Remove one of a port's IPv6 addresses.",
+        "operationId": "port_delete_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ipv6",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/kr": {
+      "get": {
+        "summary": "Get a port's KR mode setting.",
+        "operationId": "port_get_kr",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Boolean",
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set a port's KR mode setting.",
+        "operationId": "port_set_kr",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Boolean",
+                "type": "boolean"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/linkup": {
+      "get": {
+        "summary": "Return whether the port's link is up.",
+        "operationId": "port_get_linkup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Boolean",
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/mac": {
+      "get": {
+        "summary": "Get a port's MAC address.",
+        "operationId": "port_get_mac",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacAddr"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set a port's MAC address.",
+        "operationId": "port_set_mac",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MacAddr"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/port/{port}/prbs": {
+      "post": {
+        "summary": "Set a port's PRBS speed and mode.",
+        "operationId": "port_set_prbs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortPrbsMode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/route/ipv4/entries": {
+      "get": {
+        "summary": "Fetch the configured IPv4 routes, mapping IPv4 CIDR blocks to the switch port",
+        "description": "used for sending out that traffic, and optionally a gateway.",
+        "operationId": "route_ipv4_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Reset the ipv4 subnet routing tables",
+        "operationId": "route_ipv4_reset",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/route/ipv4/entries/{cidr}": {
+      "get": {
+        "summary": "Get the configured route for the given IPv4 subnet.",
+        "operationId": "route_ipv4_entry_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cidr",
+            "description": "The IPv4 subnet in CIDR notation whose route entry is returned.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Ipv4Cidr"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Route"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Route an IPv4 subnet to a switch port, and optionally a nexthop gateway.",
+        "description": "If no nexthop is provided, the a destination address in the subnet is assumed to be directly connected to the switch port, and resolvable through ARP.",
+        "operationId": "route_ipv4_entry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cidr",
+            "description": "The IPv4 subnet in CIDR notation whose route entry is returned.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Ipv4Cidr"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Route"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove the current IPv4 subnet route through a switch port.",
+        "operationId": "route_ipv4_entry_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cidr",
+            "description": "The IPv4 subnet in CIDR notation whose route entry is returned.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Ipv4Cidr"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/route/ipv6/entries": {
+      "get": {
+        "summary": "Fetch the configured IPv6 routes, mapping IPv6 CIDR blocks to the switch port",
+        "description": "used for sending out that traffic, and optionally a gateway.",
+        "operationId": "route_ipv6_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "delete": {
+        "summary": "Remove all entries in the IPv6 subnet routing tables.",
+        "operationId": "route_ipv6_reset",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/route/ipv6/entries/{cidr}": {
+      "get": {
+        "summary": "Get a single IPv6 route, by its IPv6 CIDR block.",
+        "operationId": "route_ipv6_entry_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cidr",
+            "description": "The IPv6 subnet in CIDR notation whose route entry is returned.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Ipv6Cidr"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Route"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Route an IPv6 subnet to a switch port, and optionally a nexthop gateway.",
+        "description": "If no nexthop is provided, the a destination address in the subnet is assumed to be directly connected to the switch port, and resolvable through NDP.",
+        "operationId": "route_ipv6_entry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cidr",
+            "description": "The IPv6 subnet in CIDR notation whose route entry is returned.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Ipv6Cidr"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Route"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove an IPv6 route, by its IPv6 CIDR block.",
+        "operationId": "route_ipv6_entry_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cidr",
+            "description": "The IPv6 subnet in CIDR notation whose route entry is returned.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Ipv6Cidr"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ArpEntry": {
+        "description": "Represents the mapping of an IP address to a MAC address.",
+        "type": "object",
+        "properties": {
+          "ip": {
+            "description": "The IP address for the entry.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "description": "The MAC address to which `ip` maps.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr"
+              }
+            ]
+          },
+          "tag": {
+            "description": "A tag used to associate this entry with a client.",
+            "type": "string"
+          },
+          "update": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ip",
+          "mac",
+          "tag",
+          "update"
+        ]
+      },
+      "ArpEntryResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArpEntry"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Cidr": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Cidr"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Cidr"
+              }
+            ]
+          }
+        ]
+      },
+      "CounterValue": {
+        "description": "An ASIC-specific counter.",
+        "type": "object",
+        "properties": {
+          "bytes": {
+            "description": "The number of bytes processed pertaining to the key.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "key": {
+            "description": "A key or description of the counter's data.",
+            "type": "string"
+          },
+          "packets": {
+            "description": "The number of packets processed pertaining to the key.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bytes",
+          "key",
+          "packets"
+        ]
+      },
+      "CounterValueResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CounterValue"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "FecRSCounters": {
+        "description": "Per-port RS FEC counters",
+        "type": "object",
+        "properties": {
+          "fec_align_status": {
+            "type": "boolean"
+          },
+          "fec_corr_cnt": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_0": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_1": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_2": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_3": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_4": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_5": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_6": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_ser_lane_7": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fec_uncorr_cnt": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "hi_ser": {
+            "type": "boolean"
+          },
+          "port": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fec_align_status",
+          "fec_corr_cnt",
+          "fec_ser_lane_0",
+          "fec_ser_lane_1",
+          "fec_ser_lane_2",
+          "fec_ser_lane_3",
+          "fec_ser_lane_4",
+          "fec_ser_lane_5",
+          "fec_ser_lane_6",
+          "fec_ser_lane_7",
+          "fec_uncorr_cnt",
+          "hi_ser",
+          "port"
+        ]
+      },
+      "Ipv4Cidr": {
+        "example": "192.168.1.0/24",
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "type": "string",
+        "format": "ipv4cidr"
+      },
+      "Ipv4Entry": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "tag"
+        ]
+      },
+      "Ipv4Nat": {
+        "description": "represents an IPv4 NAT reservation",
+        "type": "object",
+        "properties": {
+          "external": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "high": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "low": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "target": {
+            "$ref": "#/components/schemas/NatTarget"
+          }
+        },
+        "required": [
+          "external",
+          "high",
+          "low",
+          "target"
+        ]
+      },
+      "Ipv4NatResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Nat"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Ipv6Cidr": {
+        "example": "fe80::/10",
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "type": "string",
+        "format": "ipv6cidr"
+      },
+      "Ipv6Entry": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "tag"
+        ]
+      },
+      "Ipv6Nat": {
+        "description": "represents an IPv6 NAT reservation",
+        "type": "object",
+        "properties": {
+          "external": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "high": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "low": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "target": {
+            "$ref": "#/components/schemas/NatTarget"
+          }
+        },
+        "required": [
+          "external",
+          "high",
+          "low",
+          "target"
+        ]
+      },
+      "Ipv6NatResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv6Nat"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "MacAddr": {
+        "description": "An EUI-48 MAC address, used for layer-2 addressing.",
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 6,
+            "maxItems": 6
+          }
+        },
+        "required": [
+          "a"
+        ]
+      },
+      "NatTarget": {
+        "description": "represents an internal NAT target",
+        "type": "object",
+        "properties": {
+          "inner_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "internal_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "inner_mac",
+          "internal_ip",
+          "vni"
+        ]
+      },
+      "PcsCounters": {
+        "description": "Per-port PCS counters",
+        "type": "object",
+        "properties": {
+          "bad_sync_headers": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "bip_errors_per_pcs_lane": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "block_lock_loss": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "errored_blocks": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "hi_ber": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "invalid_errors": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "type": "string"
+          },
+          "sync_loss": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "unknown_errors": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "valid_errors": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bad_sync_headers",
+          "bip_errors_per_pcs_lane",
+          "block_lock_loss",
+          "errored_blocks",
+          "hi_ber",
+          "invalid_errors",
+          "port",
+          "sync_loss",
+          "unknown_errors",
+          "valid_errors"
+        ]
+      },
+      "PortAvail": {
+        "description": "Represents the channels available on a single physical port.",
+        "type": "object",
+        "properties": {
+          "channels": {
+            "description": "The set of available channels (lanes) on this connector.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connector": {
+            "description": "The Tofino connector for this port.\n\nThis describes the set of electrical connections representing this port object, which are defined by the pinout and board design of the Sidecar.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channels",
+          "connector"
+        ]
+      },
+      "PortData": {
+        "description": "Represents the state of a configured port",
+        "type": "object",
+        "properties": {
+          "autoneg": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "fec": {
+            "$ref": "#/components/schemas/PortFec"
+          },
+          "ipv4": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Entry"
+            }
+          },
+          "ipv6": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv6Entry"
+            }
+          },
+          "kr": {
+            "type": "boolean"
+          },
+          "link_up": {
+            "type": "boolean"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "media": {
+            "$ref": "#/components/schemas/PortMedia"
+          },
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "prbs": {
+            "$ref": "#/components/schemas/PortPrbsMode"
+          },
+          "speed": {
+            "$ref": "#/components/schemas/PortSpeed"
+          },
+          "updated": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "autoneg",
+          "enabled",
+          "fec",
+          "ipv4",
+          "ipv6",
+          "kr",
+          "link_up",
+          "mac",
+          "media",
+          "name",
+          "port",
+          "prbs",
+          "speed",
+          "updated"
+        ]
+      },
+      "PortDataResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortData"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "PortFec": {
+        "type": "string",
+        "enum": [
+          "None",
+          "Firecode",
+          "RS"
+        ]
+      },
+      "PortMedia": {
+        "type": "string",
+        "enum": [
+          "Copper",
+          "Optical",
+          "CPU",
+          "Unknown"
+        ]
+      },
+      "PortPrbsMode": {
+        "description": "Legal PRBS modes",
+        "type": "string",
+        "enum": [
+          "Mode31",
+          "Mode23",
+          "Mode15",
+          "Mode13",
+          "Mode11",
+          "Mode9",
+          "Mode7",
+          "Mission"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Speeds with which a single port may be configured",
+        "type": "string",
+        "enum": [
+          "Speed0G",
+          "Speed1G",
+          "Speed10G",
+          "Speed25G",
+          "Speed40G",
+          "Speed50G",
+          "Speed100G",
+          "Speed200G",
+          "Speed400G"
+        ]
+      },
+      "PortSpeedFec": {
+        "type": "object",
+        "properties": {
+          "fec": {
+            "$ref": "#/components/schemas/PortFec"
+          },
+          "speed": {
+            "$ref": "#/components/schemas/PortSpeed"
+          }
+        },
+        "required": [
+          "fec",
+          "speed"
+        ]
+      },
+      "RMonCounters": {
+        "description": "High level subset of the RMon counters maintained by the Tofino ASIC",
+        "type": "object",
+        "properties": {
+          "crc_error_stomped": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "fragments_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frame_too_long": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_dropped_buffer_full": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_all": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_ok": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_all": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_ok": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_with_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_with_any_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_rx_in_good_frames": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_tx_total": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_tx_without_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "port": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "crc_error_stomped",
+          "fragments_rx",
+          "frame_too_long",
+          "frames_dropped_buffer_full",
+          "frames_rx_all",
+          "frames_rx_ok",
+          "frames_tx_all",
+          "frames_tx_ok",
+          "frames_tx_with_error",
+          "frames_with_any_error",
+          "octets_rx",
+          "octets_rx_in_good_frames",
+          "octets_tx_total",
+          "octets_tx_without_error",
+          "port"
+        ]
+      },
+      "RMonCountersAll": {
+        "description": "All of the RMon counters maintained by the Tofino ASIC",
+        "type": "object",
+        "properties": {
+          "crc_error_stomped": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "fragments_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frame_too_long": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_dropped_buffer_full": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_all": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_indersized": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_1024_1518": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_128_255": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_1519_2047": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_2048_4095": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_256_511": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_4096_8191": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_512_1023": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_65_127": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_8192_9215": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_9216": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_eq_64": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_length_lt_64": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_oftype_pause": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_ok": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_oversized": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_with_any_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_with_broadcast_addresses": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_with_fcs_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_with_length_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_with_multicast_addresses": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_rx_with_unicast_addresses": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_truncated": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_all": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_broadcast": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_1024_1518": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_128_255": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_1519_2047": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_2048_4095": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_256_511": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_4096_8191": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_512_1023": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_65_127": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_8192_9215": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_9216": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_eq_64": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_length_lt_64": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_multicast": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_ok": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_pause": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_pri_pause": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_unicast": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_vlan": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "frames_tx_with_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "jabber_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_rx_in_good_frames": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_tx_total": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "octets_tx_without_error": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "port": {
+            "type": "string"
+          },
+          "pri0_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri0_framex_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri1_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri1_frames_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri2_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri2_frames_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri3_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri3_frames_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri4_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri4_frames_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri5_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri5_frames_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri6_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri6_frames_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri7_frames_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "pri7_frames_tx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "priority_pause_frames": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri0_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri1_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri2_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri3_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri4_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri5_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri6_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_pri7_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_standard_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "rx_vlan_frames_good": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri0_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri1_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri2_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri3_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri4_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri5_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri6_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tx_pri7_pause_1us_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "crc_error_stomped",
+          "fragments_rx",
+          "frame_too_long",
+          "frames_dropped_buffer_full",
+          "frames_rx_all",
+          "frames_rx_indersized",
+          "frames_rx_length_1024_1518",
+          "frames_rx_length_128_255",
+          "frames_rx_length_1519_2047",
+          "frames_rx_length_2048_4095",
+          "frames_rx_length_256_511",
+          "frames_rx_length_4096_8191",
+          "frames_rx_length_512_1023",
+          "frames_rx_length_65_127",
+          "frames_rx_length_8192_9215",
+          "frames_rx_length_9216",
+          "frames_rx_length_eq_64",
+          "frames_rx_length_lt_64",
+          "frames_rx_oftype_pause",
+          "frames_rx_ok",
+          "frames_rx_oversized",
+          "frames_rx_with_any_error",
+          "frames_rx_with_broadcast_addresses",
+          "frames_rx_with_fcs_error",
+          "frames_rx_with_length_error",
+          "frames_rx_with_multicast_addresses",
+          "frames_rx_with_unicast_addresses",
+          "frames_truncated",
+          "frames_tx_all",
+          "frames_tx_broadcast",
+          "frames_tx_length_1024_1518",
+          "frames_tx_length_128_255",
+          "frames_tx_length_1519_2047",
+          "frames_tx_length_2048_4095",
+          "frames_tx_length_256_511",
+          "frames_tx_length_4096_8191",
+          "frames_tx_length_512_1023",
+          "frames_tx_length_65_127",
+          "frames_tx_length_8192_9215",
+          "frames_tx_length_9216",
+          "frames_tx_length_eq_64",
+          "frames_tx_length_lt_64",
+          "frames_tx_multicast",
+          "frames_tx_ok",
+          "frames_tx_pause",
+          "frames_tx_pri_pause",
+          "frames_tx_unicast",
+          "frames_tx_vlan",
+          "frames_tx_with_error",
+          "jabber_rx",
+          "octets_rx",
+          "octets_rx_in_good_frames",
+          "octets_tx_total",
+          "octets_tx_without_error",
+          "port",
+          "pri0_frames_rx",
+          "pri0_framex_tx",
+          "pri1_frames_rx",
+          "pri1_frames_tx",
+          "pri2_frames_rx",
+          "pri2_frames_tx",
+          "pri3_frames_rx",
+          "pri3_frames_tx",
+          "pri4_frames_rx",
+          "pri4_frames_tx",
+          "pri5_frames_rx",
+          "pri5_frames_tx",
+          "pri6_frames_rx",
+          "pri6_frames_tx",
+          "pri7_frames_rx",
+          "pri7_frames_tx",
+          "priority_pause_frames",
+          "rx_pri0_pause_1us_count",
+          "rx_pri1_pause_1us_count",
+          "rx_pri2_pause_1us_count",
+          "rx_pri3_pause_1us_count",
+          "rx_pri4_pause_1us_count",
+          "rx_pri5_pause_1us_count",
+          "rx_pri6_pause_1us_count",
+          "rx_pri7_pause_1us_count",
+          "rx_standard_pause_1us_count",
+          "rx_vlan_frames_good",
+          "tx_pri0_pause_1us_count",
+          "tx_pri1_pause_1us_count",
+          "tx_pri2_pause_1us_count",
+          "tx_pri3_pause_1us_count",
+          "tx_pri4_pause_1us_count",
+          "tx_pri5_pause_1us_count",
+          "tx_pri6_pause_1us_count",
+          "tx_pri7_pause_1us_count"
+        ]
+      },
+      "Route": {
+        "description": "Represents the mapping of a subnet to a specific egress port and nexthop target.",
+        "type": "object",
+        "properties": {
+          "cidr": {
+            "description": "The subnet to which the route applies.\n\nTraffic destined for any address within the CIDR block is routed using this information.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Cidr"
+              }
+            ]
+          },
+          "egress_port": {
+            "description": "The switch port out which applicable packets are sent.",
+            "type": "string"
+          },
+          "nexthop": {
+            "nullable": true,
+            "description": "An optional next hop address for routed packets.\n\nIf `nexthop` is none, then the route is considered _on-link_, and a resolution protocol is used to determine the L2 address corresponding to the destination. The resolution happens via ARP for IPv4 routes and NDP for IPv6 routes.",
+            "type": "string",
+            "format": "ip"
+          },
+          "tag": {
+            "description": "A client-defined tag associated with the route entry.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cidr",
+          "egress_port",
+          "tag"
+        ]
+      },
+      "RouteResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Vni": {
+        "description": "A Geneve Virtual Network Identifier.\n\nA Geneve VNI is a 24-bit value used to identify virtual networks encapsulated using the Generic Network Virtualization Encapsulation (Geneve) protocol (RFC 8926).",
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "ipv4ResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ipv6ResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    }
+  }
+}

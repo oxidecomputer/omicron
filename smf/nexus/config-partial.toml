@@ -15,7 +15,7 @@ schemes_external = ["spoof", "session_cookie", "access_token"]
 
 [log]
 # Show log messages of this level and more severe
-level = "info"
+level = "debug"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
@@ -23,3 +23,7 @@ if_exists = "append"
 # Configuration for interacting with the timeseries database
 [timeseries_db]
 address = "[fd00:1122:3344:0101::6]:8123"
+
+# Configuration for interacting with the dataplane daemon
+[dpd_api]
+address = "[fd00:1122:3344:101::2]:12224"

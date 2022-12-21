@@ -12,6 +12,7 @@ futures.workspace = true
 illumos-utils.workspace = true
 libc.workspace = true
 nexus-client.workspace = true
+serde.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tofino.workspace = true

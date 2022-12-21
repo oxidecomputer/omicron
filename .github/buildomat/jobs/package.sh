@@ -20,6 +20,10 @@
 #: series = "image"
 #: name = "trampoline-global-zone-packages"
 #: from_output = "/work/trampoline-global-zone-packages.tar.gz"
+#:
+#: access_repos = [
+#:   "oxidecomputer/dendrite",
+#: ]
 
 set -o errexit
 set -o pipefail
@@ -29,10 +33,11 @@ cargo --version
 rustc --version
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
+ptime -m ./tools/install_softnpu_machinery.sh
 
 # Build the test target
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t test target create -i standard -m non-gimlet -s stub
+  -t test target create -i standard -m non-gimlet -s softnpu
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
@@ -44,10 +49,12 @@ tarball_src_dir="$(pwd)/out"
 files=(
 	out/*.tar
 	out/target/test
+	out/softnpu/*
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
+	tools/scrimlet/*
 )
 
 pfexec mkdir -p /work && pfexec chown $USER /work
@@ -105,7 +112,7 @@ zones=(
 	out/oximeter-collector.tar.gz
 	out/propolis-server.tar.gz
 	out/switch-asic.tar.gz
-	out/switch-stub.tar.gz
+	out/switch-softnpu.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

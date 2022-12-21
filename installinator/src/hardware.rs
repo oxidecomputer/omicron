@@ -22,9 +22,10 @@ impl Hardware {
             .context("failed to detect whether host is a gimlet")?;
         ensure!(is_gimlet, "hardware scan only supported on gimlets");
 
-        let hardware = HardwareManager::new(log, None).map_err(|err| {
-            anyhow!("failed to create HardwareManager: {err}")
-        })?;
+        let hardware =
+            HardwareManager::new(log.clone(), None).map_err(|err| {
+                anyhow!("failed to create HardwareManager: {err}")
+            })?;
 
         let disks = hardware.disks();
 

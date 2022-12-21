@@ -15,7 +15,10 @@
 #:
 #: [dependencies.build-end-to-end-tests]
 #: job = "helios / build-end-to-end-tests"
-#:
+#
+#: access_repos = [
+#:   "oxidecomputer/dendrite",
+#: ]
 
 set -o errexit
 set -o pipefail
@@ -39,6 +42,12 @@ _exit_trap() {
 	pfexec netstat -rncva
 	pfexec netstat -anu
 	pfexec arp -an
+	pfexec ./out/softnpu/scadm \
+		--server /opt/oxide/softnpu/stuff/server \
+		--client /opt/oxide/softnpu/stuff/client \
+		standalone \
+		dump-state
+
 	pfexec zfs list
 	pfexec zpool list
 	pfexec fmdump -eVp
@@ -167,6 +176,25 @@ OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
 ./tests/bootstrap
+
+# NOTE: this script configures softnpu's "rack network" settings using swadm
+GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
+
+# NOTE: this command configures proxy arp for softnpu. This is needed if you want to be
+# able to reach instances from the same L2 network segment.
+# /out/softnpu/scadm standalone add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	dump-state
+
 rm ./tests/bootstrap
 for test_bin in tests/*; do
 	./"$test_bin"

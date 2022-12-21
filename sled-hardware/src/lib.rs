@@ -5,6 +5,7 @@
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
+use serde::Deserialize;
 use slog::Logger;
 use slog::{info, warn};
 use std::path::PathBuf;
@@ -37,6 +38,20 @@ pub enum HardwareUpdate {
     TofinoUnloaded,
     DiskAdded(UnparsedDisk),
     DiskRemoved(UnparsedDisk),
+}
+
+/// Configuration for forcing a sled to run as a Scrimlet
+#[derive(Clone, Debug, Deserialize, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ScrimletMode {
+    /// Force sled to run as a Gimlet
+    /// this is to preserve the old behavior of `scrimlet_override = false`,
+    /// but I haven't found where that logic has actually been leveraged...
+    Disabled,
+    /// Force sled to run in Scrimlet mode with a stub switch
+    Stub,
+    /// Force sled to run in Scrimlet mode with a Softnpu switch
+    Softnpu,
 }
 
 /// Describes properties that should uniquely identify a Gimlet.

@@ -8,6 +8,9 @@
 #:	"=/work/*.gz",
 #: ]
 #:
+#: access_repos = [
+#:   "oxidecomputer/dendrite",
+#: ]
 
 set -o errexit
 set -o pipefail

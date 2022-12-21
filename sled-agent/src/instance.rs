@@ -573,6 +573,8 @@ impl Instance {
             Some(&inner.propolis_id().to_string()),
             // dataset=
             &[],
+            // filesystems=
+            &[],
             &[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },

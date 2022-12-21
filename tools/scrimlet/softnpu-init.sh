@@ -3,39 +3,35 @@
 set -e
 set -x
 
-./softnpuadm add-address6 fe80::aae1:deff:fe01:701c
-./softnpuadm add-address6 fe80::aae1:deff:fe01:701d
-./softnpuadm add-address6 fd00:99::1
+# Gateway ip is automatically configured based on the default route on your development machine
+# Can be overridden by setting GATEWAY_IP
+GATEWAY_IP=${GATEWAY_IP:=$(netstat -rn -f inet | grep default | awk -F ' ' '{print $2}')}
+echo "Using $GATEWAY_IP as gateway ip"
 
-./softnpuadm add-route6 fd00:1122:3344:0101:: 64 1 fe80::aae1:deff:fe00:1
-./softnpuadm add-ndp-entry fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
+# Gateway mac is determined automatically by inspecting the arp table on the development machine
+gateway_mac=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')
 
-# ========================================================
-# Change these for your upstream nexthop gateway
-#
-./softnpuadm add-route4 0.0.0.0 0 2 10.100.0.1
-#                                   ^^^^^^^^^^
-#                                   upstream gateway
-#
-./softnpuadm add-arp-entry 10.100.0.1 90:ec:77:2e:70:27
-#                          ^^^^^^^^^^ ^^^^^^^^^^^^^^^^^
-#                          gateway ip    gateway mac
-#
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# Sidecar Interface facing "sled"
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port add 1:0 100G RS
 
-./softnpuadm add-nat4 10.100.0.6 1024 65535 fd00:1122:3344:0101::1 13609650 A8:40:25:F3:C8:3D
+# Sidecar Interface facing external network
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port add 2:0 100G RS
 
-./softnpuadm set-mac 1 a8:e1:de:1:70:1c
-./softnpuadm set-mac 2 a8:e1:de:1:70:1d
+# Configure sidecar local ipv6 addresses
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr add 1:0 fe80::aae1:deff:fe01:701c
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr add 2:0 fe80::aae1:deff:fe01:701d
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr add 1:0 fd00:99::1
 
-# ========================================================
-# Change these for your ip pool
-#
-# The mac address is the one assigned to `vgw0`.
-#
-./softnpuadm add-proxy-arp 10.100.0.5 10.100.0.25 a8:e1:de:01:70:1d
-#                          ^^^^^^^^^^ ^^^^^^^^^^^
-#                           ip-pool     ip-pool
-#                            begin        end
+# Configure route to oxide rack
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" route add fd00:1122:3344:0101::/64 1:0 fe80::aae1:deff:fe00:1
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
 
-./softnpuadm dump-state
+# Configure default route
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" route add 0.0.0.0/0 2:0 "$GATEWAY_IP"
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp add "$GATEWAY_IP" "$gateway_mac"
+
+
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port list
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr list
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" route list
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp list

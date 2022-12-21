@@ -1686,6 +1686,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
+name = "dpd-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "omicron-zone-package",
+ "progenitor",
+ "progenitor-client",
+ "quote",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slog",
+ "toml 0.7.2",
+]
+
+[[package]]
 name = "dropshot"
 version = "0.9.1-dev"
 source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3bf0ee02e98b72c2196240977c8145c8aeb59697"
@@ -3975,6 +3992,7 @@ dependencies = [
  "diesel",
  "diesel-dtrace",
  "dns-service-client",
+ "dpd-client",
  "dropshot",
  "expectorate",
  "fatfs",
@@ -6355,6 +6373,7 @@ dependencies = [
  "libefi-illumos",
  "nexus-client",
  "omicron-test-utils",
+ "serde",
  "serial_test",
  "slog",
  "thiserror",
