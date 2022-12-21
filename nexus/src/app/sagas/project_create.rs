@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use nexus_defaults as defaults;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::Deserialize;
 use serde::Serialize;
@@ -94,8 +95,15 @@ async fn spc_create_record_undo(
     let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
-    let (authz_project, project) =
+    let (_authz_project, project) =
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
+
+    let (.., authz_project, project) =
+        db::lookup::LookupPath::new(&opctx, osagactx.datastore())
+            .project_id(project.id())
+            .fetch_for(authz::Action::Delete)
+            .await?;
+
     osagactx
         .datastore()
         .project_delete(&opctx, &authz_project, &project)
