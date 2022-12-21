@@ -19,6 +19,7 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
+// TODO-v1: Post migration rename `*Path` to `*Identifier`
 #[derive(Deserialize, JsonSchema)]
 pub struct OrganizationPath {
     pub organization: NameOrId,
@@ -34,7 +35,7 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskPath {
     pub disk: NameOrId,
 }
@@ -111,11 +112,8 @@ impl DiskSelector {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskList {
-    /// Optional filter to only return disks attached to the given instance
-    pub instance: Option<NameOrId>,
-    /// If `instance` is supplied as an ID this field should be left empty
     #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project_selector: ProjectSelector,
     #[serde(flatten)]
     pub pagination: PaginatedByName,
 }
@@ -1017,6 +1015,7 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
+/// TODO-v1: Delete this
 /// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1024,12 +1023,7 @@ pub struct DiskIdentifier {
     pub name: Name,
 }
 
-// TODO-v1: Post merge, consolidate with paths
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceIdentifier {
-    pub instance: NameOrId,
-}
-
+/// TODO-v1: Delete this
 /// Parameters for the
 /// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
 /// attached or detached to an instance.

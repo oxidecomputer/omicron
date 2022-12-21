@@ -212,10 +212,6 @@ lazy_static! {
                 DiskTest::DEFAULT_ZPOOL_SIZE_GIB / 2
             ),
         };
-    pub static ref DEMO_DISKS_ATTACH_URL: String =
-        format!("/v1/disks/{}/attach?{}", *DEMO_DISK_NAME, *DEMO_PROJECT_SELECTOR);
-    pub static ref DEMO_DISKS_DETACH_URL: String =
-        format!("/v1/disks/{}/detach?{}", *DEMO_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_DISK_METRICS_URL: String =
         format!(
             "/v1/disks/{}/metrics/activated?{}&start_time={:?}&end_time={:?}",
@@ -246,6 +242,13 @@ lazy_static! {
         format!("/v1/instances/{}/serial-console?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_SERIAL_STREAM_URL: String =
         format!("/v1/instances/{}/serial-console/stream?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
+
+    pub static ref DEMO_INSTANCE_DISKS_URL: String =
+        format!("/v1/instances/{}/disks?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
+    pub static ref DEMO_INSTANCE_DISKS_ATTACH_URL: String =
+        format!("/v1/instances/{}/disks/attach?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
+    pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
+        format!("/v1/instances/{}/disks/detach?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
 
     // To be migrated...
     pub static ref DEMO_INSTANCE_NICS_URL: String =
@@ -1145,25 +1148,35 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &*DEMO_DISKS_ATTACH_URL,
+            url: &*DEMO_INSTANCE_DISKS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ]
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
-                    serde_json::to_value(params::InstanceIdentifier {
-                        instance: DEMO_INSTANCE_NAME.clone().into()
+                    serde_json::to_value(params::DiskPath {
+                        disk: DEMO_DISK_NAME.clone().into()
                     }).unwrap()
                 )
             ],
         },
+
         VerifyEndpoint {
-            url: &*DEMO_DISKS_DETACH_URL,
+            url: &*DEMO_INSTANCE_DISKS_DETACH_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
-                    serde_json::to_value(params::InstanceIdentifier {
-                        instance: DEMO_INSTANCE_NAME.clone().into()
+                    serde_json::to_value(params::DiskPath {
+                        disk: DEMO_DISK_NAME.clone().into()
                     }).unwrap()
                 )
             ],

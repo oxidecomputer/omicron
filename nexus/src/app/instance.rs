@@ -707,12 +707,21 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        disk_lookup: &lookup::Disk<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_instance) =
+        let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
-        let (.., authz_disk) =
-            disk_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
@@ -743,12 +752,21 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        disk_lookup: &lookup::Disk<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_instance) =
+        let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
-        let (.., authz_disk) =
-            disk_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk detach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively

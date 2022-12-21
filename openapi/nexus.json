@@ -2150,7 +2150,7 @@
           "instances"
         ],
         "summary": "List an instance's disks",
-        "description": "Use `GET /v1/disks?instance={instance}` instead",
+        "description": "Use `GET /v1/instances/{instance}/disks` instead",
         "operationId": "instance_disk_list",
         "parameters": [
           {
@@ -2233,7 +2233,7 @@
           "instances"
         ],
         "summary": "Attach a disk to an instance",
-        "description": "Use `POST /v1/disks/{disk}/attach` instead",
+        "description": "Use `POST /v1/instances/{instance}/disks/attach` instead",
         "operationId": "instance_disk_attach",
         "parameters": [
           {
@@ -7329,14 +7329,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "instance",
-            "description": "Optional filter to only return disks attached to the given instance",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -7365,6 +7357,7 @@
           {
             "in": "query",
             "name": "project",
+            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7532,128 +7525,6 @@
         "responses": {
           "204": {
             "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/disks/{disk}/attach": {
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Attach a disk to an instance",
-        "operationId": "disk_attach_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceIdentifier"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/disks/{disk}/detach": {
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Detach a disk from an instance",
-        "operationId": "disk_detach_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceIdentifier"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -7964,6 +7835,205 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/disks": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "instance_disk_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiskResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/instances/{instance}/disks/attach": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "instance_disk_attach_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskPath"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/disks/detach": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "operationId": "instance_disk_detach_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskPath"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -9556,7 +9626,7 @@
         ]
       },
       "DiskIdentifier": {
-        "description": "Parameters for the [`Disk`](omicron_common::api::external::Disk) to be attached or detached to an instance",
+        "description": "TODO-v1: Delete this Parameters for the [`Disk`](omicron_common::api::external::Disk) to be attached or detached to an instance",
         "type": "object",
         "properties": {
           "name": {
@@ -9565,6 +9635,17 @@
         },
         "required": [
           "name"
+        ]
+      },
+      "DiskPath": {
+        "type": "object",
+        "properties": {
+          "disk": {
+            "$ref": "#/components/schemas/NameOrId"
+          }
+        },
+        "required": [
+          "disk"
         ]
       },
       "DiskResultsPage": {
@@ -10777,17 +10858,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "InstanceIdentifier": {
-        "type": "object",
-        "properties": {
-          "instance": {
-            "$ref": "#/components/schemas/NameOrId"
-          }
-        },
-        "required": [
-          "instance"
         ]
       },
       "InstanceMigrate": {
