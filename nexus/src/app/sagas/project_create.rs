@@ -8,11 +8,9 @@ use super::NexusSaga;
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use crate::context::OpContext;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use nexus_defaults as defaults;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::Deserialize;
 use serde::Serialize;
@@ -108,21 +106,15 @@ async fn spc_create_record_undo(
 async fn spc_create_vpc_params(
     sagactx: NexusActionContext,
 ) -> Result<sagas::vpc_create::Params, ActionError> {
-    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
-    let project_id = sagactx.lookup::<db::model::Project>("project")?.id();
+    let (authz_project, _project) =
+        sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
     let ipv6_prefix = Some(
         defaults::random_vpc_ipv6_prefix()
             .map_err(ActionError::action_failed)?,
     );
-
-    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
-        .project_id(project_id)
-        .lookup_for(authz::Action::CreateChild)
-        .await
-        .map_err(ActionError::action_failed)?;
 
     let vpc_create = params::VpcCreate {
         identity: IdentityMetadataCreateParams {
