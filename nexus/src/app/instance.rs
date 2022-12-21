@@ -711,7 +711,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
-        let (.., authz_disk) = self
+        let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
                 &params::DiskSelector::new(
@@ -722,6 +722,19 @@ impl super::Nexus {
             )?
             .lookup_for(authz::Action::Modify)
             .await?;
+
+        // TODO-v1: Write test to verify this case
+        // Because both instance and disk can be provided by ID it's possible for someone
+        // to specify resources from different projects. The lookups would resolve the resources
+        // (assuming the user had sufficient permissions on both) without verifying the shared hierarchy.
+        // To mitigate that we verify that their parent projects have the same ID.
+        if authz_project.id() != authz_project_disk.id() {
+            return Err(Error::InvalidRequest {
+                message: "disk must be in the same project as the instance"
+                    .to_string(),
+            });
+        }
+
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
