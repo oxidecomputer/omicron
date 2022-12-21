@@ -661,14 +661,6 @@ pub struct NetworkInterfaceUpdate {
 
 // IP POOLS
 
-// Type used to identify a Project in request bodies, where one may not have
-// the path in the request URL.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct OldProjectPath {
-    pub organization: Name,
-    pub project: Name,
-}
-
 /// Create-time parameters for an IP Pool.
 ///
 /// See [`IpPool`](crate::external_api::views::IpPool)
@@ -676,8 +668,6 @@ pub struct OldProjectPath {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    #[serde(flatten)]
-    pub project: Option<OldProjectPath>,
 }
 
 /// Parameters for updating an IP Pool

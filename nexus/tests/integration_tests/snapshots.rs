@@ -11,10 +11,10 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external;
@@ -59,7 +59,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -190,7 +190,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
 async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -289,7 +289,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
 async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -643,7 +643,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     // Test that snapshots cannot be created if there is no space for the blocks
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 

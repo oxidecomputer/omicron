@@ -10,8 +10,8 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
-    create_disk, create_ip_pool, create_organization, create_project,
-    create_vpc, object_create, project_get, DiskTest,
+    create_disk, create_organization, create_project, create_vpc,
+    object_create, populate_ip_pool, project_get, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
@@ -165,7 +165,7 @@ async fn test_project_deletion_with_instance(
     let client = &cptestctx.external_client;
 
     let org_name = "test-org";
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_organization(&client, &org_name).await;
 
     // Create a project that we'll use for testing.
@@ -388,63 +388,3 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     delete_project(&url, &client).await;
 }
-
-#[nexus_test]
-async fn test_project_deletion_with_ip_pool(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
-
-    // Create a project that we'll use for testing.
-    let name = "springfield-squidport";
-    let url = format!("/organizations/{}/projects/{}", org_name, name);
-
-    create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&url, &client).await;
-    delete_project_default_vpc(&url, &client).await;
-
-    let pool_name = "p0";
-    let params = params::IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: String::from(pool_name).parse().unwrap(),
-            description: String::from("description"),
-        },
-        project: Some(params::OldProjectPath {
-            organization: org_name.parse().unwrap(),
-            project: name.parse().unwrap(),
-        }),
-    };
-    let ip_pools_url = "/system/ip-pools";
-    let _: views::IpPool =
-        NexusRequest::objects_post(client, ip_pools_url, &params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
-
-    assert_eq!(
-        "project to be deleted contains an ip pool: p0",
-        delete_project_expect_fail(&url, &client).await,
-    );
-
-    let ip_pool_url = format!("{ip_pools_url}/{pool_name}");
-    NexusRequest::object_delete(client, &ip_pool_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
-
-    delete_project(&url, &client).await;
-}
-
-// TODO(https://github.com/oxidecomputer/omicron/issues/1334): Once floating IPs
-// are implemented, we should:
-// - Create a project-scoped external IP
-// - Attempt to delete the project (show that we cannot)
-// - Delete the external IP
-// - Delete the project

@@ -262,7 +262,7 @@ lazy_static! {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![
-                params::ExternalIpCreate::Ephemeral { pool_name: None }
+                params::ExternalIpCreate::Ephemeral { pool_name: Some(DEMO_IP_POOL_NAME.clone()) }
             ],
             disks: vec![],
             start: true,
@@ -329,14 +329,13 @@ lazy_static! {
 
     // IP Pools
     pub static ref DEMO_IP_POOLS_URL: &'static str = "/system/ip-pools";
-    pub static ref DEMO_IP_POOL_NAME: Name = "pool0".parse().unwrap();
+    pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
         params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
             },
-            project: None,
         };
     pub static ref DEMO_IP_POOL_URL: String = format!("/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
@@ -355,8 +354,7 @@ lazy_static! {
     pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
     // IP Pools (Services)
-    pub static ref DEMO_IP_POOLS_SERVICE_URL: &'static str = "/system/ip-pools-service";
-    pub static ref DEMO_IP_POOL_SERVICE_URL: String = format!("{}/{}", *DEMO_IP_POOLS_SERVICE_URL, RACK_UUID);
+    pub static ref DEMO_IP_POOL_SERVICE_URL: &'static str = "/system/ip-pools-service";
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_SERVICE_URL);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_SERVICE_RANGES_URL);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL);
