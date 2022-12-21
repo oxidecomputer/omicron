@@ -8,13 +8,13 @@ use super::NexusSaga;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::context::OpContext;
-use crate::db::model::VpcRouterKind;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use nexus_defaults as defaults;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -40,15 +40,19 @@ declare_saga_actions! {
     vpc_create;
     VPC_CREATE_VPC -> "vpc" {
         + svc_create_vpc
+        - svc_create_vpc_undo
     }
     VPC_CREATE_ROUTER -> "router" {
         + svc_create_router
+        - svc_create_router_undo
     }
     VPC_CREATE_ROUTE -> "route" {
         + svc_create_route
+        - svc_create_route_undo
     }
     VPC_CREATE_SUBNET -> "subnet" {
         + svc_create_subnet
+        - svc_create_subnet_undo
     }
     VPC_UPDATE_FIREWALL -> "firewall" {
         + svc_update_firewall
@@ -124,11 +128,6 @@ async fn svc_create_vpc(
     let vpc_id = sagactx.lookup::<Uuid>("vpc_id")?;
     let system_router_id = sagactx.lookup::<Uuid>("system_router_id")?;
 
-    // TODO: This is both fake and utter nonsense. It should be eventually
-    // replaced with the proper behavior for creating the default route
-    // which may not even happen here. Creating the vpc, its system router,
-    // and that routers default route should all be a part of the same
-    // transaction.
     let vpc = db::model::IncompleteVpc::new(
         vpc_id,
         params.authz_project.id(),
@@ -142,6 +141,21 @@ async fn svc_create_vpc(
         .await
         .map_err(ActionError::action_failed)?;
     Ok((authz_vpc, db_vpc))
+}
+
+async fn svc_create_vpc_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let (authz_vpc, db_vpc) =
+        sagactx.lookup::<(authz::Vpc, db::model::Vpc)>("vpc")?;
+    osagactx
+        .datastore()
+        .project_delete_vpc(&opctx, &db_vpc, &authz_vpc)
+        .await?;
+    Ok(())
 }
 
 async fn svc_create_router(
@@ -162,7 +176,7 @@ async fn svc_create_router(
     let router = db::model::VpcRouter::new(
         system_router_id,
         vpc_id,
-        VpcRouterKind::System,
+        db::model::VpcRouterKind::System,
         params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: "system".parse().unwrap(),
@@ -178,6 +192,18 @@ async fn svc_create_router(
         .await
         .map_err(ActionError::action_failed)?;
     Ok(authz_router)
+}
+
+async fn svc_create_router_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
+
+    osagactx.datastore().vpc_delete_router(&opctx, &authz_router).await?;
+    Ok(())
 }
 
 async fn svc_create_route(
@@ -214,9 +240,26 @@ async fn svc_create_route(
     Ok(())
 }
 
+async fn svc_create_route_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
+    let route_id = sagactx.lookup::<Uuid>("default_route_id")?;
+    let authz_route = authz::RouterRoute::new(
+        authz_router,
+        route_id,
+        LookupType::ById(route_id),
+    );
+    osagactx.datastore().router_delete_route(&opctx, &authz_route).await?;
+    Ok(())
+}
+
 async fn svc_create_subnet(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<(authz::VpcSubnet, db::model::VpcSubnet), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
@@ -284,8 +327,23 @@ async fn svc_create_subnet(
             }
             SubnetError::External(e) => e,
         })
-        .map_err(ActionError::action_failed)?;
+        .map_err(ActionError::action_failed)
+}
 
+async fn svc_create_subnet_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let (authz_subnet, db_subnet) =
+        sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
+
+    osagactx
+        .datastore()
+        .vpc_delete_subnet(&opctx, &db_subnet, &authz_subnet)
+        .await?;
     Ok(())
 }
 

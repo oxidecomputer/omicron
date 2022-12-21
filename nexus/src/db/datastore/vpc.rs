@@ -379,14 +379,22 @@ impl DataStore {
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
         subnet: VpcSubnet,
-    ) -> Result<VpcSubnet, SubnetError> {
+    ) -> Result<(authz::VpcSubnet, VpcSubnet), SubnetError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_vpc)
             .await
             .map_err(SubnetError::External)?;
         assert_eq!(authz_vpc.id(), subnet.vpc_id);
 
-        self.vpc_create_subnet_raw(subnet).await
+        let db_subnet = self.vpc_create_subnet_raw(subnet).await?;
+        Ok((
+            authz::VpcSubnet::new(
+                authz_vpc.clone(),
+                db_subnet.id(),
+                LookupType::ById(db_subnet.id()),
+            ),
+            db_subnet,
+        ))
     }
 
     pub(crate) async fn vpc_create_subnet_raw(
