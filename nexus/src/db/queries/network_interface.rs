@@ -1728,7 +1728,7 @@ mod tests {
                 .lookup_for(authz::Action::CreateChild)
                 .await
                 .unwrap();
-            let project = db_datastore
+            let (.., project) = db_datastore
                 .project_create(&opctx, &authz_org, project)
                 .await
                 .unwrap();
