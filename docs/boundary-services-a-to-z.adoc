@@ -4,6 +4,10 @@ This document describes how to run a RAP environment with boundary services.
 It's a quick rundown and assumes knowledge of the basic setup described in the
 Running Omicron (Non-Simulated) document.
 
+Since we're using virtual network hardware, the OPTE hack is no longer needed.
+The hack will automatically be disabled during the `create_virtual_hardware.sh`
+script.
+
 == 0. Install softnpu ASIC emulator machinery
 
 ----
@@ -13,89 +17,74 @@ Running Omicron (Non-Simulated) document.
 == 1. Setup virtual hardware
 
 ----
-pfexec ./tools/create_virtual_hardware.sh <wan interface>
+PHYSICAL_LINK=<wan interface> pfexec ./tools/create_virtual_hardware.sh
 ----
+Note that the `PHYSICAL_LINK` environment variable is optional. If not supplied,
+the first link in `dladm show-phys` will be used.
 
 The virtual hardware is a bit different than what's currently being used. What
 we'll eventually wind up with looks like this.
 
 image::plumbing.png[]
 
+The `softnpu` zone will be configured and launched during the `create_virtual_hardware.sh`
+script.
+
 == 2. Build and install the control plane.
 
 ----
 ./tools/create_self_signed_cert.sh
-cargo run --release --bin omicron-package -- package
-pfexec cargo run --release --bin omicron-package -- install
+
+cargo build --release --bin omicron-package
+./target/release/omicron-package -t switch_variant=softnpu package
+pfexec ./target/release/omicron-package -t switch_variant=softnpu install
 ----
 
 The control plane is now starting, reference the Running Omicron (Non-Simulated)
 doc for more details on determining when things are ready to go.
 
-
-== 3. Launch and configure the softnpu zone
-
-Launch the zone.
-
-----
-pfexec ./tools/scrimlet/create-softnpu-zone.sh
-----
-
-Configure the softnpu zone. The following will drop you into a zone shell.
+Once the control plane is running, `softnpu` can be configured via `dendrite`
+using `swadm`. An example script is provided in `tools/scrimlet/softnpu-init.sh`.
+This script should work without modification for basic development setups,
+but feel free to tweak it as needed.
 
 ----
-pfexec zlogin softnpu
-----
-
-Now run softnpu.
-
-----
-root@scrimlet:~# cd /stuff/
-root@scrimlet:/stuff# ./softnpu softnpu.toml
-Config {
-    p4_program: "/stuff/libsidecar_lite.so",
-    ports: [
-        Port {
-            sidecar: "sc0_0",
-            scrimlet: "sr0_0",
-            mtu: 1600,
-        },
-        Port {
-            sidecar: "sc0_1",
-            scrimlet: "sr0_1",
-            mtu: 1500,
-        },
-    ],
-}
-----
-
-Back in the global zone, softnpu can be configured.
-
-----
-ry@korgano: cd /opt/softnpu/stuff
-ry@korgano: pfexec ./softnpu-init.sh
-[00:00:01] ######################################## 14.31 MiB/14.31 MiB done
-local v6:
-fe80::aae1:deff:fe01:701c
-fe80::aae1:deff:fe01:701d
-fd00:99::1
-local v4:
-router v6:
-fd00:1122:3344:101::/64 -> fe80::aae1:deff:fe00:1 (1)
-router v4:
-0.0.0.0/0 -> 10.100.0.1 (2)
-resolver v4:
-10.100.0.1 -> 90:ec:77:2e:70:27
-resolver v6:
-fe80::aae1:deff:fe00:1 -> a8:e1:de:00:00:01
-nat_v4:
-10.100.0.6 1024/65535 -> fd00:1122:3344:101:: 8717766/a8:40:25:f0:51:75
-nat_v6:
-port_mac:
-1: a8:e1:de:01:70:1c
-2: a8:e1:de:01:70:1d
-icmp_v6:
-icmp_v4:
+$ ./tools/scrimlet/softnpu-init.sh
+++ netstat -rn
+++ grep default
+++ awk -F ' ' '{print $2}'
++ GATEWAY_IP=10.85.0.1
++ echo 'Using 10.85.0.1 as gateway ip'
+Using 10.85.0.1 as gateway ip
+++ arp 10.85.0.1
+++ awk -F ' ' '{print $4}'
++ gateway_mac=68:d7:9a:1f:77:a1
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port add 1:0 100G RS
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port add 2:0 100G RS
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr add 1:0 fe80::aae1:deff:fe01:701c
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr add 2:0 fe80::aae1:deff:fe01:701d
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr add 1:0 fd00:99::1
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' route add fd00:1122:3344:0101::/64 1:0 fe80::aae1:deff:fe00:1
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' route add 0.0.0.0/0 2:0 10.85.0.1
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' arp add 10.85.0.1 68:d7:9a:1f:77:a1
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port list
+ NAME  MEDIA    SPEED   FEC     ENA   LINK  MAC
+  1:0  Copper   100G    RS      Ena   Up    a8:40:25:71:e3:82
+  2:0  Copper   100G    RS      Ena   Up    a8:40:25:71:e3:83
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr list
+Port  IPv4  IPv6
+1:0         fd00:99::1
+            fe80::aae1:deff:fe01:701c
+2:0         fe80::aae1:deff:fe01:701d
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' route list
+Subnet                                      Port     Gateway
+0.0.0.0/0                                   2:0      10.85.0.1
+fd00:1122:3344:101::/64                     1:0      fe80::aae1:deff:fe00:1
++ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' arp list
+host                            mac                age
+10.85.0.1                       68:d7:9a:1f:77:a1  0s
+fe80::aae1:deff:fe00:1          a8:e1:de:00:00:01  0s
 ----
 
 == 4. Populating the system
@@ -108,12 +97,19 @@ to here are the following.
 - The address range in the IP pool should be on a subnet in your local network that
   can NAT out to the Internet.
 - Be sure to set up an external IP for the instance you create.
+- You will need to set up `proxy-arp` if your VM external IP addresses are on the
+  same L2 network as the router or other non-oxide hosts.
+
+Once your host has been populated with images, you can use the script at
+`tools/quickstart.sh` to quickly create a VM and set up the `proxy-arp`. Please
+be sure to edit the `ip_pool_start` and `ip_pool_end` variables to match your
+desired address ranges.
 
 == 5. Configuring scrimlet/sidecar
 
 A this point we have an instance up and running. At the time of writing there is
 not control plane driven boundary services automation so we're going to
-configure the scrimlet it by hand.
+configure the scrimlet by hand.
 
 First we need to collect some information. In particular we need to know about
 the virtual network our instance is sitting on. We can get that info from
@@ -152,43 +148,17 @@ field in the table. Let's assume that is `10.100.0.6` for this example.
 
 Now we need to go tell boundary services about this information.
 
-Log back into the scrimlet VM
+This can be accomplished via the following `swadm` command:
 
 ----
-./out/propolis/propolis-cli --server 127.0.0.1 serial
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" nat add \
+    -e 10.100.0.6 \
+    -l 1024 \
+    -h 65535 \
+    -i fd00:1122:3344:101::1 \
+    -m A8:40:25:F2:84:3F \
+    -v 15103089
 ----
-
-Go back to the `/opt/cargo-bay` and open up `softnpu-init.sh` in an editor.
-There are a few things we need to edit here. Locate the line with the following
-content.
-
-----
-./softnpuadm add-nat4 10.100.0.6 1024 65535 fd00:1122:3344:0101:: 8717766 a8:40:25:f0:51:75
-----
-
-Edit this line to use the information we gathered above. For the specific
-information I have for this run, this look like:
-
-----
-./softnpuadm add-nat4 10.100.0.6 1024 65535 fd00:1122:3344:101::1 15103089 A8:40:25:F2:84:3F
-----
-
-While editing this file, also note the comments guiding you to change the
-upstream gateway IP and MAC addresses. The MAC address is the same one you would
-use for the OPTE hack. The IP address honestly does not matter a whole lot for
-this setup since it's a default route. Just make sure the address used for the
-gateway IP is the same in both places.
-
-Now run
-
-----
-./softnpu-init.sh
-----
-
-This will reconfigure the ASIC (you could also run just 
-`./softnpuadm remove-<x> ...` and `./softnpuadm add-<x>` if you feel like
-being more surgical) with a boundary services config that will give your
-instance access to the Internet.
 
 ----
 ry@korgano:~/omicron$ ~/propolis/target/release/propolis-cli --server fd00:1122:3344:101::c serial

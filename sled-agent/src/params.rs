@@ -216,7 +216,7 @@ pub struct Zpool {
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DendriteAsic {

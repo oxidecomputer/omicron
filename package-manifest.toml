@@ -263,8 +263,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9bb68574476afbf847ec9490c708c878a3883a3e"
-source.sha256 = "70bf400cb87dce9d9b03f8f723561f8101942db18cb6316b47ee2f8b0e7cee44"
+# TODO: @internet-diglett
+# point this back to dendrite `main` before merging
+source.commit = "4a288a85e31c737a5b197dea91e543dd475a0fd0"
+source.sha256 = "046c14c995579a783edf22e19429729a9099e8a2271cd550fa91568a43c5129a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -282,8 +284,30 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9bb68574476afbf847ec9490c708c878a3883a3e"
-source.sha256 = "c84131ed636d6757e7a9a26185d78d8a6a1db4fd83fa0fbdfa81fc308ad71b31"
+# TODO: @internet-diglett
+# point this back to dendrite `main` before merging
+source.commit = "4a288a85e31c737a5b197dea91e543dd475a0fd0"
+source.sha256 = "130df5345ebd7e17ffe9445b564bc5ad020349b8571cc509e8dfad57e678e7dd"
+output.type = "zone"
+output.intermediate_only = true
+
+[package.dendrite-softnpu]
+service_name = "dendrite"
+only_for_targets.switch_variant = "softnpu"
+# To manually override the package source:
+#
+# 1. Build the zone image manually
+#   1a. cd <dendrite tree>
+#   1b. cargo build --features=softnpu --release
+#   1c. cargo xtask dist -o -r --features softnpu
+# 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
+# 3. Use source.type = "manual" instead of "prebuilt"
+source.type = "prebuilt"
+source.repo = "dendrite"
+# TODO: @internet-diglett
+# point this back to dendrite `main` before merging
+source.commit = "0391fbe150bb42167de127304f93974518e8747e"
+source.sha256 = "ac03e2a23dd5a3e8024fde7b54da12002f1798272c6ef4d3d571a6bf96a8df1a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -301,7 +325,7 @@ output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
-# - Set the sled agent's configuration option "stub_scrimlet" to "true"
+# - Set the sled agent's configuration option "scrimlet_override" to "stub"
 # - Run the following:
 # $ cargo run --release -p omicron-package -- -t switch=stub package
 # $ pfexec ./target/release/omicron-package -t switch=stub install
@@ -311,4 +335,17 @@ only_for_targets.switch = "stub"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
+output.type = "zone"
+
+# To package and install the softnpu variant of the switch, do the following:
+#
+# - Set the sled agent's configuration option "scrimlet_override" to "softnpu"
+# - Run the following:
+# $ cargo run --release -p omicron-package -- -t switch_variant=softnpu package
+# $ pfexec ./target/release/omicron-package -t switch_variant=softnpu install
+[package.switch-softnpu]
+service_name = "switch"
+only_for_targets.switch_variant = "softnpu"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-softnpu.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"

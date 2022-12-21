@@ -173,6 +173,12 @@ pub struct TimeseriesDbConfig {
     pub address: Option<SocketAddr>,
 }
 
+/// Configuration for the dataplane daemon.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct DpdConfig {
+    pub address: SocketAddr,
+}
+
 // A deserializable type that does no validation on the tunable parameters.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct UnvalidatedTunables {
@@ -278,6 +284,8 @@ pub struct PackageConfig {
     /// Tunable configuration for testing and experimentation
     #[serde(default)]
     pub tunables: Tunables,
+    /// dataplane daemon configuration
+    pub dpd_api: DpdConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -350,7 +358,9 @@ mod test {
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
-    use crate::nexus_config::{Database, DeploymentConfig, LoadErrorKind};
+    use crate::nexus_config::{
+        Database, DeploymentConfig, DpdConfig, LoadErrorKind,
+    };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -360,6 +370,7 @@ mod test {
     use std::net::{Ipv6Addr, SocketAddr};
     use std::path::Path;
     use std::path::PathBuf;
+    use std::str::FromStr;
 
     /// Generates a temporary filesystem path unique for the given label.
     fn temp_path(label: &str) -> PathBuf {
@@ -479,6 +490,8 @@ mod test {
             net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [dpd_api]
+            address = "[::1]:12224"
             "##,
         )
         .unwrap();
@@ -528,6 +541,9 @@ mod test {
                         default_base_url: "http://example.invalid/".into(),
                     }),
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
+                    dpd_api: DpdConfig {
+                        address: SocketAddr::from_str("[::1]:12224").unwrap()
+                    },
                 },
             }
         );
@@ -562,6 +578,8 @@ mod test {
             net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [dpd_api]
+            address = "[::1]:12224"
             "##,
         )
         .unwrap();

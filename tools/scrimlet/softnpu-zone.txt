@@ -1,5 +1,5 @@
 create
-set brand=sparse
+set brand=omicron1
 set zonepath=/softnpu-zone
 set ip-type=exclusive
 set autoboot=false
@@ -17,7 +17,7 @@ add net
 end
 add fs
     set dir=/stuff
-    set special=/opt/softnpu/stuff
+    set special=/opt/oxide/softnpu/stuff
     set type=lofs
 end
 commit

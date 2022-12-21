@@ -90,10 +90,10 @@ function try_remove_simnet {
 function try_remove_vnics {
     try_remove_address "lo0/underlay"
     try_remove_interface sc0_1
-    try_remove_interface net$I
     try_remove_vnic sc0_1
     INDICES=("0" "1")
     for I in "${INDICES[@]}"; do
+        try_remove_interface "net$I"
         try_remove_simnet "net$I"
         try_remove_simnet "sc${I}_0"
         try_remove_simnet "sr0_$I"
@@ -115,7 +115,18 @@ function try_destroy_zpools {
     done
 }
 
+function remove_softnpu_zone {
+    zoneadm -z softnpu halt
+    zoneadm -z softnpu uninstall -F
+    zonecfg -z softnpu delete -F
+
+    rm -rf /opt/oxide/softnpu/stuff
+    zfs destroy rpool/softnpu-zone
+    rm -rf /softnpu-zone
+}
+
 verify_omicron_uninstalled
 unload_xde_driver
+remove_softnpu_zone
 try_remove_vnics
 try_destroy_zpools

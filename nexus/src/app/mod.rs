@@ -163,6 +163,9 @@ pub struct Nexus {
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
     resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
+
+    /// Client for dataplane daemon / switch management API
+    dpd_client: Arc<dpd_client::Client>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -200,6 +203,20 @@ impl Nexus {
                 "sec_id" => my_sec_id.to_string()
             )),
             sec_store,
+        ));
+
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: log.new(o!(
+                "component" => "DpdClient"
+            )),
+        };
+        let dpd_address = config.pkg.dpd_api.address;
+        let dpd_host = dpd_address.ip().to_string();
+        let dpd_port = dpd_address.port();
+        let dpd_client = Arc::new(dpd_client::Client::new(
+            &format!("http://[{dpd_host}]:{dpd_port}"),
+            client_state,
         ));
 
         // Connect to clickhouse - but do so lazily.
@@ -262,6 +279,7 @@ impl Nexus {
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
+            dpd_client: Arc::clone(&dpd_client),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

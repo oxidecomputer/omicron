@@ -30,6 +30,9 @@ declare_saga_actions! {
     INSTANCE_DELETE_RECORD -> "no_result1" {
         + sid_delete_instance_record
     }
+    DELETE_ASIC_CONFIGURATION -> "delete_asic_configuration" {
+        + sid_delete_network_config
+    }
     DELETE_NETWORK_INTERFACES -> "no_result2" {
         + sid_delete_network_interfaces
     }
@@ -57,6 +60,7 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(delete_asic_configuration_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
@@ -66,6 +70,79 @@ impl NexusSaga for SagaInstanceDelete {
 }
 
 // instance delete saga: action implementations
+
+async fn sid_delete_network_config(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let osagactx = sagactx.user_data();
+    let dpd_client = &osagactx.nexus().dpd_client;
+    let datastore = &osagactx.datastore();
+    let log = sagactx.user_data().log();
+
+    debug!(log, "fetching external ip addresses");
+
+    let external_ips = &datastore
+        .instance_lookup_external_ips(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // TODO: currently if we have this environment variable set, we want to
+    // bypass all calls to DPD. This is mainly to facilitate some tests where
+    // we don't have dpd running. In the future we should probably have these
+    // testing environments running dpd-stub so that the full path can be tested.
+    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
+        return Ok(());
+    };
+
+    let mut errors: Vec<ActionError> = vec![];
+
+    // Here we are attempting to delete every existing NAT entry while deferring
+    // any error handling. If we don't defer error handling, we might end up
+    // bailing out before we've attempted deletion of all entries.
+    for entry in external_ips {
+        debug!(log, "deleting nat mapping for entry: {entry:#?}");
+        let result = match entry.ip {
+            ipnetwork::IpNetwork::V4(network) => {
+                dpd_client
+                    .nat_delete_ipv4(&network.ip(), *entry.first_port)
+                    .await
+            }
+            ipnetwork::IpNetwork::V6(network) => {
+                dpd_client
+                    .nat_delete_ipv6(&network.ip(), *entry.first_port)
+                    .await
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                debug!(log, "deletion of nat entry successful for: {entry:#?}");
+            }
+            Err(e) => {
+                if e.status() == Some(http::StatusCode::NOT_FOUND) {
+                    debug!(log, "no nat entry found for: {entry:#?}");
+                } else {
+                    let new_error =
+                        ActionError::action_failed(Error::internal_error(
+                            &format!("failed to delete nat entry via dpd: {e}"),
+                        ));
+                    errors.push(new_error);
+                }
+            }
+        }
+    }
+
+    if let Some(error) = errors.first() {
+        return Err(error.clone());
+    }
+
+    Ok(())
+}
 
 async fn sid_delete_instance_record(
     sagactx: NexusActionContext,

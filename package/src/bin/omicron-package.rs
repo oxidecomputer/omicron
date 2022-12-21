@@ -700,8 +700,14 @@ async fn do_clean(
         "Removing artifacts from {}",
         artifact_dir.to_string_lossy()
     );
-    const ARTIFACTS_TO_KEEP: &[&str] =
-        &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads", "softnpu"];
+    const ARTIFACTS_TO_KEEP: &[&str] = &[
+        "clickhouse",
+        "cockroachdb",
+        "xde",
+        "console-assets",
+        "downloads",
+        "softnpu",
+    ];
     remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, &config.log)?;
     info!(
         config.log,

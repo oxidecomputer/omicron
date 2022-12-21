@@ -64,3 +64,7 @@ url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
 # The maximum allowed prefix (thus smallest size) for a VPC Subnet's
 # IPv4 subnetwork. This size allows for ~60 hosts.
 max_vpc_ipv4_subnet_prefix = 26
+
+# Configuration for interacting with the dataplane daemon
+[dpd_api]
+address = "[::1]:12224"

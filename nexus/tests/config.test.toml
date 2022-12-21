@@ -65,3 +65,7 @@ net = "fd00:1122:3344:0100::/56"
 [deployment.database]
 type = "from_url"
 url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"
+
+# Dendrite (dataplane daemon) API configuration
+[dpd_api]
+address = "[::1]:12224"

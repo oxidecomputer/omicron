@@ -4,6 +4,7 @@ members = [
     "bootstore",
     "common",
     "ddm-admin-client",
+    "dpd-client",
     "deploy",
     "dns-server",
     "dns-service-client",
@@ -55,6 +56,7 @@ members = [
 default-members = [
     "common",
     "ddm-admin-client",
+    "dpd-client",
     "deploy",
     "dns-server",
     "dns-service-client",
@@ -138,6 +140,7 @@ diesel = { version = "2.0.3" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
 dns-server = { path = "dns-server" }
 dns-service-client = { path = "dns-service-client" }
+dpd-client = { path = "dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 expectorate = "1.0.6"
 fatfs = "0.3.6"

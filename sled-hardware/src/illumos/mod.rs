@@ -6,6 +6,7 @@ use crate::{
     Baseboard, DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
 };
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
+use serde::Deserialize;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -23,6 +24,20 @@ mod disk;
 mod gpt;
 
 pub use disk::ensure_partition_layout;
+
+/// Configuration for forcing a sled to run as a Scrimlet
+#[derive(Clone, Debug, Deserialize, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ScrimletMode {
+    /// Force sled to run as a Gimlet
+    /// this is to preserve the old behavior of `scrimlet_override = false`,
+    /// but I haven't found where that logic has actually been leveraged...
+    Disabled,
+    /// Force sled to run in Scrimlet mode with a stub switch
+    Stub,
+    /// Force sled to run in Scrimlet mode with a Softnpu switch
+    Softnpu,
+}
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -513,8 +528,8 @@ impl HardwareManager {
     /// If this argument is not supplied, we assume the device is a gimlet until
     /// device scanning informs us otherwise.
     pub fn new(
-        log: &Logger,
-        stub_scrimlet: Option<bool>,
+        log: Logger,
+        scrimlet_override: Option<ScrimletMode>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
@@ -524,9 +539,20 @@ impl HardwareManager {
         // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
         // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
-        let hw = match stub_scrimlet {
+        let hw = match scrimlet_override {
             None => HardwareView::new(),
-            Some(active) => HardwareView::new_stub_tofino(active),
+            Some(mode) => match mode {
+                ScrimletMode::Disabled => HardwareView::new_stub_tofino(
+                    // active=
+                    false,
+                ),
+                ScrimletMode::Stub => HardwareView::new_stub_tofino(true),
+                // TODO: @internet-diglett
+                // I'm not sure whether or not we should be treating softnpu
+                // as a stub or treating it as a real ASIC here, so this
+                // might change.
+                ScrimletMode::Softnpu => HardwareView::new_stub_tofino(true),
+            },
         };
         let inner = Arc::new(Mutex::new(hw));
 

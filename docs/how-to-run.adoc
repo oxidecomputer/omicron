@@ -48,6 +48,17 @@ file-based ZFS vdevs and ZFS zpools on top of those, and a couple of VNICs. The
 vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
 two Chelsio NIC ports.
 
+Set the `GATEWAY_IP` variable when running the `create_virtual_hardware` script
+to override the default logic used to automatically determine the gateway ip.
+This variable is used to configure `softnpu` with a default route for external /
+internet connectivity. Set the `PHYSICAL_LINK` environment variable to override
+the default logic used to automatically determine the physical network connection
+used for external communication. For example:
+
+----
+$ GATEWAY_IP=10.85.0.1 PHYSICAL_LINK=ixgbe0 pfexec ./tools/create_virtual_hardware.sh
+----
+
 You can clean up these resources with `pfexec ./tools/destroy_virtual_hardware.sh`.
 This script requires Omicron be uninstalled, e.g., with `pfexec
 ./target/release/omicron-package uninstall`, and a warning will be printed if

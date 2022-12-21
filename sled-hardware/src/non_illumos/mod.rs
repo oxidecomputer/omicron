@@ -21,8 +21,8 @@ pub struct HardwareManager {}
 
 impl HardwareManager {
     pub fn new(
-        _log: &Logger,
-        _stub_scrimlet: Option<bool>,
+        _log: Logger,
+        _scrimlet_override: Option<ScrimletMode>,
     ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }

@@ -2,12 +2,15 @@
 
 # Identifies if the sled should be unconditionally treated as a scrimlet.
 #
-# If this is set to "true", the sled agent treats itself as a scrimlet.
-# If this is set to "false", the sled agent treats itself as a gimlet.
+# If this is set to "stub", the sled agent treats itself as a scrimlet
+# with a stub switch.
+# If this is set to "softnpu", the sled agent treats itself as a scrimlet
+# with a softnpu switch.
+# If this is set to "disabled", the sled agent treats itself as a gimlet.
 # If this is unset:
 # - On illumos, the sled automatically detects whether or not it is a scrimlet.
 # - On all other platforms, the sled assumes it is a gimlet.
-# stub_scrimlet = true
+scrimlet_override = "softnpu"
 
 # Identifies the revision of the sidecar that is attached, if one is attached.
 # TODO: This field should be removed once Gimlets have the ability to auto-detect
