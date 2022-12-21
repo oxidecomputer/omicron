@@ -614,6 +614,7 @@ impl Drop for CockroachInstance {
 pub async fn check_db_version() -> Result<(), CockroachStartError> {
     let mut cmd = tokio::process::Command::new(COCKROACHDB_BIN);
     cmd.args(&["version", "--build-tag"]);
+    cmd.env("GOTRACEBACK", "crash");
     let output = cmd.output().await.map_err(|source| {
         CockroachStartError::BadCmd { cmd: COCKROACHDB_BIN.to_string(), source }
     })?;
