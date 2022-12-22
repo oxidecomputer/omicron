@@ -373,6 +373,8 @@ impl CockroachStarter {
                     // memory.
                     match tokio::fs::read_to_string(&listen_url_file).await {
                         Ok(listen_url) if listen_url.contains('\n') => {
+                            // The file is fully written.
+                            // We're ready to move on.
                             let listen_url = listen_url.trim_end();
                             make_pg_config(listen_url).map_err(|source| {
                                 poll::CondCheckError::Failed(
@@ -383,26 +385,31 @@ impl CockroachStarter {
                                 )
                             })
                         }
+
                         Ok(_) => {
                             // The file hasn't been fully written yet.
+                            // Keep waiting.
                             Err(poll::CondCheckError::NotYet)
                         }
+
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            // The file doesn't exist yet.
+                            // Keep waiting.
+                            Err(poll::CondCheckError::NotYet)
+                        }
+
                         Err(error) => {
-                            let maybe_errno = error.raw_os_error();
-                            if maybe_errno.is_some()
-                                && maybe_errno.unwrap() == libc::ENOENT
-                            {
-                                // The file doesn't exist yet.
-                                Err(poll::CondCheckError::NotYet)
-                            } else {
-                                let source = anyhow!(error).context(format!(
-                                    "checking listen file {:?}",
-                                    listen_url_file
-                                ));
-                                Err(poll::CondCheckError::Failed(
-                                    CockroachStartError::Unknown { source },
-                                ))
-                            }
+                            // Something else has gone wrong.  Stop immediately
+                            // and report the problem.
+                            let source = anyhow!(error).context(format!(
+                                "checking listen file {:?}",
+                                listen_url_file
+                            ));
+                            Err(poll::CondCheckError::Failed(
+                                CockroachStartError::Unknown { source },
+                            ))
                         }
                     }
                 }
