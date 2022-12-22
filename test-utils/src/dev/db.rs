@@ -377,8 +377,27 @@ impl CockroachStarter {
                                 )
                             })
                         }
-
-                        _ => Err(poll::CondCheckError::NotYet),
+                        Ok(_) => {
+                            // The file hasn't been fully written yet.
+                            Err(poll::CondCheckError::NotYet)
+                        }
+                        Err(error) => {
+                            let maybe_errno = error.raw_os_error();
+                            if maybe_errno.is_some()
+                                && maybe_errno.unwrap() == libc::ENOENT
+                            {
+                                // The file doesn't exist yet.
+                                Err(poll::CondCheckError::NotYet)
+                            } else {
+                                let source = anyhow!(error).context(format!(
+                                    "checking listen file {:?}",
+                                    listen_url_file
+                                ));
+                                Err(poll::CondCheckError::Failed(
+                                    CockroachStartError::Unknown { source },
+                                ))
+                            }
+                        }
                     }
                 }
             },
