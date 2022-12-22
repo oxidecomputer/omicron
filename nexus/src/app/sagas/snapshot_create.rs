@@ -401,7 +401,7 @@ async fn ssc_create_snapshot_record(
         project_id: params.project_id,
         disk_id: disk.id(),
         volume_id,
-        destination_volume_id: Some(destination_volume_id),
+        destination_volume_id: destination_volume_id,
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,

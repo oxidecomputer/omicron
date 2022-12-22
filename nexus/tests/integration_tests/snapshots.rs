@@ -423,7 +423,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
-                destination_volume_id: None,
+                destination_volume_id: Uuid::new_v4(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -580,7 +580,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
-                destination_volume_id: None,
+                destination_volume_id: Uuid::new_v4(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -724,7 +724,7 @@ async fn test_create_snapshot_record_idempotent(
         project_id,
         disk_id: Uuid::new_v4(),
         volume_id: Uuid::new_v4(),
-        destination_volume_id: None,
+        destination_volume_id: Uuid::new_v4(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
