@@ -9,6 +9,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::ops::Deref;
@@ -68,6 +69,8 @@ pub struct CockroachStarterBuilder {
     store_dir: Option<PathBuf>,
     /// optional value for the listening port
     listen_port: u16,
+    /// environment variables, mirrored here for reporting
+    env: BTreeMap<String, String>,
     /// command-line arguments, mirrored here for reporting
     args: Vec<String>,
     /// describes the command line that we're going to execute
@@ -87,11 +90,28 @@ impl CockroachStarterBuilder {
         let mut builder = CockroachStarterBuilder {
             store_dir: None,
             listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
+            env: BTreeMap::new(),
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
             redirect_stdio: false,
         };
+
+        // Copy the current set of environment variables.  We could instead
+        // allow the default behavior of inheriting the current process
+        // environment.  But we want to print these out.  If we use the default
+        // behavior, it's possible that what we print out wouldn't match what
+        // was used if some other thread modified the process environment in
+        // between.
+        builder.cmd_builder.env_clear();
+
+        // Configure Go to generate a core file on fatal error.  This behavior
+        // may be overridden by the user if they've set this variable in their
+        // environment.
+        builder.env("GOTRACEBACK", "crash");
+        for (key, value) in std::env::vars_os() {
+            builder.env(key, value);
+        }
 
         // We use single-node insecure mode listening only on localhost.  We
         // consider this secure enough for development (including the test
@@ -217,6 +237,7 @@ impl CockroachStarterBuilder {
             store_dir: store_dir.into(),
             listen_url_file,
             args: self.args,
+            env: self.env,
             cmd_builder: self.cmd_builder,
             start_timeout: self.start_timeout,
         })
@@ -228,6 +249,22 @@ impl CockroachStarterBuilder {
         let arg = arg.as_ref();
         self.args.push(arg.to_string_lossy().to_string());
         self.cmd_builder.arg(arg);
+        self
+    }
+
+    /// Convenience wrapper for self.cmd_builder.env() that records the
+    /// environment variables so that we can print them out before running the
+    /// command
+    fn env<K: AsRef<OsStr>, V: AsRef<OsStr>>(
+        &mut self,
+        k: K,
+        v: V,
+    ) -> &mut Self {
+        self.env.insert(
+            k.as_ref().to_string_lossy().into_owned(),
+            v.as_ref().to_string_lossy().into_owned(),
+        );
+        self.cmd_builder.env(k, v);
         self
     }
 
@@ -251,6 +288,8 @@ pub struct CockroachStarter {
     store_dir: PathBuf,
     /// path to listen URL file (inside temp_dir)
     listen_url_file: PathBuf,
+    /// environment variables, mirrored here for reporting
+    env: BTreeMap<String, String>,
     /// command-line arguments, mirrored here for reporting to the user
     args: Vec<String>,
     /// the command line that we're going to execute
@@ -260,6 +299,12 @@ pub struct CockroachStarter {
 }
 
 impl CockroachStarter {
+    /// Enumerates human-readable summaries of the environment variables set on
+    /// execution
+    pub fn environment(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.env.iter().map(|(k, v)| (k.as_ref(), v.as_ref()))
+    }
+
     /// Returns a human-readable summary of the command line to be executed
     pub fn cmdline(&self) -> impl fmt::Display {
         self.args.join(" ")
@@ -569,6 +614,7 @@ impl Drop for CockroachInstance {
 pub async fn check_db_version() -> Result<(), CockroachStartError> {
     let mut cmd = tokio::process::Command::new(COCKROACHDB_BIN);
     cmd.args(&["version", "--build-tag"]);
+    cmd.env("GOTRACEBACK", "crash");
     let output = cmd.output().await.map_err(|source| {
         CockroachStartError::BadCmd { cmd: COCKROACHDB_BIN.to_string(), source }
     })?;
@@ -907,6 +953,7 @@ mod test {
     use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
+    use std::collections::BTreeMap;
     use std::env;
     use std::path::Path;
     use std::path::PathBuf;
@@ -990,6 +1037,10 @@ mod test {
         let starter = builder.build().unwrap();
         let temp_dir = starter.temp_dir().to_owned();
         eprintln!("will run: {}", starter.cmdline());
+        eprintln!("environment:");
+        for (k, v) in starter.environment() {
+            eprintln!("    {}={}", k, v);
+        }
         let error =
             starter.start().await.expect_err("unexpectedly started database");
         eprintln!("error: {:?}", error);
@@ -1092,20 +1143,29 @@ mod test {
 
         // This common function will verify that the entire temporary directory
         // is cleaned up.  We do not need to check that again here.
-        test_setup_database(starter, &data_dir, true).await;
+        test_setup_database(starter, &data_dir, true, &BTreeMap::new()).await;
     }
 
-    // Test the happy path using an overridden store directory.
+    // Test the happy path using an overridden store directory and environment
+    // variables.
     #[tokio::test]
     async fn test_setup_database_overridden_dir() {
         let extra_temp_dir =
             tempdir().expect("failed to create temporary directory");
         let data_dir = extra_temp_dir.path().join("custom_data");
-        let starter = new_builder().store_dir(&data_dir).build().unwrap();
+        let mut builder = new_builder().store_dir(&data_dir);
+
+        let mut env_overrides = BTreeMap::new();
+        env_overrides.insert("GOTRACEBACK", "bogus");
+        env_overrides.insert("OMICRON_DUMMY", "dummy");
+        for (key, value) in &env_overrides {
+            builder.env(key, value);
+        }
 
         // This common function will verify that the entire temporary directory
         // is cleaned up.  We do not need to check that again here.
-        test_setup_database(starter, &data_dir, false).await;
+        let starter = builder.build().unwrap();
+        test_setup_database(starter, &data_dir, false, &env_overrides).await;
 
         // At this point, our extra temporary directory should still exist.
         // This is important -- the library should not clean up a data directory
@@ -1135,9 +1195,35 @@ mod test {
         starter: CockroachStarter,
         data_dir: P,
         test_populate: bool,
+        env_overrides: &BTreeMap<&str, &str>,
     ) {
-        // Start the database.
         eprintln!("will run: {}", starter.cmdline());
+        eprintln!("environment:");
+        for (k, v) in starter.environment() {
+            eprintln!("    {}={}", k, v);
+        }
+
+        // Figure out the expected environment by starting with the hardcoded
+        // environment (GOTRACEBACK=crash), override with values from the
+        // current environment, and finally override with values applied by the
+        // caller.
+        let vars = std::env::vars().collect::<Vec<_>>();
+        let env_expected = {
+            let mut env = BTreeMap::new();
+            env.insert("GOTRACEBACK", "crash");
+            for (k, v) in &vars {
+                env.insert(k, v);
+            }
+            for (k, v) in env_overrides {
+                env.insert(k, v);
+            }
+            env
+        };
+
+        // Compare the configured environment against what we expected.
+        assert_eq!(env_expected, starter.environment().collect());
+
+        // Start the database.
         let mut database =
             starter.start().await.expect("failed to start database");
         let pid = database.pid();
@@ -1155,6 +1241,11 @@ mod test {
             .await
             .expect("CockroachDB data directory is missing")
             .is_dir());
+
+        // Check the environment variables.  Doing this is platform-specific and
+        // we only bother implementing it for illumos.
+        #[cfg(target_os = "illumos")]
+        verify_environment(&env_expected, pid).await;
 
         // Try to connect to it and run a query.
         eprintln!("connecting to database");
@@ -1210,6 +1301,82 @@ mod test {
         );
 
         eprintln!("cleaned up database and temporary directory");
+    }
+
+    #[cfg(target_os = "illumos")]
+    async fn verify_environment(env_expected: &BTreeMap<&str, &str>, pid: u32) {
+        use std::io::BufRead;
+
+        // Run `pargs -e PID` to dump the environment.
+        let output = tokio::process::Command::new("pargs")
+            .arg("-e")
+            .arg(format!("{}", pid))
+            .output()
+            .await
+            .expect("`pargs -e` failed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        eprintln!(
+            "pargs -e {} -> {:?}:\nstderr = {}\nstdout = {}",
+            pid, output.status, stdout, stderr
+        );
+        assert!(output.status.success(), "`pargs -e` unexpectedly failed");
+
+        // Buffer the output and parse it.
+        let lines = std::io::BufReader::<&[u8]>::new(output.stdout.as_ref())
+            .lines()
+            .map(|l| l.unwrap().replace("\\\\", "\\"))
+            .filter(|l| l.starts_with("envp["))
+            .collect::<Vec<_>>();
+        let mut env_found: BTreeMap<&str, &str> = lines
+            .iter()
+            .map(|line| {
+                let (_, envpart) =
+                    line.split_once("]: ").expect("`pargs -e` garbled");
+                envpart.split_once('=').expect("`pargs -e` garbled")
+            })
+            .collect();
+
+        // Compare it to what we expect.
+        let mut okay = true;
+        for (expected_key, expected_value) in env_expected {
+            match env_found.remove(expected_key) {
+                Some(found_value) => {
+                    // We ignore non-ASCII values because `pargs` encodes these
+                    // in a way that's annoying for us to parse.  The purpose of
+                    // this test is to catch variables that are wholly wrong,
+                    // not to catch corruption within the string (which seems
+                    // exceedingly unlikely).
+                    if expected_value.is_ascii()
+                        && !expected_value.chars().any(|c| c.is_ascii_control())
+                        && found_value != *expected_value
+                    {
+                        okay = false;
+                        println!(
+                            "error: mismatched value for env var {:?}: \
+                            expected {:?}, found {:?})",
+                            expected_key, expected_value, found_value
+                        );
+                    }
+                }
+                None => {
+                    okay = false;
+                    println!(
+                        "error: missing expected env var: {:?}",
+                        expected_key
+                    );
+                }
+            }
+        }
+
+        for (expected_key, _) in env_found {
+            okay = false;
+            println!("error: found unexpected env var: {:?}", expected_key);
+        }
+
+        if !okay {
+            panic!("environment mismatch (see above)");
+        }
     }
 
     // Test that you can run the database twice concurrently (and have different
