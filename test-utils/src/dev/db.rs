@@ -315,6 +315,12 @@ impl CockroachStarter {
         self.temp_dir.path()
     }
 
+    /// Returns the path to the listen-url file for this execution
+    #[cfg(test)]
+    pub fn listen_url_file(&self) -> &Path {
+        &self.listen_url_file
+    }
+
     /// Returns the path to the storage directory created for this execution.
     pub fn store_dir(&self) -> &Path {
         self.store_dir.as_path()
@@ -367,6 +373,8 @@ impl CockroachStarter {
                     // memory.
                     match tokio::fs::read_to_string(&listen_url_file).await {
                         Ok(listen_url) if listen_url.contains('\n') => {
+                            // The file is fully written.
+                            // We're ready to move on.
                             let listen_url = listen_url.trim_end();
                             make_pg_config(listen_url).map_err(|source| {
                                 poll::CondCheckError::Failed(
@@ -378,7 +386,31 @@ impl CockroachStarter {
                             })
                         }
 
-                        _ => Err(poll::CondCheckError::NotYet),
+                        Ok(_) => {
+                            // The file hasn't been fully written yet.
+                            // Keep waiting.
+                            Err(poll::CondCheckError::NotYet)
+                        }
+
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            // The file doesn't exist yet.
+                            // Keep waiting.
+                            Err(poll::CondCheckError::NotYet)
+                        }
+
+                        Err(error) => {
+                            // Something else has gone wrong.  Stop immediately
+                            // and report the problem.
+                            let source = anyhow!(error).context(format!(
+                                "checking listen file {:?}",
+                                listen_url_file
+                            ));
+                            Err(poll::CondCheckError::Failed(
+                                CockroachStartError::Unknown { source },
+                            ))
+                        }
                     }
                 }
             },
@@ -996,7 +1028,7 @@ mod test {
     #[tokio::test]
     async fn test_bad_cmd() {
         let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
-        let _ = test_database_start_failure(builder).await;
+        let _ = test_database_start_failure(builder.build().unwrap()).await;
     }
 
     // Tests what happens if the "cockroach" command exits before writing the
@@ -1006,7 +1038,8 @@ mod test {
     async fn test_cmd_fails() {
         let mut builder = new_builder();
         builder.arg("not-a-valid-argument");
-        let temp_dir = test_database_start_failure(builder).await;
+        let (temp_dir, _) =
+            test_database_start_failure(builder.build().unwrap()).await;
         fs::metadata(&temp_dir).await.expect("temporary directory was deleted");
         // The temporary directory is preserved in this case so that we can
         // debug the failure.  In this case, we injected the failure.  Remove
@@ -1032,9 +1065,8 @@ mod test {
     // caller can decide whether to check if it was cleaned up or not.  The
     // expected behavior depends on the failure mode.
     async fn test_database_start_failure(
-        builder: CockroachStarterBuilder,
-    ) -> PathBuf {
-        let starter = builder.build().unwrap();
+        starter: CockroachStarter,
+    ) -> (PathBuf, CockroachStartError) {
         let temp_dir = starter.temp_dir().to_owned();
         eprintln!("will run: {}", starter.cmdline());
         eprintln!("environment:");
@@ -1044,7 +1076,7 @@ mod test {
         let error =
             starter.start().await.expect_err("unexpectedly started database");
         eprintln!("error: {:?}", error);
-        temp_dir
+        (temp_dir, error)
     }
 
     // Tests when CockroachDB hangs on startup by setting the start timeout
@@ -1130,6 +1162,49 @@ mod test {
                 e
             )
         });
+    }
+
+    // Test what happens if we can't read the listen-url file.  This is a little
+    // obscure, but it has been a problem.
+    #[tokio::test]
+    async fn test_setup_database_bad_listen_url() {
+        // We don't need to actually run Cockroach for this test, and it's
+        // simpler (and faster) if we don't.  But we do need something that
+        // won't exit before we get a chance to trigger an error and that can
+        // also accept the extra arguments that the builder will provide.
+        let mut builder = CockroachStarterBuilder::new_with_cmd("bash");
+        builder.arg("-c").arg("sleep 60");
+        let starter = builder.build().unwrap();
+
+        // We want to inject an error into the code path that reads the
+        // listen-url file.  We do this by precreating that path as a directory.
+        // Then we'll get EISDIR when we try to read it.
+        let listen_url_file = starter.listen_url_file().to_owned();
+        std::fs::create_dir(&listen_url_file)
+            .expect("pre-creating listen-URL path as directory");
+        let (temp_dir, error) = test_database_start_failure(starter).await;
+
+        if let CockroachStartError::Unknown { source } = error {
+            let message = format!("{:#}", source);
+            eprintln!("error message was: {}", message);
+            // Verify the error message refers to the listening file (since
+            // that's what we were operating on) and also reflects the EISDIR
+            // error.
+            assert!(message.starts_with("checking listen file \""));
+            assert!(message.contains("Is a directory"));
+        } else {
+            panic!("unexpected error trying to start database: {:#}", error);
+        }
+
+        // Clean up the temporary directory -- carefully.  Since we know exactly
+        // what should be in it, we opt to remove these items individually
+        // rather than risk blowing away something else inadvertently.
+        fs::remove_dir(&listen_url_file)
+            .await
+            .expect("failed to remove listen-url directory");
+        fs::remove_dir(temp_dir)
+            .await
+            .expect("failed to remove temporary directory");
     }
 
     // Test the happy path using the default store directory.
