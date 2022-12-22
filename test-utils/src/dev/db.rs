@@ -1146,21 +1146,25 @@ mod test {
         test_setup_database(starter, &data_dir, true, &BTreeMap::new()).await;
     }
 
-    // Test the happy path using an overridden store directory.
+    // Test the happy path using an overridden store directory and environment
+    // variables.
     #[tokio::test]
     async fn test_setup_database_overridden_dir() {
         let extra_temp_dir =
             tempdir().expect("failed to create temporary directory");
         let data_dir = extra_temp_dir.path().join("custom_data");
         let mut builder = new_builder().store_dir(&data_dir);
-        builder.env("GOTRACEBACK", "bogus").env("OMICRON_DUMMY", "dummy");
-        let starter = builder.build().unwrap();
 
-        // This common function will verify that the entire temporary directory
-        // is cleaned up.  We do not need to check that again here.
         let mut env_overrides = BTreeMap::new();
         env_overrides.insert("GOTRACEBACK", "bogus");
         env_overrides.insert("OMICRON_DUMMY", "dummy");
+        for (key, value) in &env_overrides {
+            builder.env(key, value);
+        }
+
+        // This common function will verify that the entire temporary directory
+        // is cleaned up.  We do not need to check that again here.
+        let starter = builder.build().unwrap();
         test_setup_database(starter, &data_dir, false, &env_overrides).await;
 
         // At this point, our extra temporary directory should still exist.
