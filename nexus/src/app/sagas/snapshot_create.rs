@@ -866,7 +866,18 @@ fn create_snapshot_from_disk(
 mod test {
     use super::*;
 
+    use crate::app::saga::create_saga_dag;
+    use dropshot::test_util::ClientTestContext;
+    use nexus_test_utils::resource_helpers::create_disk;
+    use nexus_test_utils::resource_helpers::create_ip_pool;
+    use nexus_test_utils::resource_helpers::create_organization;
+    use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::Name;
     use sled_agent_client::types::CrucibleOpts;
+    use std::str::FromStr;
 
     #[test]
     fn test_create_snapshot_from_disk_modify_request() {
@@ -1061,5 +1072,93 @@ mod test {
 
         assert!(snapshot_first_opts.control.is_none());
         assert!(disk_first_opts.control.is_some());
+    }
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    const ORG_NAME: &str = "test-org";
+    const PROJECT_NAME: &str = "springfield-squidport";
+    const DISK_NAME: &str = "disky-mcdiskface";
+
+    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
+        create_ip_pool(&client, "p0", None).await;
+        create_organization(&client, ORG_NAME).await;
+        create_project(client, ORG_NAME, PROJECT_NAME).await;
+        create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await.identity.id
+    }
+
+    // Helper for creating snapshot create parameters
+    fn new_test_params(
+        opctx: &OpContext,
+        silo_id: Uuid,
+        project_id: Uuid,
+        disk_id: Uuid,
+        disk: Name,
+    ) -> Params {
+        Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            silo_id,
+            project_id,
+            disk_id,
+            create_params: params::SnapshotCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-snapshot".parse().expect("Invalid disk name"),
+                    description: "My snapshot".to_string(),
+                },
+                disk,
+            },
+        }
+    }
+
+    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+        OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            cptestctx.server.apictx.nexus.datastore().clone(),
+        )
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_basic_usage_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let disk_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(cptestctx);
+
+        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+            LookupPath::new(&opctx, nexus.datastore())
+                .disk_id(disk_id)
+                .lookup_for(authz::Action::Read)
+                .await
+                .expect("Failed to look up created disk");
+
+        let silo_id = authz_silo.id();
+        let project_id = authz_project.id();
+
+        let params = new_test_params(
+            &opctx,
+            silo_id,
+            project_id,
+            disk_id,
+            Name::from_str(DISK_NAME).unwrap().into(),
+        );
+        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+
+        // Actually run the saga
+        let output = nexus.run_saga(runnable_saga).await.unwrap();
+
+        let snapshot = output
+            .lookup_node_output::<crate::db::model::Snapshot>(
+                "finalized_snapshot",
+            )
+            .unwrap();
+        assert_eq!(snapshot.project_id, project_id);
     }
 }
