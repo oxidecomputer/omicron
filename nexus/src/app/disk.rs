@@ -515,7 +515,6 @@ impl super::Nexus {
             saga_params,
         )
         .await?;
-
         Ok(())
     }
 }

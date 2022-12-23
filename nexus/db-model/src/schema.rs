@@ -77,7 +77,7 @@ table! {
         disk_id -> Uuid,
         volume_id -> Uuid,
 
-        destination_volume_id -> Nullable<Uuid>,
+        destination_volume_id -> Uuid,
 
         gen -> Int8,
         state -> crate::SnapshotStateEnum,
