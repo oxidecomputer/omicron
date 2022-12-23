@@ -82,8 +82,11 @@
 //!
 
 use super::{
-    common_storage::ensure_all_datasets_and_regions, ActionRegistry,
-    NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
+    common_storage::{
+        delete_crucible_regions, ensure_all_datasets_and_regions,
+    },
+    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
+    ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::context::OpContext;
@@ -125,9 +128,11 @@ declare_saga_actions! {
     snapshot_create;
     REGIONS_ALLOC -> "datasets_and_regions" {
         + ssc_alloc_regions
+        - ssc_alloc_regions_undo
     }
     REGIONS_ENSURE -> "regions_ensure" {
         + ssc_regions_ensure
+        - ssc_regions_ensure_undo
     }
     CREATE_DESTINATION_VOLUME_RECORD -> "created_destination_volume" {
         + ssc_create_destination_volume_record
@@ -252,6 +257,23 @@ async fn ssc_alloc_regions(
     Ok(datasets_and_regions)
 }
 
+async fn ssc_alloc_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let region_ids = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.id())
+        .collect::<Vec<Uuid>>();
+
+    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
+}
+
 async fn ssc_regions_ensure(
     sagactx: NexusActionContext,
 ) -> Result<String, ActionError> {
@@ -330,6 +352,21 @@ async fn ssc_regions_ensure(
         })?;
 
     Ok(volume_data)
+}
+
+async fn ssc_regions_ensure_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
+    delete_crucible_regions(
+        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?,
+    )
+    .await?;
+    info!(log, "ssc_regions_ensure_undo: Deleted crucible regions");
+    Ok(())
 }
 
 async fn ssc_create_destination_volume_record(
@@ -872,6 +909,7 @@ mod test {
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1160,5 +1198,116 @@ mod test {
             )
             .unwrap();
         assert_eq!(snapshot.project_id, project_id);
+    }
+
+    async fn verify_clean_slate(
+        cptestctx: &ControlPlaneTestContext,
+        test: &DiskTest,
+    ) {
+        // Verifies:
+        // - No disk records exist
+        // - No volume records exist
+        // - No region allocations exist
+        // - No regions are ensured in the sled agent
+        crate::app::sagas::disk_create::test::verify_clean_slate(
+            cptestctx, test,
+        )
+        .await;
+
+        // TODO: No snapshot record
+        // TODO: sled agent "snapshot_request" undone (???)
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let mut disk_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+            LookupPath::new(&opctx, nexus.datastore())
+                .disk_id(disk_id)
+                .lookup_for(authz::Action::Read)
+                .await
+                .expect("Failed to look up created disk");
+
+        let silo_id = authz_silo.id();
+        let project_id = authz_project.id();
+
+        let params = new_test_params(
+            &opctx,
+            silo_id,
+            project_id,
+            disk_id,
+            Name::from_str(DISK_NAME).unwrap().into(),
+        );
+        let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+
+        // The saga's input parameters include a disk UUID, which makes sense,
+        // since the snapshot is created from a disk.
+        //
+        // Unfortunately, for our idempotency checks, checking for a "clean
+        // slate" gets more expensive when we need to compare region allocations
+        // between the disk and the snapshot. If we can undo the snapshot
+        // provisioning AND delete the disk together, these checks are much
+        // simpler to write.
+        //
+        // So, in summary: We do some odd indexing here...
+        // ... because we re-create the whole DAG on each iteration...
+        // ... because we also delete the disk on each iteration, making the
+        // parameters invalid...
+        // ... because doing so provides a really easy-to-verify "clean slate"
+        // for us to test against.
+        let mut n: usize = 0;
+        while let Some(node) = dag.get_nodes().nth(n) {
+            n = n + 1;
+
+            // Create a new saga for this node.
+            info!(
+                log,
+                "Creating new saga which will fail at index {:?}", node.index();
+                "node_name" => node.name().as_ref(),
+                "label" => node.label(),
+            );
+
+            let runnable_saga =
+                nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+            // Inject an error instead of running the node.
+            //
+            // This should cause the saga to unwind.
+            nexus
+                .sec()
+                .saga_inject_error(runnable_saga.id(), node.index())
+                .await
+                .unwrap();
+            nexus
+                .run_saga(runnable_saga)
+                .await
+                .expect_err("Saga should have failed");
+
+            delete_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+            verify_clean_slate(cptestctx, &test).await;
+            disk_id = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME)
+                .await
+                .identity
+                .id;
+
+            let params = new_test_params(
+                &opctx,
+                silo_id,
+                project_id,
+                disk_id,
+                Name::from_str(DISK_NAME).unwrap().into(),
+            );
+            dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        }
     }
 }
