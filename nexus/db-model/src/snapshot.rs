@@ -48,7 +48,7 @@ pub struct Snapshot {
     pub volume_id: Uuid,
 
     // destination of all snapshot blocks
-    pub destination_volume_id: Option<Uuid>,
+    pub destination_volume_id: Uuid,
 
     pub gen: Generation,
     pub state: SnapshotState,
