@@ -44,7 +44,7 @@ impl NexusSaga for SagaSnapshotDelete {
 
         const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
         const DELETE_VOLUME_DESTINATION_PARAMS: &'static str =
-            "delete_volume_params";
+            "delete_volume_destination_params";
 
         let volume_delete_params = sagas::volume_delete::Params {
             volume_id: params.snapshot.volume_id,
