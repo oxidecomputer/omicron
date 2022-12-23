@@ -614,7 +614,7 @@ impl ServiceManager {
                                     443,
                                 ),
                                 request_body_max_bytes: 1048576,
-                                tls: Some(dropshot::ConfigTls {
+                                tls: Some(dropshot::ConfigTls::AsFile {
                                     cert_file,
                                     key_file,
                                 }),
