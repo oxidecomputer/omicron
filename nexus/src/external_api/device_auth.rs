@@ -112,7 +112,7 @@ pub async fn device_auth_request(
             nexus.device_auth_request_create(&opctx, params.client_id).await?;
         build_oauth_response(
             StatusCode::OK,
-            &model.into_response(rqctx.server.tls, host),
+            &model.into_response(rqctx.server.using_tls(), host),
         )
     };
     // TODO: instrumentation doesn't work because we use `Response<Body>`
