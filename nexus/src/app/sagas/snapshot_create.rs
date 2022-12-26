@@ -142,7 +142,7 @@ declare_saga_actions! {
         + ssc_create_snapshot_record
         - ssc_create_snapshot_record_undo
     }
-    SEND_SNAPSHOT_REQUEST -> "sled_id" {
+    SEND_SNAPSHOT_REQUEST -> "snapshot_request" {
         + ssc_send_snapshot_request
         - ssc_send_snapshot_request_undo
     }
@@ -503,7 +503,7 @@ async fn ssc_create_snapshot_record_undo(
 
 async fn ssc_send_snapshot_request(
     sagactx: NexusActionContext,
-) -> Result<Uuid, ActionError> {
+) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -547,7 +547,7 @@ async fn ssc_send_snapshot_request(
                 .await
                 .map_err(|e| e.to_string())
                 .map_err(ActionError::action_failed)?;
-            Ok(instance.runtime().sled_id)
+            Ok(())
         }
 
         None => {
@@ -604,7 +604,7 @@ async fn ssc_send_snapshot_request(
                 .map_err(|e| e.to_string())
                 .map_err(ActionError::action_failed)?;
 
-            Ok(sled_id)
+            Ok(())
         }
     }
 }
