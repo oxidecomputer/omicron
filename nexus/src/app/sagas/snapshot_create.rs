@@ -1012,6 +1012,9 @@ mod test {
     use super::*;
 
     use crate::app::saga::create_saga_dag;
+    use crate::db::DataStore;
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
@@ -1308,6 +1311,33 @@ mod test {
         assert_eq!(snapshot.project_id, project_id);
     }
 
+    async fn no_snapshot_records_exist(datastore: &DataStore) -> bool {
+        use crate::db::model::Snapshot;
+        use crate::db::schema::snapshot::dsl;
+
+        dsl::snapshot
+            .filter(dsl::time_deleted.is_null())
+            .select(Snapshot::as_select())
+            .first_async::<Snapshot>(datastore.pool_for_tests().await.unwrap())
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn no_region_snapshot_records_exist(datastore: &DataStore) -> bool {
+        use crate::db::model::RegionSnapshot;
+        use crate::db::schema::region_snapshot::dsl;
+
+        dsl::region_snapshot
+            .select(RegionSnapshot::as_select())
+            .first_async::<RegionSnapshot>(datastore.pool_for_tests().await.unwrap())
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
     async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
         test: &DiskTest,
@@ -1322,9 +1352,12 @@ mod test {
         )
         .await;
 
-        // TODO: No snapshot record
-        // TODO: sled agent "snapshot_request" undone (???)
-        // TODO: No "region_snapshot" records
+        // Verifies:
+        // - No snapshot records exist
+        // - No region snapshot records exist
+        let datastore = cptestctx.server.apictx.nexus.datastore();
+        assert!(no_snapshot_records_exist(datastore).await);
+        assert!(no_region_snapshot_records_exist(datastore).await);
     }
 
     #[nexus_test(server = crate::Server)]
