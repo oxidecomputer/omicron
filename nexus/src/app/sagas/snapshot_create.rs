@@ -1331,7 +1331,9 @@ mod test {
 
         dsl::region_snapshot
             .select(RegionSnapshot::as_select())
-            .first_async::<RegionSnapshot>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<RegionSnapshot>(
+                datastore.pool_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
