@@ -74,6 +74,23 @@ declare_saga_actions! {
 
 // volume delete saga: definition
 
+pub fn create_dag(
+    mut builder: steno::DagBuilder,
+) -> Result<steno::Dag, super::SagaInitError> {
+    builder.append(decrease_crucible_resource_count_action());
+    builder.append_parallel(vec![
+        // clean up top level regions for volume
+        delete_crucible_regions_action(),
+        // clean up snapshots no longer referenced by any volume
+        delete_crucible_snapshots_action(),
+    ]);
+    // clean up regions that were freed by deleting snapshots
+    builder.append(delete_freed_crucible_regions_action());
+    builder.append(hard_delete_volume_record_action());
+
+    Ok(builder.build()?)
+}
+
 #[derive(Debug)]
 pub struct SagaVolumeDelete;
 impl NexusSaga for SagaVolumeDelete {
@@ -86,20 +103,9 @@ impl NexusSaga for SagaVolumeDelete {
 
     fn make_saga_dag(
         _params: &Self::Params,
-        mut builder: steno::DagBuilder,
+        builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(decrease_crucible_resource_count_action());
-        builder.append_parallel(vec![
-            // clean up top level regions for volume
-            delete_crucible_regions_action(),
-            // clean up snapshots no longer referenced by any volume
-            delete_crucible_snapshots_action(),
-        ]);
-        // clean up regions that were freed by deleting snapshots
-        builder.append(delete_freed_crucible_regions_action());
-        builder.append(hard_delete_volume_record_action());
-
-        Ok(builder.build()?)
+        create_dag(builder)
     }
 }
 

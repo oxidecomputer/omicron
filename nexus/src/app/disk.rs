@@ -12,7 +12,6 @@ use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -501,10 +500,9 @@ impl super::Nexus {
         // (on-disk snapshots, running read-only downstairs) because disks
         // *could* still be using them (if the snapshot has not yet been turned
         // into a regular crucible volume). It will involve some sort of
-        // reference counting for volumes, and probably means this needs to
-        // instead be a saga.
+        // reference counting for volumes.
 
-        let (.., project, authz_snapshot, db_snapshot) =
+        let (.., authz_snapshot, db_snapshot) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -512,27 +510,15 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        // TODO: This should exist within a saga
-        self.db_datastore
-            .virtual_provisioning_collection_delete_disk(
-                &opctx,
-                db_snapshot.id(),
-                project.id(),
-                -i64::try_from(db_snapshot.size.to_bytes()).map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })?,
-            )
-            .await?;
-
-        self.db_datastore
-            .project_delete_snapshot(opctx, &authz_snapshot, &db_snapshot)
-            .await?;
-
-        // Kick off volume deletion saga(s)
-        self.volume_delete(opctx, db_snapshot.volume_id).await?;
-        self.volume_delete(opctx, db_snapshot.destination_volume_id).await?;
+        let saga_params = sagas::snapshot_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_snapshot,
+            snapshot: db_snapshot,
+        };
+        self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
+            saga_params,
+        )
+        .await?;
 
         Ok(())
     }

@@ -125,6 +125,7 @@ declare_saga_actions! {
     snapshot_create;
     REGIONS_ALLOC -> "datasets_and_regions" {
         + ssc_alloc_regions
+        - ssc_alloc_regions_undo
     }
     REGIONS_ENSURE -> "regions_ensure" {
         + ssc_regions_ensure
@@ -521,16 +522,13 @@ async fn ssc_account_space_undo(
             &opctx,
             snapshot_created.id(),
             params.project_id,
-            -i64::try_from(snapshot_created.size.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            -i64::try_from(snapshot_created.size.to_bytes()).map_err(|e| {
+                Error::internal_error(&format!(
+                    "updating resource provisioning: {e}"
+                ))
+            })?,
         )
-        .await
-        .map_err(ActionError::action_failed)?;
+        .await?;
     Ok(())
 }
 

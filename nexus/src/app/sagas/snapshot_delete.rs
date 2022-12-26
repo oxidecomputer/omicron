@@ -2,55 +2,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
-};
-use crate::app::sagas::NexusAction;
-use crate::authn;
-use crate::external_api::params;
-use lazy_static::lazy_static;
+use super::{ActionRegistry, NexusActionContext, NexusSaga};
+use crate::app::sagas;
+use crate::app::sagas::declare_saga_actions;
+use crate::context::OpContext;
+use crate::db;
+use crate::{authn, authz};
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
-use std::sync::Arc;
-use steno::new_action_noop_undo;
 use steno::ActionError;
 use steno::Node;
-use uuid::Uuid;
-
-// snapshot create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub snapshot_id: Uuid,
-    pub project_id: Uuid,
-    pub disk_id: Uuid,
-    pub create_params: params::SnapshotCreate,
+    pub authz_snapshot: authz::Snapshot,
+    pub snapshot: db::model::Snapshot,
 }
 
-// snapshot create saga: actions
-
-lazy_static! {
-    static ref DELETE_SNAPSHOT_RECORD: NexusAction = new_action_noop_undo(
-        "snapshot-delete.delete-snapshot-record",
-        ssd_delete_snapshot_record,
-    );
-    static ref SPACE_ACCOUNT: NexusAction = new_action_noop_undo(
-        "snapshot-delete.account-space",
-        ssd_account_space,
-    );
-    static ref DELETE_SOURCE_VOLUME: NexusAction = new_action_noop_undo(
-        "snapshot-delete.delete-source-volume",
-        ssd_delete_source_volume,
-    );
-    static ref DELETE_DESTINATION_VOLUME: NexusAction = new_action_noop_undo(
-        "snapshot-delete.delete-destination-volume",
-        ssd_delete_destination_volume,
-    );
+declare_saga_actions! {
+    snapshot_delete;
+    DELETE_SNAPSHOT_RECORD -> "no_result1" {
+        + ssd_delete_snapshot_record
+    }
+    SPACE_ACCOUNT -> "no_result2" {
+        + ssd_account_space
+    }
 }
-
-// snapshot delete saga: definition
 
 #[derive(Debug)]
 pub struct SagaSnapshotDelete;
@@ -59,47 +38,63 @@ impl NexusSaga for SagaSnapshotDelete {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*DELETE_SNAPSHOT_RECORD));
-        registry.register(Arc::clone(&*SPACE_ACCOUNT));
-        registry.register(Arc::clone(&*DELETE_SOURCE_VOLUME));
-        registry.register(Arc::clone(&*DELETE_DESTINATION_VOLUME));
+        snapshot_delete_register_actions(registry);
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
-    ) -> Result<steno::Dag, SagaInitError> {
-        // Generate IDs
-        builder.append(Node::action(
-            "delete_source_volume_saga_id",
-            "GenerateSourceVolumeSagaId",
-            ACTION_GENERATE_ID.as_ref(),
+    ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(delete_snapshot_record_action());
+        builder.append(space_account_action());
+
+        const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
+        const DELETE_VOLUME_DESTINATION_PARAMS: &'static str =
+            "delete_volume_destination_params";
+
+        let volume_delete_params = sagas::volume_delete::Params {
+            serialized_authn: params.serialized_authn.clone(),
+            volume_id: params.snapshot.volume_id,
+        };
+        builder.append(Node::constant(
+            DELETE_VOLUME_PARAMS,
+            serde_json::to_value(&volume_delete_params).map_err(|e| {
+                super::SagaInitError::SerializeError(
+                    String::from("volume_id"),
+                    e,
+                )
+            })?,
         ));
 
-        builder.append(Node::action(
-            "delete_destination_volume_saga_id",
-            "GenerateDestinationVolumeSagaId",
-            ACTION_GENERATE_ID.as_ref(),
+        let volume_delete_params = sagas::volume_delete::Params {
+            serialized_authn: params.serialized_authn.clone(),
+            volume_id: params.snapshot.destination_volume_id,
+        };
+        builder.append(Node::constant(
+            DELETE_VOLUME_DESTINATION_PARAMS,
+            serde_json::to_value(&volume_delete_params).map_err(|e| {
+                super::SagaInitError::SerializeError(
+                    String::from("volume_id"),
+                    e,
+                )
+            })?,
         ));
-        builder.append(Node::action(
-            "deleted_snapshot",
-            "DeleteSnapshotRecord",
-            DELETE_SNAPSHOT_RECORD.as_ref(),
+
+        let make_volume_delete_dag = || {
+            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
+                sagas::volume_delete::SagaVolumeDelete::NAME,
+            ));
+            sagas::volume_delete::create_dag(subsaga_builder)
+        };
+        builder.append(steno::Node::subsaga(
+            "delete_volume",
+            make_volume_delete_dag()?,
+            DELETE_VOLUME_PARAMS,
         ));
-        builder.append(Node::action(
-            "accounted_space",
-            "SpaceAccount",
-            SPACE_ACCOUNT.as_ref(),
-        ));
-        builder.append(Node::action(
-            "deleted_source_volume_saga",
-            "DeleteSourceVolumeSaga",
-            DELETE_SOURCE_VOLUME.as_ref(),
-        ));
-        builder.append(Node::action(
-            "deleted_destination_volume_saga",
-            "DeleteDestinationVolumeSaga",
-            DELETE_DESTINATION_VOLUME.as_ref(),
+        builder.append(steno::Node::subsaga(
+            "delete_destination_volume",
+            make_volume_delete_dag()?,
+            DELETE_VOLUME_DESTINATION_PARAMS,
         ));
 
         Ok(builder.build()?)
@@ -111,42 +106,43 @@ impl NexusSaga for SagaSnapshotDelete {
 async fn ssd_delete_snapshot_record(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    todo!();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    osagactx
+        .datastore()
+        .project_delete_snapshot(
+            &opctx,
+            &params.authz_snapshot,
+            &params.snapshot,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 async fn ssd_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    todo!();
-    /*
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-
-    let snapshot_created =
-        sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_snapshot(
             &opctx,
-            snapshot_created.id(),
-            params.project_id,
-            // TODO: How many bytes? read while deleting?
+            params.authz_snapshot.id(),
+            params.snapshot.project_id,
+            -i64::try_from(params.snapshot.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource provisioning: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
         )
         .await
         .map_err(ActionError::action_failed)?;
-    */
     Ok(())
-}
-
-async fn ssd_delete_source_volume(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    todo!();
-}
-
-async fn ssd_delete_destination_volume(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    todo!();
 }

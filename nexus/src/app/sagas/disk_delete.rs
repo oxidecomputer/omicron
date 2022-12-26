@@ -28,7 +28,7 @@ pub struct Params {
 
 declare_saga_actions! {
     disk_delete;
-    DELETE_DISK_RECORD -> "volume_id" {
+    DELETE_DISK_RECORD -> "deleted_disk" {
         // TODO: See the comment on the "DeleteRegions" step,
         // we may want to un-delete the disk if we cannot remove
         // underlying regions.
