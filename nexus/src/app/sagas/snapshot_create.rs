@@ -142,11 +142,13 @@ declare_saga_actions! {
         + ssc_create_snapshot_record
         - ssc_create_snapshot_record_undo
     }
-    SEND_SNAPSHOT_REQUEST -> "snapshot_request" {
+    SEND_SNAPSHOT_REQUEST -> "sled_id" {
         + ssc_send_snapshot_request
+        - ssc_send_snapshot_request_undo
     }
     START_RUNNING_SNAPSHOT -> "replace_sockets_map" {
         + ssc_start_running_snapshot
+        - ssc_start_running_snapshot_undo
     }
     CREATE_VOLUME_RECORD -> "created_volume" {
         + ssc_create_volume_record
@@ -192,17 +194,27 @@ impl NexusSaga for SagaSnapshotCreate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
-        // Allocate region space for snapshot to store blocks post-scrub
+        // (DB) Allocate region space for snapshot to store blocks post-scrub
         builder.append(regions_alloc_action());
+        // (Sleds) Reaches out to each dataset, and ensures the regions exist
+        // for the destination volume
         builder.append(regions_ensure_action());
+        // (DB) Creates a record of the destination volume in the DB
         builder.append(create_destination_volume_record_action());
+        // (DB) Creates a record of the snapshot, referencing both the
+        // original disk ID and the destination volume
         builder.append(create_snapshot_record_action());
+        // (Sleds) Sends a request for the disk to create a ZFS snapshot
         builder.append(send_snapshot_request_action());
-        // Validate with crucible agent and start snapshot downstairs
+        // (Sleds + DB) Start snapshot downstairs, add an entry in the DB for
+        // the dataset's snapshot.
+        //
+        // TODO: Should this be two separate saga steps?
         builder.append(start_running_snapshot_action());
-        // Copy and modify the disk volume construction request to point to the new
-        // running snapshot
+        // (DB) Copy and modify the disk volume construction request to point
+        // to the new running snapshot
         builder.append(create_volume_record_action());
+        // (DB) Mark snapshot as "ready"
         builder.append(finalize_snapshot_record_action());
 
         Ok(builder.build()?)
@@ -491,7 +503,7 @@ async fn ssc_create_snapshot_record_undo(
 
 async fn ssc_send_snapshot_request(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<Uuid, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -535,6 +547,7 @@ async fn ssc_send_snapshot_request(
                 .await
                 .map_err(|e| e.to_string())
                 .map_err(ActionError::action_failed)?;
+            Ok(instance.runtime().sled_id)
         }
 
         None => {
@@ -563,13 +576,19 @@ async fn ssc_send_snapshot_request(
                 })?;
 
             // Send the snapshot request to a random sled agent
-            let sled_agent_client = osagactx
-                .random_sled_client()
+            let sled_id = osagactx
+                .nexus()
+                .random_sled_id()
                 .await
                 .map_err(ActionError::action_failed)?
                 .ok_or_else(|| {
                     "no sled found when looking for random sled?!".to_string()
                 })
+                .map_err(ActionError::action_failed)?;
+            let sled_agent_client = osagactx
+                .nexus()
+                .sled_client(&sled_id)
+                .await
                 .map_err(ActionError::action_failed)?;
 
             sled_agent_client
@@ -584,9 +603,43 @@ async fn ssc_send_snapshot_request(
                 .await
                 .map_err(|e| e.to_string())
                 .map_err(ActionError::action_failed)?;
+
+            Ok(sled_id)
         }
     }
+}
 
+async fn ssc_send_snapshot_request_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
+    info!(log, "Undoing snapshot request for {snapshot_id}");
+
+    // Lookup the regions used by the source disk...
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await?;
+    let datasets_and_regions =
+        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+
+    // ... and instruct each of those regions to delete the snapshot.
+    for (dataset, region) in datasets_and_regions {
+        let url = format!("http://{}", dataset.address());
+        let client = CrucibleAgentClient::new(&url);
+
+        client
+            .region_delete_snapshot(
+                &RegionId(region.id().to_string()),
+                &snapshot_id.to_string(),
+            )
+            .await?;
+    }
     Ok(())
 }
 
@@ -599,6 +652,7 @@ async fn ssc_start_running_snapshot(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
+    info!(log, "starting running snapshot for {snapshot_id}");
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -684,6 +738,60 @@ async fn ssc_start_running_snapshot(
     }
 
     Ok(map)
+}
+
+async fn ssc_start_running_snapshot_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
+    info!(log, "Undoing snapshot start running request for {snapshot_id}");
+
+    // Lookup the regions used by the source disk...
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await?;
+    let datasets_and_regions =
+        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+
+    // ... and instruct each of those regions to delete the running snapshot.
+    for (dataset, region) in datasets_and_regions {
+        let url = format!("http://{}", dataset.address());
+        let client = CrucibleAgentClient::new(&url);
+
+        use crucible_agent_client::Error::ErrorResponse;
+        use http::status::StatusCode;
+
+        client
+            .region_delete_running_snapshot(
+                &RegionId(region.id().to_string()),
+                &snapshot_id.to_string(),
+            )
+            .await
+            .map(|_| ())
+            // NOTE: If we later create a volume record and delete it, the
+            // running snapshot may be deleted (see:
+            // ssc_create_volume_record_undo).
+            //
+            // To cope, we treat "running snapshot not found" as "Ok", since it
+            // may just be the result of the volume deletion steps completing.
+            .or_else(|err| match err {
+                ErrorResponse(r) if r.status() == StatusCode::NOT_FOUND => {
+                    Ok(())
+                }
+                _ => Err(err),
+            })?;
+        osagactx
+            .datastore()
+            .region_snapshot_remove(dataset.id(), region.id(), snapshot_id)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn ssc_create_volume_record(
@@ -1216,6 +1324,7 @@ mod test {
 
         // TODO: No snapshot record
         // TODO: sled agent "snapshot_request" undone (???)
+        // TODO: No "region_snapshot" records
     }
 
     #[nexus_test(server = crate::Server)]
