@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
-use crate::app::sagas::NexusAction;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
@@ -16,7 +16,6 @@ use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use chrono::Utc;
-use lazy_static::lazy_static;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::Error;
@@ -33,10 +32,7 @@ use slog::warn;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
-use std::sync::Arc;
-use steno::new_action_noop_undo;
 use steno::ActionError;
-use steno::ActionFunc;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
 use uuid::Uuid;
@@ -71,52 +67,44 @@ struct DiskAttachParams {
 
 // instance create saga: actions
 
-lazy_static! {
-    static ref ALLOC_SERVER: NexusAction = new_action_noop_undo(
-        // TODO-robustness This still needs an undo action, and we should really
-        // keep track of resources and reservations, etc.  See the comment on
-        // SagaContext::alloc_server()
-        "instance-create.alloc-server",
-        sic_alloc_server
-    );
-    static ref RESOURCES_ACCOUNT: NexusAction = ActionFunc::new_action(
-        "instance-create.account-resources",
-        sic_account_resources,
-        sic_account_resources_undo,
-    );
-    static ref ALLOC_PROPOLIS_IP: NexusAction = new_action_noop_undo(
-        "instance-create.allocate-propolis-ip",
-        sic_allocate_propolis_ip,
-    );
-    static ref CREATE_INSTANCE_RECORD: NexusAction = ActionFunc::new_action(
-        "instance-create.create-instance-record",
-        sic_create_instance_record,
-        sic_delete_instance_record,
-    );
-    static ref CREATE_NETWORK_INTERFACE: NexusAction = ActionFunc::new_action(
-        "instance-create.create-network-interface",
-        sic_create_network_interface,
-        sic_create_network_interface_undo,
-    );
-    static ref CREATE_SNAT_IP: NexusAction = ActionFunc::new_action(
-        "instance-create.create-snat-ip",
-        sic_allocate_instance_snat_ip,
-        sic_allocate_instance_snat_ip_undo,
-    );
-    static ref CREATE_EXTERNAL_IP: NexusAction = ActionFunc::new_action(
-        "instance-create.create-external-ip",
-        sic_allocate_instance_external_ip,
-        sic_allocate_instance_external_ip_undo,
-    );
-    static ref ATTACH_DISKS_TO_INSTANCE: NexusAction = ActionFunc::new_action(
-        "instance-create.attach-disks-to-instance",
-        sic_attach_disk_to_instance,
-        sic_attach_disk_to_instance_undo,
-    );
-    static ref INSTANCE_ENSURE: NexusAction = new_action_noop_undo(
-        "instance-create.instance-ensure",
-        sic_instance_ensure,
-    );
+declare_saga_actions! {
+    instance_create;
+    // TODO-robustness This still needs an undo action, and we should really
+    // keep track of resources and reservations, etc.  See the comment on
+    // SagaContext::alloc_server()
+    ALLOC_SERVER -> "server_id" {
+        + sic_alloc_server
+    }
+    RESOURCES_ACCOUNT -> "no_result" {
+        + sic_account_resources
+        - sic_account_resources_undo
+    }
+    ALLOC_PROPOLIS_IP -> "propolis_ip" {
+        + sic_allocate_propolis_ip
+    }
+    CREATE_INSTANCE_RECORD -> "instance_name" {
+        + sic_create_instance_record
+        - sic_delete_instance_record
+    }
+    CREATE_NETWORK_INTERFACE -> "output" {
+        + sic_create_network_interface
+        - sic_create_network_interface_undo
+    }
+    CREATE_SNAT_IP -> "snat_ip" {
+        + sic_allocate_instance_snat_ip
+        - sic_allocate_instance_snat_ip_undo
+    }
+    CREATE_EXTERNAL_IP -> "output" {
+        + sic_allocate_instance_external_ip
+        - sic_allocate_instance_external_ip_undo
+    }
+    ATTACH_DISKS_TO_INSTANCE -> "attach_disk_output" {
+        + sic_attach_disk_to_instance
+        - sic_attach_disk_to_instance_undo
+    }
+    INSTANCE_ENSURE -> "instance_ensure" {
+        + sic_instance_ensure
+    }
 }
 
 // instance create saga: definition
@@ -128,15 +116,7 @@ impl NexusSaga for SagaInstanceCreate {
     type Params = Params;
 
     fn register_actions(registry: &mut super::ActionRegistry) {
-        registry.register(Arc::clone(&*ALLOC_SERVER));
-        registry.register(Arc::clone(&*RESOURCES_ACCOUNT));
-        registry.register(Arc::clone(&*ALLOC_PROPOLIS_IP));
-        registry.register(Arc::clone(&*CREATE_INSTANCE_RECORD));
-        registry.register(Arc::clone(&*CREATE_NETWORK_INTERFACE));
-        registry.register(Arc::clone(&*CREATE_SNAT_IP));
-        registry.register(Arc::clone(&*CREATE_EXTERNAL_IP));
-        registry.register(Arc::clone(&*ATTACH_DISKS_TO_INSTANCE));
-        registry.register(Arc::clone(&*INSTANCE_ENSURE));
+        instance_create_register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -158,29 +138,10 @@ impl NexusSaga for SagaInstanceCreate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
-        builder.append(Node::action(
-            "server_id",
-            "AllocServer",
-            ALLOC_SERVER.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "no-result",
-            "ResourcesAccount",
-            RESOURCES_ACCOUNT.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "propolis_ip",
-            "AllocatePropolisIp",
-            ALLOC_PROPOLIS_IP.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "instance_name",
-            "CreateInstanceRecord",
-            CREATE_INSTANCE_RECORD.as_ref(),
-        ));
+        builder.append(alloc_server_action());
+        builder.append(resources_account_action());
+        builder.append(alloc_propolis_ip_action());
+        builder.append(create_instance_record_action());
 
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
@@ -262,11 +223,7 @@ impl NexusSaga for SagaInstanceCreate {
             "CreateSnatIpId",
             ACTION_GENERATE_ID.as_ref(),
         ));
-        builder.append(Node::action(
-            "snat_ip",
-            "CreateSnatIp",
-            CREATE_SNAT_IP.as_ref(),
-        ));
+        builder.append(create_snat_ip_action());
 
         // See the comment above where we add nodes for creating NICs.  We use
         // the same pattern here.
@@ -341,12 +298,7 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        builder.append(Node::action(
-            "instance_ensure",
-            "InstanceEnsure",
-            INSTANCE_ENSURE.as_ref(),
-        ));
-
+        builder.append(instance_ensure_action());
         Ok(builder.build()?)
     }
 }
@@ -638,13 +590,15 @@ async fn sic_allocate_instance_snat_ip(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+
+    let (.., pool) = datastore
+        .ip_pools_fetch_default_for(&opctx, authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let pool_id = pool.identity.id;
+
     datastore
-        .allocate_instance_snat_ip(
-            &opctx,
-            ip_id,
-            saga_params.project_id,
-            instance_id,
-        )
+        .allocate_instance_snat_ip(&opctx, ip_id, instance_id, pool_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -696,13 +650,7 @@ async fn sic_allocate_instance_external_ip(
         }
     };
     datastore
-        .allocate_instance_ephemeral_ip(
-            &opctx,
-            ip_id,
-            saga_params.project_id,
-            instance_id,
-            pool_name,
-        )
+        .allocate_instance_ephemeral_ip(&opctx, ip_id, instance_id, pool_name)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -919,9 +867,15 @@ async fn sic_create_instance_record(
         runtime.into(),
     );
 
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let instance = osagactx
         .datastore()
-        .project_create_instance(&opctx, new_instance)
+        .project_create_instance(&opctx, &authz_project, new_instance)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1063,9 +1017,9 @@ mod test {
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
@@ -1082,7 +1036,7 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
+        populate_ip_pool(&client, "default", None).await;
         create_organization(&client, ORG_NAME).await;
         let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
         create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;

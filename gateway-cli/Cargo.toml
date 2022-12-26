@@ -5,19 +5,15 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-clap = "4.0.26"
-futures = "0.3.25"
-libc = "0.2"
-slog-async = "2.6"
-slog-term = "2.9"
-tokio = { version = "1.23", features = [ "rt-multi-thread", "macros", "time" ] }
-tokio-tungstenite = "0.18"
-uuid = { version = "1.2", features = [ "v4" ] }
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+libc.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+tokio = { workspace = true, features = [ "rt-multi-thread", "macros", "time" ] }
+tokio-tungstenite.workspace = true
+uuid.workspace = true
 
-gateway-client = { path = "../gateway-client" }
-omicron-common = { path = "../common" }
-
-[dependencies.slog]
-version = "2.7"
-features = [ "max_level_trace", "release_max_level_debug" ]
+gateway-client.workspace = true

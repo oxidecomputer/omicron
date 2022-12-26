@@ -318,16 +318,31 @@ impl Populator for PopulateRack {
                     name: "oxide-service-pool".parse::<Name>().unwrap(),
                     description: String::from("IP Pool for Oxide Services"),
                 },
-                project: None,
             };
             datastore
-                .ip_pool_create(opctx, &params, Some(args.rack_id))
+                .ip_pool_create(opctx, &params, /*internal=*/ true)
                 .await
                 .map(|_| ())
                 .or_else(|e| match e {
                     Error::ObjectAlreadyExists { .. } => Ok(()),
                     _ => Err(e),
                 })?;
+
+            let params = params::IpPoolCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse::<Name>().unwrap(),
+                    description: String::from("default IP pool"),
+                },
+            };
+            datastore
+                .ip_pool_create(opctx, &params, /*internal=*/ false)
+                .await
+                .map(|_| ())
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
+
             Ok(())
         }
         .boxed()

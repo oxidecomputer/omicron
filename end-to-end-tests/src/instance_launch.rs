@@ -61,13 +61,14 @@ async fn instance_launch() -> Result<()> {
         .id;
 
     eprintln!("create disk");
+    let disk_name = generate_name("disk")?;
     let disk_name = ctx
         .client
         .disk_create()
         .organization_name(ctx.org_name.clone())
         .project_name(ctx.project_name.clone())
         .body(DiskCreate {
-            name: generate_name("disk")?,
+            name: disk_name.clone(),
             description: String::new(),
             disk_source: DiskSource::GlobalImage { image_id },
             size: ByteCount(2048 * 1024 * 1024),
@@ -89,7 +90,9 @@ async fn instance_launch() -> Result<()> {
             hostname: "localshark".into(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
-            disks: vec![InstanceDiskAttachment::Attach { name: disk_name }],
+            disks: vec![InstanceDiskAttachment::Attach {
+                name: disk_name.clone(),
+            }],
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool_name: None }],
             user_data: String::new(),
@@ -236,6 +239,23 @@ async fn instance_launch() -> Result<()> {
                 .organization_name(ctx.org_name.clone())
                 .project_name(ctx.project_name.clone())
                 .instance_name(instance.name.clone())
+                .send()
+                .await
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await?;
+
+    eprintln!("deleting disk");
+    wait_for_condition(
+        || async {
+            ctx.client
+                .disk_delete()
+                .organization_name(ctx.org_name.clone())
+                .project_name(ctx.project_name.clone())
+                .disk_name(disk_name.clone())
                 .send()
                 .await
                 .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)

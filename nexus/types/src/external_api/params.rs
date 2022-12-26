@@ -7,6 +7,7 @@
 use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
+    http_pagination::{PaginatedByName, PaginatedByNameOrId},
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
@@ -19,31 +20,106 @@ use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ProjectSelector {
+pub struct OrganizationPath {
+    pub organization: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectPath {
     pub project: NameOrId,
-    pub organization: Option<NameOrId>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstancePath {
+    pub instance: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OrganizationSelector {
+    pub organization: NameOrId,
+}
+
+impl From<Name> for OrganizationSelector {
+    fn from(name: Name) -> Self {
+        OrganizationSelector { organization: name.into() }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalOrganizationSelector {
+    #[serde(flatten)]
+    pub organization_selector: Option<OrganizationSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectSelector {
+    #[serde(flatten)]
+    pub organization_selector: Option<OrganizationSelector>,
+    pub project: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl ProjectSelector {
+    pub fn new(organization: Option<NameOrId>, project: NameOrId) -> Self {
+        ProjectSelector {
+            organization_selector: organization
+                .map(|o| OrganizationSelector { organization: o }),
+            project,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectList {
+    #[serde(flatten)]
+    pub pagination: PaginatedByNameOrId,
+    #[serde(flatten)]
+    pub organization: OrganizationSelector,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalProjectSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct InstanceSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
     pub instance: NameOrId,
-    pub project: Option<NameOrId>,
-    pub organization: Option<NameOrId>,
 }
 
+// TODO-v1: delete this post migration
 impl InstanceSelector {
     pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
         instance: NameOrId,
-        project_selector: &Option<ProjectSelector>,
-    ) -> InstanceSelector {
+    ) -> Self {
         InstanceSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
             instance,
-            organization: project_selector
-                .as_ref()
-                .and_then(|s| s.organization.clone()),
-            project: project_selector.as_ref().map(|s| s.project.clone()),
         }
     }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceList {
+    #[serde(flatten)]
+    pub pagination: PaginatedByName,
+    #[serde(flatten)]
+    pub project_selector: ProjectSelector,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceSerialConsole {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+
+    #[serde(flatten)]
+    pub console_params: InstanceSerialConsoleRequest,
 }
 
 // Silos
@@ -508,14 +584,6 @@ pub struct NetworkInterfaceUpdate {
 
 // IP POOLS
 
-// Type used to identify a Project in request bodies, where one may not have
-// the path in the request URL.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct ProjectPath {
-    pub organization: Name,
-    pub project: Name,
-}
-
 /// Create-time parameters for an IP Pool.
 ///
 /// See [`IpPool`](crate::external_api::views::IpPool)
@@ -523,8 +591,6 @@ pub struct ProjectPath {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    #[serde(flatten)]
-    pub project: Option<ProjectPath>,
 }
 
 /// Parameters for updating an IP Pool

@@ -1496,15 +1496,19 @@ mod tests {
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::identity::Resource;
+    use crate::db::lookup::LookupPath;
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
     use crate::db::model::MacAddr;
     use crate::db::model::NetworkInterface;
+    use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
+    use crate::external_api::params;
     use crate::external_api::params::InstanceCreate;
     use crate::external_api::params::InstanceNetworkInterfaceAttachment;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -1536,11 +1540,10 @@ mod tests {
     // stopped to add or delete interfaces.
     async fn create_instance(
         opctx: &OpContext,
+        project_id: Uuid,
         db_datastore: &DataStore,
     ) -> Instance {
         let instance_id = Uuid::new_v4();
-        let project_id =
-            "f89892a0-58e0-60c8-a164-a82d0bd29ff4".parse().unwrap();
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
         let name = format!("a{}", instance_id)[..9].parse().unwrap();
@@ -1576,17 +1579,25 @@ mod tests {
         };
         let instance =
             Instance::new(instance_id, project_id, &params, runtime.into());
+
+        let (.., authz_project) = LookupPath::new(&opctx, &db_datastore)
+            .project_id(project_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .expect("Failed to lookup project for instance creation");
+
         db_datastore
-            .project_create_instance(opctx, instance)
+            .project_create_instance(&opctx, &authz_project, instance)
             .await
             .expect("Failed to create new instance record")
     }
 
     async fn create_stopped_instance(
         opctx: &OpContext,
+        project_id: Uuid,
         db_datastore: &DataStore,
     ) -> Instance {
-        let instance = create_instance(opctx, db_datastore).await;
+        let instance = create_instance(opctx, project_id, db_datastore).await;
         instance_set_state(
             db_datastore,
             instance,
@@ -1677,6 +1688,7 @@ mod tests {
         opctx: OpContext,
         db: CockroachInstance,
         db_datastore: Arc<DataStore>,
+        project_id: Uuid,
         net1: Network,
         net2: Network,
     }
@@ -1686,12 +1698,40 @@ mod tests {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
-            let cfg = crate::db::Config { url: db.pg_config().clone() };
-            let pool = Arc::new(crate::db::Pool::new(&cfg));
-            let db_datastore =
-                Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
-            let opctx =
-                OpContext::for_tests(log.new(o!()), db_datastore.clone());
+            let (opctx, db_datastore) =
+                crate::db::datastore::datastore_test(&logctx, &db).await;
+
+            // Create an organization
+            let organization = params::OrganizationCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "org".parse().unwrap(),
+                    description: "desc".to_string(),
+                },
+            };
+            let organization = db_datastore
+                .organization_create(&opctx, &organization)
+                .await
+                .unwrap();
+
+            // Create a project
+            let project = Project::new(
+                organization.id(),
+                params::ProjectCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "project".parse().unwrap(),
+                        description: "desc".to_string(),
+                    },
+                },
+            );
+            let (.., authz_org) = LookupPath::new(&opctx, &db_datastore)
+                .organization_id(organization.id())
+                .lookup_for(authz::Action::CreateChild)
+                .await
+                .unwrap();
+            let project = db_datastore
+                .project_create(&opctx, &authz_org, project)
+                .await
+                .unwrap();
 
             use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
             let p = db_datastore.pool_authorized(&opctx).await.unwrap();
@@ -1704,7 +1744,15 @@ mod tests {
                     .await
                     .unwrap();
             }
-            Self { logctx, opctx, db, db_datastore, net1, net2 }
+            Self {
+                logctx,
+                opctx,
+                db,
+                db_datastore,
+                project_id: project.id(),
+                net1,
+                net2,
+            }
         }
 
         async fn success(mut self) {
@@ -1718,7 +1766,12 @@ mod tests {
         ) -> Instance {
             instance_set_state(
                 &self.db_datastore,
-                create_instance(&self.opctx, &self.db_datastore).await,
+                create_instance(
+                    &self.opctx,
+                    self.project_id,
+                    &self.db_datastore,
+                )
+                .await,
                 state,
             )
             .await
@@ -2103,9 +2156,12 @@ mod tests {
         }
 
         // Next one should fail
-        let instance =
-            create_stopped_instance(&context.opctx, &context.db_datastore)
-                .await;
+        let instance = create_stopped_instance(
+            &context.opctx,
+            context.project_id,
+            &context.db_datastore,
+        )
+        .await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance.id(),

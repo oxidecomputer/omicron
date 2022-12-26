@@ -10,7 +10,7 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -22,6 +22,7 @@ use uuid::Uuid;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod instance_create;
+pub mod instance_delete;
 pub mod instance_migrate;
 pub mod snapshot_create;
 pub mod snapshot_delete;
@@ -80,12 +81,11 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
     }
 }
 
-lazy_static! {
-    pub(super) static ref ACTION_GENERATE_ID: NexusAction =
-        new_action_noop_undo("common.uuid_generate", saga_generate_uuid);
-    pub static ref ACTION_REGISTRY: Arc<ActionRegistry> =
-        Arc::new(make_action_registry());
-}
+pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
+    new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
+});
+pub static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
+    Lazy::new(|| Arc::new(make_action_registry()));
 
 fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
@@ -94,6 +94,9 @@ fn make_action_registry() -> ActionRegistry {
     <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
     <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
     <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_delete::SagaInstanceDelete as NexusSaga>::register_actions(
         &mut registry,
     );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
@@ -120,3 +123,138 @@ pub(super) async fn saga_generate_uuid<UserType: SagaType>(
 ) -> Result<Uuid, ActionError> {
     Ok(Uuid::new_v4())
 }
+
+macro_rules! __stringify_ident {
+    ($i:ident) => {
+        stringify!($i)
+    };
+}
+
+macro_rules! __emit_action {
+    ($node:ident, $output:literal) => {
+        paste::paste! {
+            #[allow(dead_code)]
+            fn [<$node:lower _action>]() -> ::steno::Node {
+                ::steno::Node::action(
+                    $output,
+                    crate::app::sagas::__stringify_ident!([<$node:camel>]),
+                    $node.as_ref(),
+                )
+            }
+        }
+    };
+}
+
+macro_rules! __action_name {
+    ($saga:ident, $node:ident) => {
+        paste::paste! {
+            concat!(
+                stringify!($saga),
+                ".",
+                crate::app::sagas::__stringify_ident!([<$node:lower>]),
+            )
+        }
+    };
+}
+
+/// A macro intended to reduce boilerplate when writing saga actions.
+///
+/// This macro aims to reduce this boilerplate, by requiring only the following:
+/// - The name of the saga
+/// - The name of each action
+/// - The output of each action
+/// - The "forward" action function
+/// - (Optional) The "undo" action function
+///
+/// For this input:
+///
+/// ```ignore
+/// declare_saga_actions! {
+///     my_saga;
+///     SAGA_NODE1 -> "output1" {
+///         + do1
+///         - undo1
+///     }
+///     SAGA_NODE2 -> "output2" {
+///         + do2
+///     }
+/// }
+/// ```
+///
+/// We generate the following:
+/// - For `SAGA_NODE1`:
+///     - A `NexusAction` labeled "my_saga.saga_node1" (containing "do1" and "undo1").
+///     - `fn saga_node1_action() -> steno::Node` referencing this node, with an
+///     output named "output1".
+/// - For `SAGA_NODE2`:
+///     - A `NexusAction` labeled "my_saga.saga_node2" (containing "do2").
+///     - `fn saga_node2_action() -> steno::Node` referencing this node, with an
+///     output named "output2".
+/// - For `my_saga`:
+///     - `fn my_saga_register_actions(...)`, which can be called to implement
+///     `NexusSaga::register_actions`.
+macro_rules! declare_saga_actions {
+    // The entrypoint to the macro.
+    // We expect the input to be of the form:
+    //
+    //  saga-name;
+    ($saga:ident; $($tail:tt)*) => {
+        declare_saga_actions!(S = $saga <> $($tail)*);
+    };
+    // Subsequent lines of the saga action declaration.
+    // These take the form:
+    //
+    //  ACTION_NAME -> "output" {
+    //      + action
+    //      - undo_action
+    //  }
+    //
+    // However, we also want to propagate the Saga structure and collection of
+    // all node names, so this is *actually* parsed with a hidden prefix:
+    //
+    //  S = SagaName <old nodes> <> ...
+    //
+    // Basically, everything to the left of "<>" is just us propagating state
+    // through the macro, and everything to the right of it is user input.
+    (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
+        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
+            ::once_cell::sync::Lazy::new(|| {
+                ::steno::ActionFunc::new_action(
+                    crate::app::sagas::__action_name!($saga, $node), $a, $u,
+                )
+            });
+        crate::app::sagas::__emit_action!($node, $out);
+        declare_saga_actions!(S = $saga $($nodes,)* $node <> $($tail)*);
+    };
+    // Same as the prior match, but without the undo action.
+    (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident } $($tail:tt)*) => {
+        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
+            ::once_cell::sync::Lazy::new(|| {
+                ::steno::new_action_noop_undo(
+                    crate::app::sagas::__action_name!($saga, $node), $a,
+                )
+            });
+        crate::app::sagas::__emit_action!($node, $out);
+        declare_saga_actions!(S = $saga $($nodes,)* $node <> $($tail)*);
+    };
+    // The end of the macro, which registers all previous generated saga nodes.
+    //
+    // We generate a new function, rather than implementing
+    // "NexusSaga::register_actions", because traits cannot be partially
+    // implemented, and "make_saga_dag" is not being generated through this
+    // macro.
+    (S = $saga:ident $($nodes:ident),* <>) => {
+        paste::paste! {
+            fn [<$saga _register_actions>](registry: &mut crate::app::sagas::ActionRegistry) {
+                $(
+                    registry.register(::std::sync::Arc::clone(&* $nodes ));
+                )*
+            }
+        }
+    };
+}
+
+pub(crate) use __action_name;
+pub(crate) use __emit_action;
+pub(crate) use __stringify_ident;
+pub(crate) use declare_saga_actions;

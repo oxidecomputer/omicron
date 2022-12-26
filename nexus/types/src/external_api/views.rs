@@ -271,7 +271,6 @@ pub struct VpcRouter {
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub project_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]

@@ -136,23 +136,16 @@ fn test_unauthorized_coverage() {
     // not `expectorage::assert_contents`?  Because we only expect this file to
     // ever shrink, which is easy enough to fix by hand, and we don't want to
     // make it easy to accidentally add things to the allowlist.)
-    let expected_uncovered_endpoints =
-        std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
-            .expect("failed to load file of allowed uncovered endpoints");
-    let mut unexpected_uncovered_endpoints = "These endpoints were expected to be covered by the unauthorized_coverage test but were not:\n".to_string();
-    let mut has_uncovered_endpoints = false;
-    for endpoint in uncovered_endpoints.lines() {
-        if !expected_uncovered_endpoints.contains(endpoint) {
-            unexpected_uncovered_endpoints
-                .push_str(&format!("\t{}\n", endpoint));
-            has_uncovered_endpoints = true;
-        }
-    }
-    assert_eq!(
-        has_uncovered_endpoints, false,
-        "{}\nMake sure you've added a test for this endpoint in unauthorized.rs.",
-        unexpected_uncovered_endpoints
-    )
+    // let expected_uncovered_endpoints =
+    //     std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
+    //         .expect("failed to load file of allowed uncovered endpoints");
+
+    // TODO: Update this to remove overwrite capabilities
+    // See https://github.com/oxidecomputer/expectorate/pull/12
+    assert_contents(
+        "tests/output/uncovered-authz-endpoints.txt",
+        uncovered_endpoints.as_str(),
+    );
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]

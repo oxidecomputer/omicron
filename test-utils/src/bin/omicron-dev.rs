@@ -116,6 +116,10 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
         "omicron-dev: will run this to start CockroachDB:\n{}",
         db_starter.cmdline()
     );
+    println!("omicron-dev: environment:");
+    for (k, v) in db_starter.environment() {
+        println!("    {}={}", k, v);
+    }
     println!(
         "omicron-dev: temporary directory: {}",
         db_starter.temp_dir().display()
