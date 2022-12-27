@@ -8,16 +8,7 @@ license = "MPL-2.0"
 [lib]
 proc-macro = true
 
-[dependencies.bytes]
-version = "1.3.0"
-features = ["serde"]
-
-[dependencies.proc-macro2]
-version = "1.0.47"
-
-[dependencies.quote]
-version = "1.0.21"
-
-[dependencies.syn]
-version = "1.0.105"
-features = [ "full", "derive", "extra-traits" ]
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = [ "full", "extra-traits" ] }

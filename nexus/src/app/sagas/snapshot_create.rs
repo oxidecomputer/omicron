@@ -88,12 +88,11 @@
 //! Pantry. Most of the rest of the saga is unchanged.
 //!
 
-use super::common_storage::ensure_all_datasets_and_regions;
-use super::ActionRegistry;
-use super::NexusActionContext;
-use super::NexusSaga;
-use super::SagaInitError;
-use super::ACTION_GENERATE_ID;
+use super::{
+    common_storage::ensure_all_datasets_and_regions, ActionRegistry,
+    NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
+};
+use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
@@ -118,9 +117,7 @@ use slog::info;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
-use steno::new_action_noop_undo;
 use steno::ActionError;
-use steno::ActionFunc;
 use steno::Node;
 use uuid::Uuid;
 
@@ -136,76 +133,60 @@ pub struct Params {
     pub create_params: params::SnapshotCreate,
 }
 
-// snapshot create saga: actions
+static ref PANTRY_SENTINEL_ID: Uuid =
+    "00000000-0000-0000-0000-000000000000".parse().unwrap();
 
-lazy_static! {
-    static ref REGIONS_ALLOC: NexusAction = new_action_noop_undo(
-        "snapshot-create.regions-alloc",
-        ssc_alloc_regions,
-    );
-    static ref REGIONS_ENSURE: NexusAction = new_action_noop_undo(
-        "snapshot-create.regions-ensure",
-        ssc_regions_ensure,
-    );
-    static ref CREATE_DESTINATION_VOLUME_RECORD: NexusAction =
-        ActionFunc::new_action(
-            "snapshot-create.create-destination-volume-record",
-            ssc_create_destination_volume_record,
-            ssc_create_destination_volume_record_undo,
-        );
-    static ref CREATE_SNAPSHOT_RECORD: NexusAction = ActionFunc::new_action(
-        "snapshot-create.create-snapshot-record",
-        ssc_create_snapshot_record,
-        ssc_create_snapshot_record_undo,
-    );
-    static ref SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT: NexusAction =
-        new_action_noop_undo(
-            "snapshot-create.send-snapshot-request-to-sled-agent",
-            ssc_send_snapshot_request_to_sled_agent,
-        );
-    static ref ATTACH_DISK_TO_PANTRY: NexusAction = ActionFunc::new_action(
-        "snapshot-create.attach-disk-to-pantry",
-        ssc_attach_disk_to_pantry,
-        ssc_attach_disk_to_pantry_undo,
-    );
-    static ref GET_PANTRY_ADDRESS: NexusAction = new_action_noop_undo(
-        "snapshot-create.get-pantry-address",
-        ssc_get_pantry_address,
-    );
-    static ref CALL_PANTRY_ATTACH_FOR_DISK: NexusAction =
-        ActionFunc::new_action(
-            "snapshot-create.call-pantry-attach-for-disk",
-            ssc_call_pantry_attach_for_disk,
-            ssc_call_pantry_attach_for_disk_undo,
-        );
-    static ref CALL_PANTRY_SNAPSHOT_FOR_DISK: NexusAction =
-        new_action_noop_undo(
-            "snapshot-create.call-pantry-snapshot-for-disk",
-            ssc_call_pantry_snapshot_for_disk,
-        );
-    static ref CALL_PANTRY_DETACH_FOR_DISK: NexusAction = new_action_noop_undo(
-        "snapshot-create.call-pantry-detach-for-disk",
-        ssc_call_pantry_detach_for_disk,
-    );
-    static ref DETACH_DISK_FROM_PANTRY: NexusAction = new_action_noop_undo(
-        "snapshot-create.detach-disk-from-pantry",
-        ssc_detach_disk_from_pantry,
-    );
-    static ref START_RUNNING_SNAPSHOT: NexusAction = new_action_noop_undo(
-        "snapshot-create.start-running-snapshot",
-        ssc_start_running_snapshot,
-    );
-    static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
-        "snapshot-create.create-volume-record",
-        ssc_create_volume_record,
-        ssc_create_volume_record_undo,
-    );
-    static ref FINALIZE_SNAPSHOT_RECORD: NexusAction = new_action_noop_undo(
-        "snapshot-create.finalize-snapshot-record",
-        ssc_finalize_snapshot_record,
-    );
-    static ref PANTRY_SENTINEL_ID: Uuid =
-        "00000000-0000-0000-0000-000000000000".parse().unwrap();
+// snapshot create saga: actions
+declare_saga_actions! {
+    snapshot_create;
+    REGIONS_ALLOC -> "datasets_and_regions" {
+        + ssc_alloc_regions
+    }
+    REGIONS_ENSURE -> "regions_ensure" {
+        + ssc_regions_ensure
+    }
+    CREATE_DESTINATION_VOLUME_RECORD -> "created_destination_volume" {
+        + ssc_create_destination_volume_record
+        - ssc_create_destination_volume_record_undo
+    }
+    CREATE_SNAPSHOT_RECORD -> "created_snapshot" {
+        + ssc_create_snapshot_record
+        - ssc_create_snapshot_record_undo
+    }
+    SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT -> "snapshot_request_to_sled_agent" {
+        + ssc_send_snapshot_request_to_sled_agent,
+    }
+    ATTACH_DISK_TO_PANTRY -> "attach_disk_to_pantry" {
+        + ssc_attach_disk_to_pantry,
+        - ssc_attach_disk_to_pantry_undo,
+    }
+    GET_PANTRY_ADDRESS: NexusAction -> "get_pantry_address" {
+        + ssc_get_pantry_address,
+    }
+    CALL_PANTRY_ATTACH_FOR_DISK -> "call_pantry_attach_for_disk" {
+        + ssc_call_pantry_attach_for_disk,
+        - ssc_call_pantry_attach_for_disk_undo,
+    }
+    CALL_PANTRY_SNAPSHOT_FOR_DISK -> "call_pantry_snapshot_for_disk" {
+        + ssc_call_pantry_snapshot_for_disk,
+    }
+    CALL_PANTRY_DETACH_FOR_DISK -> "call_pantry_detach_for_disk" {
+        + ssc_call_pantry_detach_for_disk,
+    }
+    DETACH_DISK_FROM_PANTRY -> "detach_disk_from_pantry" {
+        + ssc_detach_disk_from_pantry,
+    }
+
+    START_RUNNING_SNAPSHOT -> "replace_sockets_map" {
+        + ssc_start_running_snapshot
+    }
+    CREATE_VOLUME_RECORD -> "created_volume" {
+        + ssc_create_volume_record
+        - ssc_create_volume_record_undo
+    }
+    FINALIZE_SNAPSHOT_RECORD -> "finalized_snapshot" {
+        + ssc_finalize_snapshot_record
+    }
 }
 
 // snapshot create saga: definition
@@ -217,20 +198,7 @@ impl NexusSaga for SagaSnapshotCreate {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*REGIONS_ALLOC));
-        registry.register(Arc::clone(&*REGIONS_ENSURE));
-        registry.register(Arc::clone(&*CREATE_DESTINATION_VOLUME_RECORD));
-        registry.register(Arc::clone(&*CREATE_SNAPSHOT_RECORD));
-        registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT));
-        registry.register(Arc::clone(&*ATTACH_DISK_TO_PANTRY));
-        registry.register(Arc::clone(&*GET_PANTRY_ADDRESS));
-        registry.register(Arc::clone(&*CALL_PANTRY_ATTACH_FOR_DISK));
-        registry.register(Arc::clone(&*CALL_PANTRY_SNAPSHOT_FOR_DISK));
-        registry.register(Arc::clone(&*CALL_PANTRY_DETACH_FOR_DISK));
-        registry.register(Arc::clone(&*DETACH_DISK_FROM_PANTRY));
-        registry.register(Arc::clone(&*START_RUNNING_SNAPSHOT));
-        registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
-        registry.register(Arc::clone(&*FINALIZE_SNAPSHOT_RECORD));
+        snapshot_create_register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -335,26 +303,17 @@ impl NexusSaga for SagaSnapshotCreate {
             ));
         }
 
+        builder.append(regions_alloc_action());
+        builder.append(regions_ensure_action());
+        builder.append(create_destination_volume_record_action());
+        builder.append(create_snapshot_record_action());
+        builder.append(send_snapshot_request_action());
         // Validate with crucible agent and start snapshot downstairs
-        builder.append(Node::action(
-            "replace_sockets_map",
-            "StartRunningSnapshot",
-            START_RUNNING_SNAPSHOT.as_ref(),
-        ));
-
-        // Copy and modify the disk volume construction request to point to the new
-        // running snapshot
-        builder.append(Node::action(
-            "created_volume",
-            "CreateVolumeRecord",
-            CREATE_VOLUME_RECORD.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "finalized_snapshot",
-            "FinalizeSnapshotRecord",
-            FINALIZE_SNAPSHOT_RECORD.as_ref(),
-        ));
+        builder.append(start_running_snapshot_action());
+        // Copy and modify the disk volume construction request to point to
+        // the new running snapshot
+        builder.append(create_volume_record_action());
+        builder.append(finalize_snapshot_record_action());
 
         Ok(builder.build()?)
     }
@@ -425,6 +384,8 @@ async fn ssc_regions_ensure(
     .await?;
 
     let block_size = datasets_and_regions[0].1.block_size;
+    let blocks_per_extent = datasets_and_regions[0].1.extent_size;
+    let extent_count = datasets_and_regions[0].1.extent_count;
 
     // Create volume construction request
     let mut rng = StdRng::from_entropy();
@@ -433,6 +394,8 @@ async fn ssc_regions_ensure(
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
+            blocks_per_extent,
+            extent_count: extent_count.try_into().unwrap(),
             gen: 1,
             opts: CrucibleOpts {
                 id: destination_volume_id,
@@ -553,7 +516,7 @@ async fn ssc_create_snapshot_record(
         project_id: params.project_id,
         disk_id: disk.id(),
         volume_id,
-        destination_volume_id: Some(destination_volume_id),
+        destination_volume_id: destination_volume_id,
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -561,15 +524,15 @@ async fn ssc_create_snapshot_record(
         size: disk.size,
     };
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &osagactx.datastore())
-        .silo_id(params.silo_id)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
 
     let snapshot_created = osagactx
         .datastore()
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1293,7 +1256,13 @@ fn create_snapshot_from_disk(
             })
         }
 
-        VolumeConstructionRequest::Region { block_size, opts, gen } => {
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            opts,
+            gen,
+        } => {
             let mut opts = opts.clone();
 
             if let Some(socket_map) = socket_map {
@@ -1313,6 +1282,8 @@ fn create_snapshot_from_disk(
 
             Ok(VolumeConstructionRequest::Region {
                 block_size: *block_size,
+                blocks_per_extent: *blocks_per_extent,
+                extent_count: *extent_count,
                 opts,
                 gen: *gen,
             })
@@ -1353,6 +1324,8 @@ mod test {
                     sub_volumes: vec![
                         VolumeConstructionRequest::Region {
                             block_size: 512,
+                            blocks_per_extent: 10,
+                            extent_count: 20,
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
@@ -1377,6 +1350,8 @@ mod test {
             sub_volumes: vec![
                 VolumeConstructionRequest::Region {
                     block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 80,
                     gen: 100,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),

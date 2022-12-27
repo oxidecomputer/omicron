@@ -12,10 +12,10 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external;
@@ -60,7 +60,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -195,7 +195,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
 async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -294,7 +294,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
 async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -402,16 +402,16 @@ async fn test_reject_creating_disk_from_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     let snapshot = datastore
         .project_ensure_snapshot(
             &opctx,
-            &authz_silo,
+            &authz_project,
             db::model::Snapshot {
                 identity: db::model::SnapshotIdentity {
                     id: Uuid::new_v4(),
@@ -428,7 +428,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
-                destination_volume_id: None,
+                destination_volume_id: Uuid::new_v4(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -559,16 +559,16 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     let snapshot = datastore
         .project_ensure_snapshot(
             &opctx,
-            &authz_silo,
+            &authz_project,
             db::model::Snapshot {
                 identity: db::model::SnapshotIdentity {
                     id: Uuid::new_v4(),
@@ -585,7 +585,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
-                destination_volume_id: None,
+                destination_volume_id: Uuid::new_v4(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -648,7 +648,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     // Test that snapshots cannot be created if there is no space for the blocks
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -729,7 +729,7 @@ async fn test_create_snapshot_record_idempotent(
         project_id,
         disk_id: Uuid::new_v4(),
         volume_id: Uuid::new_v4(),
-        destination_volume_id: None,
+        destination_volume_id: Uuid::new_v4(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -740,21 +740,21 @@ async fn test_create_snapshot_record_idempotent(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     // Test project_ensure_snapshot is idempotent
 
     let snapshot_created_1 = datastore
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot.clone())
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot.clone())
         .await
         .unwrap();
 
     let snapshot_created_2 = datastore
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
         .unwrap();
 

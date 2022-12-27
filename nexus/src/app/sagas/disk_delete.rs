@@ -5,14 +5,10 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use crate::app::sagas::NexusAction;
-use lazy_static::lazy_static;
+use crate::app::sagas::declare_saga_actions;
 use serde::Deserialize;
 use serde::Serialize;
-use std::sync::Arc;
-use steno::new_action_noop_undo;
 use steno::ActionError;
-use steno::Node;
 use uuid::Uuid;
 
 // disk delete saga: input parameters
@@ -24,18 +20,17 @@ pub struct Params {
 
 // disk delete saga: actions
 
-lazy_static! {
-    static ref DELETE_DISK_RECORD: NexusAction = new_action_noop_undo(
-        "disk-delete.delete-disk-record",
+declare_saga_actions! {
+    disk_delete;
+    DELETE_DISK_RECORD -> "volume_id" {
         // TODO: See the comment on the "DeleteRegions" step,
         // we may want to un-delete the disk if we cannot remove
         // underlying regions.
-        sdd_delete_disk_record
-    );
-    static ref DELETE_VOLUME: NexusAction = new_action_noop_undo(
-        "disk-delete.delete-volume",
-        sdd_delete_volume
-    );
+        + sdd_delete_disk_record
+    }
+    DELETE_VOLUME -> "no_result" {
+        + sdd_delete_volume
+    }
 }
 
 // disk delete saga: definition
@@ -47,24 +42,15 @@ impl NexusSaga for SagaDiskDelete {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*DELETE_DISK_RECORD));
-        registry.register(Arc::clone(&*DELETE_VOLUME));
+        disk_delete_register_actions(registry);
     }
 
     fn make_saga_dag(
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(Node::action(
-            "volume_id",
-            "DeleteDiskRecord",
-            DELETE_DISK_RECORD.as_ref(),
-        ));
-        builder.append(Node::action(
-            "no_result",
-            "DeleteVolume",
-            DELETE_VOLUME.as_ref(),
-        ));
+        builder.append(delete_disk_record_action());
+        builder.append(delete_volume_action());
         Ok(builder.build()?)
     }
 }

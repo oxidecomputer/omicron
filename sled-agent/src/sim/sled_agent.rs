@@ -76,7 +76,13 @@ fn extract_targets_from_volume_construction_request(
             // noop
         }
 
-        VolumeConstructionRequest::Region { block_size: _, opts, gen: _ } => {
+        VolumeConstructionRequest::Region {
+            block_size: _,
+            blocks_per_extent: _,
+            extent_count: _,
+            opts,
+            gen: _,
+        } => {
             for target in &opts.target {
                 vec.push(*target);
             }
