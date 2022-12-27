@@ -289,15 +289,6 @@ pub struct ExternalIp {
     pub kind: IpKind,
 }
 
-// FLEET
-
-/// Client view of a [`Fleet`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Fleet {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-}
-
 // RACKS
 
 /// Client view of an [`Rack`]
