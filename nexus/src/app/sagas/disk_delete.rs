@@ -82,7 +82,6 @@ async fn sdd_delete_disk_record(
     Ok(disk)
 }
 
-// TODO: Not yet idempotent
 async fn sdd_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -110,7 +109,6 @@ async fn sdd_account_space(
     Ok(())
 }
 
-// TODO: Not yet idempotent
 async fn sdd_account_space_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {

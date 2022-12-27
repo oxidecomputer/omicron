@@ -37,7 +37,7 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    RESOURCES_ACCOUNT -> "no_reult4" {
+    RESOURCES_ACCOUNT -> "no_result4" {
         + sid_account_resources
     }
 }

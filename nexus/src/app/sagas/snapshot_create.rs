@@ -477,7 +477,6 @@ async fn ssc_create_snapshot_record_undo(
     Ok(())
 }
 
-// TODO: Not yet idempotent
 async fn ssc_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -506,7 +505,6 @@ async fn ssc_account_space(
     Ok(())
 }
 
-// TODO: Not yet idempotent
 async fn ssc_account_space_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {

@@ -221,15 +221,44 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
     ) -> DeleteResult {
+        let pool = self.pool_authorized(opctx).await?;
+        self.virtual_provisioning_collection_delete_on_connection(pool, id)
+            .await
+    }
+
+    /// Delete a [`VirtualProvisioningCollection`] object.
+    pub(crate) async fn virtual_provisioning_collection_delete_on_connection<
+        ConnErr,
+    >(
+        &self,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
+        id: Uuid,
+    ) -> DeleteResult
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
         use db::schema::virtual_provisioning_collection::dsl;
 
-        diesel::delete(dsl::virtual_provisioning_collection)
+        // NOTE: We don't really need to extract the value we're deleting from
+        // the DB, but by doing so, we can validate that we haven't
+        // miscalculated our usage accounting.
+        let collection = diesel::delete(dsl::virtual_provisioning_collection)
             .filter(dsl::id.eq(id))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .returning(VirtualProvisioningCollection::as_select())
+            .get_result_async(conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel_pool(
+                    PoolError::from(e),
+                    ErrorHandler::Server,
+                )
             })?;
+        assert!(
+            collection.is_empty(),
+            "Collection deleted while non-empty: {collection:?}"
+        );
         Ok(())
     }
 

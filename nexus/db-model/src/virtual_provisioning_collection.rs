@@ -48,4 +48,10 @@ impl VirtualProvisioningCollection {
             ram_provisioned: 0,
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.virtual_disk_bytes_provisioned == 0
+            && self.cpus_provisioned == 0
+            && self.ram_provisioned == 0
+    }
 }

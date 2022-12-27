@@ -244,7 +244,6 @@ async fn sdc_alloc_regions_undo(
     Ok(())
 }
 
-// TODO: Not yet idempotent
 async fn sdc_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -272,7 +271,6 @@ async fn sdc_account_space(
     Ok(())
 }
 
-// TODO: Not yet idempotent
 async fn sdc_account_space_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
