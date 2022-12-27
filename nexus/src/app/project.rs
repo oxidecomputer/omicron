@@ -4,6 +4,8 @@
 
 //! Project APIs, contained within organizations
 
+use crate::app::sagas;
+use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -13,18 +15,17 @@ use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
-use nexus_defaults as defaults;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -64,8 +65,9 @@ impl super::Nexus {
             )),
         }
     }
+
     pub async fn project_create(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         organization_lookup: &lookup::Organization<'_>,
         new_project: &params::ProjectCreate,
@@ -73,40 +75,20 @@ impl super::Nexus {
         let (.., authz_org) =
             organization_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // Create a project.
-        let db_project =
-            db::model::Project::new(authz_org.id(), new_project.clone());
-        let db_project = self
-            .db_datastore
-            .project_create(opctx, &authz_org, db_project)
-            .await?;
-        let project_lookup = LookupPath::new(opctx, &self.db_datastore)
-            .project_id(db_project.id());
-
-        // TODO: We probably want to have "project creation" and "default VPC
-        // creation" co-located within a saga for atomicity.
-        //
-        // Until then, we just perform the operations sequentially.
-
-        // Create a default VPC associated with the project.
-        let _ = self
-            .project_create_vpc(
-                opctx,
-                &project_lookup,
-                &params::VpcCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "default".parse().unwrap(),
-                        description: "Default VPC".to_string(),
-                    },
-                    ipv6_prefix: Some(defaults::random_vpc_ipv6_prefix()?),
-                    // TODO-robustness this will need to be None if we decide to
-                    // handle the logic around name and dns_name by making
-                    // dns_name optional
-                    dns_name: "default".parse().unwrap(),
-                },
+        let saga_params = sagas::project_create::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_create: new_project.clone(),
+            authz_org,
+        };
+        let saga_outputs = self
+            .execute_saga::<sagas::project_create::SagaProjectCreate>(
+                saga_params,
             )
             .await?;
-
+        let db_project = saga_outputs
+            .lookup_node_output::<db::model::Project>("project")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from project create saga")?;
         Ok(db_project)
     }
 

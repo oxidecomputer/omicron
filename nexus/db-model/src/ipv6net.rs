@@ -11,9 +11,20 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use rand::{rngs::StdRng, SeedableRng};
+use serde::Deserialize;
+use serde::Serialize;
 use std::net::Ipv6Addr;
 
-#[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+)]
 #[diesel(sql_type = sql_types::Inet)]
 pub struct Ipv6Net(pub external::Ipv6Net);
 
