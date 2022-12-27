@@ -155,7 +155,7 @@ impl super::Nexus {
                         Err(result.unwrap_err().into_external())
                     }
                     Err(SubnetError::External(e)) => Err(e),
-                    Ok(subnet) => Ok(subnet),
+                    Ok((.., subnet)) => Ok(subnet),
                 }
             }
             Some(ipv6_block) => {
@@ -178,6 +178,7 @@ impl super::Nexus {
                 self.db_datastore
                     .vpc_create_subnet(opctx, &authz_vpc, subnet)
                     .await
+                    .map(|(.., subnet)| subnet)
                     .map_err(SubnetError::into_external)
             }
         }

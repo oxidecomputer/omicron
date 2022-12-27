@@ -14,10 +14,21 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use serde::Deserialize;
+use serde::Serialize;
 use std::net::IpAddr;
 use uuid::Uuid;
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[derive(
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
 #[diesel(table_name = vpc_subnet)]
 pub struct VpcSubnet {
     #[diesel(embed)]
