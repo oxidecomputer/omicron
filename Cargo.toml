@@ -206,7 +206,8 @@ sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-steno = "0.3"
+# TODO: Use versions once more when a new release drops
+steno = { git = "http://github.com/oxidecomputer/steno", rev = "29266bdc815c58ee4295e41d46c60fb852c156d7" }
 strum = { version = "0.24", features = [ "derive" ] }
 subprocess = "0.2.9"
 syn = { version = "1.0" }
