@@ -585,7 +585,7 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
-        context::OpContext, db::datastore::DataStore, external_api::params,
+        context::OpContext, db, db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -597,12 +597,16 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
+    use ref_cast::RefCast;
+    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
+    const DISK_NAME: &str = "my-disk";
     const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
 
@@ -620,7 +624,7 @@ pub(crate) mod test {
             project_id,
             create_params: params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
-                    name: "my-disk".parse().expect("Invalid disk name"),
+                    name: DISK_NAME.parse().expect("Invalid disk name"),
                     description: "My disk".to_string(),
                 },
                 disk_source: params::DiskSource::Blank {
@@ -785,8 +789,136 @@ pub(crate) mod test {
         }
     }
 
-    // TODO: We still need to test:
-    // - Can we repeat each action safely, without failing / leaving detritus?
-    // - Can we repeat each undo action safely?
-    // - Is each node atomic? (This seems harder to test)
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_and_project(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
+
+        // The "undo_node" should always be immediately preceding the
+        // "error_node".
+        for (undo_node, error_node) in
+            dag.get_nodes().zip(dag.get_nodes().skip(1))
+        {
+            // Create a new saga for this node.
+            info!(
+                log,
+                "Creating new saga which will fail at index {:?}", error_node.index();
+                "node_name" => error_node.name().as_ref(),
+                "label" => error_node.label(),
+            );
+
+            let runnable_saga =
+                nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+            // Inject an error instead of running the node.
+            //
+            // This should cause the saga to unwind.
+            nexus
+                .sec()
+                .saga_inject_error(runnable_saga.id(), error_node.index())
+                .await
+                .unwrap();
+
+            // Inject a repetition for the node being undone.
+            //
+            // This means it is executing twice while unwinding.
+            nexus
+                .sec()
+                .saga_inject_repeat(
+                    runnable_saga.id(),
+                    undo_node.index(),
+                    steno::RepeatInjected {
+                        action: NonZeroU32::new(1).unwrap(),
+                        undo: NonZeroU32::new(2).unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+
+            nexus
+                .run_saga(runnable_saga)
+                .await
+                .expect_err("Saga should have failed");
+
+            verify_clean_slate(&cptestctx, &test).await;
+        }
+    }
+
+    async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx.nexus;
+        let opctx = test_opctx(&cptestctx);
+
+        nexus
+            .project_delete_disk(
+                &opctx,
+                db::model::Name::ref_cast(
+                    &Name::try_from(ORG_NAME.to_string()).unwrap(),
+                ),
+                db::model::Name::ref_cast(
+                    &Name::try_from(PROJECT_NAME.to_string()).unwrap(),
+                ),
+                db::model::Name::ref_cast(
+                    &Name::try_from(DISK_NAME.to_string()).unwrap(),
+                ),
+            )
+            .await
+            .expect("Failed to delete disk");
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_and_project(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
+
+        let runnable_saga =
+            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+        // Cause all actions to run twice. The saga should succeed regardless!
+        for node in dag.get_nodes() {
+            nexus
+                .sec()
+                .saga_inject_repeat(
+                    runnable_saga.id(),
+                    node.index(),
+                    steno::RepeatInjected {
+                        action: NonZeroU32::new(2).unwrap(),
+                        undo: NonZeroU32::new(1).unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        // Verify that the saga's execution succeeded.
+        nexus
+            .run_saga(runnable_saga)
+            .await
+            .expect("Saga should have succeeded");
+
+        destroy_disk(&cptestctx).await;
+        verify_clean_slate(&cptestctx, &test).await;
+    }
 }
