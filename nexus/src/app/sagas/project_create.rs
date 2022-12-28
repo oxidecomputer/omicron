@@ -245,7 +245,7 @@ mod test {
         let nexus = &cptestctx.server.apictx.nexus;
         let org_id = create_org(&client).await;
 
-        // Before running the test, confirm we have no records of any VPCs.
+        // Before running the test, confirm we have no records of any projects.
         verify_clean_slate(nexus.datastore()).await;
 
         // Build the saga DAG with the provided test parameters
