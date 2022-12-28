@@ -95,8 +95,9 @@ clap = { version = "4.0", features = ["derive"] }
 cookie = "0.16"
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2f700a52e063f2ef6c6e44cd7e4195127484c9b7" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "2f700a52e063f2ef6c6e44cd7e4195127484c9b7" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2f700a52e063f2ef6c6e44cd7e4195127484c9b7" }
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 derive_more = "0.99.17"

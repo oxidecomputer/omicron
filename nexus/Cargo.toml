@@ -17,7 +17,7 @@ clap.workspace = true
 chrono.workspace = true
 cookie.workspace = true
 crucible-agent-client.workspace = true
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "861a09c350fd0e127b6105c8099e31a0bc3b711a" }
+crucible-pantry-client.workspace = true
 diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace.workspace = true
 dropshot.workspace = true

@@ -93,7 +93,6 @@ use super::{
     NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
@@ -103,7 +102,6 @@ use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use internal_dns_client::names::ServiceName;
 use internal_dns_client::names::SRV;
-use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
@@ -116,7 +114,6 @@ use sled_agent_client::types::VolumeConstructionRequest;
 use slog::info;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
-use std::sync::Arc;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -133,8 +130,8 @@ pub struct Params {
     pub create_params: params::SnapshotCreate,
 }
 
-static ref PANTRY_SENTINEL_ID: Uuid =
-    "00000000-0000-0000-0000-000000000000".parse().unwrap();
+static PANTRY_SENTINEL_ID: Uuid =
+    Uuid::from_u128(0x00000000_0000_0000_0000_000000000000);
 
 // snapshot create saga: actions
 declare_saga_actions! {
@@ -154,27 +151,27 @@ declare_saga_actions! {
         - ssc_create_snapshot_record_undo
     }
     SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT -> "snapshot_request_to_sled_agent" {
-        + ssc_send_snapshot_request_to_sled_agent,
+        + ssc_send_snapshot_request_to_sled_agent
     }
     ATTACH_DISK_TO_PANTRY -> "attach_disk_to_pantry" {
-        + ssc_attach_disk_to_pantry,
-        - ssc_attach_disk_to_pantry_undo,
+        + ssc_attach_disk_to_pantry
+        - ssc_attach_disk_to_pantry_undo
     }
-    GET_PANTRY_ADDRESS: NexusAction -> "get_pantry_address" {
-        + ssc_get_pantry_address,
+    GET_PANTRY_ADDRESS -> "pantry_address" {
+        + ssc_get_pantry_address
     }
     CALL_PANTRY_ATTACH_FOR_DISK -> "call_pantry_attach_for_disk" {
-        + ssc_call_pantry_attach_for_disk,
-        - ssc_call_pantry_attach_for_disk_undo,
+        + ssc_call_pantry_attach_for_disk
+        - ssc_call_pantry_attach_for_disk_undo
     }
     CALL_PANTRY_SNAPSHOT_FOR_DISK -> "call_pantry_snapshot_for_disk" {
-        + ssc_call_pantry_snapshot_for_disk,
+        + ssc_call_pantry_snapshot_for_disk
     }
     CALL_PANTRY_DETACH_FOR_DISK -> "call_pantry_detach_for_disk" {
-        + ssc_call_pantry_detach_for_disk,
+        + ssc_call_pantry_detach_for_disk
     }
     DETACH_DISK_FROM_PANTRY -> "detach_disk_from_pantry" {
-        + ssc_detach_disk_from_pantry,
+        + ssc_detach_disk_from_pantry
     }
 
     START_RUNNING_SNAPSHOT -> "replace_sockets_map" {
@@ -225,89 +222,38 @@ impl NexusSaga for SagaSnapshotCreate {
         ));
 
         // Allocate region space for snapshot to store blocks post-scrub
-        builder.append(Node::action(
-            "datasets_and_regions",
-            "RegionsAlloc",
-            REGIONS_ALLOC.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "regions_ensure",
-            "RegionsEnsure",
-            REGIONS_ENSURE.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "created_destination_volume",
-            "CreateDestinationVolumeRecord",
-            CREATE_DESTINATION_VOLUME_RECORD.as_ref(),
-        ));
-
-        // Create the Snapshot DB object
-        builder.append(Node::action(
-            "created_snapshot",
-            "CreateSnapshotRecord",
-            CREATE_SNAPSHOT_RECORD.as_ref(),
-        ));
-
-        if !params.use_the_pantry {
-            // If the disk is attached to an instance, send a snapshot request
-            // to a sled-agent
-            builder.append(Node::action(
-                "snapshot_request_to_sled_agent",
-                "SendSnapshotRequestToSledAgent",
-                SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT.as_ref(),
-            ));
-        } else {
-            // If the disk is _not_ attached to an instance:
-            // 1. "attach" the disk to the pantry
-            builder.append(Node::action(
-                "attach_disk_to_pantry",
-                "AttachDiskToPantry",
-                ATTACH_DISK_TO_PANTRY.as_ref(),
-            ));
-
-            // 2. record the address of a Pantry service
-            builder.append(Node::action(
-                "pantry_address",
-                "GetPantryAddress",
-                GET_PANTRY_ADDRESS.as_ref(),
-            ));
-
-            // 3. call the Pantry's /attach
-            builder.append(Node::action(
-                "call_pantry_attach_for_disk",
-                "CallPantryAttachForDisk",
-                CALL_PANTRY_ATTACH_FOR_DISK.as_ref(),
-            ));
-
-            // 4. call the Pantry's /snapshot
-            builder.append(Node::action(
-                "call_pantry_snapshot_for_disk",
-                "CallPantrySnapshotForDisk",
-                CALL_PANTRY_SNAPSHOT_FOR_DISK.as_ref(),
-            ));
-
-            // 5. call the Pantry's /detach
-            builder.append(Node::action(
-                "call_pantry_detach_for_disk",
-                "CallPantryDetachForDisk",
-                CALL_PANTRY_DETACH_FOR_DISK.as_ref(),
-            ));
-
-            // 6. clear attach_instance_id
-            builder.append(Node::action(
-                "detach_disk_from_pantry",
-                "DetachDiskFromPantry",
-                DETACH_DISK_FROM_PANTRY.as_ref(),
-            ));
-        }
-
         builder.append(regions_alloc_action());
         builder.append(regions_ensure_action());
         builder.append(create_destination_volume_record_action());
+
+        // Create the Snapshot DB object
         builder.append(create_snapshot_record_action());
-        builder.append(send_snapshot_request_action());
+
+        if !params.use_the_pantry {
+            // If the disk is attached to an instance, send a snapshot request
+            // to sled-agent
+            builder.append(send_snapshot_request_to_sled_agent_action());
+        } else {
+            // If the disk is _not_ attached to an instance:
+            // 1. "attach" the disk to the pantry
+            builder.append(attach_disk_to_pantry_action());
+
+            // 2. record the address of a Pantry service
+            builder.append(get_pantry_address_action());
+
+            // 3. call the Pantry's /attach
+            builder.append(call_pantry_attach_for_disk_action());
+
+            // 4. call the Pantry's /snapshot
+            builder.append(call_pantry_snapshot_for_disk_action());
+
+            // 5. call the Pantry's /detach
+            builder.append(call_pantry_detach_for_disk_action());
+
+            // 6. clear attach_instance_id
+            builder.append(detach_disk_from_pantry_action());
+        }
+
         // Validate with crucible agent and start snapshot downstairs
         builder.append(start_running_snapshot_action());
         // Copy and modify the disk volume construction request to point to
@@ -454,6 +400,7 @@ async fn ssc_create_destination_volume_record(
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
+
     let destination_volume_data = sagactx.lookup::<String>("regions_ensure")?;
 
     let volume =
@@ -656,7 +603,7 @@ async fn ssc_attach_disk_to_pantry(
         .disk_update_runtime(
             &opctx,
             &authz_disk,
-            &db_disk.runtime().attach(*PANTRY_SENTINEL_ID),
+            &db_disk.runtime().attach(PANTRY_SENTINEL_ID),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -681,7 +628,7 @@ async fn ssc_attach_disk_to_pantry_undo(
 
     match db_disk.runtime().attach_instance_id {
         Some(attach_instance_id) => {
-            if attach_instance_id == *PANTRY_SENTINEL_ID {
+            if attach_instance_id == PANTRY_SENTINEL_ID {
                 info!(
                     log,
                     "undo: detaching disk {} from the pantry", params.disk_id
@@ -958,7 +905,7 @@ async fn ssc_detach_disk_from_pantry(
 
     match db_disk.runtime().attach_instance_id {
         Some(attach_instance_id) => {
-            if attach_instance_id == *PANTRY_SENTINEL_ID {
+            if attach_instance_id == PANTRY_SENTINEL_ID {
                 info!(log, "detaching disk {} from the pantry", params.disk_id);
 
                 osagactx

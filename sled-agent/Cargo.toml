@@ -8,6 +8,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+base64.workspace = true
 bincode.workspace = true
 bytes.workspace = true
 cfg-if.workspace = true
@@ -19,6 +20,7 @@ crucible-agent-client.workspace = true
 ddm-admin-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+internal-dns.workspace = true
 internal-dns-client.workspace = true
 ipnetwork.workspace = true
 libc.workspace = true

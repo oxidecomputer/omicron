@@ -57,7 +57,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 }
 
 #[nexus_test]
-async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
+async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     populate_ip_pool(&client, "default", None).await;

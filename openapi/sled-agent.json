@@ -1818,7 +1818,8 @@
           "internal_dns",
           "nexus",
           "oximeter",
-          "switch"
+          "switch",
+          "crucible_pantry"
         ]
       },
       "Zpool": {

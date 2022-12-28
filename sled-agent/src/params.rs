@@ -435,6 +435,8 @@ pub enum ZoneType {
     Oximeter,
     #[serde(rename = "switch")]
     Switch,
+    #[serde(rename = "crucible_pantry")]
+    CruciblePantry,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
@@ -444,6 +446,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
         }
     }
 }
@@ -456,6 +459,7 @@ impl std::fmt::Display for ZoneType {
             Nexus => "nexus",
             Oximeter => "oximeter",
             Switch => "switch",
+            CruciblePantry => "crucible_pantry",
         };
         write!(f, "{name}")
     }
@@ -553,31 +557,6 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
         }
     }
 }
-
-/*
-impl From<ServiceType> for nexus_client::types::ServiceKind {
-    fn from(s: ServiceType) -> Self {
-        match s {
-            ServiceType::InternalDns { .. } => {
-                nexus_client::types::ServiceKind::InternalDNS
-            }
-            ServiceType::Nexus { internal_ip, .. } => {
-                nexus_client::types::ServiceKind::Nexus { internal_ip }
-            }
-            ServiceType::Oximeter => nexus_client::types::ServiceKind::Oximeter,
-            ServiceType::Dendrite { .. } => {
-                nexus_client::types::ServiceKind::Dendrite
-            }
-            ServiceType::Tfport { .. } => {
-                nexus_client::types::ServiceKind::Tfport
-            }
-            ServiceType::CruciblePantry => {
-                nexus_client::types::ServiceKind::CruciblePantry
-            }
-        }
-    }
-}
-*/
 
 /// Used to request that the Sled initialize certain services on initialization.
 ///

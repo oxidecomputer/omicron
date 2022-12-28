@@ -41,6 +41,9 @@ const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_ZPOOL_COUNT: usize = 3;
+// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
+// when Nexus provisions the Pantry.
+const PANTRY_COUNT: usize = 1;
 
 fn rss_service_plan_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-service-plan.toml")
@@ -296,6 +299,18 @@ impl Plan {
                         ),
                     }],
                 });
+            }
+
+            // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+            if idx < PANTRY_COUNT {
+                let address = addr_alloc.next().expect("Not enough addrs");
+                request.services.push(ServiceZoneRequest {
+                    id: Uuid::new_v4(),
+                    zone_type: ZoneType::CruciblePantry,
+                    addresses: vec![address],
+                    gz_addresses: vec![],
+                    services: vec![ServiceType::CruciblePantry],
+                })
             }
 
             allocations.push((sled_address, request));
