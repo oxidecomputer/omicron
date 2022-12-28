@@ -409,7 +409,7 @@ async fn svc_notify_sleds(
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::vpc_create::Params,
         app::sagas::vpc_create::SagaVpcCreate, authn::saga::Serialized, authz,
@@ -551,7 +551,7 @@ mod test {
             .expect("Failed to delete VPC");
     }
 
-    async fn verify_clean_slate(datastore: &DataStore) {
+    pub(crate) async fn verify_clean_slate(datastore: &DataStore) {
         assert!(no_vpcs_exist(datastore).await);
         assert!(no_routers_exist(datastore).await);
         assert!(no_routes_exist(datastore).await);

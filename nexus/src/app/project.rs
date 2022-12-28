@@ -85,8 +85,10 @@ impl super::Nexus {
                 saga_params,
             )
             .await?;
-        let db_project = saga_outputs
-            .lookup_node_output::<db::model::Project>("project")
+        let (_authz_project, db_project) = saga_outputs
+            .lookup_node_output::<(authz::Project, db::model::Project)>(
+                "project",
+            )
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from project create saga")?;
         Ok(db_project)
