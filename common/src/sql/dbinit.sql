@@ -128,7 +128,8 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
-CREATE TABLE omicron.public.certificates (
+-- x509 certificates which may be used by services
+CREATE TABLE omicron.public.certificate (
     -- Identity metadata (asset)
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -146,7 +147,7 @@ CREATE TABLE omicron.public.certificates (
 
 -- Add an index which lets us look up certificates for a particular service
 -- class.
-CREATE INDEX ON omicron.public.certificates (
+CREATE INDEX ON omicron.public.certificate (
     service
 );
 

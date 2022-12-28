@@ -405,7 +405,7 @@ table! {
 }
 
 table! {
-    certificates (id) {
+    certificate (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
