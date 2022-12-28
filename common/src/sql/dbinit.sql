@@ -128,6 +128,28 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+CREATE TABLE omicron.public.certificates (
+    -- Identity metadata (asset)
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- The service type which should use this certificate
+    service omicron.public.service_kind NOT NULL,
+
+    -- cert.pem file as a binary blob
+    cert BYTES NOT NULL,
+
+    -- key.pem file as a binary blob
+    key BYTES NOT NULL
+);
+
+-- Add an index which lets us look up certificates for a particular service
+-- class.
+CREATE INDEX ON omicron.public.certificates (
+    service
+);
+
 /*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.

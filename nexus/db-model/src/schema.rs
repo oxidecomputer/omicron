@@ -405,6 +405,18 @@ table! {
 }
 
 table! {
+    certificates (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        service -> crate::ServiceKindEnum,
+        cert -> Binary,
+        key -> Binary,
+    }
+}
+
+table! {
     zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,
