@@ -617,21 +617,25 @@ pub(crate) mod test {
         project.identity.id
     }
 
+    pub fn new_disk_create_params() -> params::DiskCreate {
+        params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DISK_NAME.parse().expect("Invalid disk name"),
+                description: "My disk".to_string(),
+            },
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize(512),
+            },
+            size: ByteCount::from_gibibytes_u32(1),
+        }
+    }
+
     // Helper for creating disk create parameters
     fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_id,
-            create_params: params::DiskCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: DISK_NAME.parse().expect("Invalid disk name"),
-                    description: "My disk".to_string(),
-                },
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize(512),
-                },
-                size: ByteCount::from_gibibytes_u32(1),
-            },
+            create_params: new_disk_create_params(),
         }
     }
 
