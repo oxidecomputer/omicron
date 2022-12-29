@@ -581,7 +581,7 @@ fn randomize_volume_construction_request_ids(
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
@@ -677,6 +677,20 @@ mod test {
             .is_none()
     }
 
+    async fn no_volume_records_exist(datastore: &DataStore) -> bool {
+        use crate::db::model::Volume;
+        use crate::db::schema::volume::dsl;
+
+        dsl::volume
+            .filter(dsl::time_deleted.is_null())
+            .select(Volume::as_select())
+            .first_async::<Volume>(datastore.pool_for_tests().await.unwrap())
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
     async fn no_region_allocations_exist(
         datastore: &DataStore,
         test: &DiskTest,
@@ -710,6 +724,19 @@ mod test {
             }
         }
         true
+    }
+
+    pub(crate) async fn verify_clean_slate(
+        cptestctx: &ControlPlaneTestContext,
+        test: &DiskTest,
+    ) {
+        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let datastore = cptestctx.server.apictx.nexus.datastore();
+
+        assert!(no_disk_records_exist(datastore).await);
+        assert!(no_volume_records_exist(datastore).await);
+        assert!(no_region_allocations_exist(datastore, &test).await);
+        assert!(no_regions_ensured(&sled_agent, &test).await);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -753,15 +780,8 @@ mod test {
                 .await
                 .expect_err("Saga should have failed");
 
-            let datastore = nexus.datastore();
-
             // Check that no partial artifacts of disk creation exist:
-            assert!(no_disk_records_exist(datastore).await);
-            assert!(no_region_allocations_exist(datastore, &test).await);
-            assert!(
-                no_regions_ensured(&cptestctx.sled_agent.sled_agent, &test)
-                    .await
-            );
+            verify_clean_slate(&cptestctx, &test).await;
         }
     }
 
