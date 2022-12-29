@@ -585,7 +585,7 @@ pub struct NetworkInterfaceUpdate {
 // CERTIFICATES
 
 /// Create-time parameters for a
-/// [`Certificate`](omicron_common::api::external::Certificate)
+/// [`Certificate`](crate::external_api::views::Certificate)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CertificateCreate {
     /// common identifying metadata
