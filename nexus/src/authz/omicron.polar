@@ -385,7 +385,8 @@ resource CertificateList {
 	relations = { parent_fleet: Fleet };
 	"modify" if "admin" on "parent_fleet";
 	"create_child" if "admin" on "parent_fleet";
-
+	"list_children" if "admin" on "parent_fleet";
+}
 has_relation(fleet: Fleet, "parent_fleet", certificate_list: CertificateList)
 	if certificate_list.fleet = fleet;
 
