@@ -588,6 +588,7 @@ pub enum ResourceType {
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
+    Certificate,
     ConsoleSession,
     DeviceAuthRequest,
     DeviceAccessToken,

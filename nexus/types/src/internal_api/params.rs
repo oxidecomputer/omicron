@@ -154,6 +154,12 @@ pub struct DatasetCreateRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Certificate {
+    pub cert: Vec<u8>,
+    pub key: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
     pub services: Vec<ServicePutRequest>,
     pub datasets: Vec<DatasetCreateRequest>,
@@ -164,6 +170,7 @@ pub struct RackInitializationRequest {
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/1528):
     // Support passing x509 cert info.
+    pub certs: Vec<Certificate>,
 }
 
 /// Message used to notify Nexus that this oximeter instance is up and running.

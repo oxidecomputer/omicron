@@ -40,6 +40,7 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod certificate;
 mod console_session;
 mod dataset;
 mod device_auth;
@@ -1019,14 +1020,14 @@ mod test {
 
         // Initialize the Rack.
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);

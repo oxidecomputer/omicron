@@ -30,8 +30,10 @@ pub use app::Nexus;
 pub use config::Config;
 pub use context::ServerContext;
 pub use crucible_agent_client;
+use dropshot::PaginationOrder;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use omicron_common::api::external::DataPageParams;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
@@ -130,12 +132,46 @@ impl Server {
         let opctx = apictx.nexus.opctx_for_service_balancer();
         apictx.nexus.await_rack_initialization(&opctx).await;
 
+        // Lookup x509 certificates which might be stored in CRDB, specifically
+        // for launching the Nexus service.
+        //
+        // We only grab one certificate (see: the "limit" argument) because
+        // we're currently fine just using whatever certificate happens to be
+        // available.
+        let certs = apictx
+            .nexus
+            .datastore()
+            .certificate_list_for(
+                &opctx,
+                db::model::ServiceKind::Nexus,
+                &DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(1).unwrap(),
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
         // Launch the external server(s).
         let http_servers_external = config
             .deployment
             .dropshot_external
-            .iter()
-            .map(|cfg| {
+            .clone()
+            .iter_mut()
+            .map(|mut cfg| {
+                // Populate TLS with data from CRDB
+                if cfg.bind_address.port() == 443 {
+                    let certificate = certs.get(0).ok_or_else(|| {
+                        "No x.509 certificates found".to_string()
+                    })?;
+
+                    cfg.tls = Some(dropshot::ConfigTls::AsBytes {
+                        certs: certificate.cert.clone(),
+                        key: certificate.key.clone(),
+                    });
+                }
+
                 let server_starter_external = dropshot::HttpServerStarter::new(
                     &cfg,
                     external_api(),
@@ -213,6 +249,7 @@ impl nexus_test_interface::NexusServer for Server {
                 internal_api::params::RackInitializationRequest {
                     services: vec![],
                     datasets: vec![],
+                    certs: vec![],
                 },
             )
             .await

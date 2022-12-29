@@ -407,8 +407,11 @@ table! {
 table! {
     certificate (id) {
         id -> Uuid,
+        name -> Text,
+        description -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
 
         service -> crate::ServiceKindEnum,
         cert -> Binary,

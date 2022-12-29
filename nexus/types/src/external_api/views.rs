@@ -127,6 +127,15 @@ pub struct Project {
     pub organization_id: Uuid,
 }
 
+// CERTIFICATES
+
+/// Client view of a [`Certificate`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Certificate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
 // IMAGES
 
 /// Client view of global Images

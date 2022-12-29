@@ -596,9 +596,6 @@ impl ServiceManager {
                         }
                     }
 
-                    let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
-                    let key_file = PathBuf::from("/var/nexus/certs/key.pem");
-
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
@@ -614,10 +611,7 @@ impl ServiceManager {
                                     443,
                                 ),
                                 request_body_max_bytes: 1048576,
-                                tls: Some(dropshot::ConfigTls::AsFile {
-                                    cert_file,
-                                    key_file,
-                                }),
+                                ..Default::default()
                             },
                             dropshot::ConfigDropshot {
                                 bind_address: SocketAddr::new(*external_ip, 80),

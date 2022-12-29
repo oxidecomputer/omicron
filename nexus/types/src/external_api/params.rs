@@ -582,6 +582,19 @@ pub struct NetworkInterfaceUpdate {
     pub primary: bool,
 }
 
+// CERTIFICATES
+
+/// Create-time parameters for a
+/// [`Certificate`](omicron_common::api::external::Certificate)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CertificateCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub cert: Vec<u8>,
+    pub key: Vec<u8>,
+}
+
 // IP POOLS
 
 /// Create-time parameters for an IP Pool.

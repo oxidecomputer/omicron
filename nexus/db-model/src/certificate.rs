@@ -4,11 +4,14 @@
 
 use super::ServiceKind;
 use crate::schema::certificate;
-use db_macros::Asset;
+use db_macros::Resource;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views;
+use nexus_types::identity::Resource;
 use uuid::Uuid;
 
 /// Representation of x509 certificates used by services.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Resource)]
 #[diesel(table_name = certificate)]
 pub struct Certificate {
     #[diesel(embed)]
@@ -24,9 +27,19 @@ impl Certificate {
     pub fn new(
         id: Uuid,
         service: ServiceKind,
-        cert: Vec<u8>,
-        key: Vec<u8>,
+        params: params::CertificateCreate,
     ) -> Self {
-        Self { identity: CertificateIdentity::new(id), service, cert, key }
+        Self {
+            identity: CertificateIdentity::new(id, params.identity),
+            service,
+            cert: params.cert,
+            key: params.key,
+        }
+    }
+}
+
+impl From<Certificate> for views::Certificate {
+    fn from(cert: Certificate) -> Self {
+        Self { identity: cert.identity() }
     }
 }

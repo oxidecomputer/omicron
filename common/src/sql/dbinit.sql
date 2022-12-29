@@ -132,8 +132,11 @@ CREATE INDEX ON omicron.public.service (
 CREATE TABLE omicron.public.certificate (
     -- Identity metadata (asset)
     id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
 
     -- The service type which should use this certificate
     service omicron.public.service_kind NOT NULL,

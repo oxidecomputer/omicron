@@ -103,6 +103,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Action::get_polar_class(),
         AnyActor::get_polar_class(),
         AuthenticatedActor::get_polar_class(),
+        CertificateList::get_polar_class(),
         Database::get_polar_class(),
         Fleet::get_polar_class(),
         IpPoolList::get_polar_class(),
@@ -130,6 +131,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         RouterRoute::init(),
         VpcSubnet::init(),
         // Fleet-level resources
+        Certificate::init(),
         ConsoleSession::init(),
         DeviceAuthRequest::init(),
         DeviceAccessToken::init(),

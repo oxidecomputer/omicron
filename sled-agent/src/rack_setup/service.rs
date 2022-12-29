@@ -520,8 +520,29 @@ impl ServiceInner {
             }
         }
 
-        let request =
-            NexusTypes::RackInitializationRequest { services, datasets };
+        // TODO: These paths should be removed.
+        //
+        // This is just a convenient way of passing the certificates through the
+        // package system. Ideally this info should be tranferred through RSS's
+        // API.
+        let cert = tokio::fs::read("/opt/oxide/sled-agent/certs/cert.pem")
+            .await
+            .map_err(|err| SetupServiceError::Io {
+                message: "Failed to read cert.pem file".to_string(),
+                err,
+            })?;
+        let key = tokio::fs::read("/opt/oxide/sled-agent/certs/key.pem")
+            .await
+            .map_err(|err| SetupServiceError::Io {
+                message: "Failed to read key.pem file".to_string(),
+                err,
+            })?;
+
+        let request = NexusTypes::RackInitializationRequest {
+            services,
+            datasets,
+            certs: vec![NexusTypes::Certificate { cert, key }],
+        };
 
         let notify_nexus = || async {
             nexus_client
