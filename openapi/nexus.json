@@ -8468,20 +8468,20 @@
         }
       }
     },
-    "/v1/system/update/status": {
+    "/v1/system/update/components": {
       "get": {
         "tags": [
           "system"
         ],
-        "summary": "List all updates",
-        "operationId": "system_update_status",
+        "summary": "View version and update status of component tree",
+        "operationId": "system_component_version_list",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SystemUpdateStatus"
+                  "$ref": "#/components/schemas/ComponentVersionResultsPage"
                 }
               }
             }
@@ -8527,7 +8527,7 @@
         "tags": [
           "system"
         ],
-        "summary": "View update",
+        "summary": "View system update",
         "operationId": "system_update_view",
         "parameters": [
           {
@@ -8547,6 +8547,71 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SystemUpdate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/updates/{update_id}/components": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "View system update component tree",
+        "operationId": "system_update_components_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "update_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentUpdateResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/version": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "View system version and update status",
+        "operationId": "system_version",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemVersion"
                 }
               }
             }
@@ -8777,6 +8842,112 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "ComponentUpdate": {
+        "type": "object",
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "device_type": {
+            "$ref": "#/components/schemas/DeviceType"
+          },
+          "parent_id": {
+            "nullable": true,
+            "description": "ID of the parent component, e.g., the sled a disk belongs to. Value will be `None` for top-level components whose \"parent\" is the rack.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SemverVersion"
+          }
+        },
+        "required": [
+          "component_id",
+          "device_id",
+          "device_type",
+          "version"
+        ]
+      },
+      "ComponentUpdateResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentUpdate"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ComponentVersion": {
+        "type": "object",
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "device_type": {
+            "$ref": "#/components/schemas/DeviceType"
+          },
+          "parent_id": {
+            "nullable": true,
+            "description": "ID of the parent component, e.g., the sled a disk belongs to. Value will be `None` for top-level components whose \"parent\" is the rack.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VersionStatus"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SemverVersion"
+          }
+        },
+        "required": [
+          "component_id",
+          "device_id",
+          "device_type",
+          "status",
+          "version"
+        ]
+      },
+      "ComponentVersionResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentVersion"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
@@ -9061,6 +9232,12 @@
         },
         "required": [
           "user_code"
+        ]
+      },
+      "DeviceType": {
+        "type": "string",
+        "enum": [
+          "sled"
         ]
       },
       "Digest": {
@@ -12593,86 +12770,19 @@
           "items"
         ]
       },
-      "SystemUpdateStatus": {
+      "SystemVersion": {
         "type": "object",
         "properties": {
           "status": {
-            "$ref": "#/components/schemas/SystemVersionStatus"
+            "$ref": "#/components/schemas/VersionStatus"
           },
           "version_range": {
-            "$ref": "#/components/schemas/SystemVersionRange"
+            "$ref": "#/components/schemas/VersionRange"
           }
         },
         "required": [
           "status",
           "version_range"
-        ]
-      },
-      "SystemVersionRange": {
-        "type": "object",
-        "properties": {
-          "high": {
-            "$ref": "#/components/schemas/SemverVersion"
-          },
-          "low": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "high",
-          "low"
-        ]
-      },
-      "SystemVersionStatus": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "updating": {
-                "type": "object",
-                "properties": {
-                  "target": {
-                    "$ref": "#/components/schemas/SemverVersion"
-                  }
-                },
-                "required": [
-                  "target"
-                ]
-              }
-            },
-            "required": [
-              "updating"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "steady": {
-                "type": "object",
-                "properties": {
-                  "reason": {
-                    "$ref": "#/components/schemas/SystemVersionSteadyReason"
-                  }
-                },
-                "required": [
-                  "reason"
-                ]
-              }
-            },
-            "required": [
-              "steady"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "SystemVersionSteadyReason": {
-        "type": "string",
-        "enum": [
-          "completed",
-          "stopped",
-          "failed"
         ]
       },
       "TimeseriesName": {
@@ -12922,6 +13032,73 @@
         "required": [
           "password",
           "username"
+        ]
+      },
+      "VersionRange": {
+        "type": "object",
+        "properties": {
+          "high": {
+            "$ref": "#/components/schemas/SemverVersion"
+          },
+          "low": {
+            "$ref": "#/components/schemas/SemverVersion"
+          }
+        },
+        "required": [
+          "high",
+          "low"
+        ]
+      },
+      "VersionStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "updating": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "$ref": "#/components/schemas/SemverVersion"
+                  }
+                },
+                "required": [
+                  "target"
+                ]
+              }
+            },
+            "required": [
+              "updating"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "steady": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "$ref": "#/components/schemas/VersionSteadyReason"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            },
+            "required": [
+              "steady"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "VersionSteadyReason": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "stopped",
+          "failed"
         ]
       },
       "Vpc": {

@@ -9,11 +9,11 @@ use super::views::IpPoolRange;
 use super::{
     console_api, device_auth, params, views,
     views::{
-        GlobalImage, Group, IdentityProvider, Image, Organization, Project,
-        Rack, Role, SemverVersion, Silo, Sled, Snapshot, SshKey, SystemUpdate,
-        SystemUpdateStatus, SystemVersionRange, SystemVersionStatus,
-        SystemVersionSteadyReason, User, UserBuiltin, Vpc, VpcRouter,
-        VpcSubnet,
+        ComponentUpdate, ComponentVersion, GlobalImage, Group,
+        IdentityProvider, Image, Organization, Project, Rack, Role,
+        SemverVersion, Silo, Sled, Snapshot, SshKey, SystemUpdate,
+        SystemVersion, User, UserBuiltin, VersionRange, VersionStatus,
+        VersionSteadyReason, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -276,9 +276,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_delete)?;
 
         api.register(updates_refresh)?;
-        api.register(system_update_status)?;
+        api.register(system_version)?;
+        api.register(system_component_version_list)?;
         api.register(system_update_list)?;
         api.register(system_update_view)?;
+        api.register(system_update_components_list)?;
 
         api.register(user_list)?;
         api.register(silo_users_list)?;
@@ -5053,28 +5055,46 @@ async fn updates_refresh(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List all updates
+/// View system version and update status
 #[endpoint {
      method = GET,
-     path = "/v1/system/update/status",
+     path = "/v1/system/update/version",
      tags = ["system"],
 }]
-async fn system_update_status(
+async fn system_version(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<SystemUpdateStatus>, HttpError> {
+) -> Result<HttpResponseOk<SystemVersion>, HttpError> {
     let apictx = rqctx.context();
     let _nexus = &apictx.nexus;
     let handler = async {
         let _opctx = OpContext::for_external_api(&rqctx).await?;
-        Ok(HttpResponseOk(SystemUpdateStatus {
-            version_range: SystemVersionRange {
+        Ok(HttpResponseOk(SystemVersion {
+            version_range: VersionRange {
                 low: SemverVersion::new(0, 0, 1),
                 high: SemverVersion::new(0, 0, 2),
             },
-            status: SystemVersionStatus::Steady {
-                reason: SystemVersionSteadyReason::Completed,
+            status: VersionStatus::Steady {
+                reason: VersionSteadyReason::Completed,
             },
         }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View version and update status of component tree
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/components",
+     tags = ["system"],
+}]
+async fn system_component_version_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<ResultsPage<ComponentVersion>>, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let handler = async {
+        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        Ok(HttpResponseOk(ResultsPage { items: vec![], next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5103,7 +5123,7 @@ struct SystemUpdatePathParam {
     update_id: Uuid,
 }
 
-/// View update
+/// View system update
 #[endpoint {
      method = GET,
      path = "/v1/system/update/updates/{update_id}",
@@ -5122,6 +5142,26 @@ async fn system_update_view(
             id: path.update_id,
             version: SemverVersion::new(1, 0, 0),
         }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View system update component tree
+#[endpoint {
+    method = GET,
+    path = "/v1/system/update/updates/{update_id}/components",
+    tags = ["system"],
+}]
+async fn system_update_components_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SystemUpdatePathParam>,
+) -> Result<HttpResponseOk<ResultsPage<ComponentUpdate>>, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let _path = path_params.into_inner();
+    let handler = async {
+        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        Ok(HttpResponseOk(ResultsPage { items: vec![], next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -418,6 +418,8 @@ pub enum DeviceAccessTokenType {
     Bearer,
 }
 
+// SYSTEM UPDATES
+
 // TODO: remove wrapper for semver::Version once this PR goes through
 // https://github.com/GREsau/schemars/pull/195
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -450,17 +452,17 @@ impl JsonSchema for SemverVersion {
     }
 }
 
-// SYSTEM UPDATES
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemVersionRange {
+pub struct VersionRange {
     pub low: SemverVersion,
     pub high: SemverVersion,
 }
 
+// currently shared between SystemVersion and ComponentVersion, but it seems
+// likely they'll eventually diverge
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum SystemVersionSteadyReason {
+pub enum VersionSteadyReason {
     Completed,
     Stopped,
     Failed,
@@ -468,19 +470,51 @@ pub enum SystemVersionSteadyReason {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum SystemVersionStatus {
+pub enum VersionStatus {
     Updating { target: SemverVersion },
-    Steady { reason: SystemVersionSteadyReason },
+    Steady { reason: VersionSteadyReason },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateStatus {
-    pub version_range: SystemVersionRange,
-    pub status: SystemVersionStatus,
+pub struct SystemVersion {
+    pub version_range: VersionRange,
+    pub status: VersionStatus,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SystemUpdate {
     pub id: Uuid,
     pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceType {
+    Sled,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ComponentUpdate {
+    // note this is the ID of the component, not the update. Does the component
+    // update also have an ID?
+    pub component_id: Uuid,
+    // pub name: Name, // hmmm. who would name this?
+    pub device_id: String,
+    pub device_type: DeviceType,
+    pub version: SemverVersion,
+    /// ID of the parent component, e.g., the sled a disk belongs to. Value will
+    /// be `None` for top-level components whose "parent" is the rack.
+    pub parent_id: Option<Uuid>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ComponentVersion {
+    pub component_id: Uuid,
+    pub device_id: String,
+    pub device_type: DeviceType,
+    pub version: SemverVersion,
+    pub status: VersionStatus,
+    /// ID of the parent component, e.g., the sled a disk belongs to. Value will
+    /// be `None` for top-level components whose "parent" is the rack.
+    pub parent_id: Option<Uuid>,
 }
