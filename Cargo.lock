@@ -3112,6 +3112,7 @@ dependencies = [
  "api_identity",
  "base64 0.20.0",
  "chrono",
+ "newtype_derive",
  "nexus-passwords",
  "omicron-common",
  "openssl",

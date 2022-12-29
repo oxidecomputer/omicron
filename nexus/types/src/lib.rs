@@ -32,3 +32,6 @@
 pub mod external_api;
 pub mod identity;
 pub mod internal_api;
+
+#[macro_use]
+extern crate newtype_derive;

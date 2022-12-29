@@ -10,7 +10,7 @@ use super::{
     console_api, device_auth, params, views,
     views::{
         GlobalImage, Group, IdentityProvider, Image, Organization, Project,
-        Rack, Role, Silo, Sled, Snapshot, SshKey, SystemUpdate,
+        Rack, Role, SemverVersion, Silo, Sled, Snapshot, SshKey, SystemUpdate,
         SystemUpdateStatus, SystemVersionRange, SystemVersionStatus,
         SystemVersionSteadyReason, User, UserBuiltin, Vpc, VpcRouter,
         VpcSubnet,
@@ -74,7 +74,6 @@ use omicron_common::bail_unless;
 use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
-// use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -5069,10 +5068,8 @@ async fn system_update_status(
         let _opctx = OpContext::for_external_api(&rqctx).await?;
         Ok(HttpResponseOk(SystemUpdateStatus {
             version_range: SystemVersionRange {
-                // low: semver::Version::new(0, 0, 1),
-                low: String::from("0.0.1"),
-                // high: semver::Version::new(0, 0, 2),
-                high: String::from("0.0.2"),
+                low: SemverVersion::new(0, 0, 1),
+                high: SemverVersion::new(0, 0, 2),
             },
             status: SystemVersionStatus::Steady {
                 reason: SystemVersionSteadyReason::Completed,
@@ -5123,7 +5120,7 @@ async fn system_update_view(
         let _opctx = OpContext::for_external_api(&rqctx).await?;
         Ok(HttpResponseOk(SystemUpdate {
             id: path.update_id,
-            version: String::from("1.0.0"),
+            version: SemverVersion::new(1, 0, 0),
         }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

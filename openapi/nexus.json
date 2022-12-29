@@ -12116,6 +12116,10 @@
           "technical_contact_email"
         ]
       },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^\\d+\\.\\d+\\.\\d+([\\-\\+].+)?$"
+      },
       "Silo": {
         "description": "Client view of a ['Silo']",
         "type": "object",
@@ -12560,7 +12564,7 @@
             "format": "uuid"
           },
           "version": {
-            "type": "string"
+            "$ref": "#/components/schemas/SemverVersion"
           }
         },
         "required": [
@@ -12608,10 +12612,10 @@
         "type": "object",
         "properties": {
           "high": {
-            "type": "string"
+            "$ref": "#/components/schemas/SemverVersion"
           },
           "low": {
-            "type": "string"
+            "$ref": "#/components/schemas/SemverVersion"
           }
         },
         "required": [
@@ -12628,7 +12632,7 @@
                 "type": "object",
                 "properties": {
                   "target": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/SemverVersion"
                   }
                 },
                 "required": [
