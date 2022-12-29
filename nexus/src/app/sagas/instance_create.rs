@@ -960,7 +960,7 @@ async fn sic_instance_ensure(
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
@@ -1124,7 +1124,9 @@ mod test {
             && sled_agent.disk_count().await == 0
     }
 
-    async fn verify_clean_clate(cptestctx: &ControlPlaneTestContext) {
+    pub(crate) async fn verify_clean_slate(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.apictx.nexus.datastore();
 
@@ -1178,7 +1180,7 @@ mod test {
                 .await
                 .expect_err("Saga should have failed");
 
-            verify_clean_clate(&cptestctx).await;
+            verify_clean_slate(&cptestctx).await;
         }
     }
 
@@ -1245,7 +1247,7 @@ mod test {
                 .await
                 .expect_err("Saga should have failed");
 
-            verify_clean_clate(&cptestctx).await;
+            verify_clean_slate(&cptestctx).await;
         }
     }
 
@@ -1308,6 +1310,6 @@ mod test {
         // This is important to ensure that our original saga didn't
         // double-allocate during repeated actions.
         destroy_instance(&cptestctx).await;
-        verify_clean_clate(&cptestctx).await;
+        verify_clean_slate(&cptestctx).await;
     }
 }
