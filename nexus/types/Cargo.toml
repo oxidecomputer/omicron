@@ -11,6 +11,7 @@ base64.workspace = true
 openssl.workspace = true
 openssl-sys.workspace = true
 openssl-probe.workspace = true
+semver.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json.workspace = true

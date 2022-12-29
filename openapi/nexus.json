@@ -8467,6 +8467,98 @@
           }
         }
       }
+    },
+    "/v1/system/update/status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List all updates",
+        "operationId": "system_update_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemUpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/updates": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List all updates",
+        "operationId": "system_update_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemUpdateResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/updates/{update_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "View update",
+        "operationId": "system_update_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "update_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemUpdate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12458,6 +12550,125 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SystemUpdate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ]
+      },
+      "SystemUpdateResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SystemUpdate"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SystemUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SystemVersionStatus"
+          },
+          "version_range": {
+            "$ref": "#/components/schemas/SystemVersionRange"
+          }
+        },
+        "required": [
+          "status",
+          "version_range"
+        ]
+      },
+      "SystemVersionRange": {
+        "type": "object",
+        "properties": {
+          "high": {
+            "type": "string"
+          },
+          "low": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "high",
+          "low"
+        ]
+      },
+      "SystemVersionStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "updating": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ]
+              }
+            },
+            "required": [
+              "updating"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "steady": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "$ref": "#/components/schemas/SystemVersionSteadyReason"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            },
+            "required": [
+              "steady"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SystemVersionSteadyReason": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "stopped",
+          "failed"
         ]
       },
       "TimeseriesName": {

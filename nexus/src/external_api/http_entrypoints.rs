@@ -10,8 +10,10 @@ use super::{
     console_api, device_auth, params, views,
     views::{
         GlobalImage, Group, IdentityProvider, Image, Organization, Project,
-        Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc,
-        VpcRouter, VpcSubnet,
+        Rack, Role, Silo, Sled, Snapshot, SshKey, SystemUpdate,
+        SystemUpdateStatus, SystemVersionRange, SystemVersionStatus,
+        SystemVersionSteadyReason, User, UserBuiltin, Vpc, VpcRouter,
+        VpcSubnet,
     },
 };
 use crate::authz;
@@ -72,6 +74,7 @@ use omicron_common::bail_unless;
 use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
+// use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -274,6 +277,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_delete)?;
 
         api.register(updates_refresh)?;
+        api.register(system_update_status)?;
+        api.register(system_update_list)?;
+        api.register(system_update_view)?;
 
         api.register(user_list)?;
         api.register(silo_users_list)?;
@@ -5044,6 +5050,81 @@ async fn updates_refresh(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus.updates_refresh_metadata(&opctx).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List all updates
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/status",
+     tags = ["system"],
+}]
+async fn system_update_status(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<SystemUpdateStatus>, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let handler = async {
+        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        Ok(HttpResponseOk(SystemUpdateStatus {
+            version_range: SystemVersionRange {
+                // low: semver::Version::new(0, 0, 1),
+                low: String::from("0.0.1"),
+                // high: semver::Version::new(0, 0, 2),
+                high: String::from("0.0.2"),
+            },
+            status: SystemVersionStatus::Steady {
+                reason: SystemVersionSteadyReason::Completed,
+            },
+        }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List all updates
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/updates",
+     tags = ["system"],
+}]
+async fn system_update_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<ResultsPage<SystemUpdate>>, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let handler = async {
+        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        Ok(HttpResponseOk(ResultsPage { items: vec![], next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for SystemUpdate requests
+#[derive(Deserialize, JsonSchema)]
+struct SystemUpdatePathParam {
+    update_id: Uuid,
+}
+
+/// View update
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/updates/{update_id}",
+     tags = ["system"],
+}]
+async fn system_update_view(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SystemUpdatePathParam>,
+) -> Result<HttpResponseOk<SystemUpdate>, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        Ok(HttpResponseOk(SystemUpdate {
+            id: path.update_id,
+            version: String::from("1.0.0"),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

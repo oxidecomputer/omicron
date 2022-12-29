@@ -14,6 +14,7 @@ use omicron_common::api::external::{
     ObjectIdentity, RoleName,
 };
 use schemars::JsonSchema;
+// use semver;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
@@ -411,4 +412,48 @@ pub struct DeviceAccessTokenGrant {
 #[serde(rename_all = "snake_case")]
 pub enum DeviceAccessTokenType {
     Bearer,
+}
+
+// SYSTEM UPDATES
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemVersionRange {
+    // TODO: if we want to use semver::Version, I think we have to newtype it
+    // in order to implement JsonSchema. ew
+    // pub low: semver::Version,
+    // pub high: semver::Version,
+    pub low: String,
+    pub high: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemVersionSteadyReason {
+    Completed,
+    Stopped,
+    Failed,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemVersionStatus {
+    Updating {
+        // target: semver::Version
+        target: String,
+    },
+    Steady {
+        reason: SystemVersionSteadyReason,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdateStatus {
+    pub version_range: SystemVersionRange,
+    pub status: SystemVersionStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdate {
+    pub id: Uuid,
+    pub version: String,
 }
