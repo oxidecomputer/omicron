@@ -8598,6 +8598,68 @@
         }
       }
     },
+    "/v1/system/update/updates/{update_id}/start": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Start system update",
+        "operationId": "system_update_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "update_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/updates/{update_id}/stop": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Stop system update",
+        "operationId": "system_update_stop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "update_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/update/version": {
       "get": {
         "tags": [
@@ -8858,7 +8920,7 @@
           },
           "parent_id": {
             "nullable": true,
-            "description": "ID of the parent component, e.g., the sled a disk belongs to. Value will be `None` for top-level components whose \"parent\" is the rack.",
+            "description": "ID of the parent component. Not present for top-level components.",
             "type": "string",
             "format": "uuid"
           },

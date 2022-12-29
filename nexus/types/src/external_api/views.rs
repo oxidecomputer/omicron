@@ -479,6 +479,8 @@ pub enum VersionStatus {
 pub struct SystemVersion {
     pub version_range: VersionRange,
     pub status: VersionStatus,
+    // TODO: time_released? time_last_applied? I got a fever and the only
+    // prescription is more timestamps
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -502,8 +504,9 @@ pub struct ComponentUpdate {
     pub device_id: String,
     pub device_type: DeviceType,
     pub version: SemverVersion,
-    /// ID of the parent component, e.g., the sled a disk belongs to. Value will
-    /// be `None` for top-level components whose "parent" is the rack.
+    // TODO: parent ID doesn't need to be optional if we say top-level
+    // components have the rack as their parent
+    /// ID of the parent component. Not present for top-level components.
     pub parent_id: Option<Uuid>,
 }
 

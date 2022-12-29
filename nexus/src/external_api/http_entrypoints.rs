@@ -280,6 +280,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_component_version_list)?;
         api.register(system_update_list)?;
         api.register(system_update_view)?;
+        api.register(system_update_start)?;
+        api.register(system_update_stop)?;
         api.register(system_update_components_list)?;
 
         api.register(user_list)?;
@@ -5120,6 +5122,9 @@ async fn system_update_list(
 /// Path parameters for SystemUpdate requests
 #[derive(Deserialize, JsonSchema)]
 struct SystemUpdatePathParam {
+    // TODO: do updates have names? Should this therefore be NameOrId? Do we
+    // allow access by some other string identifier (like version) which, like
+    // Name, is disjoint with the set of Uuids? NameOrVersion?
     update_id: Uuid,
 }
 
@@ -5162,6 +5167,52 @@ async fn system_update_components_list(
     let handler = async {
         let _opctx = OpContext::for_external_api(&rqctx).await?;
         Ok(HttpResponseOk(ResultsPage { items: vec![], next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// TODO: 204 isn't the right response
+
+/// Start system update
+#[endpoint {
+    method = POST,
+    path = "/v1/system/update/updates/{update_id}/start",
+    tags = ["system"],
+}]
+async fn system_update_start(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SystemUpdatePathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let _path = path_params.into_inner();
+    let handler = async {
+        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// TODO: since there can only be one system update going at a time, does /stop
+// even need to hang off the detail endpoint? `POST /system/update/stop` would
+// be sufficient, and if the system is currently steady, it would be a noop
+
+/// Stop system update
+#[endpoint {
+    method = POST,
+    path = "/v1/system/update/updates/{update_id}/stop",
+    tags = ["system"],
+}]
+async fn system_update_stop(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SystemUpdatePathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let _path = path_params.into_inner();
+    let handler = async {
+        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
