@@ -64,6 +64,7 @@ pub async fn make_resources<'a>(
     // Global resources
     builder.new_resource(authz::DATABASE.clone());
     builder.new_resource_with_users(authz::FLEET.clone()).await;
+    builder.new_resource(authz::CERTIFICATE_LIST.clone());
     builder.new_resource(authz::CONSOLE_SESSION_LIST.clone());
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST.clone());
     builder.new_resource(authz::GLOBAL_IMAGE_LIST.clone());
