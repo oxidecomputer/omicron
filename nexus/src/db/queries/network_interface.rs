@@ -81,6 +81,11 @@ const NO_INSTANCE_ERROR_MESSAGE: &'static str =
 /// Errors related to inserting or attaching a NetworkInterface
 #[derive(Debug)]
 pub enum InsertError {
+    /// This interface already exists
+    ///
+    /// Note: An interface with the same name existing is a different error;
+    /// this error matches the case where the UUID already exists.
+    InterfaceAlreadyExists(String),
     /// The instance specified for this interface is already associated with a
     /// different VPC from this interface.
     InstanceSpansMultipleVpcs(Uuid),
@@ -134,6 +139,12 @@ impl InsertError {
     /// Convert this error into an external one.
     pub fn into_external(self) -> external::Error {
         match self {
+            InsertError::InterfaceAlreadyExists(name) => {
+                external::Error::ObjectAlreadyExists {
+                    type_name: external::ResourceType::NetworkInterface,
+                    object_name: name,
+                }
+            }
             InsertError::NoAvailableIpAddresses => {
                 external::Error::invalid_request(
                     "No available IP addresses for interface",
@@ -221,6 +232,10 @@ fn decode_database_error(
     // same instance.
     const NAME_CONFLICT_CONSTRAINT: &str =
         "network_interface_instance_id_name_key";
+
+    // The name of the constraint violated if we try to re-insert an already
+    // existing interface with the same UUID.
+    const ID_CONFLICT_CONSTRAINT: &str = "network_interface_pkey";
 
     // The check  violated in the case where we try to insert more that the
     // maximum number of NICs (`MAX_NICS_PER_INSTANCE`).
@@ -320,7 +335,6 @@ fn decode_database_error(
                     .unwrap_or_else(|| std::net::Ipv4Addr::UNSPECIFIED.into());
                 InsertError::IpAddressNotAvailable(ip)
             }
-
             // Constraint violated if the user-requested name is already
             // assigned to an interface on this instance.
             Some(constraint) if constraint == NAME_CONFLICT_CONSTRAINT => {
@@ -332,7 +346,13 @@ fn decode_database_error(
                     ),
                 ))
             }
-
+            // Constraint violated if the user-requested UUID has already
+            // been inserted.
+            Some(constraint) if constraint == ID_CONFLICT_CONSTRAINT => {
+                InsertError::InterfaceAlreadyExists(
+                    interface.identity.name.to_string(),
+                )
+            }
             // Any other constraint violation is a bug
             _ => InsertError::External(error::public_error_from_diesel_pool(
                 err,
@@ -638,6 +658,7 @@ fn push_ensure_unique_vpc_expression<'a>(
 ///        SELECT subnet_id
 ///        FROM network_interface
 ///        WHERE
+///            id != <interface_id> AND
 ///            instance_id = <instance_id> AND
 ///            time_deleted IS NULL AND
 ///            subnet_id = <subnet_id>
@@ -653,6 +674,7 @@ fn push_ensure_unique_vpc_expression<'a>(
 /// `'non-unique-subnets'`, which will fail casting to a UUID.
 fn push_ensure_unique_vpc_subnet_expression<'a>(
     mut out: AstPass<'_, 'a, Pg>,
+    interface_id: &'a Uuid,
     subnet_id: &'a Uuid,
     subnet_id_str: &'a String,
     instance_id: &'a Uuid,
@@ -662,6 +684,10 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
     out.push_sql(" FROM ");
     NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
+    out.push_identifier(dsl::id::NAME)?;
+    out.push_sql(" != ");
+    out.push_bind_param::<sql_types::Uuid, Uuid>(interface_id)?;
+    out.push_sql(" AND ");
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
@@ -694,6 +720,7 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
 #[allow(clippy::too_many_arguments)]
 fn push_instance_validation_cte<'a>(
     mut out: AstPass<'_, 'a, Pg>,
+    interface_id: &'a Uuid,
     vpc_id: &'a Uuid,
     vpc_id_str: &'a String,
     subnet_id: &'a Uuid,
@@ -727,6 +754,7 @@ fn push_instance_validation_cte<'a>(
     out.push_sql(", ");
     push_ensure_unique_vpc_subnet_expression(
         out.reborrow(),
+        interface_id,
         subnet_id,
         subnet_id_str,
         instance_id,
@@ -924,6 +952,7 @@ impl QueryFragment<Pg> for InsertQuery {
         //  - `is_primary`
         push_instance_validation_cte(
             out.reborrow(),
+            &self.interface.identity.id,
             &self.interface.vpc_id,
             &self.vpc_id_str,
             &self.interface.subnet.identity.id,
@@ -2067,6 +2096,43 @@ mod tests {
         assert!(
             matches!(result, Err(InsertError::NonUniqueVpcSubnets)),
             "Each interface for an instance must be in distinct VPC Subnets"
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_same_interface_fails() {
+        let context =
+            TestContext::new("test_insert_same_interface_fails", 2).await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
+        let interface = IncompleteNetworkInterface::new(
+            Uuid::new_v4(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+        let _ = context
+            .db_datastore
+            .instance_create_network_interface_raw(
+                &context.opctx,
+                interface.clone(),
+            )
+            .await
+            .expect("Failed to insert interface");
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
+            .await;
+        assert!(
+            matches!(result, Err(InsertError::InterfaceAlreadyExists(_))),
+            "Expected that interface would already exist",
         );
         context.success().await;
     }

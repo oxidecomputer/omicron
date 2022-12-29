@@ -68,6 +68,14 @@ where
         .unwrap()
 }
 
+pub async fn object_delete(client: &ClientTestContext, path: &str) {
+    NexusRequest::object_delete(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect(&format!("failed to make \"delete\" request to {path}"));
+}
+
 pub async fn populate_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
@@ -215,6 +223,19 @@ pub async fn create_disk(
         },
     )
     .await
+}
+
+pub async fn delete_disk(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    disk_name: &str,
+) {
+    let url = format!(
+        "/organizations/{}/projects/{}/disks/{}",
+        organization_name, project_name, disk_name
+    );
+    object_delete(client, &url).await
 }
 
 /// Creates an instance with a default NIC and no disks.
