@@ -47,7 +47,7 @@ this document should act as a jumping-off point.
 === **Testing**
 
 * Authorization
-** There exists a xref:https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test/[policy test] which compares all Oso objects against an expected policy. New resources are usually added to xref:https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test/resources.rs[resources.rs] to get coverage.
+** There exists a xref:https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test[policy test] which compares all Oso objects against an expected policy. New resources are usually added to xref:https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test/resources.rs[resources.rs] to get coverage.
 * openapi
 ** Nexus generates a new openapi spec from the dropshot endpoints. If you modify endpoints, you'll usually need to `EXPECTORATE=overwrite cargo test` the following targets...
 *** External API: `test_nexus_openapi`
