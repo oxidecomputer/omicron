@@ -373,23 +373,6 @@ resource IpPoolList {
 has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 	if ip_pool_list.fleet = fleet;
 
-# Describes the policy for accessing "/system/certificates" in the API
-resource CertificateList {
-	permissions = [
-	    "list_children",
-	    "modify",
-	    "create_child",
-	];
-
-	# Fleet Administrators can create or modify the certificate list.
-	relations = { parent_fleet: Fleet };
-	"modify" if "admin" on "parent_fleet";
-	"create_child" if "admin" on "parent_fleet";
-	"list_children" if "admin" on "parent_fleet";
-}
-has_relation(fleet: Fleet, "parent_fleet", certificate_list: CertificateList)
-	if certificate_list.fleet = fleet;
-
 # Describes the policy for accessing "/system/images" (in the API)
 resource GlobalImageList {
 	permissions = [

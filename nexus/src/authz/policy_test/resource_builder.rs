@@ -243,7 +243,6 @@ macro_rules! impl_dyn_authorized_resource_for_global {
 
 impl_dyn_authorized_resource_for_global!(authz::oso_generic::Database);
 impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
-impl_dyn_authorized_resource_for_global!(authz::CertificateList);
 impl_dyn_authorized_resource_for_global!(authz::GlobalImageList);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
