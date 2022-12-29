@@ -24,9 +24,12 @@ pub mod disk_delete;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_migrate;
+pub mod project_create;
 pub mod snapshot_create;
+pub mod snapshot_delete;
 pub mod volume_delete;
 pub mod volume_remove_rop;
+pub mod vpc_create;
 
 pub mod common_storage;
 
@@ -101,7 +104,13 @@ fn make_action_registry() -> ActionRegistry {
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
         &mut registry,
     );
+    <project_create::SagaProjectCreate as NexusSaga>::register_actions(
+        &mut registry,
+    );
     <snapshot_create::SagaSnapshotCreate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <snapshot_delete::SagaSnapshotDelete as NexusSaga>::register_actions(
         &mut registry,
     );
     <volume_delete::SagaVolumeDelete as NexusSaga>::register_actions(
@@ -110,6 +119,7 @@ fn make_action_registry() -> ActionRegistry {
     <volume_remove_rop::SagaVolumeRemoveROP as NexusSaga>::register_actions(
         &mut registry,
     );
+    <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
 
     registry
 }

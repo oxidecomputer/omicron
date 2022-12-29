@@ -59,13 +59,4 @@ impl SagaContext {
     ) -> Result<Arc<SledAgentClient>, Error> {
         self.nexus.sled_client(sled_id).await
     }
-
-    pub async fn random_sled_client(
-        &self,
-    ) -> Result<Option<Arc<SledAgentClient>>, Error> {
-        Ok(match self.nexus.random_sled_id().await? {
-            Some(sled_id) => Some(self.nexus.sled_client(&sled_id).await?),
-            None => None,
-        })
-    }
 }
