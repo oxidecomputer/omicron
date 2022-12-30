@@ -3398,7 +3398,7 @@ async fn certificate_view(
 /// cannot be created with this certificate.
 #[endpoint {
     method = DELETE,
-    path = "/system/certificate/{certificate}",
+    path = "/system/certificates/{certificate}",
     tags = ["system"],
 }]
 async fn certificate_delete(
