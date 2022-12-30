@@ -49,9 +49,21 @@ this document should act as a jumping-off point.
 * Authorization
 ** There exists a https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test[policy test] which compares all Oso objects against an expected policy. New resources are usually added to https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test/resources.rs[resources.rs] to get coverage.
 * openapi
-** Nexus generates a new openapi spec from the dropshot endpoints. If you modify endpoints, you'll usually need to `EXPECTORATE=overwrite cargo test` the following targets...
-*** External API: `test_nexus_openapi`
-*** Internal API: `test_nexus_openapi_internal`
+** Nexus generates a new openapi spec from the dropshot endpoints. If you modify endpoints, you'll need to update openapi JSON files.
+*** The following commands may be used to update APIs:
++
+[source, rust]
+----
+$ cargo run -p omicron-nexus --bin nexus -- -I nexus/examples/config.toml > openapi/nexus-internal.json
+$ cargo run -p omicron-nexus --bin nexus -- -O nexus/examples/config.toml > openapi/nexus.json
+$ cargo run -p omicron-sled-agent --bin sled-agent -- openapi > openapi/sled-agent.json
+----
+*** Alternative, you can run:
++
+[source, rust]
+----
+$ EXPECTORATE=overwrite cargo test_nexus_openapi test_nexus_openapi_internal test_sled_agent_openapi_sled
+----
 * Integration Tests
 ** Nexus' https://github.com/oxidecomputer/omicron/tree/main/nexus/tests/integration_tests[integration tests] are used to cross the HTTP interface for testing. Typically, one file is used "per-resource".
 *** These tests use a simulated Sled Agent, and keep the "Nexus" object in-process, so it can still be accessed and modified for invasive testing.
