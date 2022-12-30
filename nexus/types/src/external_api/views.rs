@@ -5,7 +5,7 @@
 //! Views are response bodies, most of which are public lenses onto DB models.
 
 use crate::external_api::shared::{self, IpKind, IpRange};
-use crate::identity::Asset;
+use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -23,33 +23,6 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
-
-// IDENTITY METADATA
-
-/// Identity-related metadata that's included in "asset" public API objects
-/// (which generally have no name or description)
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
-pub struct AssetIdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
-    pub id: Uuid,
-    /// timestamp when this resource was created
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    /// timestamp when this resource was last modified
-    pub time_modified: chrono::DateTime<chrono::Utc>,
-}
-
-impl<T> From<&T> for AssetIdentityMetadata
-where
-    T: Asset,
-{
-    fn from(t: &T) -> Self {
-        AssetIdentityMetadata {
-            id: t.id(),
-            time_created: t.time_created(),
-            time_modified: t.time_modified(),
-        }
-    }
-}
 
 // SILOS
 
