@@ -5139,14 +5139,13 @@ async fn system_update_view(
     path_params: Path<SystemUpdatePathParam>,
 ) -> Result<HttpResponseOk<SystemUpdate>, HttpError> {
     let apictx = rqctx.context();
-    let _nexus = &apictx.nexus;
+    let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let handler = async {
-        let _opctx = OpContext::for_external_api(&rqctx).await?;
-        Ok(HttpResponseOk(SystemUpdate {
-            id: path.update_id,
-            version: SemverVersion::new(1, 0, 0),
-        }))
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let system_update =
+            nexus.system_update_fetch_by_id(&opctx, &path.update_id).await?;
+        Ok(HttpResponseOk(system_update.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

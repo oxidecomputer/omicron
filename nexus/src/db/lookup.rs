@@ -394,6 +394,11 @@ impl<'a> LookupPath<'a> {
         )
     }
 
+    /// Select a resource of type SystemUpdate, identified by its id
+    pub fn system_update_id(self, id: Uuid) -> SystemUpdate<'a> {
+        SystemUpdate::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type UserBuiltin, identified by its `name`
     pub fn user_builtin_name<'b, 'c>(self, name: &'b Name) -> UserBuiltin<'c>
     where
@@ -684,6 +689,15 @@ lookup_resource! {
         { column_name = "version", rust_type = i64 },
         { column_name = "kind", rust_type = UpdateArtifactKind }
     ]
+}
+
+lookup_resource! {
+    name = "SystemUpdate",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {

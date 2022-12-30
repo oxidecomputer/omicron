@@ -12796,11 +12796,23 @@
         ]
       },
       "SystemUpdate": {
+        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
         "type": "object",
         "properties": {
           "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
           },
           "version": {
             "$ref": "#/components/schemas/SemverVersion"
@@ -12808,6 +12820,8 @@
         },
         "required": [
           "id",
+          "time_created",
+          "time_modified",
           "version"
         ]
       },

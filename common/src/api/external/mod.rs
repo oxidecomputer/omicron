@@ -615,6 +615,7 @@ pub enum ResourceType {
     MetricProducer,
     RoleBuiltin,
     UpdateAvailableArtifact,
+    SystemUpdate,
     UserBuiltin,
     Zpool,
 }

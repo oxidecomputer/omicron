@@ -6,13 +6,14 @@
 
 use crate::authz;
 use crate::context::OpContext;
+use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
 use hex;
-use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::Error;
-use omicron_common::api::external::PaginationOrder;
+use omicron_common::api::external::{
+    DataPageParams, Error, LookupResult, PaginationOrder,
+};
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use rand::Rng;
 use ring::digest;
@@ -20,6 +21,7 @@ use std::convert::TryFrom;
 use std::num::NonZeroU32;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
@@ -275,5 +277,17 @@ impl super::Nexus {
             ))
         })?;
         Ok(body)
+    }
+
+    pub async fn system_update_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        update_id: &Uuid,
+    ) -> LookupResult<db::model::SystemUpdate> {
+        let (.., db_system_update) = LookupPath::new(opctx, &self.db_datastore)
+            .system_update_id(*update_id)
+            .fetch()
+            .await?;
+        Ok(db_system_update)
     }
 }

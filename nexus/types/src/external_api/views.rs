@@ -458,7 +458,8 @@ pub struct SystemVersion {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SystemUpdate {
-    pub id: Uuid,
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
     pub version: SemverVersion,
 }
 

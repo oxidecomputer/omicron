@@ -633,6 +633,18 @@ table! {
     }
 }
 
+table! {
+    system_update (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
