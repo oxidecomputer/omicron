@@ -12,7 +12,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
 use hex;
 use omicron_common::api::external::{
-    DataPageParams, Error, LookupResult, PaginationOrder,
+    DataPageParams, Error, ListResultVec, LookupResult, PaginationOrder,
 };
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use rand::Rng;
@@ -289,5 +289,18 @@ impl super::Nexus {
             .fetch()
             .await?;
         Ok(db_system_update)
+    }
+
+    pub async fn system_update_list_components(
+        &self,
+        opctx: &OpContext,
+        update_id: &Uuid,
+    ) -> ListResultVec<db::model::ComponentUpdate> {
+        let (authz_update, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .system_update_id(*update_id)
+            .fetch()
+            .await?;
+
+        self.db_datastore.components_list(opctx, &authz_update).await
     }
 }

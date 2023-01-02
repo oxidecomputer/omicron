@@ -466,16 +466,15 @@ pub struct SystemUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceType {
-    Sled,
+    Disk,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ComponentUpdate {
-    // note this is the ID of the component, not the update. Does the component
-    // update also have an ID?
-    pub component_id: Uuid,
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
     // pub name: Name, // hmmm. who would name this?
-    pub device_id: String,
     pub device_type: DeviceType,
     pub version: SemverVersion,
     // TODO: parent ID doesn't need to be optional if we say top-level
