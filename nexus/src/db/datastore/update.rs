@@ -57,7 +57,7 @@ impl DataStore {
             .internal_context("deleting outdated available artifacts")
     }
 
-    pub async fn components_list(
+    pub async fn system_update_components_list(
         &self,
         opctx: &OpContext,
         authz_update: &authz::SystemUpdate,

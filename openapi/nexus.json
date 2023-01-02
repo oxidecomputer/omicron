@@ -8906,17 +8906,16 @@
         "minimum": 0
       },
       "ComponentUpdate": {
+        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
         "type": "object",
         "properties": {
-          "component_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "device_id": {
-            "type": "string"
-          },
           "device_type": {
             "$ref": "#/components/schemas/DeviceType"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
           },
           "parent_id": {
             "nullable": true,
@@ -8924,14 +8923,25 @@
             "type": "string",
             "format": "uuid"
           },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
           "version": {
             "$ref": "#/components/schemas/SemverVersion"
           }
         },
         "required": [
-          "component_id",
-          "device_id",
           "device_type",
+          "id",
+          "time_created",
+          "time_modified",
           "version"
         ]
       },
@@ -9299,7 +9309,7 @@
       "DeviceType": {
         "type": "string",
         "enum": [
-          "sled"
+          "disk"
         ]
       },
       "Digest": {

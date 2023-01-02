@@ -301,6 +301,8 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.db_datastore.components_list(opctx, &authz_update).await
+        self.db_datastore
+            .system_update_components_list(opctx, &authz_update)
+            .await
     }
 }
