@@ -80,7 +80,7 @@ impl CertificateChain {
     }
 }
 
-fn tls_cert_to_buffer(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
+fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
     let mut serialized_certs = vec![];
     let mut cert_writer = std::io::BufWriter::new(&mut serialized_certs);
     for cert in certs {
@@ -96,7 +96,7 @@ fn tls_cert_to_buffer(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
     serialized_certs
 }
 
-fn tls_key_to_buffer(key: &rustls::PrivateKey) -> Vec<u8> {
+fn tls_key_to_pem(key: &rustls::PrivateKey) -> Vec<u8> {
     let mut serialized_key = vec![];
     let mut key_writer = std::io::BufWriter::new(&mut serialized_key);
     let encoded_key = pem::encode(&pem::Pem {
@@ -194,7 +194,7 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
 
     let chain = CertificateChain::new();
     let (cert, key) = (chain.cert_chain(), chain.end_cert_private_key());
-    let (cert, key) = (tls_cert_to_buffer(&cert), tls_key_to_buffer(&key));
+    let (cert, key) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
 
     // We can create a new certificate
     create_certificate(&client, CERT_NAME, cert.clone(), key.clone()).await;
@@ -215,13 +215,88 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     cert_delete_expect_not_found(&client).await;
 }
 
-#[nexus_test]
-async fn test_refresh(_cptestctx: &ControlPlaneTestContext) {
-    todo!();
+// struct HttpsTester<'a> {
+//     cptestctx: &'a ControlPlaneTestContext,
+// }
+
+async fn do_request(
+    cptestctx: &ControlPlaneTestContext,
+    scheme: http::uri::Scheme,
+    root_certs: rustls::RootCertStore,
+) -> Result<(), hyper::Error> {
+    let client = &cptestctx.external_client;
+
+    let address = client.bind_address;
+    let ip = address.ip();
+    let port = address.port();
+    let uri: hyper::Uri =
+        format!("{scheme}://{ip}:{port}/").parse().unwrap();
+    let request = hyper::Request::builder()
+        .method(http::method::Method::GET)
+        .uri(&uri)
+        .body(hyper::Body::empty())
+        .unwrap();
+
+    match scheme.as_str() {
+        "http" => {
+            let http_client = hyper::Client::builder().build_http();
+            http_client.request(request).await.map(|_| ())
+        },
+        "https" => {
+            let tls_config = rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_root_certificates(root_certs)
+                .with_no_client_auth();
+            let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(tls_config)
+                .https_only()
+                .enable_http1()
+                .build();
+            let https_client = hyper::Client::builder().build(https_connector);
+            https_client.request(request).await.map(|_| ())
+        },
+        _ => panic!("Unsupported scheme"),
+    }
 }
 
 #[nexus_test]
+async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let chain = CertificateChain::new();
+    let (cert, key) = (chain.cert_chain(), chain.end_cert_private_key());
+
+    // TODO: could refactor "do_request" into helper class w/cert
+
+    let mut root_certs = rustls::RootCertStore::empty();
+    root_certs.add(&chain.root_cert).expect("Failed to add certificate");
+
+    // Access HTTP interface, see that it can succeed.
+    do_request(&cptestctx, http::uri::Scheme::HTTP, root_certs.clone()).await.unwrap();
+    // Access HTTPS interface, see it's not there
+    let error = do_request(&cptestctx, http::uri::Scheme::HTTPS, root_certs.clone()).await.unwrap_err();
+    println!("error: {error:?}");
+
+    // Add a certificate
+    let (cert_u8, key_u8) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
+    create_certificate(&client, CERT_NAME, cert_u8.clone(), key_u8.clone()).await;
+
+    // Both interfaces should succeed now
+    do_request(&cptestctx, http::uri::Scheme::HTTP, root_certs.clone()).await.unwrap();
+    do_request(&cptestctx, http::uri::Scheme::HTTPS, root_certs.clone()).await.unwrap();
+
+    // TODO: Add a cert
+    // TODO: Try to access HTTPS interface, see it's OK
+
+    todo!();
+}
+
+// TODO: Questions...
+// - Does deleting a cert cause a refresh?
+// - Do we add an internal Nexus API to notify that a refresh should happen?
+
+#[nexus_test]
 async fn test_validation(_cptestctx: &ControlPlaneTestContext) {
-    // TODO: Pass bad certs?
+    // TODO: Pass bad certs, see that they are rejected
     todo!();
 }

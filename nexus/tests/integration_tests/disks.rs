@@ -157,7 +157,7 @@ async fn test_disk_create_attach_detach_delete(
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_org_and_project(client).await;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -334,7 +334,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
 #[nexus_test]
 async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     DiskTest::new(&cptestctx).await;
     create_org_and_project(&client).await;
     let disks_url = get_disks_url();
@@ -903,7 +903,7 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     // Create three 10 GiB zpools, each with one dataset.

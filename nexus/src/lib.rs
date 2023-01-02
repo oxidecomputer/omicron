@@ -30,6 +30,7 @@ pub use app::Nexus;
 pub use config::Config;
 pub use context::ServerContext;
 pub use crucible_agent_client;
+use crate::context::OpContext;
 use dropshot::PaginationOrder;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
@@ -37,6 +38,7 @@ use omicron_common::api::external::DataPageParams;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 #[macro_use]
@@ -112,7 +114,7 @@ impl<'a> InternalServer<'a> {
 
 /// Packages up a [`Nexus`], running both external and internal HTTP API servers
 /// wired up to Nexus
-pub struct Server {
+pub struct ServerInner {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
     /// dropshot servers for external API
@@ -121,25 +123,23 @@ pub struct Server {
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 }
 
+pub struct Server {
+    inner: Arc<ServerInner>,
+}
+
 impl Server {
-    pub async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
-        let apictx = internal.apictx;
-        let http_server_internal = internal.http_server_internal;
-        let log = internal.log;
-        let config = internal.config;
+    pub fn apictx(&self) -> &Arc<ServerContext> {
+        &self.inner.apictx
+    }
 
-        // Wait until RSS handoff completes.
-        let opctx = apictx.nexus.opctx_for_service_balancer();
-        apictx.nexus.await_rack_initialization(&opctx).await;
-
+    async fn get_tls_config(nexus: &Nexus, opctx: &OpContext) -> Result<Option<dropshot::ConfigTls>, String> {
         // Lookup x509 certificates which might be stored in CRDB, specifically
         // for launching the Nexus service.
         //
         // We only grab one certificate (see: the "limit" argument) because
         // we're currently fine just using whatever certificate happens to be
-        // available.
-        let certs = apictx
-            .nexus
+        // available (as long as it's for Nexus).
+        let certs = nexus
             .datastore()
             .certificate_list_for(
                 &opctx,
@@ -153,6 +153,32 @@ impl Server {
             .await
             .map_err(|e| e.to_string())?;
 
+        let certificate = if let Some(certificate) = certs.get(0) {
+            certificate
+        } else {
+            return Ok(None)
+        };
+
+        Ok(Some(dropshot::ConfigTls::AsBytes {
+            certs: certificate.cert.clone(),
+            key: certificate.key.clone(),
+        }))
+    }
+
+    pub async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
+        let apictx = internal.apictx;
+        let http_server_internal = internal.http_server_internal;
+        let log = internal.log;
+        let config = internal.config;
+
+        // Wait until RSS handoff completes.
+        let opctx = apictx.nexus.opctx_for_service_balancer();
+        apictx.nexus.await_rack_initialization(&opctx).await;
+
+        // Lookup x509 certificates which might be stored in CRDB, specifically
+        // for launching the Nexus service.
+        let tls_config = Self::get_tls_config(&apictx.nexus, &opctx).await?;
+
         // Launch the external server(s).
         let http_servers_external = config
             .deployment
@@ -162,14 +188,12 @@ impl Server {
             .map(|mut cfg| {
                 // Populate TLS with data from CRDB
                 if cfg.bind_address.port() == 443 {
-                    let certificate = certs.get(0).ok_or_else(|| {
-                        "No x.509 certificates found".to_string()
-                    })?;
-
-                    cfg.tls = Some(dropshot::ConfigTls::AsBytes {
-                        certs: certificate.cert.clone(),
-                        key: certificate.key.clone(),
-                    });
+                    let tls_config = if let Some(tls_config) = &tls_config {
+                        tls_config
+                    } else {
+                        return Err("No x.509 certificates found".to_string());
+                    };
+                    cfg.tls = Some(tls_config.clone());
                 }
 
                 let server_starter_external = dropshot::HttpServerStarter::new(
@@ -185,7 +209,39 @@ impl Server {
             })
             .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?;
 
-        Ok(Server { apictx, http_servers_external, http_server_internal })
+        let (sender, receiver) = watch::channel(());
+        apictx.nexus.set_server_refresh(sender);
+
+
+        let server = Server {
+            inner: Arc::new(ServerInner {
+                apictx: apictx.clone(),
+                http_servers_external,
+                http_server_internal
+            })
+        };
+
+        Ok(server)
+    }
+
+    pub async fn refresh(&self) -> Result<(), String> {
+        let opctx = self.inner.apictx.nexus.opctx_for_service_balancer();
+        let tls_config = Self::get_tls_config(&self.inner.apictx.nexus, &opctx).await?;
+        let tls_config = if let Some(tls_config) = tls_config {
+            tls_config
+        } else {
+            // TODO: Should we be doing this? We ignore the refresh if no certs
+            // exist. We *could* actively remove the TLS cert, but that'll
+            // require updating the dropshot API.
+            return Ok(());
+        };
+
+        for server in &self.inner.http_servers_external {
+            if server.local_addr().port() == 443 {
+                server.refresh_tls(&tls_config).await?;
+            }
+        }
+        Ok(())
     }
 
     /// Wait for the given server to shut down
@@ -195,11 +251,11 @@ impl Server {
     /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
         let mut errors = vec![];
-        for server in self.http_servers_external {
+        for server in self.inner.http_servers_external {
             errors.push(server.await.map_err(|e| format!("external: {}", e)));
         }
         errors.push(
-            self.http_server_internal
+            self.inner.http_server_internal
                 .await
                 .map_err(|e| format!("internal: {}", e)),
         );
@@ -219,9 +275,9 @@ impl Server {
 
     /// Register the Nexus server as a metric producer with `oximeter.
     pub async fn register_as_producer(&self) {
-        self.apictx
+        self.inner.apictx
             .nexus
-            .register_as_producer(self.http_server_internal.local_addr())
+            .register_as_producer(self.inner.http_server_internal.local_addr())
             .await;
     }
 }
@@ -260,14 +316,14 @@ impl nexus_test_interface::NexusServer for Server {
     }
 
     fn get_http_servers_external(&self) -> Vec<SocketAddr> {
-        self.http_servers_external
+        self.inner.http_servers_external
             .iter()
             .map(|server| server.local_addr())
             .collect()
     }
 
     fn get_http_server_internal(&self) -> SocketAddr {
-        self.http_server_internal.local_addr()
+        self.inner.http_server_internal.local_addr()
     }
 
     async fn upsert_crucible_dataset(
@@ -276,7 +332,7 @@ impl nexus_test_interface::NexusServer for Server {
         zpool_id: Uuid,
         address: SocketAddrV6,
     ) {
-        self.apictx
+        self.inner.apictx
             .nexus
             .upsert_dataset(
                 id,
@@ -289,10 +345,10 @@ impl nexus_test_interface::NexusServer for Server {
     }
 
     async fn close(mut self) {
-        for server in self.http_servers_external {
+        for server in self.inner.http_servers_external {
             server.close().await.unwrap();
         }
-        self.http_server_internal.close().await.unwrap();
+        self.inner.http_server_internal.close().await.unwrap();
     }
 }
 

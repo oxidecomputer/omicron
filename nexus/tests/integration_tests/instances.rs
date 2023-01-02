@@ -187,7 +187,7 @@ async fn test_instances_create_reboot_halt(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
 
     create_org_and_project(&client).await;
@@ -510,7 +510,7 @@ async fn test_instances_create_stopped_start(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
 
     create_org_and_project(&client).await;
@@ -563,7 +563,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
 
     create_org_and_project(&client).await;
@@ -1025,7 +1025,7 @@ async fn test_instance_create_delete_network_interface(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     create_org_and_project(&client).await;
     let url_instances = format!(
@@ -1273,7 +1273,7 @@ async fn test_instance_update_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     create_org_and_project(&client).await;
     let url_instances = format!(
@@ -2041,7 +2041,7 @@ async fn test_instance_create_attach_disks_undo(
     );
 
     // set `faulted_disk` to the faulted state
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     assert!(nexus
         .set_disk_as_faulted(&faulted_disk.identity.id)
@@ -2379,7 +2379,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 8);
 
     // Set the 7th to FAULTED
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     assert!(nexus.set_disk_as_faulted(&disks[6].identity.id).await.unwrap());
 
@@ -2584,7 +2584,7 @@ async fn test_disks_detached_when_instance_destroyed(
 
     let instance =
         instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
@@ -2720,7 +2720,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
 #[nexus_test]
 async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
 
     create_org_and_project(&client).await;

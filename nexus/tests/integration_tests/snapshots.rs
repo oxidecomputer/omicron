@@ -389,7 +389,7 @@ async fn test_reject_creating_disk_from_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -546,7 +546,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -703,7 +703,7 @@ async fn test_create_snapshot_record_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -778,7 +778,7 @@ async fn test_create_snapshot_record_idempotent(
 async fn test_region_snapshot_create_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let region_snapshot = db::model::RegionSnapshot {

@@ -86,6 +86,7 @@ oximeter-producer.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 expectorate.workspace = true
+hyper-rustls = "0.23.2"
 itertools.workspace = true
 nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
