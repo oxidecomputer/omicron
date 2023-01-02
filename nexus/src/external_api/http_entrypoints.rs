@@ -5161,10 +5161,12 @@ async fn system_update_components_list(
     path_params: Path<SystemUpdatePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<ComponentUpdate>>, HttpError> {
     let apictx = rqctx.context();
-    let _nexus = &apictx.nexus;
-    let _path = path_params.into_inner();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
     let handler = async {
-        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let _system_update =
+            nexus.system_update_fetch_by_id(&opctx, &path.update_id).await?;
         Ok(HttpResponseOk(ResultsPage { items: vec![], next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

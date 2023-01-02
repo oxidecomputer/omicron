@@ -1423,14 +1423,14 @@ CREATE INDEX ON omicron.public.update_available_artifact (
  * System updates
  */
 CREATE TABLE omicron.public.system_update (
-    /* Unique identifier for this update package */
+    /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL
+    time_modified TIMESTAMPTZ NOT NULL,
 
     /* Unique semver version */
     /* TODO: If the version is really supposed to be unique, we could make it the PK? */
-    version STRING(40) NOT NULL,
+    version STRING(40) NOT NULL
 );
 
 /*******************************************************************/

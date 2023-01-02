@@ -395,7 +395,7 @@ pub enum DeviceAccessTokenType {
 
 // TODO: remove wrapper for semver::Version once this PR goes through
 // https://github.com/GREsau/schemars/pull/195
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SemverVersion(pub semver::Version);
 
 impl SemverVersion {
@@ -425,7 +425,7 @@ impl JsonSchema for SemverVersion {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct VersionRange {
     pub low: SemverVersion,
     pub high: SemverVersion,
@@ -433,7 +433,7 @@ pub struct VersionRange {
 
 // currently shared between SystemVersion and ComponentVersion, but it seems
 // likely they'll eventually diverge
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VersionSteadyReason {
     Completed,
@@ -441,14 +441,14 @@ pub enum VersionSteadyReason {
     Failed,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VersionStatus {
     Updating { target: SemverVersion },
     Steady { reason: VersionSteadyReason },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct SystemVersion {
     pub version_range: VersionRange,
     pub status: VersionStatus,
