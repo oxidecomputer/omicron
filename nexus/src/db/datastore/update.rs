@@ -65,16 +65,14 @@ impl DataStore {
         // TODO: what's the right permission here?
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use db::schema::component_update::dsl as component_update;
-        use db::schema::system_update_component_update::dsl as join_table;
+        use db::schema::component_update;
+        use db::schema::system_update_component_update as join_table;
 
-        component_update::component_update
-            .inner_join(join_table::system_update_component_update)
-            .filter(join_table::system_update_id.eq(authz_update.id()))
-            .select(ComponentUpdate::as_returning())
-            .get_results_async::<ComponentUpdate>(
-                self.pool_authorized(opctx).await?,
-            )
+        component_update::table
+            .inner_join(join_table::table)
+            .filter(join_table::columns::system_update_id.eq(authz_update.id()))
+            .select(ComponentUpdate::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

@@ -4,7 +4,7 @@
 
 use crate::{
     impl_enum_type,
-    schema::{component_update, system_update},
+    schema::{component_update, system_update, system_update_component_update},
 };
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
@@ -79,6 +79,15 @@ pub struct ComponentUpdate {
     pub version: String,
     pub device_type: DeviceType,
     pub parent_id: Option<Uuid>,
+}
+
+#[derive(
+    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+)]
+#[diesel(table_name = system_update_component_update)]
+pub struct SystemUpdateComponentUpdate {
+    pub component_update_id: Uuid,
+    pub system_update_id: Uuid,
 }
 
 impl From<ComponentUpdate> for views::ComponentUpdate {

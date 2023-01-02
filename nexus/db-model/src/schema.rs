@@ -653,7 +653,7 @@ table! {
         device_type -> crate::DeviceTypeEnum,
         // parent component update ID
         // TODO: spell out the whole horrible name?
-        parent_id -> Uuid,
+        parent_id -> Nullable<Uuid>,
     }
 }
 
