@@ -29,4 +29,4 @@ wicketd-client.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 test-strategy.workspace = true
-tokio = { version = "1.22", features = [ "test-util" ] }
+tokio = { workspace = true, features = [ "test-util" ] }
