@@ -947,7 +947,6 @@ async fn ssc_call_pantry_snapshot_for_disk(
 async fn ssc_call_pantry_snapshot_for_disk_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
