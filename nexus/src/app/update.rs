@@ -291,6 +291,15 @@ impl super::Nexus {
         Ok(db_system_update)
     }
 
+    pub async fn system_updates_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SystemUpdate> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        self.db_datastore.system_updates_list_by_id(opctx, pagparams).await
+    }
+
     pub async fn system_update_list_components(
         &self,
         opctx: &OpContext,

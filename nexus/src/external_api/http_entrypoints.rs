@@ -5109,12 +5109,26 @@ async fn system_component_version_list(
 }]
 async fn system_update_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    // TODO: pagination should probably be by most recent first, ID is nonsense
+    query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<SystemUpdate>>, HttpError> {
     let apictx = rqctx.context();
-    let _nexus = &apictx.nexus;
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
     let handler = async {
-        let _opctx = OpContext::for_external_api(&rqctx).await?;
-        Ok(HttpResponseOk(ResultsPage { items: vec![], next_page: None }))
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let updates = nexus
+            .system_updates_list_by_id(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|u| u.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            updates,
+            &|_, u: &SystemUpdate| u.identity.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

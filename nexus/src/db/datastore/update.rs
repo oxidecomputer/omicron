@@ -10,12 +10,17 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
-use crate::db::model::{ComponentUpdate, UpdateAvailableArtifact};
+use crate::db::model::{
+    ComponentUpdate, SystemUpdate, UpdateAvailableArtifact,
+};
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, InternalContext, ListResultVec,
 };
+use uuid::Uuid;
 
 impl DataStore {
     pub async fn update_available_artifact_upsert(
@@ -57,13 +62,30 @@ impl DataStore {
             .internal_context("deleting outdated available artifacts")
     }
 
+    pub async fn system_updates_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SystemUpdate> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::system_update::dsl;
+
+        paginated(dsl::system_update, dsl::id, pagparams)
+            .select(SystemUpdate::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     pub async fn system_update_components_list(
         &self,
         opctx: &OpContext,
         authz_update: &authz::SystemUpdate,
     ) -> ListResultVec<ComponentUpdate> {
         // TODO: what's the right permission here?
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::component_update;
         use db::schema::system_update_component_update as join_table;
