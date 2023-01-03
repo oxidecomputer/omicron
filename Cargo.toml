@@ -102,7 +102,8 @@ db-macros = { path = "nexus/db-macros" }
 derive_more = "0.99.17"
 diesel = { version = "2.0.2" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+# TODO: Switch back to main when it's merged
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", rev = "b2ce08def4659b7c6694f0a87b04f5f22b5da858", features = [ "usdt-probes" ] }
 expectorate = "1.0.5"
 # TODO(luqman): Update once merged & new release is cut
 # https://github.com/rafalh/rust-fatfs/pull/76

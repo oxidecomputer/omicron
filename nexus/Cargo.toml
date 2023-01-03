@@ -44,7 +44,7 @@ oso.workspace = true
 oximeter-client.workspace = true
 oximeter-db.workspace = true
 parse-display.workspace = true
-paste = "1.0"
+paste = "1.0.11"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 propolis-client.workspace = true

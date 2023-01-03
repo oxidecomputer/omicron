@@ -25,12 +25,12 @@ mod populate;
 mod saga_interface;
 pub mod updates; // public for testing
 
+use crate::context::OpContext;
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
 pub use config::Config;
 pub use context::ServerContext;
 pub use crucible_agent_client;
-use crate::context::OpContext;
 use dropshot::PaginationOrder;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
@@ -38,7 +38,6 @@ use omicron_common::api::external::DataPageParams;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::sync::watch;
 use uuid::Uuid;
 
 #[macro_use]
@@ -112,27 +111,32 @@ impl<'a> InternalServer<'a> {
     }
 }
 
+pub type DropshotServer = dropshot::HttpServer<
+    Arc<ServerContext>,
+    dropshot::Uncloseable,
+    dropshot::Unjoinable,
+>;
+
 /// Packages up a [`Nexus`], running both external and internal HTTP API servers
 /// wired up to Nexus
-pub struct ServerInner {
-    /// shared state used by API request handlers
-    pub apictx: Arc<ServerContext>,
-    /// dropshot servers for external API
-    pub http_servers_external: Vec<dropshot::HttpServer<Arc<ServerContext>>>,
-    /// dropshot server for internal API
-    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
-}
-
 pub struct Server {
-    inner: Arc<ServerInner>,
+    /// shared state used by API request handlers
+    apictx: Arc<ServerContext>,
+    external_joiners: Vec<dropshot::Joinable>,
+    external_closers: Vec<dropshot::Closeable>,
+    internal_joiner: dropshot::Joinable,
+    internal_closer: dropshot::Closeable,
 }
 
 impl Server {
     pub fn apictx(&self) -> &Arc<ServerContext> {
-        &self.inner.apictx
+        &self.apictx
     }
 
-    async fn get_tls_config(nexus: &Nexus, opctx: &OpContext) -> Result<Option<dropshot::ConfigTls>, String> {
+    async fn get_tls_config(
+        nexus: &Nexus,
+        opctx: &OpContext,
+    ) -> Result<Option<dropshot::ConfigTls>, String> {
         // Lookup x509 certificates which might be stored in CRDB, specifically
         // for launching the Nexus service.
         //
@@ -156,7 +160,7 @@ impl Server {
         let certificate = if let Some(certificate) = certs.get(0) {
             certificate
         } else {
-            return Ok(None)
+            return Ok(None);
         };
 
         Ok(Some(dropshot::ConfigTls::AsBytes {
@@ -165,7 +169,7 @@ impl Server {
         }))
     }
 
-    pub async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
+    async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
         let log = internal.log;
@@ -209,40 +213,55 @@ impl Server {
             })
             .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?;
 
-        let (sender, receiver) = watch::channel(());
-        apictx.nexus.set_server_refresh(sender);
+        // Separate the "abilty to manage the server" from the "ability to await
+        // the server's completion".
+        let (http_servers_external, external_joiners): (Vec<_>, Vec<_>) =
+            http_servers_external
+                .into_iter()
+                .map(|server| server.get_joiner())
+                .unzip();
+        let (http_servers_external, external_closers): (Vec<_>, Vec<_>) =
+            http_servers_external
+                .into_iter()
+                .map(|server| server.get_closer())
+                .unzip();
+        let (http_server_internal, internal_joiner) =
+            http_server_internal.get_joiner();
+        let (http_server_internal, internal_closer) =
+            http_server_internal.get_closer();
 
+        apictx.nexus.set_servers(http_servers_external, http_server_internal);
 
         let server = Server {
-            inner: Arc::new(ServerInner {
-                apictx: apictx.clone(),
-                http_servers_external,
-                http_server_internal
-            })
+            apictx: apictx.clone(),
+            external_joiners,
+            external_closers,
+            internal_joiner,
+            internal_closer,
         };
-
+        server.register_as_producer().await;
         Ok(server)
     }
 
-    pub async fn refresh(&self) -> Result<(), String> {
-        let opctx = self.inner.apictx.nexus.opctx_for_service_balancer();
-        let tls_config = Self::get_tls_config(&self.inner.apictx.nexus, &opctx).await?;
-        let tls_config = if let Some(tls_config) = tls_config {
-            tls_config
-        } else {
-            // TODO: Should we be doing this? We ignore the refresh if no certs
-            // exist. We *could* actively remove the TLS cert, but that'll
-            // require updating the dropshot API.
-            return Ok(());
-        };
-
-        for server in &self.inner.http_servers_external {
-            if server.local_addr().port() == 443 {
-                server.refresh_tls(&tls_config).await?;
-            }
-        }
-        Ok(())
-    }
+    //    pub async fn refresh(&self) -> Result<(), String> {
+    //        let opctx = self.apictx.nexus.opctx_for_service_balancer();
+    //        let tls_config = Self::get_tls_config(&self.apictx.nexus, &opctx).await?;
+    //        let tls_config = if let Some(tls_config) = tls_config {
+    //            tls_config
+    //        } else {
+    //            // TODO: Should we be doing this? We ignore the refresh if no certs
+    //            // exist. We *could* actively remove the TLS cert, but that'll
+    //            // require updating the dropshot API.
+    //            return Ok(());
+    //        };
+    //
+    //        for server in &self.http_servers_external {
+    //            if server.local_addr().port() == 443 {
+    //                server.refresh_tls(&tls_config).await?;
+    //            }
+    //        }
+    //        Ok(())
+    //    }
 
     /// Wait for the given server to shut down
     ///
@@ -251,13 +270,11 @@ impl Server {
     /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
         let mut errors = vec![];
-        for server in self.inner.http_servers_external {
+        for server in self.external_joiners {
             errors.push(server.await.map_err(|e| format!("external: {}", e)));
         }
         errors.push(
-            self.inner.http_server_internal
-                .await
-                .map_err(|e| format!("internal: {}", e)),
+            self.internal_joiner.await.map_err(|e| format!("internal: {}", e)),
         );
         let errors = errors
             .into_iter()
@@ -274,11 +291,10 @@ impl Server {
     }
 
     /// Register the Nexus server as a metric producer with `oximeter.
-    pub async fn register_as_producer(&self) {
-        self.inner.apictx
-            .nexus
-            .register_as_producer(self.inner.http_server_internal.local_addr())
-            .await;
+    async fn register_as_producer(&self) {
+        let nexus = &self.apictx.nexus;
+
+        nexus.register_as_producer(nexus.get_internal_server().unwrap()).await;
     }
 }
 
@@ -316,14 +332,11 @@ impl nexus_test_interface::NexusServer for Server {
     }
 
     fn get_http_servers_external(&self) -> Vec<SocketAddr> {
-        self.inner.http_servers_external
-            .iter()
-            .map(|server| server.local_addr())
-            .collect()
+        self.apictx.nexus.get_external_servers().unwrap()
     }
 
     fn get_http_server_internal(&self) -> SocketAddr {
-        self.inner.http_server_internal.local_addr()
+        self.apictx.nexus.get_internal_server().unwrap()
     }
 
     async fn upsert_crucible_dataset(
@@ -332,7 +345,7 @@ impl nexus_test_interface::NexusServer for Server {
         zpool_id: Uuid,
         address: SocketAddrV6,
     ) {
-        self.inner.apictx
+        self.apictx
             .nexus
             .upsert_dataset(
                 id,
@@ -345,10 +358,15 @@ impl nexus_test_interface::NexusServer for Server {
     }
 
     async fn close(mut self) {
-        for server in self.inner.http_servers_external {
+        for server in self.external_closers {
             server.close().await.unwrap();
         }
-        self.inner.http_server_internal.close().await.unwrap();
+        self.internal_closer.close().await.unwrap();
+
+        for server in self.external_joiners {
+            server.await.unwrap();
+        }
+        self.internal_joiner.await.unwrap();
     }
 }
 
@@ -371,6 +389,5 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     }
     let internal_server = InternalServer::start(config, &log).await?;
     let server = Server::start(internal_server).await?;
-    server.register_as_producer().await;
     server.wait_for_finish().await
 }

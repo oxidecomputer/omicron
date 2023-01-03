@@ -14,12 +14,12 @@ use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
+use crate::DropshotServer;
 use anyhow::anyhow;
 use omicron_common::api::external::Error;
 use once_cell::sync::OnceCell;
 use slog::Logger;
 use std::sync::Arc;
-use tokio::sync::watch;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -84,8 +84,11 @@ pub struct Nexus {
     /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
-    /// Communication channel to the server running our HTTP interfaces.
-    pub server_refresh: OnceCell<watch::Sender<()>>,
+    /// External dropshot servers
+    external_servers: OnceCell<Vec<DropshotServer>>,
+
+    /// Internal dropshot server
+    internal_server: OnceCell<DropshotServer>,
 
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
@@ -184,7 +187,8 @@ impl Nexus {
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
-            server_refresh: OnceCell::new(),
+            external_servers: OnceCell::new(),
+            internal_server: OnceCell::new(),
             populate_status,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
@@ -230,12 +234,6 @@ impl Nexus {
         nexus
     }
 
-    pub fn set_server_refresh(&self, server: watch::Sender<()>) {
-        self.server_refresh.set(server)
-            .map_err(|_| "Cannot insert server, already exists")
-            .unwrap();
-    }
-
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &config::Tunables {
         &self.tunables
@@ -256,6 +254,37 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    /// Called (once) to hand off management of external servers to Nexus.
+    pub fn set_servers(
+        &self,
+        external_servers: Vec<DropshotServer>,
+        internal_server: DropshotServer,
+    ) {
+        self.external_servers
+            .set(external_servers)
+            .map_err(|_| "External server already set")
+            .unwrap();
+
+        self.internal_server
+            .set(internal_server)
+            .map_err(|_| "Internal server already set")
+            .unwrap();
+    }
+
+    pub fn get_external_servers(&self) -> Option<Vec<std::net::SocketAddr>> {
+        Some(
+            self.external_servers
+                .get()?
+                .iter()
+                .map(|server| server.local_addr())
+                .collect(),
+        )
+    }
+
+    pub fn get_internal_server(&self) -> Option<std::net::SocketAddr> {
+        self.internal_server.get().map(|server| server.local_addr())
     }
 
     /// Returns an [`OpContext`] used for authenticating external requests

@@ -229,8 +229,7 @@ async fn do_request(
     let address = client.bind_address;
     let ip = address.ip();
     let port = address.port();
-    let uri: hyper::Uri =
-        format!("{scheme}://{ip}:{port}/").parse().unwrap();
+    let uri: hyper::Uri = format!("{scheme}://{ip}:{port}/").parse().unwrap();
     let request = hyper::Request::builder()
         .method(http::method::Method::GET)
         .uri(&uri)
@@ -241,7 +240,7 @@ async fn do_request(
         "http" => {
             let http_client = hyper::Client::builder().build_http();
             http_client.request(request).await.map(|_| ())
-        },
+        }
         "https" => {
             let tls_config = rustls::ClientConfig::builder()
                 .with_safe_defaults()
@@ -254,7 +253,7 @@ async fn do_request(
                 .build();
             let https_client = hyper::Client::builder().build(https_connector);
             https_client.request(request).await.map(|_| ())
-        },
+        }
         _ => panic!("Unsupported scheme"),
     }
 }
@@ -272,18 +271,28 @@ async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
     root_certs.add(&chain.root_cert).expect("Failed to add certificate");
 
     // Access HTTP interface, see that it can succeed.
-    do_request(&cptestctx, http::uri::Scheme::HTTP, root_certs.clone()).await.unwrap();
+    do_request(&cptestctx, http::uri::Scheme::HTTP, root_certs.clone())
+        .await
+        .unwrap();
     // Access HTTPS interface, see it's not there
-    let error = do_request(&cptestctx, http::uri::Scheme::HTTPS, root_certs.clone()).await.unwrap_err();
+    let error =
+        do_request(&cptestctx, http::uri::Scheme::HTTPS, root_certs.clone())
+            .await
+            .unwrap_err();
     println!("error: {error:?}");
 
     // Add a certificate
     let (cert_u8, key_u8) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
-    create_certificate(&client, CERT_NAME, cert_u8.clone(), key_u8.clone()).await;
+    create_certificate(&client, CERT_NAME, cert_u8.clone(), key_u8.clone())
+        .await;
 
     // Both interfaces should succeed now
-    do_request(&cptestctx, http::uri::Scheme::HTTP, root_certs.clone()).await.unwrap();
-    do_request(&cptestctx, http::uri::Scheme::HTTPS, root_certs.clone()).await.unwrap();
+    do_request(&cptestctx, http::uri::Scheme::HTTP, root_certs.clone())
+        .await
+        .unwrap();
+    do_request(&cptestctx, http::uri::Scheme::HTTPS, root_certs.clone())
+        .await
+        .unwrap();
 
     // TODO: Add a cert
     // TODO: Try to access HTTPS interface, see it's OK
