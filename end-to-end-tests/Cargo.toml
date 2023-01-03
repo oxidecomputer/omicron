@@ -5,14 +5,14 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = { version = "1.0.58", features = ["backtrace"] }
-base64 = "0.20.0"
-futures = "0.3.21"
-omicron-sled-agent = { path = "../sled-agent" }
-omicron-test-utils = { path = "../test-utils" }
+anyhow = { workspace = true, features = ["backtrace"] }
+async-trait.workspace = true
+base64.workspace = true
+omicron-sled-agent.workspace = true
+omicron-test-utils.workspace = true
 oxide-client = { path = "../oxide-client" }
-rand = "0.8.5"
-reqwest = { version = "0.11.13", default-features = false }
-russh = "0.35.0-beta.2"
-russh-keys = "0.22.0"
-tokio = { version = "1.23.0", features = ["macros", "rt-multi-thread"] }
+rand.workspace = true
+reqwest.workspace = true
+russh = "0.35.0-beta.8"
+russh-keys = "0.23.0-beta.1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

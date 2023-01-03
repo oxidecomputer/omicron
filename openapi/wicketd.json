@@ -22,8 +22,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -32,8 +31,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {

@@ -77,7 +77,7 @@ table! {
         disk_id -> Uuid,
         volume_id -> Uuid,
 
-        destination_volume_id -> Nullable<Uuid>,
+        destination_volume_id -> Uuid,
 
         gen -> Int8,
         state -> crate::SnapshotStateEnum,
@@ -149,8 +149,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        project_id -> Nullable<Uuid>,
-        rack_id -> Nullable<Uuid>,
+        internal -> Bool,
         rcgen -> Int8,
     }
 }
@@ -164,7 +163,6 @@ table! {
         first_address -> Inet,
         last_address -> Inet,
         ip_pool_id -> Uuid,
-        project_id -> Nullable<Uuid>,
         rcgen -> Int8,
     }
 }
@@ -179,7 +177,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        project_id -> Nullable<Uuid>,
         instance_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
@@ -330,6 +327,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
         organization_id -> Uuid,
     }
 }

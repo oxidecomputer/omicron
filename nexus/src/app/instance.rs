@@ -62,56 +62,36 @@ impl super::Nexus {
         instance_selector: &'a params::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
-            params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
-                // TODO: 400 if project or organization are present
+            params::InstanceSelector {
+                project_selector: None,
+                instance: NameOrId::Id(id),
+            } => {
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
                 Ok(instance)
             }
             params::InstanceSelector {
-                instance: NameOrId::Name(instance_name),
-                project: Some(NameOrId::Id(project_id)),
-                ..
+                project_selector: Some(project_selector),
+                instance: NameOrId::Name(name),
             } => {
-                // TODO: 400 if organization is present
-                let instance = LookupPath::new(opctx, &self.db_datastore)
-                    .project_id(*project_id)
-                    .instance_name(Name::ref_cast(instance_name));
+                let instance = self
+                    .project_lookup(opctx, project_selector)?
+                    .instance_name(Name::ref_cast(name));
                 Ok(instance)
             }
             params::InstanceSelector {
-                instance: NameOrId::Name(instance_name),
-                project: Some(NameOrId::Name(project_name)),
-                organization: Some(NameOrId::Id(organization_id)),
+                project_selector: Some(_),
+                instance: NameOrId::Id(_),
             } => {
-                let instance = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_id(*organization_id)
-                    .project_name(Name::ref_cast(project_name))
-                    .instance_name(Name::ref_cast(instance_name));
-                Ok(instance)
+                Err(Error::invalid_request(
+                    "when providing instance as an ID, project should not be specified",
+                ))
             }
-            params::InstanceSelector {
-                instance: NameOrId::Name(instance_name),
-                project: Some(NameOrId::Name(project_name)),
-                organization: Some(NameOrId::Name(organization_name)),
-            } => {
-                let instance = LookupPath::new(opctx, &self.db_datastore)
-                    .organization_name(Name::ref_cast(organization_name))
-                    .project_name(Name::ref_cast(project_name))
-                    .instance_name(Name::ref_cast(instance_name));
-                Ok(instance)
+            _ => {
+                Err(Error::invalid_request(
+                    "instance should either be UUID or project should be specified",
+                ))
             }
-            // TODO: Add a better error message
-            _ => Err(Error::InvalidRequest {
-                message: "
-                Unable to resolve instance. Expected one of
-                    - instance: Uuid 
-                    - instance: Name, project: Uuid
-                    - instance: Name, project: Name, organization: Uuid
-                    - instance: Name, project: Name, organization: Name
-                "
-                .to_string(),
-            }),
         }
     }
 
@@ -265,7 +245,7 @@ impl super::Nexus {
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
     pub async fn project_destroy_instance(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> DeleteResult {
@@ -275,16 +255,14 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Delete).await?;
 
-        self.db_datastore
-            .project_delete_instance(opctx, &authz_instance)
-            .await?;
-        self.db_datastore
-            .instance_delete_all_network_interfaces(opctx, &authz_instance)
-            .await?;
-        // Ignore the count of addresses deleted
-        self.db_datastore
-            .deallocate_external_ip_by_instance_id(opctx, authz_instance.id())
-            .await?;
+        let saga_params = sagas::instance_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_instance,
+        };
+        self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
+            saga_params,
+        )
+        .await?;
         Ok(())
     }
 

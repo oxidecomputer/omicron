@@ -496,8 +496,7 @@ impl super::Nexus {
         // (on-disk snapshots, running read-only downstairs) because disks
         // *could* still be using them (if the snapshot has not yet been turned
         // into a regular crucible volume). It will involve some sort of
-        // reference counting for volumes, and probably means this needs to
-        // instead be a saga.
+        // reference counting for volumes.
 
         let (.., authz_snapshot, db_snapshot) =
             LookupPath::new(opctx, &self.db_datastore)
@@ -507,16 +506,15 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        self.db_datastore
-            .project_delete_snapshot(opctx, &authz_snapshot, &db_snapshot)
-            .await?;
-
-        // Kick off volume deletion saga(s)
-        self.volume_delete(db_snapshot.volume_id).await?;
-        if let Some(volume_id) = db_snapshot.destination_volume_id {
-            self.volume_delete(volume_id).await?;
-        }
-
+        let saga_params = sagas::snapshot_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_snapshot,
+            snapshot: db_snapshot,
+        };
+        self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
+            saga_params,
+        )
+        .await?;
         Ok(())
     }
 }
