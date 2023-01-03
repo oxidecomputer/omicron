@@ -172,6 +172,7 @@ declare_saga_actions! {
     }
     CALL_PANTRY_SNAPSHOT_FOR_DISK -> "call_pantry_snapshot_for_disk" {
         + ssc_call_pantry_snapshot_for_disk
+        - ssc_call_pantry_snapshot_for_disk_undo
     }
     CALL_PANTRY_DETACH_FOR_DISK -> "call_pantry_detach_for_disk" {
         + ssc_call_pantry_detach_for_disk
@@ -943,6 +944,42 @@ async fn ssc_call_pantry_snapshot_for_disk(
     Ok(())
 }
 
+async fn ssc_call_pantry_snapshot_for_disk_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
+    let params = sagactx.saga_params::<Params>()?;
+
+    info!(log, "Undoing pantry snapshot request for {snapshot_id}");
+
+    // Lookup the regions used by the source disk...
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await?;
+    let datasets_and_regions =
+        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+
+    // ... and instruct each of those regions to delete the snapshot.
+    for (dataset, region) in datasets_and_regions {
+        let url = format!("http://{}", dataset.address());
+        let client = CrucibleAgentClient::new(&url);
+
+        client
+            .region_delete_snapshot(
+                &RegionId(region.id().to_string()),
+                &snapshot_id.to_string(),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
 async fn ssc_call_pantry_detach_for_disk(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -1624,12 +1661,14 @@ mod test {
         project_id: Uuid,
         disk_id: Uuid,
         disk: Name,
+        use_the_pantry: bool,
     ) -> Params {
         Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id,
             project_id,
             disk_id,
+            use_the_pantry,
             create_params: params::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-snapshot".parse().expect("Invalid disk name"),
@@ -1651,6 +1690,8 @@ mod test {
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        // Basic snapshot test, create a snapshot of a disk that
+        // is not attached to an instance.
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
@@ -1676,6 +1717,7 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
+            true,
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1743,8 +1785,22 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_action_failure_can_unwind(
+    async fn test_action_failure_can_unwind_no_pantry(
         cptestctx: &ControlPlaneTestContext,
+    ) {
+        test_action_failure_can_unwind_wrapper(cptestctx, false).await
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind_pantry(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        test_action_failure_can_unwind_wrapper(cptestctx, true).await
+    }
+
+    async fn test_action_failure_can_unwind_wrapper(
+        cptestctx: &ControlPlaneTestContext,
+        use_the_pantry: bool,
     ) {
         let test = DiskTest::new(cptestctx).await;
         let log = &cptestctx.logctx.log;
@@ -1771,6 +1827,7 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
+            use_the_pantry,
         );
         let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
 
@@ -1830,6 +1887,7 @@ mod test {
                 project_id,
                 disk_id,
                 Name::from_str(DISK_NAME).unwrap().into(),
+                use_the_pantry,
             );
             dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         }
