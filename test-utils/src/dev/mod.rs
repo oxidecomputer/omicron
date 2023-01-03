@@ -139,6 +139,15 @@ async fn setup_database(
     }
 
     info!(&log, "cockroach command line: {}", starter.cmdline());
+    info!(
+        &log,
+        "cockroach environment: {}",
+        starter
+            .environment()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     let database = starter.start().await.unwrap_or_else(|error| {
         panic!("failed to start CockroachDB: {:#}", error);
     });
