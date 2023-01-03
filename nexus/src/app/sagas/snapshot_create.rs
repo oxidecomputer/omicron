@@ -724,14 +724,12 @@ async fn ssc_attach_disk_to_pantry_undo(
                     .await
                     .map_err(ActionError::action_failed)?;
             } else {
-                info!(
+                warn!(
                     log,
-                    "undo: disk {} not attached to pantry, it's attached to {}!",
+                    "undo: disk {} attached to {}, not the pantry as expected!",
                     params.disk_id,
                     attach_instance_id,
                 );
-
-                // XXX what to do here?
             }
         }
 
@@ -1047,10 +1045,9 @@ async fn ssc_detach_disk_from_pantry(
             }
         }
         None => {
-            // Should this be a fatal error?  We expect the disk to be
-            // attached to the pantry (it was in prior steps) but now it
-            // is not! This means something is changing under us.  Is the
-            // snapshot no longer valid at this point?  Should we continue?
+            // We expect the disk to be attached to the pantry (it was in
+            // prior steps) but now it is not!  This means something is
+            // changing under us.  We can't continue in this situation.
             error!(log, "disk {} already detached", params.disk_id);
             Err(ActionError::action_failed(
                 "disk detached after snapshot_create saga started!".to_string(),
