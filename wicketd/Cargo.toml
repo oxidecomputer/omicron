@@ -5,6 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+bytes.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
