@@ -83,19 +83,7 @@ pub struct CockroachStarterBuilder {
 
 impl CockroachStarterBuilder {
     pub fn new() -> CockroachStarterBuilder {
-        CockroachStarterBuilder::new_with_cmd(COCKROACHDB_BIN)
-    }
-
-    fn new_with_cmd(cmd: &str) -> CockroachStarterBuilder {
-        let mut builder = CockroachStarterBuilder {
-            store_dir: None,
-            listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
-            env: BTreeMap::new(),
-            args: vec![String::from(cmd)],
-            cmd_builder: tokio::process::Command::new(cmd),
-            start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
-            redirect_stdio: false,
-        };
+        let mut builder = CockroachStarterBuilder::new_raw(COCKROACHDB_BIN);
 
         // Copy the current set of environment variables.  We could instead
         // allow the default behavior of inheriting the current process
@@ -128,6 +116,24 @@ impl CockroachStarterBuilder {
             .arg("--insecure")
             .arg("--http-addr=:0");
         builder
+    }
+
+    /// Helper for constructing a `CockroachStarterBuilder` that runs a specific
+    /// command instead of the usual `cockroach` binary
+    ///
+    /// This is used by `new()` as a starting point.  It's also used by the
+    /// tests to trigger failure modes that would be hard to reproduce with
+    /// `cockroach` itself.
+    fn new_raw(cmd: &str) -> CockroachStarterBuilder {
+        CockroachStarterBuilder {
+            store_dir: None,
+            listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
+            env: BTreeMap::new(),
+            args: vec![String::from(cmd)],
+            cmd_builder: tokio::process::Command::new(cmd),
+            start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
+            redirect_stdio: false,
+        }
     }
 
     /// Redirect stdout and stderr for the "cockroach" process to files within
@@ -1027,7 +1033,7 @@ mod test {
     // Tests what happens if the "cockroach" command cannot be found.
     #[tokio::test]
     async fn test_bad_cmd() {
-        let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
+        let builder = CockroachStarterBuilder::new_raw("/nonexistent");
         let _ = test_database_start_failure(builder.build().unwrap()).await;
     }
 
@@ -1170,9 +1176,8 @@ mod test {
     async fn test_setup_database_bad_listen_url() {
         // We don't need to actually run Cockroach for this test, and it's
         // simpler (and faster) if we don't.  But we do need something that
-        // won't exit before we get a chance to trigger an error and that can
-        // also accept the extra arguments that the builder will provide.
-        let mut builder = CockroachStarterBuilder::new_with_cmd("bash");
+        // won't exit before we get a chance to trigger an error.
+        let mut builder = CockroachStarterBuilder::new_raw("bash");
         builder.arg("-c").arg("sleep 60");
         let starter = builder.build().unwrap();
 
