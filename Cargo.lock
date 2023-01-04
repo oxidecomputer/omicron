@@ -2573,7 +2573,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.0.29",
+ "clap 4.0.32",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
