@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 fn validate_certs(input: Vec<u8>) -> Result<(), String> {
     let certs = X509::stack_from_pem(&input.as_slice())
-        .map_err(|err| format!("Failed to parse certificate: {err}"))?;
+        .map_err(|err| format!("Failed to parse certificate as PEM: {err}"))?;
     if certs.is_empty() {
         return Err("could not parse".to_string());
     }
@@ -33,7 +33,7 @@ fn validate_certs(input: Vec<u8>) -> Result<(), String> {
 
 fn validate_private_key(key: Vec<u8>) -> Result<(), String> {
     let _ = PKey::private_key_from_pem(&key.as_slice())
-        .map_err(|err| format!("Failed to parse private key: {err}"))?;
+        .map_err(|err| format!("Failed to parse private key as PEM: {err}"))?;
 
     Ok(())
 }
@@ -60,17 +60,11 @@ impl super::Nexus {
     ) -> CreateResult<db::model::Certificate> {
         validate_certs(params.cert.clone()).map_err(|e| {
             warn!(self.log, "bad cert: {e}");
-            Error::InvalidValue {
-                label: String::from("cert"),
-                message: e.to_string(),
-            }
+            Error::InvalidValue { label: String::from("cert"), message: e }
         })?;
         validate_private_key(params.key.clone()).map_err(|e| {
             warn!(self.log, "bad key: {e}");
-            Error::InvalidValue {
-                label: String::from("key"),
-                message: e.to_string(),
-            }
+            Error::InvalidValue { label: String::from("key"), message: e }
         })?;
 
         let new_certificate = db::model::Certificate::new(
