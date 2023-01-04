@@ -12,6 +12,7 @@ use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use futures::StreamExt;
+use installinator_artifact_client::ClientError;
 use itertools::Itertools;
 use tokio::{sync::mpsc, time::Instant};
 
@@ -313,8 +314,7 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
 }
 
 /// The send side of the channel over which data is sent.
-pub(crate) type FetchSender =
-    mpsc::Sender<Result<Bytes, progenitor_client::Error>>;
+pub(crate) type FetchSender = mpsc::Sender<Result<Bytes, ClientError>>;
 
 /// A [`PeersImpl`] that uses HTTP to fetch artifacts from peers. This is the real implementation.
 #[derive(Clone, Debug)]
@@ -381,8 +381,7 @@ impl ArtifactClient {
         {
             Ok(artifact_bytes) => artifact_bytes,
             Err(error) => {
-                // TODO: does this lose too much info (wicketd_client::types::Error)?
-                _ = sender.send(Err(error.into_untyped())).await;
+                _ = sender.send(Err(error)).await;
                 return;
             }
         };

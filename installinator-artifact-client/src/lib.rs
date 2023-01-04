@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Interface for making API requests to wicketd
+//! Interface for making API requests to installinator-artifactd.
 
 progenitor::generate_api!(
     spec = "../openapi/installinator-artifactd.json",
@@ -19,3 +19,6 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
 );
+
+/// A type alias for errors returned by this crate.
+pub type ClientError = crate::Error<crate::types::Error>;

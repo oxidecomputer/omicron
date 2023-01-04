@@ -4,6 +4,7 @@
 
 use std::{net::SocketAddrV6, time::Duration};
 
+use installinator_artifact_client::ClientError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -12,7 +13,7 @@ pub(crate) enum ArtifactFetchError {
     HttpError {
         peer: SocketAddrV6,
         #[source]
-        error: installinator_artifact_client::Error,
+        error: ClientError,
     },
 
     #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
