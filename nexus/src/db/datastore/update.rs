@@ -11,7 +11,7 @@ use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
-    ComponentUpdate, SystemUpdate, UpdateAvailableArtifact,
+    ComponentUpdate, SystemUpdate, UpdateAvailableArtifact, UpdateableComponent,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -95,6 +95,23 @@ impl DataStore {
             .filter(join_table::columns::system_update_id.eq(authz_update.id()))
             .select(ComponentUpdate::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn updateable_components_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<UpdateableComponent> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::updateable_component::dsl;
+
+        paginated(dsl::updateable_component, dsl::id, pagparams)
+            .select(UpdateableComponent::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

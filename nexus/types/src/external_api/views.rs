@@ -394,7 +394,7 @@ pub struct VersionRange {
     pub high: SemverVersion,
 }
 
-// currently shared between SystemVersion and ComponentVersion, but it seems
+// currently shared between SystemVersion and UpdateableComponent, but it seems
 // likely they'll eventually diverge
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -457,12 +457,14 @@ pub struct ComponentUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ComponentVersion {
-    pub component_id: Uuid,
+pub struct UpdateableComponent {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
     pub device_id: String,
     pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
-    pub status: VersionStatus,
+    // pub status: VersionStatus,
     /// ID of the parent component, e.g., the sled a disk belongs to. Value will
     /// be `None` for top-level components whose "parent" is the rack.
     pub parent_id: Option<Uuid>,

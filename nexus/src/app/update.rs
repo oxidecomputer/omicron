@@ -314,4 +314,14 @@ impl super::Nexus {
             .system_update_components_list(opctx, &authz_update)
             .await
     }
+
+    pub async fn updateable_components_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::UpdateableComponent> {
+        self.db_datastore
+            .updateable_components_list_by_id(opctx, pagparams)
+            .await
+    }
 }

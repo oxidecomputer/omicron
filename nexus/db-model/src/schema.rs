@@ -658,6 +658,21 @@ table! {
 }
 
 table! {
+    updateable_component (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        device_id -> Text,
+        version -> Text,
+        component_type -> crate::UpdateableComponentTypeEnum,
+        parent_id -> Nullable<Uuid>,
+        // status
+        // reason
+    }
+}
+
+table! {
     system_update_component_update (system_update_id, component_update_id) {
         system_update_id -> Uuid,
         component_update_id -> Uuid,

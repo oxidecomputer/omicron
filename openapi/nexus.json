@@ -8475,13 +8475,42 @@
         ],
         "summary": "View version and update status of component tree",
         "operationId": "system_component_version_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ComponentVersionResultsPage"
+                  "$ref": "#/components/schemas/UpdateableComponentResultsPage"
                 }
               }
             }
@@ -8492,7 +8521,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/v1/system/update/updates": {
@@ -8984,61 +9014,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ComponentUpdate"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "ComponentVersion": {
-        "type": "object",
-        "properties": {
-          "component_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "component_type": {
-            "$ref": "#/components/schemas/UpdateableComponentType"
-          },
-          "device_id": {
-            "type": "string"
-          },
-          "parent_id": {
-            "nullable": true,
-            "description": "ID of the parent component, e.g., the sled a disk belongs to. Value will be `None` for top-level components whose \"parent\" is the rack.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "$ref": "#/components/schemas/VersionStatus"
-          },
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "component_id",
-          "component_type",
-          "device_id",
-          "status",
-          "version"
-        ]
-      },
-      "ComponentVersionResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ComponentVersion"
             }
           },
           "next_page": {
@@ -12938,6 +12913,71 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TimeseriesSchema"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UpdateableComponent": {
+        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
+        "type": "object",
+        "properties": {
+          "component_type": {
+            "$ref": "#/components/schemas/UpdateableComponentType"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "parent_id": {
+            "nullable": true,
+            "description": "ID of the parent component, e.g., the sled a disk belongs to. Value will be `None` for top-level components whose \"parent\" is the rack.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SemverVersion"
+          }
+        },
+        "required": [
+          "component_type",
+          "device_id",
+          "id",
+          "time_created",
+          "time_modified",
+          "version"
+        ]
+      },
+      "UpdateableComponentResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateableComponent"
             }
           },
           "next_page": {

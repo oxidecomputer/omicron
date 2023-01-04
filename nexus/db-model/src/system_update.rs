@@ -4,7 +4,10 @@
 
 use crate::{
     impl_enum_type,
-    schema::{component_update, system_update, system_update_component_update},
+    schema::{
+        component_update, system_update, system_update_component_update,
+        updateable_component,
+    },
     SemverVersion,
 };
 use db_macros::Asset;
@@ -125,6 +128,41 @@ impl From<ComponentUpdate> for views::ComponentUpdate {
             version: component_update.version.into(),
             component_type: component_update.component_type.into(),
             parent_id: component_update.parent_id,
+        }
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Asset,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = updateable_component)]
+pub struct UpdateableComponent {
+    #[diesel(embed)]
+    identity: UpdateableComponentIdentity,
+    pub device_id: String,
+    pub component_type: UpdateableComponentType,
+    pub version: SemverVersion,
+    // pub status: VersionStatus,
+    /// ID of the parent component, e.g., the sled a disk belongs to. Value will
+    /// be `None` for top-level components whose "parent" is the rack.
+    pub parent_id: Option<Uuid>,
+}
+
+impl From<UpdateableComponent> for views::UpdateableComponent {
+    fn from(component: UpdateableComponent) -> Self {
+        Self {
+            identity: component.identity(),
+            device_id: component.device_id,
+            component_type: component.component_type.into(),
+            version: component.version.into(),
+            parent_id: component.parent_id,
         }
     }
 }

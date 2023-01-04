@@ -9,9 +9,9 @@ use super::views::IpPoolRange;
 use super::{
     console_api, device_auth, params, views,
     views::{
-        ComponentUpdate, ComponentVersion, GlobalImage, Group,
-        IdentityProvider, Image, Organization, Project, Rack, Role, Silo, Sled,
-        Snapshot, SshKey, SystemUpdate, SystemVersion, User, UserBuiltin,
+        ComponentUpdate, GlobalImage, Group, IdentityProvider, Image,
+        Organization, Project, Rack, Role, Silo, Sled, Snapshot, SshKey,
+        SystemUpdate, SystemVersion, UpdateableComponent, User, UserBuiltin,
         VersionRange, VersionStatus, VersionSteadyReason, Vpc, VpcRouter,
         VpcSubnet,
     },
@@ -5092,12 +5092,25 @@ async fn system_version(
 }]
 async fn system_component_version_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<ResultsPage<ComponentVersion>>, HttpError> {
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<UpdateableComponent>>, HttpError> {
     let apictx = rqctx.context();
-    let _nexus = &apictx.nexus;
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
     let handler = async {
-        let _opctx = OpContext::for_external_api(&rqctx).await?;
-        Ok(HttpResponseOk(ResultsPage { items: vec![], next_page: None }))
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let components = nexus
+            .updateable_components_list_by_id(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|u| u.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            components,
+            &|_, u: &UpdateableComponent| u.identity.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

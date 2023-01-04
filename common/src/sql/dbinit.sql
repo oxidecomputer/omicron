@@ -1461,6 +1461,7 @@ CREATE TABLE omicron.public.component_update (
     -- On component updates there's no device ID because the update can apply to
     -- multiple instances of a given device kind
 
+    -- TODO: figure out the actual length version strings should have
     version STRING(40) NOT NULL,
     component_type omicron.public.updateable_component_type NOT NULL,
     parent_id UUID
@@ -1476,6 +1477,23 @@ CREATE TABLE omicron.public.system_update_component_update (
     component_update_id UUID NOT NULL,
 
     PRIMARY KEY (system_update_id, component_update_id)
+);
+
+/*
+ * Updateable components and their update status
+ */
+CREATE TABLE omicron.public.updateable_component (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- free-form string that comes from the device
+    device_id STRING(40) NOT NULL,
+    component_type omicron.public.updateable_component_type NOT NULL,
+    version STRING(40) NOT NULL,
+    parent_id UUID
+    -- TODO: status and reason
 );
 
 /*******************************************************************/
