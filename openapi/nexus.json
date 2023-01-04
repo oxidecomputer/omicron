@@ -8939,8 +8939,8 @@
         "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
         "type": "object",
         "properties": {
-          "device_type": {
-            "$ref": "#/components/schemas/DeviceType"
+          "component_type": {
+            "$ref": "#/components/schemas/UpdateableComponentType"
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -8968,7 +8968,7 @@
           }
         },
         "required": [
-          "device_type",
+          "component_type",
           "id",
           "time_created",
           "time_modified",
@@ -9003,11 +9003,11 @@
             "type": "string",
             "format": "uuid"
           },
+          "component_type": {
+            "$ref": "#/components/schemas/UpdateableComponentType"
+          },
           "device_id": {
             "type": "string"
-          },
-          "device_type": {
-            "$ref": "#/components/schemas/DeviceType"
           },
           "parent_id": {
             "nullable": true,
@@ -9024,8 +9024,8 @@
         },
         "required": [
           "component_id",
+          "component_type",
           "device_id",
-          "device_type",
           "status",
           "version"
         ]
@@ -9334,12 +9334,6 @@
         },
         "required": [
           "user_code"
-        ]
-      },
-      "DeviceType": {
-        "type": "string",
-        "enum": [
-          "disk"
         ]
       },
       "Digest": {
@@ -12954,6 +12948,23 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UpdateableComponentType": {
+        "type": "string",
+        "enum": [
+          "bootloader_for_rot",
+          "bootloader_for_sp",
+          "bootloader_for_host_proc",
+          "hubris_for_psc_rot",
+          "hubris_for_psc_sp",
+          "hubris_for_sidecar_rot",
+          "hubris_for_sidecar_sp",
+          "hubris_for_gimlet_rot",
+          "hubris_for_gimlet_sp",
+          "helios_host_phase1",
+          "helios_host_phase2",
+          "host_omicron"
         ]
       },
       "User": {

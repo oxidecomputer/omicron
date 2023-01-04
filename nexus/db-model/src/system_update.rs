@@ -38,25 +38,54 @@ impl From<SystemUpdate> for views::SystemUpdate {
     }
 }
 
-// TODO: more specific name than device_type, maybe update_device_type
-
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "device_type"))]
-    pub struct DeviceTypeEnum;
+    #[diesel(postgres_type(name = "updateable_component_type"))]
+    pub struct UpdateableComponentTypeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = DeviceTypeEnum)]
-    pub enum DeviceType;
+    #[diesel(sql_type = UpdateableComponentTypeEnum)]
+    pub enum UpdateableComponentType;
 
-    // Enum values
-    Disk => b"disk"
+    BootloaderForRot => b"bootloader_for_rot"
+    BootloaderForSp => b"bootloader_for_sp"
+    BootloaderForHostProc => b"bootloader_for_host_proc"
+    HubrisForPscRot => b"hubris_for_psc_rot"
+    HubrisForPscSp => b"hubris_for_psc_sp"
+    HubrisForSidecarRot => b"hubris_for_sidecar_rot"
+    HubrisForSidecarSp => b"hubris_for_sidecar_sp"
+    HubrisForGimletRot => b"hubris_for_gimlet_rot"
+    HubrisForGimletSp => b"hubris_for_gimlet_sp"
+    HeliosHostPhase1 => b"helios_host_phase_1"
+    HeliosHostPhase2 => b"helios_host_phase_2"
+    HostOmicron => b"host_omicron"
 );
 
-impl From<DeviceType> for views::DeviceType {
-    fn from(device_type: DeviceType) -> Self {
-        match device_type {
-            DeviceType::Disk => views::DeviceType::Disk,
+impl From<UpdateableComponentType> for views::UpdateableComponentType {
+    fn from(component_type: UpdateableComponentType) -> Self {
+        match component_type {
+            UpdateableComponentType::BootloaderForRot => Self::BootloaderForRot,
+            UpdateableComponentType::BootloaderForSp => Self::BootloaderForSp,
+            UpdateableComponentType::BootloaderForHostProc => {
+                Self::BootloaderForHostProc
+            }
+            UpdateableComponentType::HubrisForPscRot => Self::HubrisForPscRot,
+            UpdateableComponentType::HubrisForPscSp => Self::HubrisForPscSp,
+            UpdateableComponentType::HubrisForSidecarRot => {
+                Self::HubrisForSidecarRot
+            }
+            UpdateableComponentType::HubrisForSidecarSp => {
+                Self::HubrisForSidecarSp
+            }
+            UpdateableComponentType::HubrisForGimletRot => {
+                Self::HubrisForGimletRot
+            }
+            UpdateableComponentType::HubrisForGimletSp => {
+                Self::HubrisForGimletSp
+            }
+            UpdateableComponentType::HeliosHostPhase1 => Self::HeliosHostPhase1,
+            UpdateableComponentType::HeliosHostPhase2 => Self::HeliosHostPhase2,
+            UpdateableComponentType::HostOmicron => Self::HostOmicron,
         }
     }
 }
@@ -76,7 +105,7 @@ pub struct ComponentUpdate {
     #[diesel(embed)]
     identity: ComponentUpdateIdentity,
     pub version: SemverVersion,
-    pub device_type: DeviceType,
+    pub component_type: UpdateableComponentType,
     pub parent_id: Option<Uuid>,
 }
 
@@ -94,7 +123,7 @@ impl From<ComponentUpdate> for views::ComponentUpdate {
         Self {
             identity: component_update.identity(),
             version: component_update.version.into(),
-            device_type: component_update.device_type.into(),
+            component_type: component_update.component_type.into(),
             parent_id: component_update.parent_id,
         }
     }

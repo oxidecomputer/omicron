@@ -650,7 +650,7 @@ table! {
         time_modified -> Timestamptz,
 
         version -> Text,
-        device_type -> crate::DeviceTypeEnum,
+        component_type -> crate::UpdateableComponentTypeEnum,
         // parent component update ID
         // TODO: spell out the whole horrible name?
         parent_id -> Nullable<Uuid>,

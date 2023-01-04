@@ -1433,9 +1433,19 @@ CREATE TABLE omicron.public.system_update (
     version STRING(40) NOT NULL
 );
 
--- TODO: get values from RFD 300
-CREATE TYPE omicron.public.device_type AS ENUM (
-    'disk'
+CREATE TYPE omicron.public.updateable_component_type AS ENUM (
+    'bootloader_for_rot',
+    'bootloader_for_sp',
+    'bootloader_for_host_proc',
+    'hubris_for_psc_rot',
+    'hubris_for_psc_sp',
+    'hubris_for_sidecar_rot',
+    'hubris_for_sidecar_sp',
+    'hubris_for_gimlet_rot',
+    'hubris_for_gimlet_sp',
+    'helios_host_phase_1',
+    'helios_host_phase_2',
+    'host_omicron'
 );
 
 /*
@@ -1452,7 +1462,7 @@ CREATE TABLE omicron.public.component_update (
     -- multiple instances of a given device kind
 
     version STRING(40) NOT NULL,
-    device_type omicron.public.device_type NOT NULL,
+    component_type omicron.public.updateable_component_type NOT NULL,
     parent_id UUID
 );
 

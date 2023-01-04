@@ -428,8 +428,19 @@ pub struct SystemUpdate {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum DeviceType {
-    Disk,
+pub enum UpdateableComponentType {
+    BootloaderForRot,
+    BootloaderForSp,
+    BootloaderForHostProc,
+    HubrisForPscRot,
+    HubrisForPscSp,
+    HubrisForSidecarRot,
+    HubrisForSidecarSp,
+    HubrisForGimletRot,
+    HubrisForGimletSp,
+    HeliosHostPhase1,
+    HeliosHostPhase2,
+    HostOmicron,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -437,8 +448,7 @@ pub struct ComponentUpdate {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
 
-    // pub name: Name, // hmmm. who would name this?
-    pub device_type: DeviceType,
+    pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
     // TODO: parent ID doesn't need to be optional if we say top-level
     // components have the rack as their parent
@@ -450,7 +460,7 @@ pub struct ComponentUpdate {
 pub struct ComponentVersion {
     pub component_id: Uuid,
     pub device_id: String,
-    pub device_type: DeviceType,
+    pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
     pub status: VersionStatus,
     /// ID of the parent component, e.g., the sled a disk belongs to. Value will
