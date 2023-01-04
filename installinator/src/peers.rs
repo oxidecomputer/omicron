@@ -359,7 +359,7 @@ struct ArtifactClient {
     // TODO: this currently uses a wicketd client. However, because the standard wicketd server is
     // not going to listen on the bootstrap network, we'll want to instead set up a separate
     // artifact server. This artifact server will be shared by both wicketd and sled-agent.
-    client: wicketd_client::Client,
+    client: installinator_artifact_client::Client,
 }
 
 impl ArtifactClient {
@@ -368,7 +368,8 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client = wicketd_client::Client::new(&endpoint, log.clone());
+        let client =
+            installinator_artifact_client::Client::new(&endpoint, log.clone());
         Self { log, client }
     }
 

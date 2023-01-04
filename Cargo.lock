@@ -2549,6 +2549,7 @@ dependencies = [
  "ddm-admin-client",
  "display-error-chain",
  "futures",
+ "installinator-artifact-client",
  "itertools",
  "once_cell",
  "progenitor-client",
@@ -2563,7 +2564,38 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
- "wicketd-client",
+]
+
+[[package]]
+name = "installinator-artifact-client"
+version = "0.1.0"
+dependencies = [
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+]
+
+[[package]]
+name = "installinator-artifactd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap 4.0.29",
+ "dropshot",
+ "expectorate",
+ "hyper",
+ "omicron-common",
+ "omicron-test-utils",
+ "openapi-lint",
+ "openapiv3",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "subprocess",
 ]
 
 [[package]]
@@ -7092,7 +7124,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "http",
- "hyper",
+ "installinator-artifactd",
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",

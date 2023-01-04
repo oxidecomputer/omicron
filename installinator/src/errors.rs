@@ -12,7 +12,7 @@ pub(crate) enum ArtifactFetchError {
     HttpError {
         peer: SocketAddrV6,
         #[source]
-        error: wicketd_client::Error,
+        error: installinator_artifact_client::Error,
     },
 
     #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
