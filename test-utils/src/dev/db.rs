@@ -1176,7 +1176,8 @@ mod test {
     async fn test_setup_database_bad_listen_url() {
         // We don't need to actually run Cockroach for this test, and it's
         // simpler (and faster) if we don't.  But we do need something that
-        // won't exit before we get a chance to trigger an error.
+        // won't exit before we get a chance to trigger an error and that can
+        // also accept the extra arguments that the builder will provide.
         let mut builder = CockroachStarterBuilder::new_raw("bash");
         builder.arg("-c").arg("sleep 60");
         let starter = builder.build().unwrap();
