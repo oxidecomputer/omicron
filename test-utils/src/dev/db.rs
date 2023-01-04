@@ -1189,17 +1189,22 @@ mod test {
         std::fs::create_dir(&listen_url_file)
             .expect("pre-creating listen-URL path as directory");
         let (temp_dir, error) = test_database_start_failure(starter).await;
-
-        if let CockroachStartError::Unknown { source } = error {
+        let mut expected_error = false;
+        if let CockroachStartError::Unknown { source } = &error {
             let message = format!("{:#}", source);
             eprintln!("error message was: {}", message);
             // Verify the error message refers to the listening file (since
             // that's what we were operating on) and also reflects the EISDIR
             // error.
-            assert!(message.starts_with("checking listen file \""));
-            assert!(message.contains("Is a directory"));
-        } else {
-            panic!("unexpected error trying to start database: {:#}", error);
+            expected_error = message.starts_with("checking listen file \"")
+                && message.contains("Is a directory")
+        }
+        if !expected_error {
+            panic!(
+                "unexpected error from CockroachStarter::start(): \
+                expected error checking listen file, found {:#}",
+                error
+            );
         }
 
         // Clean up the temporary directory -- carefully.  Since we know exactly
