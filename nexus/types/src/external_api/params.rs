@@ -121,18 +121,7 @@ pub struct DiskList {
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskMetricsList {
     #[serde(flatten)]
-pub struct DiskMetricsListParams {
-    #[serde(flatten)]
-    pub metrics: ResourceMetrics,
-    
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-}
-
-pub struct DiskMetricsListSelector {
-    pub metrics: ResourceMetrics,
-    pub disk_select: DiskSelector,
-}
+    pub pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
 
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
