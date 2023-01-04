@@ -7,7 +7,7 @@
 # Cargo Build Stage
 # ------------------------------------------------------------------------------
 
-FROM rust:latest as cargo-build
+FROM rust:bullseye as cargo-build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -28,7 +28,7 @@ RUN cargo build --release
 # Final Stage
 # ------------------------------------------------------------------------------
 
-FROM debian:sid-slim
+FROM debian:bullseye-slim
 
 # Install run-time dependencies
 COPY --from=cargo-build /usr/src/omicron/tools/install_runner_prerequisites.sh /tmp/

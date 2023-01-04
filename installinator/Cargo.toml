@@ -1,0 +1,32 @@
+[package]
+name = "installinator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+buf-list.workspace = true
+bytes.workspace = true
+camino.workspace = true
+clap.workspace = true
+ddm-admin-client.workspace = true
+display-error-chain.workspace = true
+futures.workspace = true
+itertools.workspace = true
+once_cell.workspace = true
+progenitor-client.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-envlogger.workspace = true
+slog-term.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+wicketd-client.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true
+tokio = { workspace = true, features = [ "test-util" ] }
