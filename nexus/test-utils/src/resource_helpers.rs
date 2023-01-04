@@ -184,7 +184,7 @@ pub async fn create_project(
     organization_name: &str,
     project_name: &str,
 ) -> Project {
-    let url = format!("/organizations/{}/projects", &organization_name);
+    let url = format!("/v1/projects?organization={}", &organization_name);
     object_create(
         client,
         &url,
