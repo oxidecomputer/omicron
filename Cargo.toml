@@ -9,6 +9,8 @@ members = [
     "gateway-cli",
     "gateway-client",
     "installinator",
+    "installinator-artifactd",
+    "installinator-artifact-client",
     "internal-dns",
     "internal-dns-client",
     "nexus",
@@ -48,6 +50,8 @@ default-members = [
     "gateway-cli",
     "gateway-client",
     "installinator",
+    "installinator-artifactd",
+    "installinator-artifact-client",
     "internal-dns",
     "internal-dns-client",
     "nexus",
@@ -104,6 +108,7 @@ crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev
 display-error-chain = "0.1.1"
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
+debug-ignore = "1.0.3"
 derive_more = "0.99.17"
 diesel = { version = "2.0.2" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
@@ -124,6 +129,8 @@ http = "0.2.7"
 httptest = "0.15.4"
 hyper = "0.14"
 indicatif = { version = "0.17.2", features = ["rayon"] }
+installinator-artifactd = { path = "installinator-artifactd" }
+installinator-artifact-client = { path = "installinator-artifact-client" }
 internal-dns = { path = "internal-dns" }
 internal-dns-client = { path = "internal-dns-client" }
 ipnetwork = "0.20"

@@ -9,7 +9,7 @@ mod http_entrypoints;
 mod inventory;
 mod mgs;
 
-use artifacts::ArtifactStore;
+use artifacts::WicketdArtifactStore;
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use inventory::{RackV1Inventory, SpInventory};
@@ -34,6 +34,7 @@ pub fn run_openapi() -> Result<(), String> {
 /// Command line arguments for wicketd
 pub struct Args {
     pub address: SocketAddrV6,
+    pub artifact_address: SocketAddrV6,
 }
 
 /// Run an instance of the wicketd server
@@ -54,13 +55,22 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     };
 
+    let store = WicketdArtifactStore::new(&log);
+
+    installinator_artifactd::ArtifactServer::new(
+        store,
+        args.artifact_address,
+        &log,
+    )
+    .start()
+    .await
+    .map_err(|err| format!("initializing artifact server: {:?}", err))?;
+
     let dropshot_config = ConfigDropshot {
         bind_address: SocketAddr::V6(args.address),
         request_body_max_bytes: 8 << 20, // 8 MiB
         ..Default::default()
     };
-
-    let artifact_store = ArtifactStore::new(&log);
 
     let mgs_manager = MgsManager::new(&log, config.mgs_addr);
     let mgs_handle = mgs_manager.get_handle();
@@ -71,7 +81,7 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     let server = dropshot::HttpServerStarter::new(
         &dropshot_config,
         http_entrypoints::api(),
-        ServerContext { artifact_store, mgs_handle },
+        ServerContext { mgs_handle },
         &log.new(o!("component" => "dropshot (wicketd)")),
     )
     .map_err(|err| format!("initializing http server: {}", err))?
