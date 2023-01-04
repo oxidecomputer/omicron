@@ -17,9 +17,9 @@ use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use anyhow::anyhow;
 use omicron_common::api::external::Error;
-use once_cell::sync::OnceCell;
 use slog::Logger;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -85,10 +85,10 @@ pub struct Nexus {
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
     /// External dropshot servers
-    external_servers: OnceCell<Vec<DropshotServer>>,
+    external_servers: Mutex<Option<Vec<DropshotServer>>>,
 
     /// Internal dropshot server
-    internal_server: OnceCell<DropshotServer>,
+    internal_server: Mutex<Option<DropshotServer>>,
 
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
@@ -187,8 +187,8 @@ impl Nexus {
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
-            external_servers: OnceCell::new(),
-            internal_server: OnceCell::new(),
+            external_servers: Mutex::new(None),
+            internal_server: Mutex::new(None),
             populate_status,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
@@ -257,34 +257,48 @@ impl Nexus {
     }
 
     /// Called (once) to hand off management of external servers to Nexus.
-    pub fn set_servers(
+    pub async fn set_servers(
         &self,
         external_servers: Vec<DropshotServer>,
         internal_server: DropshotServer,
     ) {
-        self.external_servers
-            .set(external_servers)
-            .map_err(|_| "External server already set")
-            .unwrap();
+        self.external_servers.lock().await.replace(external_servers);
 
-        self.internal_server
-            .set(internal_server)
-            .map_err(|_| "Internal server already set")
-            .unwrap();
+        self.internal_server.lock().await.replace(internal_server);
     }
 
-    pub fn get_external_servers(&self) -> Option<Vec<std::net::SocketAddr>> {
+    pub async fn close_servers(&self) -> Result<(), String> {
+        if let Some(servers) = self.external_servers.lock().await.take() {
+            for server in servers {
+                server.close().await?;
+            }
+        }
+        if let Some(server) = self.internal_server.lock().await.take() {
+            server.close().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn get_external_servers(
+        &self,
+    ) -> Option<Vec<std::net::SocketAddr>> {
         Some(
             self.external_servers
-                .get()?
+                .lock()
+                .await
+                .as_ref()?
                 .iter()
                 .map(|server| server.local_addr())
                 .collect(),
         )
     }
 
-    pub fn get_internal_server(&self) -> Option<std::net::SocketAddr> {
-        self.internal_server.get().map(|server| server.local_addr())
+    pub async fn get_internal_server(&self) -> Option<std::net::SocketAddr> {
+        self.internal_server
+            .lock()
+            .await
+            .as_ref()
+            .map(|server| server.local_addr())
     }
 
     /// Returns an [`OpContext`] used for authenticating external requests

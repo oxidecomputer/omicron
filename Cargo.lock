@@ -1476,54 +1476,14 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#64d5a2ccf0f3463ee2f024b5a0fbb4b3eeb687d9"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8403dddc3c8d9e5feeed3bb8cf050363eab32932"
 dependencies = [
  "async-stream",
  "async-trait",
  "base64 0.20.0",
  "bytes",
  "chrono",
- "dropshot_endpoint 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
- "futures",
- "hostname",
- "http",
- "hyper",
- "indexmap",
- "openapiv3",
- "paste",
- "percent-encoding",
- "proc-macro2",
- "rustls",
- "rustls-pemfile",
- "schemars",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sha1",
- "slog",
- "slog-async",
- "slog-bunyan",
- "slog-json",
- "slog-term",
- "tokio",
- "tokio-rustls",
- "toml",
- "usdt",
- "uuid",
- "version_check",
-]
-
-[[package]]
-name = "dropshot"
-version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858#b2ce08def4659b7c6694f0a87b04f5f22b5da858"
-dependencies = [
- "async-stream",
- "async-trait",
- "base64 0.20.0",
- "bytes",
- "chrono",
- "dropshot_endpoint 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot_endpoint",
  "futures",
  "hostname",
  "http",
@@ -1556,19 +1516,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#64d5a2ccf0f3463ee2f024b5a0fbb4b3eeb687d9"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_tokenstream",
- "syn",
-]
-
-[[package]]
-name = "dropshot_endpoint"
-version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858#b2ce08def4659b7c6694f0a87b04f5f22b5da858"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8403dddc3c8d9e5feeed3bb8cf050363eab32932"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2595,7 +2543,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.0.29",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "internal-dns-client",
  "omicron-test-utils",
@@ -2624,7 +2572,7 @@ dependencies = [
 name = "internal-dns-client"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "futures",
  "internal-dns",
  "omicron-common",
@@ -3124,7 +3072,7 @@ name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "omicron-common",
  "slog",
  "uuid",
@@ -3137,7 +3085,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "headers",
  "http",
  "hyper",
@@ -3345,7 +3293,7 @@ dependencies = [
  "api_identity",
  "backoff",
  "chrono",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "futures",
  "http",
@@ -3396,7 +3344,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap 4.0.29",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-messages",
@@ -3443,7 +3391,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "fatfs",
  "futures",
@@ -3568,7 +3516,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "futures",
  "http",
@@ -3625,7 +3573,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.0.29",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "futures",
  "libc",
@@ -3885,7 +3833,7 @@ name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "clap 4.0.29",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "internal-dns-client",
  "nexus-client",
@@ -3916,7 +3864,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap 4.0.29",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "itertools",
  "omicron-test-utils",
  "oximeter",
@@ -3939,7 +3887,7 @@ name = "oximeter-instruments"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "futures",
  "http",
  "oximeter",
@@ -3960,7 +3908,7 @@ name = "oximeter-producer"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "nexus-client",
  "omicron-common",
  "oximeter",
@@ -5902,7 +5850,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 4.0.29",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "futures",
  "gateway-messages",
  "hex",
@@ -7149,7 +7097,7 @@ name = "wicketd"
 version = "0.1.0"
 dependencies = [
  "clap 4.0.29",
- "dropshot 0.8.1-dev (git+https://github.com/oxidecomputer/dropshot?rev=b2ce08def4659b7c6694f0a87b04f5f22b5da858)",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-client",

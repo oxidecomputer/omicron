@@ -586,13 +586,25 @@ pub struct NetworkInterfaceUpdate {
 
 /// Create-time parameters for a
 /// [`Certificate`](crate::external_api::views::Certificate)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CertificateCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// PEM file containing public certificate chain
     pub cert: Vec<u8>,
+    /// PEM file containing private key
     pub key: Vec<u8>,
+}
+
+impl std::fmt::Debug for CertificateCreate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CertificateCreate")
+            .field("identity", &self.identity)
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
 }
 
 // IP POOLS

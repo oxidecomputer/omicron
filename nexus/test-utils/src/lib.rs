@@ -55,6 +55,22 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.producer.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
+
+    pub async fn external_clients(&self) -> Vec<ClientTestContext> {
+        self.server
+            .get_http_servers_external()
+            .await
+            .iter()
+            .map(|addr| {
+                ClientTestContext::new(
+                    *addr,
+                    self.logctx
+                        .log
+                        .new(o!("component" => "external client test context")),
+                )
+            })
+            .collect()
+    }
 }
 
 pub fn load_test_config() -> omicron_common::nexus_config::Config {
@@ -114,12 +130,15 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
     let server = N::start_and_populate(&config, &logctx.log).await;
 
+    let external_server_addr = server.get_http_servers_external().await[0];
+    let internal_server_addr = server.get_http_server_internal().await;
+
     let testctx_external = ClientTestContext::new(
-        server.get_http_servers_external()[0],
+        external_server_addr,
         logctx.log.new(o!("component" => "external client test context")),
     );
     let testctx_internal = ClientTestContext::new(
-        server.get_http_server_internal(),
+        internal_server_addr,
         logctx.log.new(o!("component" => "internal client test context")),
     );
 
@@ -130,7 +149,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
             "component" => "omicron_sled_agent::sim::Server",
             "sled_id" => sa_id.to_string(),
         )),
-        server.get_http_server_internal(),
+        internal_server_addr,
         sa_id,
     )
     .await
@@ -140,7 +159,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
     let oximeter = start_oximeter(
         log.new(o!("component" => "oximeter")),
-        server.get_http_server_internal(),
+        internal_server_addr,
         clickhouse.port(),
         collector_id,
     )
@@ -150,9 +169,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Set up a test metric producer server
     let producer_id = Uuid::parse_str(PRODUCER_UUID).unwrap();
     let producer =
-        start_producer_server(server.get_http_server_internal(), producer_id)
-            .await
-            .unwrap();
+        start_producer_server(internal_server_addr, producer_id).await.unwrap();
     register_test_producer(&producer).unwrap();
 
     ControlPlaneTestContext {

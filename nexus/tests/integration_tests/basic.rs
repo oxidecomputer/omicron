@@ -617,7 +617,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         let sa_id = Uuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal();
+        let addr = cptestctx.server.get_http_server_internal().await;
         sas.push(start_sled_agent(log, addr, sa_id).await.unwrap());
     }
 

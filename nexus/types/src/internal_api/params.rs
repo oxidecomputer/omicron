@@ -153,10 +153,19 @@ pub struct DatasetCreateRequest {
     pub request: DatasetPutRequest,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Certificate {
     pub cert: Vec<u8>,
     pub key: Vec<u8>,
+}
+
+impl std::fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Certificate")
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
