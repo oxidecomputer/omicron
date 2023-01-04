@@ -405,7 +405,7 @@ pub enum VersionSteadyReason {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum VersionStatus {
     Updating { target: SemverVersion },
     Steady { reason: VersionSteadyReason },

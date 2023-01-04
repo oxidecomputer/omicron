@@ -13170,42 +13170,38 @@
           {
             "type": "object",
             "properties": {
-              "updating": {
-                "type": "object",
-                "properties": {
-                  "target": {
-                    "$ref": "#/components/schemas/SemverVersion"
-                  }
-                },
-                "required": [
-                  "target"
+              "status": {
+                "type": "string",
+                "enum": [
+                  "updating"
                 ]
+              },
+              "target": {
+                "$ref": "#/components/schemas/SemverVersion"
               }
             },
             "required": [
-              "updating"
-            ],
-            "additionalProperties": false
+              "status",
+              "target"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "steady": {
-                "type": "object",
-                "properties": {
-                  "reason": {
-                    "$ref": "#/components/schemas/VersionSteadyReason"
-                  }
-                },
-                "required": [
-                  "reason"
+              "reason": {
+                "$ref": "#/components/schemas/VersionSteadyReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "steady"
                 ]
               }
             },
             "required": [
-              "steady"
-            ],
-            "additionalProperties": false
+              "reason",
+              "status"
+            ]
           }
         ]
       },
