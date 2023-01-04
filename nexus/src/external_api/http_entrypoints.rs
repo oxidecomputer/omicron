@@ -10,10 +10,10 @@ use super::{
     console_api, device_auth, params, views,
     views::{
         ComponentUpdate, ComponentVersion, GlobalImage, Group,
-        IdentityProvider, Image, Organization, Project, Rack, Role,
-        SemverVersion, Silo, Sled, Snapshot, SshKey, SystemUpdate,
-        SystemVersion, User, UserBuiltin, VersionRange, VersionStatus,
-        VersionSteadyReason, Vpc, VpcRouter, VpcSubnet,
+        IdentityProvider, Image, Organization, Project, Rack, Role, Silo, Sled,
+        Snapshot, SshKey, SystemUpdate, SystemVersion, User, UserBuiltin,
+        VersionRange, VersionStatus, VersionSteadyReason, Vpc, VpcRouter,
+        VpcSubnet,
     },
 };
 use crate::authz;
@@ -68,6 +68,7 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
@@ -5139,13 +5140,13 @@ struct SystemUpdatePathParam {
     // TODO: do updates have names? Should this therefore be NameOrId? Do we
     // allow access by some other string identifier (like version) which, like
     // Name, is disjoint with the set of Uuids? NameOrVersion?
-    update_id: Uuid,
+    id: Uuid,
 }
 
 /// View system update
 #[endpoint {
      method = GET,
-     path = "/v1/system/update/updates/{update_id}",
+     path = "/v1/system/update/updates/{id}",
      tags = ["system"],
 }]
 async fn system_update_view(
@@ -5158,7 +5159,7 @@ async fn system_update_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let system_update =
-            nexus.system_update_fetch_by_id(&opctx, &path.update_id).await?;
+            nexus.system_update_fetch_by_id(&opctx, &path.id).await?;
         Ok(HttpResponseOk(system_update.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5167,7 +5168,7 @@ async fn system_update_view(
 /// View system update component tree
 #[endpoint {
     method = GET,
-    path = "/v1/system/update/updates/{update_id}/components",
+    path = "/v1/system/update/updates/{id}/components",
     tags = ["system"],
 }]
 async fn system_update_components_list(
@@ -5180,7 +5181,7 @@ async fn system_update_components_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let components = nexus
-            .system_update_list_components(&opctx, &path.update_id)
+            .system_update_list_components(&opctx, &path.id)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -5195,7 +5196,7 @@ async fn system_update_components_list(
 /// Start system update
 #[endpoint {
     method = POST,
-    path = "/v1/system/update/updates/{update_id}/start",
+    path = "/v1/system/update/updates/{id}/start",
     tags = ["system"],
 }]
 async fn system_update_start(
@@ -5219,7 +5220,7 @@ async fn system_update_start(
 /// Stop system update
 #[endpoint {
     method = POST,
-    path = "/v1/system/update/updates/{update_id}/stop",
+    path = "/v1/system/update/updates/{id}/stop",
     tags = ["system"],
 }]
 async fn system_update_stop(

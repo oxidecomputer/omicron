@@ -8552,7 +8552,7 @@
         "x-dropshot-pagination": true
       }
     },
-    "/v1/system/update/updates/{update_id}": {
+    "/v1/system/update/updates/{id}": {
       "get": {
         "tags": [
           "system"
@@ -8562,7 +8562,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "update_id",
+            "name": "id",
             "required": true,
             "schema": {
               "type": "string",
@@ -8590,7 +8590,7 @@
         }
       }
     },
-    "/v1/system/update/updates/{update_id}/components": {
+    "/v1/system/update/updates/{id}/components": {
       "get": {
         "tags": [
           "system"
@@ -8600,7 +8600,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "update_id",
+            "name": "id",
             "required": true,
             "schema": {
               "type": "string",
@@ -8628,7 +8628,7 @@
         }
       }
     },
-    "/v1/system/update/updates/{update_id}/start": {
+    "/v1/system/update/updates/{id}/start": {
       "post": {
         "tags": [
           "system"
@@ -8638,7 +8638,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "update_id",
+            "name": "id",
             "required": true,
             "schema": {
               "type": "string",
@@ -8659,7 +8659,7 @@
         }
       }
     },
-    "/v1/system/update/updates/{update_id}/stop": {
+    "/v1/system/update/updates/{id}/stop": {
       "post": {
         "tags": [
           "system"
@@ -8669,7 +8669,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "update_id",
+            "name": "id",
             "required": true,
             "schema": {
               "type": "string",

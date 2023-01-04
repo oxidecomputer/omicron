@@ -11,14 +11,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName,
+    ObjectIdentity, RoleName, SemverVersion,
 };
-use schemars::{
-    gen::SchemaGenerator,
-    schema::{InstanceType, Schema, SchemaObject, StringValidation},
-    JsonSchema,
-};
-use semver;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
@@ -392,38 +387,6 @@ pub enum DeviceAccessTokenType {
 }
 
 // SYSTEM UPDATES
-
-// TODO: remove wrapper for semver::Version once this PR goes through
-// https://github.com/GREsau/schemars/pull/195
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SemverVersion(pub semver::Version);
-
-impl SemverVersion {
-    pub fn new(major: u64, minor: u64, patch: u64) -> Self {
-        Self(semver::Version::new(major, minor, patch))
-    }
-}
-
-NewtypeFrom! { () pub struct SemverVersion(pub semver::Version); }
-NewtypeDeref! { () pub struct SemverVersion(pub semver::Version); }
-
-impl JsonSchema for SemverVersion {
-    fn schema_name() -> String {
-        "SemverVersion".to_string()
-    }
-
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            string: Some(Box::new(StringValidation {
-                pattern: Some(r"^\d+\.\d+\.\d+([\-\+].+)?$".to_owned()),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct VersionRange {

@@ -5,6 +5,7 @@
 use crate::{
     impl_enum_type,
     schema::{component_update, system_update, system_update_component_update},
+    SemverVersion,
 };
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
@@ -25,16 +26,14 @@ use uuid::Uuid;
 pub struct SystemUpdate {
     #[diesel(embed)]
     identity: SystemUpdateIdentity,
-    pub version: String,
+    pub version: SemverVersion,
 }
 
 impl From<SystemUpdate> for views::SystemUpdate {
     fn from(system_update: SystemUpdate) -> Self {
         Self {
             identity: system_update.identity(),
-            // TODO: figure out how to ser/de semver versions
-            // version: system_update.version,
-            version: views::SemverVersion::new(1, 0, 0),
+            version: system_update.version.into(),
         }
     }
 }
@@ -76,7 +75,7 @@ impl From<DeviceType> for views::DeviceType {
 pub struct ComponentUpdate {
     #[diesel(embed)]
     identity: ComponentUpdateIdentity,
-    pub version: String,
+    pub version: SemverVersion,
     pub device_type: DeviceType,
     pub parent_id: Option<Uuid>,
 }
@@ -94,9 +93,7 @@ impl From<ComponentUpdate> for views::ComponentUpdate {
     fn from(component_update: ComponentUpdate) -> Self {
         Self {
             identity: component_update.identity(),
-            // TODO: figure out how to ser/de semver versions
-            // version: system_update.version,
-            version: views::SemverVersion::new(1, 0, 0),
+            version: component_update.version.into(),
             device_type: component_update.device_type.into(),
             parent_id: component_update.parent_id,
         }

@@ -39,6 +39,7 @@ mod organization;
 mod oximeter_info;
 mod producer_endpoint;
 mod project;
+mod semver_version;
 mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
@@ -116,6 +117,7 @@ pub use region::*;
 pub use region_snapshot::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
+pub use semver_version::*;
 pub use service::*;
 pub use service_kind::*;
 pub use silo::*;

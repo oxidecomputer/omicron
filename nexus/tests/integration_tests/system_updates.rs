@@ -6,6 +6,7 @@ use dropshot::ResultsPage;
 use http::{method::Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::SemverVersion;
 use omicron_nexus::external_api::views;
 use uuid::Uuid;
 
@@ -30,8 +31,8 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
         version,
         views::SystemVersion {
             version_range: views::VersionRange {
-                low: views::SemverVersion::new(0, 0, 1),
-                high: views::SemverVersion::new(0, 0, 2),
+                low: SemverVersion::new(0, 0, 1),
+                high: SemverVersion::new(0, 0, 2),
             },
             status: views::VersionStatus::Steady {
                 reason: views::VersionSteadyReason::Completed,

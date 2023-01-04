@@ -1433,7 +1433,7 @@ CREATE TABLE omicron.public.system_update (
     version STRING(40) NOT NULL
 );
 
--- TODO: wtf are the values here
+-- TODO: get values from RFD 300
 CREATE TYPE omicron.public.device_type AS ENUM (
     'disk'
 );
@@ -1460,13 +1460,6 @@ CREATE TABLE omicron.public.component_update (
  * Associate system updates with component updates. Not done with a
  * system_update_id field on component_update because the same component update
  * may be part of more than one system update.
- * 
- * TODO: is the one-to-many association necessary? Things would be simpler if we
- * created a new component_update for every (system update, component update).
- * Downsides: less flexibility, possibly a _lot_ of duplication, depending how
- * often component updates are actually unique. I suspect many system updates
- * will only change a couple of components, which means most component updates
- * will appear in more than one system update.
  */
 CREATE TABLE omicron.public.system_update_component_update (
     system_update_id UUID NOT NULL,

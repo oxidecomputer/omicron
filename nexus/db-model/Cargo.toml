@@ -22,6 +22,7 @@ pq-sys = "*"
 rand.workspace = true
 ref-cast.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 steno.workspace = true
