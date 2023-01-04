@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::communicator::Communicator;
 use crate::error::ConfigError;
+use crate::management_switch::ManagementSwitch;
 use crate::management_switch::SwitchConfig;
 use slog::Logger;
 use std::sync::Arc;
 
 /// Shared state used by API request handlers
 pub struct ServerContext {
-    pub sp_comms: Arc<Communicator>,
+    pub mgmt_switch: Arc<ManagementSwitch>,
     pub log: Logger,
 }
 
@@ -19,8 +19,8 @@ impl ServerContext {
         switch_config: SwitchConfig,
         log: &Logger,
     ) -> Result<Arc<Self>, ConfigError> {
-        let comms = Arc::new(
-            Communicator::new(
+        let mgmt_switch = Arc::new(
+            ManagementSwitch::new(
                 switch_config,
                 TempNoopHostPhase2RecoveryProvider,
                 log,
@@ -28,7 +28,7 @@ impl ServerContext {
             .await?,
         );
         Ok(Arc::new(ServerContext {
-            sp_comms: Arc::clone(&comms),
+            mgmt_switch: Arc::clone(&mgmt_switch),
             log: log.clone(),
         }))
     }
