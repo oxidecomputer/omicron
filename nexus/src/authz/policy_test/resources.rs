@@ -110,6 +110,14 @@ pub async fn make_resources<'a>(
         LookupType::ByName(device_access_token),
     ));
 
+    let system_update_id =
+        "9c86d713-1bc2-4927-9892-ada3eb6f5f62".parse().unwrap();
+    builder.new_resource(authz::SystemUpdate::new(
+        authz::FLEET.clone(),
+        system_update_id,
+        LookupType::ById(system_update_id),
+    ));
+
     builder.build()
 }
 
