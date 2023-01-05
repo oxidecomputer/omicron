@@ -53,11 +53,6 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     };
 
-    installinator_artifactd::ArtifactServer::new(args.artifact_address, &log)
-        .start()
-        .await
-        .map_err(|err| format!("initializing artifact server: {:?}", err))?;
-
     let dropshot_config = ConfigDropshot {
         bind_address: SocketAddr::V6(args.address),
         request_body_max_bytes: 8 << 20, // 8 MiB
@@ -70,7 +65,7 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         mgs_manager.run().await;
     });
 
-    let server = dropshot::HttpServerStarter::new(
+    let wicketd_server_fut = dropshot::HttpServerStarter::new(
         &dropshot_config,
         http_entrypoints::api(),
         ServerContext { mgs_handle },
@@ -78,6 +73,36 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     )
     .map_err(|err| format!("initializing http server: {}", err))?
     .start();
+    tokio::pin!(wicketd_server_fut);
 
-    server.await
+    let artifact_server_fut = installinator_artifactd::ArtifactServer::new(
+        args.artifact_address,
+        &log,
+    )
+    .start();
+    tokio::pin!(artifact_server_fut);
+
+    installinator_artifactd::ArtifactServer::new(args.artifact_address, &log)
+        .start()
+        .await
+        .map_err(|err| format!("initializing artifact server: {:?}", err))?;
+
+    let mut wicketd_server_done = false;
+    let mut artifact_server_done = false;
+
+    loop {
+        tokio::select! {
+            res = &mut wicketd_server_fut, if !wicketd_server_done => {
+                wicketd_server_done = true;
+                res.map_err(|err| format!("running wicketd server: {}", err))?;
+            }
+            res = &mut artifact_server_fut, if !artifact_server_done => {
+                artifact_server_done = true;
+                res.map_err(|err| format!("running artifact server: {:?}", err))?;
+            }
+            else => {
+                break Ok(())
+            }
+        }
+    }
 }
