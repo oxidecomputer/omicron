@@ -12,10 +12,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
 use chrono::Utc;
 use hex;
-use nexus_db_model::{
-    ComponentUpdateIdentity, SemverVersion, SystemUpdateIdentity,
-    UpdateableComponentType,
-};
+use nexus_db_model::{SemverVersion, UpdateableComponentType};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
     PaginationOrder,
@@ -45,6 +42,13 @@ pub struct CreateComponentUpdate {
     component_type: UpdateableComponentType,
     parent_id: Option<Uuid>,
     system_update_id: Uuid,
+}
+
+pub struct CreateUpdateableComponent {
+    version: external::SemverVersion, // TODO: is this weird? do we know the version at create time?
+    component_type: UpdateableComponentType,
+    parent_id: Option<Uuid>,
+    device_id: String,
 }
 
 impl super::Nexus {
@@ -308,7 +312,7 @@ impl super::Nexus {
     ) -> CreateResult<db::model::SystemUpdate> {
         let now = Utc::now();
         let update = db::model::SystemUpdate {
-            identity: SystemUpdateIdentity {
+            identity: db::model::SystemUpdateIdentity {
                 id: Uuid::new_v4(),
                 time_created: now,
                 time_modified: now,
@@ -325,7 +329,7 @@ impl super::Nexus {
     ) -> CreateResult<db::model::ComponentUpdate> {
         let now = Utc::now();
         let update = db::model::ComponentUpdate {
-            identity: ComponentUpdateIdentity {
+            identity: db::model::ComponentUpdateIdentity {
                 id: Uuid::new_v4(),
                 time_created: now,
                 time_modified: now,
@@ -382,6 +386,27 @@ impl super::Nexus {
             .await
     }
 
+    pub async fn updateable_component_create(
+        &self,
+        opctx: &OpContext,
+        create_component: CreateUpdateableComponent,
+    ) -> CreateResult<db::model::UpdateableComponent> {
+        let now = Utc::now();
+        let component = db::model::UpdateableComponent {
+            identity: db::model::UpdateableComponentIdentity {
+                id: Uuid::new_v4(),
+                time_created: now,
+                time_modified: now,
+            },
+            version: SemverVersion(create_component.version),
+            component_type: create_component.component_type,
+            parent_id: create_component.parent_id,
+            device_id: create_component.device_id,
+        };
+
+        self.db_datastore.updateable_component_create(opctx, component).await
+    }
+
     pub async fn updateable_components_list_by_id(
         &self,
         opctx: &OpContext,
@@ -397,7 +422,9 @@ impl super::Nexus {
 mod tests {
     use std::num::NonZeroU32;
 
-    use crate::app::update::{CreateComponentUpdate, CreateSystemUpdate};
+    use crate::app::update::{
+        CreateComponentUpdate, CreateSystemUpdate, CreateUpdateableComponent,
+    };
     use crate::context::OpContext;
     use dropshot::PaginationOrder;
     use nexus_db_model::UpdateableComponentType;
@@ -482,7 +509,7 @@ mod tests {
             .component_update_create(
                 &opctx,
                 CreateComponentUpdate {
-                    version: external::SemverVersion::new(1, 0, 0),
+                    version: external::SemverVersion::new(2, 0, 0),
                     component_type: UpdateableComponentType::HubrisForGimletSp,
                     parent_id: Some(cu1.identity.id),
                     system_update_id: su1.identity.id,
@@ -507,5 +534,54 @@ mod tests {
             .unwrap();
 
         assert_eq!(cus_for_su2.len(), 0);
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_updateable_components(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx.nexus;
+        let opctx = test_opctx(&cptestctx);
+
+        // starts out empty
+        let components = nexus
+            .updateable_components_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap();
+
+        assert_eq!(components.len(), 0);
+
+        let uc1 = nexus
+            .updateable_component_create(
+                &opctx,
+                CreateUpdateableComponent {
+                    version: external::SemverVersion::new(1, 0, 0),
+                    component_type: UpdateableComponentType::BootloaderForSp,
+                    parent_id: None,
+                    device_id: "look-a-device".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _uc2 = nexus
+            .updateable_component_create(
+                &opctx,
+                CreateUpdateableComponent {
+                    version: external::SemverVersion::new(2, 0, 0),
+                    component_type: UpdateableComponentType::HeliosHostPhase2,
+                    parent_id: Some(uc1.identity.id),
+                    device_id: "another-device".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // now there should be 2
+        let components = nexus
+            .updateable_components_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap();
+
+        assert_eq!(components.len(), 2);
+
+        // TODO: update the version of a component
     }
 }

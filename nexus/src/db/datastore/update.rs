@@ -184,6 +184,34 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    pub async fn updateable_component_create(
+        &self,
+        opctx: &OpContext,
+        component: UpdateableComponent,
+    ) -> CreateResult<UpdateableComponent> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use db::schema::updateable_component::dsl::*;
+
+        diesel::insert_into(updateable_component)
+            .values(component.clone())
+            .on_conflict(id) // TODO: should probably conflict on (component_type, device_id)
+            .do_nothing()
+            .returning(UpdateableComponent::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::UpdateableComponent,
+                        &component.id().to_string(), // TODO: more informative identifier
+                    ),
+                )
+            })
+    }
+
     pub async fn updateable_components_list_by_id(
         &self,
         opctx: &OpContext,
