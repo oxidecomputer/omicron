@@ -5418,37 +5418,6 @@
         }
       }
     },
-    "/system/certificate/{certificate}": {
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete a certificate",
-        "description": "Permanently delete a certificate. This operation cannot be undone. Any services using the certificate will continue to run, however new services cannot be created with this certificate.",
-        "operationId": "certificate_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "certificate",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/system/certificates": {
       "get": {
         "tags": [
@@ -5571,6 +5540,35 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete a certificate",
+        "description": "Permanently delete a certificate. This operation cannot be undone. Any services using the certificate will continue to run, however new services cannot be created with this certificate.",
+        "operationId": "certificate_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8894,6 +8892,7 @@
         "type": "object",
         "properties": {
           "cert": {
+            "description": "PEM file containing public certificate chain",
             "type": "array",
             "items": {
               "type": "integer",
@@ -8905,6 +8904,7 @@
             "type": "string"
           },
           "key": {
+            "description": "PEM file containing private key",
             "type": "array",
             "items": {
               "type": "integer",
