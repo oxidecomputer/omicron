@@ -28,7 +28,7 @@ use uuid::Uuid;
 #[diesel(table_name = system_update)]
 pub struct SystemUpdate {
     #[diesel(embed)]
-    identity: SystemUpdateIdentity,
+    pub identity: SystemUpdateIdentity,
     pub version: SemverVersion,
 }
 

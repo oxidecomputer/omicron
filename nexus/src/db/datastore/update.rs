@@ -17,6 +17,7 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, InternalContext, ListResultVec,
 };
@@ -62,6 +63,34 @@ impl DataStore {
             .internal_context("deleting outdated available artifacts")
     }
 
+    pub async fn system_update_create(
+        &self,
+        opctx: &OpContext,
+        update: SystemUpdate,
+    ) -> CreateResult<SystemUpdate> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use db::schema::system_update::dsl::*;
+
+        diesel::insert_into(system_update)
+            .values(update.clone())
+            .on_conflict(id) // TODO: should also conflict on version
+            .do_nothing()
+            .returning(SystemUpdate::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SystemUpdate,
+                        &update.version.to_string(),
+                    ),
+                )
+            })
+    }
+
     pub async fn system_updates_list_by_id(
         &self,
         opctx: &OpContext,
@@ -70,9 +99,9 @@ impl DataStore {
         // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::system_update::dsl;
+        use db::schema::system_update::dsl::*;
 
-        paginated(dsl::system_update, dsl::id, pagparams)
+        paginated(system_update, id, pagparams)
             .select(SystemUpdate::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
@@ -107,9 +136,9 @@ impl DataStore {
         // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::updateable_component::dsl;
+        use db::schema::updateable_component::dsl::*;
 
-        paginated(dsl::updateable_component, dsl::id, pagparams)
+        paginated(updateable_component, id, pagparams)
             .select(UpdateableComponent::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await

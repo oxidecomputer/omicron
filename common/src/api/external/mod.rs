@@ -325,7 +325,8 @@ impl JsonSchema for NameOrId {
 
 // TODO: remove wrapper for semver::Version once this PR goes through
 // https://github.com/GREsau/schemars/pull/195
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[display("{0}")]
 pub struct SemverVersion(pub semver::Version);
 
 impl SemverVersion {

@@ -10,9 +10,12 @@ use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
+use chrono::Utc;
 use hex;
+use nexus_db_model::{SemverVersion, SystemUpdateIdentity};
 use omicron_common::api::external::{
-    DataPageParams, Error, ListResultVec, LookupResult, PaginationOrder,
+    self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
+    PaginationOrder,
 };
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use rand::Rng;
@@ -24,6 +27,10 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
+
+pub struct CreateSystemUpdate {
+    version: external::SemverVersion,
+}
 
 impl super::Nexus {
     async fn tuf_base_url(
@@ -279,6 +286,23 @@ impl super::Nexus {
         Ok(body)
     }
 
+    pub async fn system_update_create(
+        &self,
+        opctx: &OpContext,
+        create_update: CreateSystemUpdate,
+    ) -> CreateResult<db::model::SystemUpdate> {
+        let now = Utc::now();
+        let update = db::model::SystemUpdate {
+            identity: SystemUpdateIdentity {
+                id: Uuid::new_v4(),
+                time_created: now,
+                time_modified: now,
+            },
+            version: SemverVersion(create_update.version),
+        };
+        self.db_datastore.system_update_create(opctx, update).await
+    }
+
     pub async fn system_update_fetch_by_id(
         &self,
         opctx: &OpContext,
@@ -323,5 +347,75 @@ impl super::Nexus {
         self.db_datastore
             .updateable_components_list_by_id(opctx, pagparams)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+
+    use crate::app::update::CreateSystemUpdate;
+    use crate::context::OpContext;
+    use dropshot::PaginationOrder;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::{self, DataPageParams};
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+        OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            cptestctx.server.apictx.nexus.datastore().clone(),
+        )
+    }
+
+    pub fn test_pagparams() -> DataPageParams<'static, Uuid> {
+        DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_list_updates(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx.nexus;
+        let opctx = test_opctx(&cptestctx);
+
+        // starts out empty
+        let updates = nexus
+            .system_updates_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap();
+
+        assert_eq!(updates.len(), 0);
+
+        let _update1 = nexus
+            .system_update_create(
+                &opctx,
+                CreateSystemUpdate {
+                    version: external::SemverVersion::new(1, 0, 0),
+                },
+            )
+            .await;
+        let _update2 = nexus
+            .system_update_create(
+                &opctx,
+                CreateSystemUpdate {
+                    version: external::SemverVersion::new(2, 0, 0),
+                },
+            )
+            .await;
+
+        // now there should be two
+        let updates = nexus
+            .system_updates_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap();
+
+        dbg!(updates.clone());
+        assert_eq!(updates.len(), 2);
     }
 }

@@ -8,16 +8,25 @@ use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
+use parse_display::Display;
 use serde::{Deserialize, Serialize};
 
 // We wrap semver::Version in external to impl JsonSchema, and we wrap it again
 // here to impl ToSql/FromSql
 
 #[derive(
-    Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq,
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Display,
 )]
 #[diesel(sql_type = sql_types::Text)]
-pub struct SemverVersion(external::SemverVersion);
+#[display("{0}")]
+pub struct SemverVersion(pub external::SemverVersion);
 
 NewtypeFrom! { () pub struct SemverVersion(external::SemverVersion); }
 NewtypeDeref! { () pub struct SemverVersion(external::SemverVersion); }
