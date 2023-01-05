@@ -5070,7 +5070,8 @@ async fn system_version(
     let apictx = rqctx.context();
     let _nexus = &apictx.nexus;
     let handler = async {
-        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         Ok(HttpResponseOk(SystemVersion {
             version_range: VersionRange {
                 low: SemverVersion::new(0, 0, 1),
@@ -5220,7 +5221,8 @@ async fn system_update_start(
     let _nexus = &apictx.nexus;
     let _path = path_params.into_inner();
     let handler = async {
-        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5244,7 +5246,8 @@ async fn system_update_stop(
     let _nexus = &apictx.nexus;
     let _path = path_params.into_inner();
     let handler = async {
-        let _opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

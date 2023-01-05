@@ -1462,6 +1462,63 @@ lazy_static! {
             )],
         },
 
+        VerifyEndpoint {
+            url: "/v1/system/update/version",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/components",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates/{id}",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            // TODO: should we figure out how to make this a regular working get?
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates/{id}/components",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            // TODO: should we figure out how to make this a regular working get?
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates/{id}/start",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            // TODO: should we figure out how to make this a regular working get?
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::Value::Null
+            )],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates/{id}/stop",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            // TODO: should we figure out how to make this a regular working get?
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::Value::Null
+            )],
+        },
+
         /* Global Images */
 
         VerifyEndpoint {

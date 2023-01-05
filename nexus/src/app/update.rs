@@ -355,10 +355,14 @@ impl super::Nexus {
         opctx: &OpContext,
         update_id: &Uuid,
     ) -> LookupResult<db::model::SystemUpdate> {
+        // TODO: I don't think this is the right way to do this auth check
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         let (.., db_system_update) = LookupPath::new(opctx, &self.db_datastore)
             .system_update_id(*update_id)
             .fetch()
             .await?;
+
         Ok(db_system_update)
     }
 
@@ -376,6 +380,9 @@ impl super::Nexus {
         opctx: &OpContext,
         update_id: &Uuid,
     ) -> ListResultVec<db::model::ComponentUpdate> {
+        // TODO: I don't think this is the right way to do this auth check
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         let (authz_update, ..) = LookupPath::new(opctx, &self.db_datastore)
             .system_update_id(*update_id)
             .fetch()
@@ -417,6 +424,10 @@ impl super::Nexus {
             .await
     }
 }
+
+// TODO: should these tests be done as integration tests? the creates would
+// still have to be direct calls to the service functions, but the retrievals
+// could be HTTP requests, which would cover more code
 
 #[cfg(test)]
 mod tests {
