@@ -445,7 +445,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let _su2 = nexus
+        let su2 = nexus
             .system_update_create(
                 &opctx,
                 CreateSystemUpdate {
@@ -492,12 +492,20 @@ mod tests {
             .unwrap();
 
         // now there should be two component updates
-        let component_updates = nexus
+        let cus_for_su1 = nexus
             .system_update_list_components(&opctx, &su1.identity.id)
             .await
             .unwrap();
 
-        dbg!(component_updates.clone());
-        assert_eq!(component_updates.len(), 2);
+        dbg!(cus_for_su1.clone());
+        assert_eq!(cus_for_su1.len(), 2);
+
+        // other system update should not be associated with any component updates
+        let cus_for_su2 = nexus
+            .system_update_list_components(&opctx, &su2.identity.id)
+            .await
+            .unwrap();
+
+        assert_eq!(cus_for_su2.len(), 0);
     }
 }
