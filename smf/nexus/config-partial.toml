@@ -2,6 +2,8 @@
 # Oxide API: partial configuration file
 #
 
+nexus_https_port = 443
+
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "/var/nexus/static"

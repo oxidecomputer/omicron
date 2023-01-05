@@ -293,31 +293,22 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     cert_delete_expect_not_found(&client).await;
 }
 
-#[tokio::test]
-async fn test_refresh() {
-    // Load the default config, but force the external dropshot server to use
-    // HTTPS.
-    let mut config = nexus_test_utils::load_test_config();
-
+#[nexus_test]
+async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
     let chain = CertificateChain::new();
     let (cert, key) = (chain.cert_chain(), chain.end_cert_private_key());
     let (cert_u8, key_u8) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
 
-    config.deployment.dropshot_external.push(dropshot::ConfigDropshot {
-        tls: Some(dropshot::ConfigTls::AsBytes {
-            certs: cert_u8.clone(),
-            key: key_u8.clone(),
-        }),
-        ..Default::default()
-    });
-
-    // Actually do the test setup typically implied by "nexus_test".
-    let cptestctx = nexus_test_utils::test_setup_with_config::<
-        omicron_nexus::Server,
-    >("test_refresh", &mut config)
+    create_certificate(
+        &cptestctx.external_client,
+        CERT_NAME,
+        cert_u8.clone(),
+        key_u8.clone(),
+    )
     .await;
 
     let clients = &cptestctx.external_clients().await;
+    assert_eq!(clients.len(), 2, "Should have a client for HTTP and HTTPS");
     let http_client = &clients[0];
     let https_client = &clients[1];
 
@@ -333,9 +324,6 @@ async fn test_refresh() {
     chain.do_request(&http_client, http::uri::Scheme::HTTPS).await.unwrap_err();
     chain.do_request(&https_client, http::uri::Scheme::HTTP).await.unwrap_err();
 
-    // Assert the auto-loaded certificate was given a default name.
-    cert_get(&http_client, "default-1").await;
-
     // Remove the default certificate, add a new one.
     //
     // NOTE: We're doing this on the "HTTP client" interface only because dropshot
@@ -344,14 +332,18 @@ async fn test_refresh() {
     let chain2 = CertificateChain::new();
     let (cert, key) = (chain2.cert_chain(), chain2.end_cert_private_key());
     let (cert_u8, key_u8) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
-    delete_certificate(&http_client, "default-1").await;
     create_certificate(
         &http_client,
-        CERT_NAME,
+        "my-other-certificate",
         cert_u8.clone(),
         key_u8.clone(),
     )
     .await;
+    delete_certificate(&http_client, CERT_NAME).await;
+
+    // (Test config) Refresh the clients -- the port for the HTTPS interface
+    // probably changed.
+    let https_client = &cptestctx.external_clients().await[1];
 
     // Requests through the old certificate chain fail -- it was removed.
     chain
@@ -360,8 +352,6 @@ async fn test_refresh() {
         .unwrap_err();
     // Requests through the new certificate chain succeed.
     chain2.do_request(&https_client, http::uri::Scheme::HTTPS).await.unwrap();
-
-    cptestctx.teardown().await;
 }
 
 #[nexus_test]
@@ -395,7 +385,3 @@ async fn test_cannot_create_certificate_with_bad_cert(
     }
     cert_create_expect_error(&client, cert, key).await;
 }
-
-// TODO: Follow-up work:
-// - Does deleting a cert cause a refresh? Should it?
-// - Do we add an internal Nexus API to notify that a refresh should happen?

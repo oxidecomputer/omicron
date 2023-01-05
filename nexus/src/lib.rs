@@ -128,6 +128,12 @@ impl Server {
         let opctx = apictx.nexus.opctx_for_service_balancer();
         apictx.nexus.await_rack_initialization(&opctx).await;
 
+        // Launch the external server(s).
+        let mut server_configs =
+            vec![config.deployment.dropshot_external.clone()];
+
+        // TODO: Could we just call "Nexus refresh TLS" to do this for us?
+
         // Lookup x509 certificates which might be stored in CRDB, specifically
         // for launching the Nexus service.
         let tls_config = apictx
@@ -136,23 +142,24 @@ impl Server {
             .await
             .map_err(|e| e.to_string())?;
 
-        // Launch the external server(s).
-        let http_servers_external = config
-            .deployment
-            .dropshot_external
-            .clone()
-            .iter_mut()
-            .map(|mut cfg| {
-                // Populate TLS with data from CRDB
-                if cfg.bind_address.port() == 443 {
-                    let tls_config = if let Some(tls_config) = &tls_config {
-                        tls_config
-                    } else {
-                        return Err("No x.509 certificates found".to_string());
-                    };
-                    cfg.tls = Some(tls_config.clone());
-                }
+        // If certificates exist, launch an HTTPS server.
+        if let Some(tls_config) = &tls_config {
+            let http_config = config.deployment.dropshot_external.clone();
+            let https_config = dropshot::ConfigDropshot {
+                bind_address: SocketAddr::new(
+                    http_config.bind_address.ip(),
+                    config.pkg.nexus_https_port,
+                ),
+                tls: Some(tls_config.clone()),
+                ..http_config
+            };
 
+            server_configs.push(https_config);
+        }
+
+        let mut http_servers_external = server_configs
+            .iter()
+            .map(|cfg| {
                 let server_starter_external = dropshot::HttpServerStarter::new(
                     &cfg,
                     external_api(),
@@ -164,7 +171,14 @@ impl Server {
                 })?;
                 Ok(server_starter_external.start())
             })
-            .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?;
+            .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?
+            .into_iter();
+
+        let http_servers_external = crate::app::ExternalServers {
+            https_port: config.pkg.nexus_https_port,
+            http: http_servers_external.next(),
+            https: http_servers_external.next(),
+        };
 
         apictx
             .nexus
@@ -205,29 +219,6 @@ impl nexus_test_interface::NexusServer for Server {
             InternalServer::start(config, &log).await.unwrap();
         internal_server.apictx.nexus.wait_for_populate().await.unwrap();
 
-        // If any certificates were provided through the configuration,
-        // make them part of the RSS handoff.
-        let certs = config
-            .deployment
-            .dropshot_external
-            .iter()
-            .filter_map(|external| {
-                if let Some(tls) = &external.tls {
-                    match tls {
-                        dropshot::ConfigTls::AsBytes { certs, key } => {
-                            Some(crate::internal_api::params::Certificate {
-                                cert: certs.clone(),
-                                key: key.clone(),
-                            })
-                        }
-                        _ => panic!("Unsupported"),
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect();
-
         // Perform the "handoff from RSS".
         //
         // However, RSS isn't running, so we'll do the handoff ourselves.
@@ -244,7 +235,7 @@ impl nexus_test_interface::NexusServer for Server {
                 internal_api::params::RackInitializationRequest {
                     services: vec![],
                     datasets: vec![],
-                    certs,
+                    certs: vec![],
                 },
             )
             .await
@@ -255,7 +246,7 @@ impl nexus_test_interface::NexusServer for Server {
     }
 
     async fn get_http_servers_external(&self) -> Vec<SocketAddr> {
-        self.apictx.nexus.get_external_servers().await.unwrap()
+        self.apictx.nexus.get_external_servers().await
     }
 
     async fn get_http_server_internal(&self) -> SocketAddr {

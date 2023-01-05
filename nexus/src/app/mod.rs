@@ -61,6 +61,18 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 // TODO-completness: Support multiple external IPs
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
 
+pub(crate) struct ExternalServers {
+    pub https_port: u16,
+    pub http: Option<DropshotServer>,
+    pub https: Option<DropshotServer>,
+}
+
+impl ExternalServers {
+    fn new(https_port: u16) -> Self {
+        Self { https_port, http: None, https: None }
+    }
+}
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
@@ -85,7 +97,7 @@ pub struct Nexus {
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
     /// External dropshot servers
-    external_servers: Mutex<Option<Vec<DropshotServer>>>,
+    external_servers: Mutex<ExternalServers>,
 
     /// Internal dropshot server
     internal_server: Mutex<Option<DropshotServer>>,
@@ -187,7 +199,9 @@ impl Nexus {
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
-            external_servers: Mutex::new(None),
+            external_servers: Mutex::new(ExternalServers::new(
+                config.pkg.nexus_https_port,
+            )),
             internal_server: Mutex::new(None),
             populate_status,
             timeseries_client,
@@ -256,22 +270,25 @@ impl Nexus {
         }
     }
 
-    /// Called (once) to hand off management of external servers to Nexus.
-    pub async fn set_servers(
+    // Called to hand off management of external servers to Nexus.
+    pub(crate) async fn set_servers(
         &self,
-        external_servers: Vec<DropshotServer>,
+        external_servers: ExternalServers,
         internal_server: DropshotServer,
     ) {
-        self.external_servers.lock().await.replace(external_servers);
-
+        let _ = self.close_servers().await;
+        *self.external_servers.lock().await =
+            ExternalServers { ..external_servers };
         self.internal_server.lock().await.replace(internal_server);
     }
 
     pub async fn close_servers(&self) -> Result<(), String> {
-        if let Some(servers) = self.external_servers.lock().await.take() {
-            for server in servers {
-                server.close().await?;
-            }
+        let mut external_servers = self.external_servers.lock().await;
+        if let Some(server) = external_servers.http.take() {
+            server.close().await?;
+        }
+        if let Some(server) = external_servers.https.take() {
+            server.close().await?;
         }
         if let Some(server) = self.internal_server.lock().await.take() {
             server.close().await?;
@@ -279,18 +296,16 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn get_external_servers(
-        &self,
-    ) -> Option<Vec<std::net::SocketAddr>> {
-        Some(
-            self.external_servers
-                .lock()
-                .await
-                .as_ref()?
-                .iter()
-                .map(|server| server.local_addr())
-                .collect(),
-        )
+    pub async fn get_external_servers(&self) -> Vec<std::net::SocketAddr> {
+        let mut addrs = vec![];
+        let external_servers = self.external_servers.lock().await;
+        if let Some(server) = external_servers.http.as_ref() {
+            addrs.push(server.local_addr());
+        }
+        if let Some(server) = external_servers.https.as_ref() {
+            addrs.push(server.local_addr());
+        }
+        addrs
     }
 
     pub async fn get_internal_server(&self) -> Option<std::net::SocketAddr> {

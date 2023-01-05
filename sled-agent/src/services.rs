@@ -602,23 +602,11 @@ impl ServiceManager {
                         id: request.id,
                         rack_id: sled_info.rack_id,
 
-                        // Request two dropshot servers: One for HTTP (port 80),
-                        // one for HTTPS (port 443).
-                        dropshot_external: vec![
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(
-                                    *external_ip,
-                                    443,
-                                ),
-                                request_body_max_bytes: 1048576,
-                                ..Default::default()
-                            },
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(*external_ip, 80),
-                                request_body_max_bytes: 1048576,
-                                ..Default::default()
-                            },
-                        ],
+                        dropshot_external: dropshot::ConfigDropshot {
+                            bind_address: SocketAddr::new(*external_ip, 80),
+                            request_body_max_bytes: 1048576,
+                            ..Default::default()
+                        },
                         dropshot_internal: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(
                                 IpAddr::V6(*internal_ip),

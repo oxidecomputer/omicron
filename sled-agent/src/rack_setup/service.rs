@@ -520,28 +520,16 @@ impl ServiceInner {
             }
         }
 
-        // TODO: These paths should be removed.
-        //
-        // This is just a convenient way of passing the certificates through the
-        // package system. Ideally this info should be tranferred through RSS's
-        // API.
-        let cert = tokio::fs::read("/opt/oxide/sled-agent/certs/cert.pem")
-            .await
-            .map_err(|err| SetupServiceError::Io {
-                message: "Failed to read cert.pem file".to_string(),
-                err,
-            })?;
-        let key = tokio::fs::read("/opt/oxide/sled-agent/certs/key.pem")
-            .await
-            .map_err(|err| SetupServiceError::Io {
-                message: "Failed to read key.pem file".to_string(),
-                err,
-            })?;
-
         let request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
-            certs: vec![NexusTypes::Certificate { cert, key }],
+            // TODO(https://github.com/oxidecomputer/omicron/issues/1959): Plumb
+            // these paths through RSS's API.
+            //
+            // These certificates CAN be updated through Nexus' HTTP API, but
+            // should be bootstrapped during the rack setup process to avoid
+            // the need for unencrypted communication.
+            certs: vec![],
         };
 
         let notify_nexus = || async {

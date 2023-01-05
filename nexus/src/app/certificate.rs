@@ -19,6 +19,7 @@ use omicron_common::api::external::NameOrId;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
 use ref_cast::RefCast;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -160,39 +161,72 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        let external_servers_guard = self.external_servers.lock().await;
-        let external_servers = if let Some(servers) = &*external_servers_guard {
-            servers
-        } else {
-            // If we aren't running anything, we have nothing to refresh
-            info!(self.log, "Refresh TLS: No servers running");
-            return Ok(());
-        };
-
         let tls_config = self.get_nexus_tls_config(&opctx).await?;
-        let tls_config = if let Some(tls_config) = tls_config {
-            tls_config
-        } else {
-            // TODO: Should we be doing this? We ignore the refresh if no certs
-            // exist. We *could* actively remove the TLS cert, but that'll
-            // require updating the dropshot API.
-            info!(self.log, "Refresh TLS: No certs available");
-            return Ok(());
-        };
-        for server in external_servers {
-            if server.using_tls() {
-                info!(self.log, "Refresh TLS for {}", server.local_addr());
-                server.refresh_tls(&tls_config).await.map_err(|e| {
-                    Error::internal_error(&format!("Cannot refresh TLS: {e}"))
+
+        let mut external_servers = self.external_servers.lock().await;
+
+        match (tls_config, external_servers.https.take()) {
+            // Create a new server, using server context from an existing HTTP
+            // server.
+            (Some(tls_config), None) => {
+                info!(self.log, "Refresh TLS: Creating HTTPS server");
+                let http = external_servers.http.as_ref().ok_or_else(|| {
+                    Error::internal_error(&format!("No HTTP servers running"))
                 })?;
-            } else {
+
+                let cfg = dropshot::ConfigDropshot {
+                    bind_address: SocketAddr::new(
+                        http.local_addr().ip(),
+                        external_servers.https_port,
+                    ),
+                    request_body_max_bytes: 1048576,
+                    tls: Some(tls_config),
+                    ..Default::default()
+                };
+
+                let apictx = http.app_private();
+                let server_starter_external = dropshot::HttpServerStarter::new(
+                    &cfg,
+                    crate::external_api::http_entrypoints::external_api(),
+                    apictx.clone(),
+                    &apictx.log.new(o!("component" => "dropshot_external")),
+                )
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "Initializing HTTPS server: {e}"
+                    ))
+                })?;
+                external_servers.https.replace(server_starter_external.start());
+            }
+            // Refresh an existing server.
+            (Some(tls_config), Some(https)) => {
                 info!(
                     self.log,
-                    "Refresh TLS ignoring {} (not using TLS)",
-                    server.local_addr()
+                    "Refresh TLS: Refreshing HTTPS server at {}",
+                    https.local_addr()
                 );
+                https.refresh_tls(&tls_config).await.map_err(|e| {
+                    Error::internal_error(&format!("Cannot refresh TLS: {e}"))
+                })?;
+                external_servers.https.replace(https);
             }
+            // Tear down an existing server.
+            (None, Some(https)) => {
+                info!(
+                    self.log,
+                    "Refresh TLS: Stopping HTTPS server at {}",
+                    https.local_addr()
+                );
+                https.close().await.map_err(|e| {
+                    Error::internal_error(&format!(
+                        "Failed to stop server: {e}"
+                    ))
+                })?;
+            }
+            // No config, no server.
+            (None, None) => (),
         }
+
         Ok(())
     }
 }

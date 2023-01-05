@@ -7,19 +7,8 @@ service_name = "sled-agent"
 source.type = "local"
 source.rust.binary_names = ["sled-agent"]
 source.rust.release = true
-source.paths = [
-  { from = "smf/sled-agent", to = "pkg" },
-  # TODO: These paths should be removed.
-  #
-  # This is just a convenient way of passing the certificates
-  # into the package system, but ideally this information would
-  # be supplied through the RSS API as a part of setup.
-  { from = "out/certs", to = "certs" },
-]
+source.paths = [ { from = "smf/sled-agent", to = "pkg" } ]
 output.type = "tarball"
-setup_hint = """
-- Run `./tools/create_self_signed_cert.sh` to generate a certificate for nexus to use later
-"""
 
 [package.omicron-nexus]
 service_name = "nexus"
