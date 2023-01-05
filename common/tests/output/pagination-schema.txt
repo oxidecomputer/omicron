@@ -196,7 +196,7 @@ schema for pagination parameters: page selector, scan by id only
 schema for pagination parameters: page selector, scan by name or id
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "PageSelector_for_ScanByNameOrId_and_NameOrIdMarker",
+  "title": "PageSelector_for_ScanByNameOrId_and_NameOrId",
   "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
   "type": "object",
   "required": [
@@ -207,7 +207,7 @@ schema for pagination parameters: page selector, scan by name or id
       "description": "value of the marker field last seen by the client",
       "allOf": [
         {
-          "$ref": "#/definitions/NameOrIdMarker"
+          "$ref": "#/definitions/NameOrId"
         }
       ]
     },
@@ -228,32 +228,24 @@ schema for pagination parameters: page selector, scan by name or id
       "maxLength": 63,
       "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]$"
     },
-    "NameOrIdMarker": {
+    "NameOrId": {
       "oneOf": [
         {
-          "type": "object",
-          "required": [
-            "id"
-          ],
-          "properties": {
-            "id": {
+          "title": "id",
+          "allOf": [
+            {
               "type": "string",
               "format": "uuid"
             }
-          },
-          "additionalProperties": false
+          ]
         },
         {
-          "type": "object",
-          "required": [
-            "name"
-          ],
-          "properties": {
-            "name": {
+          "title": "name",
+          "allOf": [
+            {
               "$ref": "#/definitions/Name"
             }
-          },
-          "additionalProperties": false
+          ]
         }
       ]
     },

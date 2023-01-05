@@ -41,12 +41,10 @@ use dropshot::{
 };
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
-use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
-use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
-use omicron_common::api::external::http_pagination::PagField;
+use omicron_common::api::external::http_pagination::name_or_id_pagination;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
@@ -481,20 +479,18 @@ async fn silo_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let silos = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let silos = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector) => {
                 nexus.silos_list_by_id(&opctx, &page_selector).await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.silos_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector) => {
+                nexus
+                    .silos_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()
@@ -946,20 +942,18 @@ async fn organization_list_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let organizations = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let organizations = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector) => {
                 nexus.organizations_list_by_id(&opctx, &page_selector).await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector) => {
+                nexus
+                    .organizations_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()
@@ -991,20 +985,18 @@ async fn organization_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let organizations = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let organizations = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector) => {
                 nexus.organizations_list_by_id(&opctx, &page_selector).await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector) => {
+                nexus
+                    .organizations_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()
@@ -1431,41 +1423,35 @@ async fn project_list_v1(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query.pagination)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_lookup =
             nexus.organization_lookup(&opctx, &query.organization)?;
-        let params = ScanByNameOrId::from_query(&query.pagination)?;
-        let field = pagination_field_for_scan_params(params);
-        let projects = match field {
-            PagField::Id => {
-                let page_selector =
-                    data_page_params_nameid_id(&rqctx, &query.pagination)?;
-                nexus
-                    .projects_list_by_id(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector,
-                    )
-                    .await?
+        let projects =
+            match name_or_id_pagination(&query.pagination, &pag_params)? {
+                PaginatedBy::Id(page_selector) => {
+                    nexus
+                        .projects_list_by_id(
+                            &opctx,
+                            &organization_lookup,
+                            &page_selector,
+                        )
+                        .await?
+                }
+                PaginatedBy::Name(page_selector) => {
+                    nexus
+                        .projects_list_by_name(
+                            &opctx,
+                            &organization_lookup,
+                            &page_selector.map_name(|n| Name::ref_cast(n)),
+                        )
+                        .await?
+                }
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query.pagination)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus
-                    .projects_list_by_name(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector,
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query.pagination,
             projects,
@@ -1492,7 +1478,7 @@ async fn project_list(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_selector = &params::OrganizationSelector {
@@ -1500,11 +1486,8 @@ async fn project_list(
         };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-        let projects = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let projects = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector) => {
                 nexus
                     .projects_list_by_id(
                         &opctx,
@@ -1513,16 +1496,12 @@ async fn project_list(
                     )
                     .await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
+            PaginatedBy::Name(page_selector) => {
                 nexus
                     .projects_list_by_name(
                         &opctx,
                         &organization_lookup,
-                        &page_selector,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
                     )
                     .await?
             }
@@ -1966,20 +1945,20 @@ async fn ip_pool_list(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-        let pools = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pools = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector) => {
                 nexus.ip_pools_list_by_id(&opctx, &page_selector).await?
             }
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.ip_pools_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector) => {
+                nexus
+                    .ip_pools_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()

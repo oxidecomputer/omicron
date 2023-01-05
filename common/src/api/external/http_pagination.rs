@@ -42,6 +42,7 @@
 
 use crate::api::external::DataPageParams;
 use crate::api::external::Name;
+use crate::api::external::NameOrId;
 use crate::api::external::ObjectIdentity;
 use crate::api::external::PaginationOrder;
 use dropshot::HttpError;
@@ -150,11 +151,12 @@ pub fn marker_for_id<S, T: ObjectIdentity>(_: &S, t: &T) -> Uuid {
 pub fn marker_for_name_or_id<T: ObjectIdentity>(
     scan: &ScanByNameOrId,
     item: &T,
-) -> NameOrIdMarker {
+) -> NameOrId {
     let identity = item.identity();
-    match pagination_field_for_scan_params(scan) {
-        PagField::Name => NameOrIdMarker::Name(identity.name.clone()),
-        PagField::Id => NameOrIdMarker::Id(identity.id),
+    match scan.sort_by {
+        NameOrIdSortMode::NameAscending => identity.name.clone().into(),
+        NameOrIdSortMode::NameDescending => identity.name.clone().into(),
+        NameOrIdSortMode::IdAscending => identity.id.into(),
     }
 }
 
@@ -177,10 +179,6 @@ where
 
 /// Given a request and pagination parameters, return a [`DataPageParams`]
 /// describing the current page of results to return
-///
-/// This implementation is used for `ScanByName` and `ScanById`.  See
-/// [`data_page_params_nameid_name`] and [`data_page_params_nameid_id`] for
-/// variants that can be used for `ScanByNameOrId`.
 pub fn data_page_params_for<'a, S, C>(
     rqctx: &'a Arc<RequestContext<C>>,
     pag_params: &'a PaginationParams<S, PageSelector<S, S::MarkerValue>>,
@@ -301,7 +299,26 @@ impl ScanParams for ScanById {
 pub type PaginatedByNameOrId =
     PaginationParams<ScanByNameOrId, PageSelectorByNameOrId>;
 /// Page selector for pagination by name or id
-pub type PageSelectorByNameOrId = PageSelector<ScanByNameOrId, NameOrIdMarker>;
+pub type PageSelectorByNameOrId = PageSelector<ScanByNameOrId, NameOrId>;
+
+pub fn name_or_id_pagination<'a>(
+    params: &'a PaginatedByNameOrId,
+    page_params: &'a DataPageParams<NameOrId>,
+) -> Result<PaginatedBy<'a>, HttpError> {
+    let params = ScanByNameOrId::from_query(params)?;
+    match params.sort_by {
+        NameOrIdSortMode::NameAscending => {
+            Ok(PaginatedBy::Name(page_params.try_into()?))
+        }
+        NameOrIdSortMode::NameDescending => {
+            Ok(PaginatedBy::Name(page_params.try_into()?))
+        }
+        NameOrIdSortMode::IdAscending => {
+            Ok(PaginatedBy::Id(page_params.try_into()?))
+        }
+    }
+}
+
 /// Scan parameters for resources that support scanning by name or id
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ScanByNameOrId {
@@ -324,42 +341,18 @@ fn default_nameid_sort_mode() -> NameOrIdSortMode {
     NameOrIdSortMode::NameAscending
 }
 
-// TODO-correctness It's tempting to make this a serde(untagged) enum, which
-// would clean up the format of the page selector parameter.  However, it would
-// have the side effect that if the name happened to be a valid uuid, then we'd
-// parse it as a uuid here, even if the corresponding scan parameters indicated
-// that we were doing a scan by name.  Then we'd fail later on an invalid
-// combination.  We could infer the correct variant here from the "sort_by"
-// field of the adjacent scan params, but we'd have to write our own
-// `Deserialize` to do this.  This might be worth revisiting before we commit to
-// any particular version of the API.
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum NameOrIdMarker {
-    Id(Uuid),
-    Name(Name),
-}
-
 fn bad_token_error() -> HttpError {
     HttpError::for_bad_request(None, String::from("invalid page token"))
 }
 
-#[derive(Debug, PartialEq)]
-pub enum PagField {
-    Id,
-    Name,
-}
-
-pub fn pagination_field_for_scan_params(p: &ScanByNameOrId) -> PagField {
-    match p.sort_by {
-        NameOrIdSortMode::NameAscending => PagField::Name,
-        NameOrIdSortMode::NameDescending => PagField::Name,
-        NameOrIdSortMode::IdAscending => PagField::Id,
-    }
+#[derive(Debug)]
+pub enum PaginatedBy<'a> {
+    Id(DataPageParams<'a, Uuid>),
+    Name(DataPageParams<'a, Name>),
 }
 
 impl ScanParams for ScanByNameOrId {
-    type MarkerValue = NameOrIdMarker;
+    type MarkerValue = NameOrId;
 
     fn direction(&self) -> PaginationOrder {
         match self.sort_by {
@@ -377,7 +370,7 @@ impl ScanParams for ScanByNameOrId {
 
             WhichPage::Next(PageSelectorByNameOrId {
                 scan,
-                last_seen: NameOrIdMarker::Name(_),
+                last_seen: NameOrId::Name(_),
             }) => match scan.sort_by {
                 NameOrIdSortMode::NameAscending => Ok(scan),
                 NameOrIdSortMode::NameDescending => Ok(scan),
@@ -386,7 +379,7 @@ impl ScanParams for ScanByNameOrId {
 
             WhichPage::Next(PageSelectorByNameOrId {
                 scan,
-                last_seen: NameOrIdMarker::Id(_),
+                last_seen: NameOrId::Id(_),
             }) => match scan.sort_by {
                 NameOrIdSortMode::NameAscending => Err(()),
                 NameOrIdSortMode::NameDescending => Err(()),
@@ -397,94 +390,23 @@ impl ScanParams for ScanByNameOrId {
     }
 }
 
-/// Serves the same purpose as [`data_page_params_for`] for the specific case of
-/// `ScanByNameOrId` when scanning by `name`
-///
-/// Why do we need a separate function here?  Because `data_page_params_for` only
-/// knows how to return the (statically-defined) marker value from the page
-/// selector.  For `ScanByNameOrId`, this would return the enum
-/// `NameOrIdMarker`.  But at some point our caller needs the specific type
-/// (e.g., `Name` for a scan by name or `Uuid` for a scan by Uuid).  They get
-/// that from this function and its partner, [`data_page_params_nameid_id`].
-/// These functions are where we look at the enum variant and extract the
-/// specific marker value out.
-pub fn data_page_params_nameid_name<'a, C>(
-    rqctx: &'a Arc<RequestContext<C>>,
-    pag_params: &'a PaginatedByNameOrId,
-) -> Result<DataPageParams<'a, Name>, HttpError>
-where
-    C: dropshot::ServerContext,
-{
-    let limit = rqctx.page_limit(pag_params)?;
-    data_page_params_nameid_name_limit(limit, pag_params)
-}
-
-fn data_page_params_nameid_name_limit(
-    limit: NonZeroU32,
-    pag_params: &PaginatedByNameOrId,
-) -> Result<DataPageParams<Name>, HttpError> {
-    let data_page = data_page_params_with_limit(limit, pag_params)?;
-    let direction = data_page.direction;
-    let marker = match data_page.marker {
-        None => None,
-        Some(NameOrIdMarker::Name(name)) => Some(name),
-        // This should arguably be a panic or a 500 error, since the caller
-        // should not have invoked this version of the function if they didn't
-        // know they were looking at a name-based marker.
-        Some(NameOrIdMarker::Id(_)) => return Err(bad_token_error()),
-    };
-    Ok(DataPageParams { limit, direction, marker })
-}
-
-/// See [`data_page_params_nameid_name`].
-pub fn data_page_params_nameid_id<'a, C>(
-    rqctx: &'a Arc<RequestContext<C>>,
-    pag_params: &'a PaginatedByNameOrId,
-) -> Result<DataPageParams<'a, Uuid>, HttpError>
-where
-    C: dropshot::ServerContext,
-{
-    let limit = rqctx.page_limit(pag_params)?;
-    data_page_params_nameid_id_limit(limit, pag_params)
-}
-
-fn data_page_params_nameid_id_limit(
-    limit: NonZeroU32,
-    pag_params: &PaginatedByNameOrId,
-) -> Result<DataPageParams<Uuid>, HttpError> {
-    let data_page = data_page_params_with_limit(limit, pag_params)?;
-    let direction = data_page.direction;
-    let marker = match data_page.marker {
-        None => None,
-        Some(NameOrIdMarker::Id(id)) => Some(id),
-        // This should arguably be a panic or a 500 error, since the caller
-        // should not have invoked this version of the function if they didn't
-        // know they were looking at an id-based marker.
-        Some(NameOrIdMarker::Name(_)) => return Err(bad_token_error()),
-    };
-    Ok(DataPageParams { limit, direction, marker })
-}
-
 #[cfg(test)]
 mod test {
-    use super::data_page_params_nameid_id_limit;
-    use super::data_page_params_nameid_name_limit;
     use super::data_page_params_with_limit;
     use super::marker_for_id;
     use super::marker_for_name;
     use super::marker_for_name_or_id;
     use super::page_selector_for;
-    use super::pagination_field_for_scan_params;
     use super::IdSortMode;
     use super::Name;
-    use super::NameOrIdMarker;
+    use super::NameOrId;
     use super::NameOrIdSortMode;
     use super::NameSortMode;
-    use super::PagField;
     use super::PageSelector;
     use super::PageSelectorById;
     use super::PageSelectorByName;
     use super::PageSelectorByNameOrId;
+    use super::PaginatedBy;
     use super::PaginatedById;
     use super::PaginatedByName;
     use super::PaginatedByNameOrId;
@@ -492,6 +414,7 @@ mod test {
     use super::ScanByName;
     use super::ScanByNameOrId;
     use super::ScanParams;
+    use crate::api::external::http_pagination::name_or_id_pagination;
     use crate::api::external::IdentityMetadata;
     use crate::api::external::ObjectIdentity;
     use chrono::Utc;
@@ -499,7 +422,6 @@ mod test {
     use dropshot::PaginationParams;
     use dropshot::WhichPage;
     use expectorate::assert_contents;
-    use http::StatusCode;
     use schemars::schema_for;
     use serde::Serialize;
     use serde_json::to_string_pretty;
@@ -595,7 +517,7 @@ mod test {
                 "page selector: by name or id, using id ascending",
                 to_string_pretty(&PageSelectorByNameOrId {
                     scan: scan_by_nameid_id,
-                    last_seen: NameOrIdMarker::Id(id),
+                    last_seen: NameOrId::Id(id),
                 })
                 .unwrap(),
             ),
@@ -603,7 +525,7 @@ mod test {
                 "page selector: by name or id, using id ascending",
                 to_string_pretty(&PageSelectorByNameOrId {
                     scan: scan_by_nameid_name,
-                    last_seen: NameOrIdMarker::Name(name),
+                    last_seen: NameOrId::Name(name),
                 })
                 .unwrap(),
             ),
@@ -815,13 +737,12 @@ mod test {
     fn test_scan_by_nameid_name() {
         // Start with the common battery of tests.
         let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::NameDescending };
-        assert_eq!(pagination_field_for_scan_params(&scan), PagField::Name);
         assert_eq!(scan.direction(), PaginationOrder::Descending);
 
         let list = list_of_things();
-        let thing0_marker = NameOrIdMarker::Name("thing0".parse().unwrap());
+        let thing0_marker = NameOrId::Name("thing0".parse().unwrap());
         let thinglast_name: Name = "thing19".parse().unwrap();
-        let thinglast_marker = NameOrIdMarker::Name(thinglast_name.clone());
+        let thinglast_marker = NameOrId::Name(thinglast_name.clone());
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
@@ -834,33 +755,39 @@ mod test {
 
         // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
-        let data_page = data_page_params_nameid_name_limit(limit, &p0).unwrap();
+        let data_page = data_page_params_with_limit(limit, &p0).unwrap();
+        let data_page = match name_or_id_pagination(&p0, &data_page) {
+            Ok(PaginatedBy::Name(params)) => params,
+            _ => {
+                panic!("Expected Name pagination, got Id pagination")
+            }
+        };
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Descending);
         assert_eq!(data_page.limit, limit);
 
-        let data_page = data_page_params_nameid_name_limit(limit, &p1).unwrap();
-        assert_eq!(data_page.marker, Some(&thinglast_name));
+        let data_page = data_page_params_with_limit(limit, &p1).unwrap();
+        let data_page = match name_or_id_pagination(&p1, &data_page) {
+            Ok(PaginatedBy::Name(params)) => params,
+            _ => {
+                panic!("Expected Name pagination, got Id pagination")
+            }
+        };
+        assert_eq!(data_page.marker, Some(&thinglast_name.into()));
         assert_eq!(data_page.direction, PaginationOrder::Descending);
         assert_eq!(data_page.limit, limit);
-
-        let error = data_page_params_nameid_id_limit(limit, &p1).unwrap_err();
-        assert_eq!(error.status_code, StatusCode::BAD_REQUEST);
-        assert_eq!(error.external_message, "invalid page token");
     }
 
     #[test]
     fn test_scan_by_nameid_id() {
         // Start with the common battery of tests.
         let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
-        assert_eq!(pagination_field_for_scan_params(&scan), PagField::Id);
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
         let list = list_of_things();
-        let thing0_marker = NameOrIdMarker::Id(list[0].identity.id);
+        let thing0_marker = NameOrId::Id(list[0].identity.id);
         let thinglast_id = list[list.len() - 1].identity.id;
-        let thinglast_marker =
-            NameOrIdMarker::Id(list[list.len() - 1].identity.id);
+        let thinglast_marker = NameOrId::Id(list[list.len() - 1].identity.id);
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
@@ -873,18 +800,26 @@ mod test {
 
         // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
-        let data_page = data_page_params_nameid_id_limit(limit, &p0).unwrap();
+        let data_page = data_page_params_with_limit(limit, &p0).unwrap();
+        let data_page = match name_or_id_pagination(&p0, &data_page) {
+            Ok(PaginatedBy::Id(params)) => params,
+            _ => {
+                panic!("Expected id pagination, got name pagination")
+            }
+        };
         assert_eq!(data_page.marker, None);
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
 
-        let data_page = data_page_params_nameid_id_limit(limit, &p1).unwrap();
-        assert_eq!(data_page.marker, Some(&thinglast_id));
+        let data_page = data_page_params_with_limit(limit, &p1).unwrap();
+        let data_page = match name_or_id_pagination(&p1, &data_page) {
+            Ok(PaginatedBy::Id(params)) => params,
+            _ => {
+                panic!("Expected id pagination, got name pagination")
+            }
+        };
+        assert_eq!(data_page.marker, Some(&thinglast_id.into()));
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
-
-        let error = data_page_params_nameid_name_limit(limit, &p1).unwrap_err();
-        assert_eq!(error.status_code, StatusCode::BAD_REQUEST);
-        assert_eq!(error.external_message, "invalid page token");
     }
 }
