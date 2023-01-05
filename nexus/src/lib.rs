@@ -128,62 +128,37 @@ impl Server {
         let opctx = apictx.nexus.opctx_for_service_balancer();
         apictx.nexus.await_rack_initialization(&opctx).await;
 
-        // Launch the external server(s).
-        let mut server_configs =
-            vec![config.deployment.dropshot_external.clone()];
-
-        // TODO: Could we just call "Nexus refresh TLS" to do this for us?
-
-        // Lookup x509 certificates which might be stored in CRDB, specifically
-        // for launching the Nexus service.
-        let tls_config = apictx
-            .nexus
-            .get_nexus_tls_config(&opctx)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // If certificates exist, launch an HTTPS server.
-        if let Some(tls_config) = &tls_config {
-            let http_config = config.deployment.dropshot_external.clone();
-            let https_config = dropshot::ConfigDropshot {
-                bind_address: SocketAddr::new(
-                    http_config.bind_address.ip(),
-                    config.pkg.nexus_https_port,
-                ),
-                tls: Some(tls_config.clone()),
-                ..http_config
-            };
-
-            server_configs.push(https_config);
-        }
-
-        let mut http_servers_external = server_configs
-            .iter()
-            .map(|cfg| {
-                let server_starter_external = dropshot::HttpServerStarter::new(
-                    &cfg,
-                    external_api(),
-                    Arc::clone(&apictx),
-                    &log.new(o!("component" => "dropshot_external")),
-                )
-                .map_err(|error| {
-                    format!("initializing external server: {}", error)
-                })?;
-                Ok(server_starter_external.start())
-            })
-            .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?
-            .into_iter();
-
-        let http_servers_external = crate::app::ExternalServers {
-            https_port: config.pkg.nexus_https_port,
-            http: http_servers_external.next(),
-            https: http_servers_external.next(),
+        // Launch the external server.
+        let http_server_external = {
+            let server_starter_external = dropshot::HttpServerStarter::new(
+                &config.deployment.dropshot_external,
+                external_api(),
+                Arc::clone(&apictx),
+                &log.new(o!("component" => "dropshot_external")),
+            )
+            .map_err(|error| {
+                format!("initializing external server: {}", error)
+            })?;
+            server_starter_external.start()
         };
 
+        // Transfer control of the external server to Nexus
+        let mut http_servers_external = crate::app::ExternalServers::new(
+            config.deployment.dropshot_external.clone(),
+            config.pkg.nexus_https_port,
+        );
+        http_servers_external.set_http(http_server_external);
         apictx
             .nexus
             .set_servers(http_servers_external, http_server_internal)
             .await;
+
+        // If Nexus has TLS certificates, launch the HTTPS server.
+        apictx
+            .nexus
+            .refresh_tls_config(&opctx)
+            .await
+            .map_err(|e| e.to_string())?;
 
         let server = Server { apictx: apictx.clone() };
         Ok(server)

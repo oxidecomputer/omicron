@@ -19,7 +19,6 @@ use omicron_common::api::external::NameOrId;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
 use ref_cast::RefCast;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -156,7 +155,10 @@ impl super::Nexus {
     }
 
     /// Refreshes the TLS configuration for the currently-running Nexus external
-    /// server.
+    /// server. This involves either:
+    /// - Creating a new HTTPS server if once does not exist
+    /// - Refreshing an existing HTTPS server if it already exists
+    /// - Tearing down an HTTPS server if no certificates exist
     pub async fn refresh_tls_config(
         &self,
         opctx: &OpContext,
@@ -170,26 +172,38 @@ impl super::Nexus {
             // server.
             (Some(tls_config), None) => {
                 info!(self.log, "Refresh TLS: Creating HTTPS server");
-                let http = external_servers.http.as_ref().ok_or_else(|| {
-                    Error::internal_error(&format!("No HTTP servers running"))
-                })?;
+                let mut cfg = external_servers.config.clone();
+                cfg.bind_address.set_port(external_servers.https_port());
+                cfg.tls = Some(tls_config);
 
-                let cfg = dropshot::ConfigDropshot {
-                    bind_address: SocketAddr::new(
-                        http.local_addr().ip(),
-                        external_servers.https_port,
-                    ),
-                    request_body_max_bytes: 1048576,
-                    tls: Some(tls_config),
-                    ..Default::default()
+                let context = if let Some(context) = external_servers
+                    .https
+                    .as_ref()
+                    .map(|server| server.app_private())
+                {
+                    // If an HTTPS server is already running, use that server context.
+                    context.clone()
+                } else if let Some(context) = external_servers
+                    .http
+                    .as_ref()
+                    .map(|server| server.app_private())
+                {
+                    // If an HTTP server is already running, use that server context.
+                    context.clone()
+                } else {
+                    // If we don't have a context object, we can't initialize servers.
+                    return Err(Error::internal_error(
+                        "No HTTP servers running",
+                    ));
                 };
 
-                let apictx = http.app_private();
+                let log =
+                    context.log.new(o!("component" => "dropshot_external"));
                 let server_starter_external = dropshot::HttpServerStarter::new(
                     &cfg,
                     crate::external_api::http_entrypoints::external_api(),
-                    apictx.clone(),
-                    &apictx.log.new(o!("component" => "dropshot_external")),
+                    context,
+                    &log,
                 )
                 .map_err(|e| {
                     Error::internal_error(&format!(

@@ -62,14 +62,23 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
 
 pub(crate) struct ExternalServers {
-    pub https_port: u16,
-    pub http: Option<DropshotServer>,
-    pub https: Option<DropshotServer>,
+    config: dropshot::ConfigDropshot,
+    https_port: u16,
+    http: Option<DropshotServer>,
+    https: Option<DropshotServer>,
 }
 
 impl ExternalServers {
-    fn new(https_port: u16) -> Self {
-        Self { https_port, http: None, https: None }
+    pub fn new(config: dropshot::ConfigDropshot, https_port: u16) -> Self {
+        Self { config, https_port, http: None, https: None }
+    }
+
+    pub fn set_http(&mut self, http: DropshotServer) {
+        self.http = Some(http);
+    }
+
+    pub fn https_port(&self) -> u16 {
+        self.https_port
     }
 }
 
@@ -200,6 +209,7 @@ impl Nexus {
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             external_servers: Mutex::new(ExternalServers::new(
+                config.deployment.dropshot_external.clone(),
                 config.pkg.nexus_https_port,
             )),
             internal_server: Mutex::new(None),
@@ -276,7 +286,10 @@ impl Nexus {
         external_servers: ExternalServers,
         internal_server: DropshotServer,
     ) {
+        // If any servers already exist, close them.
         let _ = self.close_servers().await;
+
+        // Insert the new servers.
         *self.external_servers.lock().await =
             ExternalServers { ..external_servers };
         self.internal_server.lock().await.replace(internal_server);
