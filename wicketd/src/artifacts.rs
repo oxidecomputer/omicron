@@ -41,7 +41,7 @@ impl WicketdArtifactStore {
     }
 
     #[allow(dead_code)]
-    fn insert(&mut self, id: ArtifactId, buf: BufList) {
+    fn insert(&self, id: ArtifactId, buf: BufList) {
         self.artifacts.lock().unwrap().insert(id, buf);
     }
 }
