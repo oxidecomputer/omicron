@@ -106,7 +106,7 @@ impl From<UpdateableComponentType> for views::UpdateableComponentType {
 #[diesel(table_name = component_update)]
 pub struct ComponentUpdate {
     #[diesel(embed)]
-    identity: ComponentUpdateIdentity,
+    pub identity: ComponentUpdateIdentity,
     pub version: SemverVersion,
     pub component_type: UpdateableComponentType,
     pub parent_id: Option<Uuid>,

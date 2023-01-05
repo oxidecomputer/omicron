@@ -16,6 +16,8 @@ use crate::db::model::{
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_db_model::SystemUpdateComponentUpdate;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::{
@@ -89,6 +91,60 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    pub async fn component_update_create(
+        &self,
+        opctx: &OpContext,
+        system_update_id: Uuid,
+        update: ComponentUpdate,
+    ) -> CreateResult<ComponentUpdate> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use db::schema::component_update;
+        use db::schema::system_update_component_update as join_table;
+
+        let result = diesel::insert_into(component_update::table)
+            .values(update.clone())
+            .on_conflict(component_update::columns::id) // TODO: should also conflict on version
+            .do_nothing()
+            .returning(ComponentUpdate::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::ComponentUpdate,
+                        // TODO: string representing both system and component updates?
+                        &update.version.to_string(),
+                    ),
+                )
+            });
+
+        diesel::insert_into(join_table::table)
+            .values(SystemUpdateComponentUpdate {
+                system_update_id,
+                component_update_id: update.id(),
+            })
+            .on_conflict(join_table::all_columns)
+            .do_nothing()
+            .returning(SystemUpdateComponentUpdate::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SystemUpdateComponentUpdate,
+                        // TODO: string representing both system and component updates?
+                        &update.version.to_string(),
+                    ),
+                )
+            })?;
+
+        result
     }
 
     pub async fn system_updates_list_by_id(

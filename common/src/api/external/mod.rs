@@ -649,6 +649,8 @@ pub enum ResourceType {
     RoleBuiltin,
     UpdateAvailableArtifact,
     SystemUpdate,
+    ComponentUpdate,
+    SystemUpdateComponentUpdate,
     UserBuiltin,
     Zpool,
 }

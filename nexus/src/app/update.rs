@@ -12,7 +12,10 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
 use chrono::Utc;
 use hex;
-use nexus_db_model::{SemverVersion, SystemUpdateIdentity};
+use nexus_db_model::{
+    ComponentUpdateIdentity, SemverVersion, SystemUpdateIdentity,
+    UpdateableComponentType,
+};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
     PaginationOrder,
@@ -30,6 +33,18 @@ static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
 pub struct CreateSystemUpdate {
     version: external::SemverVersion,
+}
+
+// TODO: it's janky to use the external version of SemverVersion (which makes
+// sense because this is all coming from outside the db layer) but
+// UpdateableComponentType comes from the db model. We probably need to move
+// views::UpdateableComponentType out of views and into shared, and then
+// important that here and use it.
+pub struct CreateComponentUpdate {
+    version: external::SemverVersion,
+    component_type: UpdateableComponentType,
+    parent_id: Option<Uuid>,
+    system_update_id: Uuid,
 }
 
 impl super::Nexus {
@@ -303,6 +318,34 @@ impl super::Nexus {
         self.db_datastore.system_update_create(opctx, update).await
     }
 
+    pub async fn component_update_create(
+        &self,
+        opctx: &OpContext,
+        create_update: CreateComponentUpdate,
+    ) -> CreateResult<db::model::ComponentUpdate> {
+        let now = Utc::now();
+        let update = db::model::ComponentUpdate {
+            identity: ComponentUpdateIdentity {
+                id: Uuid::new_v4(),
+                time_created: now,
+                time_modified: now,
+            },
+            version: SemverVersion(create_update.version),
+            component_type: create_update.component_type,
+            parent_id: create_update.parent_id,
+        };
+
+        // TODO: make sure system update with that ID exists first
+
+        self.db_datastore
+            .component_update_create(
+                opctx,
+                create_update.system_update_id,
+                update,
+            )
+            .await
+    }
+
     pub async fn system_update_fetch_by_id(
         &self,
         opctx: &OpContext,
@@ -354,9 +397,10 @@ impl super::Nexus {
 mod tests {
     use std::num::NonZeroU32;
 
-    use crate::app::update::CreateSystemUpdate;
+    use crate::app::update::{CreateComponentUpdate, CreateSystemUpdate};
     use crate::context::OpContext;
     use dropshot::PaginationOrder;
+    use nexus_db_model::UpdateableComponentType;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{self, DataPageParams};
     use uuid::Uuid;
@@ -385,37 +429,75 @@ mod tests {
         let opctx = test_opctx(&cptestctx);
 
         // starts out empty
-        let updates = nexus
+        let system_updates = nexus
             .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(updates.len(), 0);
+        assert_eq!(system_updates.len(), 0);
 
-        let _update1 = nexus
+        let su1 = nexus
             .system_update_create(
                 &opctx,
                 CreateSystemUpdate {
                     version: external::SemverVersion::new(1, 0, 0),
                 },
             )
-            .await;
-        let _update2 = nexus
+            .await
+            .unwrap();
+        let _su2 = nexus
             .system_update_create(
                 &opctx,
                 CreateSystemUpdate {
                     version: external::SemverVersion::new(2, 0, 0),
                 },
             )
-            .await;
+            .await
+            .unwrap();
 
-        // now there should be two
-        let updates = nexus
+        // now there should be two system updates
+        let system_updates = nexus
             .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        dbg!(updates.clone());
-        assert_eq!(updates.len(), 2);
+        dbg!(system_updates.clone());
+        assert_eq!(system_updates.len(), 2);
+
+        // now create two component updates for update 1, one at root, and one
+        // hanging off the first
+        let cu1 = nexus
+            .component_update_create(
+                &opctx,
+                CreateComponentUpdate {
+                    version: external::SemverVersion::new(1, 0, 0),
+                    component_type: UpdateableComponentType::BootloaderForRot,
+                    parent_id: None,
+                    system_update_id: su1.identity.id,
+                },
+            )
+            .await
+            .unwrap();
+        let _cu1a = nexus
+            .component_update_create(
+                &opctx,
+                CreateComponentUpdate {
+                    version: external::SemverVersion::new(1, 0, 0),
+                    component_type: UpdateableComponentType::HubrisForGimletSp,
+                    parent_id: Some(cu1.identity.id),
+                    system_update_id: su1.identity.id,
+                },
+            )
+            .await
+            .unwrap();
+
+        // now there should be two component updates
+        let component_updates = nexus
+            .system_update_list_components(&opctx, &su1.identity.id)
+            .await
+            .unwrap();
+
+        dbg!(component_updates.clone());
+        assert_eq!(component_updates.len(), 2);
     }
 }

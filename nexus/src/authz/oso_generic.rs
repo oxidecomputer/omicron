@@ -145,6 +145,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         UpdateAvailableArtifact::init(),
         UserBuiltin::init(),
         GlobalImage::init(),
+        SystemUpdate::init(),
     ];
 
     for init in generated_inits {
