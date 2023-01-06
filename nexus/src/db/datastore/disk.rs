@@ -81,7 +81,8 @@ impl DataStore {
             diesel::insert_into(dsl::disk)
                 .values(disk)
                 .on_conflict(dsl::id)
-                .do_nothing(),
+                .do_update()
+                .set(dsl::time_modified.eq(dsl::time_modified)),
         )
         .insert_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
