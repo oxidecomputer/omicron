@@ -148,8 +148,8 @@ pub fn marker_for_id<S, T: ObjectIdentity>(_: &S, t: &T) -> Uuid {
 ///
 /// This is intended for use with [`ScanByNameOrId::results_page`] with objects
 /// that impl [`ObjectIdentity`].
-pub fn marker_for_name_or_id<T: ObjectIdentity>(
-    scan: &ScanByNameOrId,
+pub fn marker_for_name_or_id<T: ObjectIdentity, Selector>(
+    scan: &ScanByNameOrId<Selector>,
     item: &T,
 ) -> NameOrId {
     let identity = item.identity();
@@ -296,34 +296,45 @@ impl ScanParams for ScanById {
 // We include this now primarily to exercise the interface for doing so.
 
 /// Query parameters for pagination by name or id
-pub type PaginatedByNameOrId =
-    PaginationParams<ScanByNameOrId, PageSelectorByNameOrId>;
+pub type PaginatedByNameOrId<Selector> = PaginationParams<
+    ScanByNameOrId<Selector>,
+    PageSelectorByNameOrId<Selector>,
+>;
 /// Page selector for pagination by name or id
-pub type PageSelectorByNameOrId = PageSelector<ScanByNameOrId, NameOrId>;
+pub type PageSelectorByNameOrId<Selector = ()> =
+    PageSelector<ScanByNameOrId<Selector>, NameOrId>;
 
-pub fn name_or_id_pagination<'a>(
-    params: &'a PaginatedByNameOrId,
-    page_params: &'a DataPageParams<NameOrId>,
-) -> Result<PaginatedBy<'a>, HttpError> {
-    let params = ScanByNameOrId::from_query(params)?;
+pub fn name_or_id_pagination<
+    'a,
+    Selector: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+>(
+    params: &PaginatedByNameOrId<Selector>,
+    pagparams: &'a DataPageParams<NameOrId>,
+) -> Result<PaginatedBy<'a, Selector>, HttpError> {
+    let params = ScanByNameOrId::<Selector>::from_query(params)?;
     match params.sort_by {
-        NameOrIdSortMode::NameAscending => {
-            Ok(PaginatedBy::Name(page_params.try_into()?))
-        }
-        NameOrIdSortMode::NameDescending => {
-            Ok(PaginatedBy::Name(page_params.try_into()?))
-        }
+        NameOrIdSortMode::NameAscending => Ok(PaginatedBy::Name(
+            pagparams.try_into()?,
+            params.selector.clone(),
+        )),
+        NameOrIdSortMode::NameDescending => Ok(PaginatedBy::Name(
+            pagparams.try_into()?,
+            params.selector.clone(),
+        )),
         NameOrIdSortMode::IdAscending => {
-            Ok(PaginatedBy::Id(page_params.try_into()?))
+            Ok(PaginatedBy::Id(pagparams.try_into()?, params.selector.clone()))
         }
     }
 }
 
 /// Scan parameters for resources that support scanning by name or id
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-pub struct ScanByNameOrId {
+pub struct ScanByNameOrId<Selector> {
     #[serde(default = "default_nameid_sort_mode")]
     sort_by: NameOrIdSortMode,
+
+    #[serde(flatten)]
+    selector: Selector,
 }
 /// Supported set of sort modes for scanning by name or id
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
@@ -346,12 +357,15 @@ fn bad_token_error() -> HttpError {
 }
 
 #[derive(Debug)]
-pub enum PaginatedBy<'a> {
-    Id(DataPageParams<'a, Uuid>),
-    Name(DataPageParams<'a, Name>),
+pub enum PaginatedBy<'a, Selector> {
+    Id(DataPageParams<'a, Uuid>, Selector),
+    Name(DataPageParams<'a, Name>, Selector),
 }
 
-impl ScanParams for ScanByNameOrId {
+impl<
+        T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+    > ScanParams for ScanByNameOrId<T>
+{
     type MarkerValue = NameOrId;
 
     fn direction(&self) -> PaginationOrder {
@@ -444,7 +458,7 @@ mod test {
             ("scan parameters, scan by id only", schema_for!(ScanById)),
             (
                 "scan parameters, scan by name or id",
-                schema_for!(ScanByNameOrId),
+                schema_for!(ScanByNameOrId<()>),
             ),
             (
                 "page selector, scan by name only",
@@ -475,10 +489,14 @@ mod test {
     fn test_pagination_examples() {
         let scan_by_id = ScanById { sort_by: IdSortMode::IdAscending };
         let scan_by_name = ScanByName { sort_by: NameSortMode::NameAscending };
-        let scan_by_nameid_name =
-            ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending };
-        let scan_by_nameid_id =
-            ScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
+        let scan_by_nameid_name = ScanByNameOrId::<()> {
+            sort_by: NameOrIdSortMode::NameAscending,
+            selector: (),
+        };
+        let scan_by_nameid_id = ScanByNameOrId::<()> {
+            sort_by: NameOrIdSortMode::IdAscending,
+            selector: (),
+        };
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
         let name: Name = "bort".parse().unwrap();
         let examples = vec![
@@ -715,7 +733,7 @@ mod test {
     #[test]
     fn test_scan_by_nameid_generic() {
         // Test from_query(): error case.
-        let error = serde_urlencoded::from_str::<PaginatedByNameOrId>(
+        let error = serde_urlencoded::from_str::<PaginatedByNameOrId<()>>(
             "sort_by=id_descending",
         )
         .unwrap_err();
@@ -736,7 +754,10 @@ mod test {
     #[test]
     fn test_scan_by_nameid_name() {
         // Start with the common battery of tests.
-        let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::NameDescending };
+        let scan = ScanByNameOrId {
+            sort_by: NameOrIdSortMode::NameDescending,
+            selector: (),
+        };
         assert_eq!(scan.direction(), PaginationOrder::Descending);
 
         let list = list_of_things();
@@ -749,7 +770,10 @@ mod test {
             "sort_by=name_descending",
             &thing0_marker,
             &thinglast_marker,
-            &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
+            &ScanByNameOrId {
+                sort_by: NameOrIdSortMode::NameAscending,
+                selector: (),
+            },
             &marker_for_name_or_id,
         );
 
@@ -757,7 +781,7 @@ mod test {
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
         let data_page = match name_or_id_pagination(&p0, &data_page) {
-            Ok(PaginatedBy::Name(params)) => params,
+            Ok(PaginatedBy::Name(params, ..)) => params,
             _ => {
                 panic!("Expected Name pagination, got Id pagination")
             }
@@ -768,7 +792,7 @@ mod test {
 
         let data_page = data_page_params_with_limit(limit, &p1).unwrap();
         let data_page = match name_or_id_pagination(&p1, &data_page) {
-            Ok(PaginatedBy::Name(params)) => params,
+            Ok(PaginatedBy::Name(params, ..)) => params,
             _ => {
                 panic!("Expected Name pagination, got Id pagination")
             }
@@ -781,7 +805,10 @@ mod test {
     #[test]
     fn test_scan_by_nameid_id() {
         // Start with the common battery of tests.
-        let scan = ScanByNameOrId { sort_by: NameOrIdSortMode::IdAscending };
+        let scan = ScanByNameOrId {
+            sort_by: NameOrIdSortMode::IdAscending,
+            selector: (),
+        };
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
         let list = list_of_things();
@@ -794,7 +821,10 @@ mod test {
             "sort_by=id_ascending",
             &thing0_marker,
             &thinglast_marker,
-            &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
+            &ScanByNameOrId {
+                sort_by: NameOrIdSortMode::NameAscending,
+                selector: (),
+            },
             &marker_for_name_or_id,
         );
 
@@ -802,7 +832,7 @@ mod test {
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
         let data_page = match name_or_id_pagination(&p0, &data_page) {
-            Ok(PaginatedBy::Id(params)) => params,
+            Ok(PaginatedBy::Id(params, ..)) => params,
             _ => {
                 panic!("Expected id pagination, got name pagination")
             }
@@ -813,7 +843,7 @@ mod test {
 
         let data_page = data_page_params_with_limit(limit, &p1).unwrap();
         let data_page = match name_or_id_pagination(&p1, &data_page) {
-            Ok(PaginatedBy::Id(params)) => params,
+            Ok(PaginatedBy::Id(params, ..)) => params,
             _ => {
                 panic!("Expected id pagination, got name pagination")
             }

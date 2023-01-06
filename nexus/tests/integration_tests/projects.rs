@@ -40,11 +40,11 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
 
     create_project(&client, &org_name, &p2_name).await;
 
-    let p1_url = format!("/organizations/{}/projects/{}", org_name, p1_name);
+    let p1_url = format!("/v1/projects/{}?organization={}", p1_name, org_name);
     let project: Project = project_get(&client, &p1_url).await;
     assert_eq!(project.identity.name, p1_name);
 
-    let p2_url = format!("/organizations/{}/projects/{}", org_name, p2_name);
+    let p2_url = format!("/v1/projects/{}?organization={}", p2_name, org_name);
     let project: Project = project_get(&client, &p2_url).await;
     assert_eq!(project.identity.name, p2_name);
 
@@ -75,7 +75,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     // Make sure the list projects results for the new org make sense
     let projects = NexusRequest::iter_collection_authn::<Project>(
         &client,
-        &format!("/organizations/{}/projects", org2_name),
+        &format!("/v1/projects?organization={}", org2_name),
         "",
         None,
     )
