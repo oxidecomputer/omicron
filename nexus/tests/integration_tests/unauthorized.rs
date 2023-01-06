@@ -290,7 +290,7 @@ lazy_static! {
         },
         // Create a Certificate
         SetupReq::Post {
-            url: &*DEMO_CERTIFICATE_URL,
+            url: &*DEMO_CERTIFICATES_URL,
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },
@@ -504,7 +504,10 @@ async fn verify_endpoint(
             if let Some(&AllowedMethod::GetWebsocket) = allowed {
                 request = request.websocket_handshake();
             }
-            let response = request.execute().await.unwrap();
+            let response = request
+                .execute()
+                .await
+                .expect(&format!("Failed making {method} request to {uri}"));
             verify_response(&response);
             record_operation(WhichTest::Unprivileged(&expected_status));
         } else {
