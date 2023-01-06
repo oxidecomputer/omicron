@@ -288,6 +288,12 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
             id_routes: vec![],
         },
+        // Create a Certificate
+        SetupReq::Post {
+            url: &*DEMO_CERTIFICATE_URL,
+            body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
+            id_routes: vec![],
+        },
     ];
 }
 

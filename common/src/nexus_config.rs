@@ -252,6 +252,10 @@ impl Default for Tunables {
     }
 }
 
+fn default_https_port() -> u16 {
+    443
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -262,6 +266,7 @@ pub struct PackageConfig {
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Port Nexus should use for launching HTTPS servers
+    #[serde(default = "default_https_port")]
     pub nexus_https_port: u16,
     /// Timeseries database configuration.
     #[serde(default)]
@@ -463,7 +468,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [[deployment.dropshot_external]]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]

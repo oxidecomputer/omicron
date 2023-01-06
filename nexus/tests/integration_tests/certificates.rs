@@ -24,7 +24,7 @@ type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // Utility structure for making a test certificate
-struct CertificateChain {
+pub struct CertificateChain {
     root_cert: rustls::Certificate,
     intermediate_cert: rustls::Certificate,
     end_cert: rustls::Certificate,
@@ -32,7 +32,7 @@ struct CertificateChain {
 }
 
 impl CertificateChain {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut root_params = rcgen::CertificateParams::new(vec![]);
         root_params.is_ca =
             rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
@@ -73,12 +73,20 @@ impl CertificateChain {
         rustls::PrivateKey(self.end_keypair.serialize_private_key_der())
     }
 
+    pub fn end_cert_private_key_as_pem(&self) -> Vec<u8> {
+        tls_key_to_pem(&self.end_cert_private_key())
+    }
+
     fn cert_chain(&self) -> Vec<rustls::Certificate> {
         vec![
             self.end_cert.clone(),
             self.intermediate_cert.clone(),
             self.root_cert.clone(),
         ]
+    }
+
+    pub fn cert_chain_as_pem(&self) -> Vec<u8> {
+        tls_cert_to_pem(&self.cert_chain())
     }
 
     // Issues a GET request using the certificate chain.
@@ -271,8 +279,8 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     assert!(certs.is_empty());
 
     let chain = CertificateChain::new();
-    let (cert, key) = (chain.cert_chain(), chain.end_cert_private_key());
-    let (cert, key) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
     // We can create a new certificate
     create_certificate(&client, CERT_NAME, cert.clone(), key.clone()).await;
@@ -296,14 +304,14 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
     let chain = CertificateChain::new();
-    let (cert, key) = (chain.cert_chain(), chain.end_cert_private_key());
-    let (cert_u8, key_u8) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
     create_certificate(
         &cptestctx.external_client,
         CERT_NAME,
-        cert_u8.clone(),
-        key_u8.clone(),
+        cert.clone(),
+        key.clone(),
     )
     .await;
 
@@ -330,13 +338,13 @@ async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
     // makes a hard-coded assumption that the test client is not using HTTPS:
     // https://docs.rs/dropshot/0.8.0/src/dropshot/test_util.rs.html#106
     let chain2 = CertificateChain::new();
-    let (cert, key) = (chain2.cert_chain(), chain2.end_cert_private_key());
-    let (cert_u8, key_u8) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
+    let (cert, key) =
+        (chain2.cert_chain_as_pem(), chain2.end_cert_private_key_as_pem());
     create_certificate(
         &http_client,
         "my-other-certificate",
-        cert_u8.clone(),
-        key_u8.clone(),
+        cert.clone(),
+        key.clone(),
     )
     .await;
     delete_certificate(&http_client, CERT_NAME).await;
@@ -361,8 +369,8 @@ async fn test_cannot_create_certificate_with_bad_key(
     let client = &cptestctx.external_client;
 
     let chain = CertificateChain::new();
-    let (cert, key) = (chain.cert_chain(), chain.end_cert_private_key());
-    let (cert, mut key) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
+    let (cert, mut key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
     for i in 0..key.len() {
         key[i] = !key[i];
@@ -377,8 +385,8 @@ async fn test_cannot_create_certificate_with_bad_cert(
     let client = &cptestctx.external_client;
 
     let chain = CertificateChain::new();
-    let (cert, key) = (chain.cert_chain(), chain.end_cert_private_key());
-    let (mut cert, key) = (tls_cert_to_pem(&cert), tls_key_to_pem(&key));
+    let (mut cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
     for i in 0..cert.len() {
         cert[i] = !cert[i];
