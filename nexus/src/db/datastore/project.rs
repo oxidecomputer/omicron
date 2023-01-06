@@ -97,15 +97,15 @@ impl DataStore {
         opctx: &OpContext,
         org: &authz::Organization,
         project: Project,
-    ) -> CreateResult<Project> {
+    ) -> CreateResult<(authz::Project, Project)> {
         use db::schema::project::dsl;
 
         opctx.authorize(authz::Action::CreateChild, org).await?;
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
-
-        self.pool_authorized(opctx)
+        let db_project = self
+            .pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 let project = Organization::insert_resource(
@@ -149,7 +149,16 @@ impl DataStore {
                 TransactionError::Pool(e) => {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)
                 }
-            })
+            })?;
+
+        Ok((
+            authz::Project::new(
+                org.clone(),
+                db_project.id(),
+                LookupType::ByName(db_project.name().to_string()),
+            ),
+            db_project,
+        ))
     }
 
     generate_fn_to_ensure_none_in_project!(instance, name, String);
