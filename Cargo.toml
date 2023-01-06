@@ -211,7 +211,9 @@ sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-# Please do not change the Steno version to a Git dependency.
+# Please do not change the Steno version to a Git dependency.  It makes it
+# harder than expected to make breaking changes (even if you specify a specific
+# SHA).  Cut a new Steno release instead.  See omicron#2117.
 steno = "0.3.1"
 strum = { version = "0.24", features = [ "derive" ] }
 subprocess = "0.2.9"
