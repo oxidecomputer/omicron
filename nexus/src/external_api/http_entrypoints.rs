@@ -3067,14 +3067,16 @@ async fn instance_stop(
 async fn instance_serial_console_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<params::InstancePath>,
-    query_params: Query<params::InstanceSerialConsole>,
+    query_params: Query<params::InstanceSerialConsoleRequest>,
+    selector_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
+    let selector = selector_params.into_inner();
     let instance_selector = params::InstanceSelector {
-        project_selector: query.project_selector,
+        project_selector: selector.project_selector,
         instance: path.instance,
     };
     let handler = async {
@@ -3082,10 +3084,7 @@ async fn instance_serial_console_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let data = nexus
-            .instance_serial_console_data(
-                &instance_lookup,
-                &query.console_params,
-            )
+            .instance_serial_console_data(&instance_lookup, &query)
             .await?;
         Ok(HttpResponseOk(data))
     };

@@ -96,15 +96,6 @@ impl InstanceSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceSerialConsole {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-
-    #[serde(flatten)]
-    pub console_params: InstanceSerialConsoleRequest,
-}
-
 // Silos
 
 /// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)

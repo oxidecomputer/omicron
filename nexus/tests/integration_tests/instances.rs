@@ -2715,9 +2715,10 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let instance_url = get_instance_url(instance_name);
 
     // Make sure we get a 404 if we try to access the serial console before creation.
-    let instance_serial_url = get_instance_url(
-        format!("{}/kris-picks/serial-console?from_start=0", instance_name)
-            .as_str(),
+    let instance_serial_url = format!(
+        "{}&{}",
+        get_instance_url(format!("{}/serial-console", instance_name).as_str()),
+        "from_start=0"
     );
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,

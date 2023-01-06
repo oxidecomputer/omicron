@@ -662,8 +662,10 @@ impl<'a> NexusRequest<'a> {
         loop {
             let url = if let Some(next_token) = &next_token {
                 format!("{}&page_token={}", url_base, next_token)
+            } else if !initial_params.is_empty() {
+                format!("{}&{}", url_base, initial_params)
             } else {
-                format!("{}{}", url_base, initial_params)
+                url_base.clone()
             };
 
             let page = NexusRequest::object_get(testctx, &url)
