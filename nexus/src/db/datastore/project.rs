@@ -22,7 +22,7 @@ use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -185,28 +185,48 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
-        let now = Utc::now();
-        let updated_rows = diesel::update(dsl::project)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_project.id()))
-            .filter(dsl::rcgen.eq(db_project.rcgen))
-            .set(dsl::time_deleted.eq(now))
-            .returning(Project::as_returning())
-            .execute_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_project),
-                )
-            })?;
+        type TxnError = TransactionError<Error>;
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                let now = Utc::now();
+                let updated_rows = diesel::update(dsl::project)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(authz_project.id()))
+                    .filter(dsl::rcgen.eq(db_project.rcgen))
+                    .set(dsl::time_deleted.eq(now))
+                    .returning(Project::as_returning())
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            PoolError::from(e),
+                            ErrorHandler::NotFoundByResource(authz_project),
+                        )
+                    })?;
 
-        if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: "deletion failed due to concurrent modification"
-                    .to_string(),
-            });
-        }
+                if updated_rows == 0 {
+                    return Err(TxnError::CustomError(Error::InvalidRequest {
+                        message:
+                            "deletion failed due to concurrent modification"
+                                .to_string(),
+                    }));
+                }
+
+                self.virtual_provisioning_collection_delete_on_connection(
+                    &conn,
+                    db_project.id(),
+                )
+                .await?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(e) => e,
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })?;
         Ok(())
     }
 
