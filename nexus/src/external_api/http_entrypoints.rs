@@ -2899,7 +2899,7 @@ async fn instance_reboot_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -2913,7 +2913,7 @@ async fn instance_reboot_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_reboot(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2956,7 +2956,7 @@ async fn instance_start_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -2970,7 +2970,7 @@ async fn instance_start_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_start(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3012,7 +3012,7 @@ async fn instance_stop_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -3026,7 +3026,7 @@ async fn instance_stop_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_stop(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
