@@ -70,6 +70,11 @@ impl Pool {
     }
 }
 
+const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
+    "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
+pub const ALLOW_FULL_TABLE_SCAN_SQL: &str =
+    "set disallow_full_table_scans = off; set large_full_scan_rows = 1000;";
+
 #[derive(Debug)]
 struct DisallowFullTableScans {}
 #[async_trait]
@@ -80,10 +85,6 @@ impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
         &self,
         conn: &mut Connection<DbConnection>,
     ) -> Result<(), ConnectionError> {
-        conn.batch_execute_async(
-            "set disallow_full_table_scans = on;\
-            set large_full_scan_rows = 0;",
-        )
-        .await
+        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL).await
     }
 }

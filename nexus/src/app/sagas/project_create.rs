@@ -255,10 +255,7 @@ mod test {
             .unwrap()
             .transaction_async(|conn| async move {
                 conn
-                    .batch_execute_async(
-                        "set disallow_full_table_scans = off;\
-                        set large_full_scan_rows = 1000;"
-                    )
+                    .batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
                 Ok::<_, crate::db::TransactionError<()>>(

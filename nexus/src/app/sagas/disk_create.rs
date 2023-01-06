@@ -785,12 +785,9 @@ pub(crate) mod test {
             .await
             .unwrap()
             .transaction_async(|conn| async move {
-                conn.batch_execute_async(
-                    "set disallow_full_table_scans = off;\
-                        set large_full_scan_rows = 1000;",
-                )
-                .await
-                .unwrap();
+                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
                 Ok::<_, crate::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
                         .filter(dsl::virtual_disk_bytes_provisioned.ne(0))
