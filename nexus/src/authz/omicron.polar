@@ -373,9 +373,10 @@ resource IpPoolList {
 has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 	if ip_pool_list.fleet = fleet;
 
-# Any authenticated user can create a child of a provided IP Pools.
+# Any authenticated user can create a child of a provided IP Pool.
 # This is necessary to use the pools when provisioning instances.
-has_permission(_actor: AuthenticatedActor, "create_child", _ip_pool: IpPool);
+has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
+  if actor.silo.fleet = ip_pool.fleet;
 
 # Describes the policy for accessing "/system/images" (in the API)
 resource GlobalImageList {
