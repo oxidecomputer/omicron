@@ -1030,8 +1030,13 @@ pub mod test {
         authn::saga::Serialized, context::OpContext, db::datastore::DataStore,
         external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        OptionalExtension,
+    };
+    use diesel::{
+        BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_organization;
@@ -1166,6 +1171,73 @@ pub mod test {
             .is_none()
     }
 
+    async fn no_virtual_provisioning_resource_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningResource;
+        use crate::db::schema::virtual_provisioning_resource::dsl;
+
+        datastore.pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn
+                    .batch_execute_async(
+                        "set disallow_full_table_scans = off;\
+                        set large_full_scan_rows = 1000;"
+                    )
+                    .await
+                    .unwrap();
+
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_resource
+                        .filter(dsl::resource_type.eq(crate::db::model::ResourceTypeProvisioned::Instance.to_string()))
+                        .select(VirtualProvisioningResource::as_select())
+                        .get_results_async::<VirtualProvisioningResource>(&conn)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                )
+            }).await.unwrap()
+    }
+
+    async fn no_virtual_provisioning_collection_records_using_instances(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningCollection;
+        use crate::db::schema::virtual_provisioning_collection::dsl;
+
+        datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn.batch_execute_async(
+                    "set disallow_full_table_scans = off;\
+                        set large_full_scan_rows = 1000;",
+                )
+                .await
+                .unwrap();
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_collection
+                        .filter(
+                            dsl::cpus_provisioned
+                                .ne(0)
+                                .or(dsl::ram_provisioned.ne(0)),
+                        )
+                        .select(VirtualProvisioningCollection::as_select())
+                        .get_results_async::<VirtualProvisioningCollection>(
+                            &conn,
+                        )
+                        .await
+                        .unwrap()
+                        .is_empty(),
+                )
+            })
+            .await
+            .unwrap()
+    }
+
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use crate::db::model::Disk;
         use crate::db::schema::disk::dsl;
@@ -1197,6 +1269,15 @@ pub mod test {
         assert!(no_instance_records_exist(datastore).await);
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
+        assert!(
+            no_virtual_provisioning_resource_records_exist(datastore).await
+        );
+        assert!(
+            no_virtual_provisioning_collection_records_using_instances(
+                datastore
+            )
+            .await
+        );
         assert!(disk_is_detached(datastore).await);
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
     }

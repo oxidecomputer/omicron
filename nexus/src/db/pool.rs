@@ -53,6 +53,7 @@ impl Pool {
         Pool { pool }
     }
 
+    #[cfg(test)]
     pub fn new_failfast(db_config: &DbConfig) -> Self {
         let manager =
             ConnectionManager::<DbConnection>::new(&db_config.url.url());

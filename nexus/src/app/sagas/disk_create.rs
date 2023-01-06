@@ -646,7 +646,10 @@ pub(crate) mod test {
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
         context::OpContext, db::datastore::DataStore, external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        OptionalExtension,
+    };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
@@ -750,6 +753,56 @@ pub(crate) mod test {
             .is_none()
     }
 
+    async fn no_virtual_provisioning_resource_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningResource;
+        use crate::db::schema::virtual_provisioning_resource::dsl;
+
+        dsl::virtual_provisioning_resource
+            .select(VirtualProvisioningResource::as_select())
+            .first_async::<VirtualProvisioningResource>(
+                datastore.pool_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn no_virtual_provisioning_collection_records_using_storage(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningCollection;
+        use crate::db::schema::virtual_provisioning_collection::dsl;
+
+        datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn.batch_execute_async(
+                    "set disallow_full_table_scans = off;\
+                        set large_full_scan_rows = 1000;",
+                )
+                .await
+                .unwrap();
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_collection
+                        .filter(dsl::virtual_disk_bytes_provisioned.ne(0))
+                        .select(VirtualProvisioningCollection::as_select())
+                        .get_results_async::<VirtualProvisioningCollection>(
+                            &conn,
+                        )
+                        .await
+                        .unwrap()
+                        .is_empty(),
+                )
+            })
+            .await
+            .unwrap()
+    }
+
     async fn no_region_allocations_exist(
         datastore: &DataStore,
         test: &DiskTest,
@@ -794,6 +847,13 @@ pub(crate) mod test {
 
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
+        assert!(
+            no_virtual_provisioning_resource_records_exist(datastore).await
+        );
+        assert!(
+            no_virtual_provisioning_collection_records_using_storage(datastore)
+                .await
+        );
         assert!(no_region_allocations_exist(datastore, &test).await);
         assert!(no_regions_ensured(&sled_agent, &test).await);
     }
