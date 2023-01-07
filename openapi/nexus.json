@@ -7082,26 +7082,6 @@
         }
       }
     },
-    "/system/updates/refresh": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Refresh update data",
-        "operationId": "updates_refresh",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/system/user": {
       "get": {
         "tags": [
@@ -8523,6 +8503,26 @@
           }
         },
         "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/update/refresh": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Refresh update data",
+        "operationId": "system_update_refresh",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/system/update/updates": {

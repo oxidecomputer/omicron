@@ -132,6 +132,15 @@ impl From<ComponentUpdate> for views::ComponentUpdate {
     }
 }
 
+// TODO: As mentioned in the "open questions" section of the PR description,
+// I've determined this model is insufficient because it does not allow me to
+// represent nodes like PSC or Host below (example tree taken from RFD 334),
+// which are parents of updateable components but which are not themselves
+// directly associated with any update artifacts. Displaying this tree in full
+// seems pretty important for the UI, so I'm going to rethink this model a bit.
+// It's probably not a drastic change. Might be as simple as making the artifact
+// field nullable.
+
 #[derive(
     Queryable,
     Insertable,
@@ -153,6 +162,7 @@ pub struct UpdateableComponent {
     /// ID of the parent component, e.g., the sled a disk belongs to. Value will
     /// be `None` for top-level components whose "parent" is the rack.
     pub parent_id: Option<Uuid>,
+    // TODO: point to the actual update artifact
 }
 
 impl From<UpdateableComponent> for views::UpdateableComponent {

@@ -181,13 +181,13 @@ system_image_view                        /system/images/{image_name}
 system_image_view_by_id                  /system/by-id/images/{id}
 system_update_components_list            /v1/system/update/updates/{id}/components
 system_update_list                       /v1/system/update/updates
+system_update_refresh                    /v1/system/update/refresh
 system_update_start                      /v1/system/update/updates/{id}/start
 system_update_stop                       /v1/system/update/updates/{id}/stop
 system_update_view                       /v1/system/update/updates/{id}
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
 system_version                           /v1/system/update/version
-updates_refresh                          /system/updates/refresh
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH

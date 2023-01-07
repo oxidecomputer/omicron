@@ -276,7 +276,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
-        api.register(updates_refresh)?;
+        api.register(system_update_refresh)?;
         api.register(system_version)?;
         api.register(system_component_version_list)?;
         api.register(system_update_list)?;
@@ -5042,10 +5042,10 @@ async fn sled_view(
 /// Refresh update data
 #[endpoint {
      method = POST,
-     path = "/system/updates/refresh",
+     path = "/v1/system/update/refresh",
      tags = ["system"],
 }]
-async fn updates_refresh(
+async fn system_update_refresh(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();

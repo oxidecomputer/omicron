@@ -1454,7 +1454,7 @@ lazy_static! {
         /* Updates */
 
         VerifyEndpoint {
-            url: "/system/updates/refresh",
+            url: "/v1/system/update/refresh",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Post(
