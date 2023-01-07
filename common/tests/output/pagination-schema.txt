@@ -63,7 +63,7 @@ schema for pagination parameters: scan parameters, scan by id only
 schema for pagination parameters: scan parameters, scan by name or id
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ScanByNameOrId",
+  "title": "ScanByNameOrId_for_Null",
   "description": "Scan parameters for resources that support scanning by name or id",
   "type": "object",
   "properties": {
@@ -196,7 +196,7 @@ schema for pagination parameters: page selector, scan by id only
 schema for pagination parameters: page selector, scan by name or id
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "PageSelector_for_ScanByNameOrId_and_NameOrId",
+  "title": "PageSelector_for_ScanByNameOrId_for_Null_and_NameOrId",
   "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
   "type": "object",
   "required": [
