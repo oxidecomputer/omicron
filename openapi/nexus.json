@@ -790,7 +790,7 @@
           "organizations"
         ],
         "summary": "List organizations",
-        "description": "Use `/v1/organizations` instead",
+        "description": "Use `GET /v1/organizations` instead",
         "operationId": "organization_list",
         "parameters": [
           {
@@ -2841,6 +2841,7 @@
           "instances"
         ],
         "summary": "Fetch an instance's serial console",
+        "description": "Use `GET /v1/instances/{instance}/serial-console` instead",
         "operationId": "instance_serial_console",
         "parameters": [
           {
@@ -2918,7 +2919,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream": {
@@ -7309,6 +7311,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "List instances",
         "operationId": "instance_list_v1",
         "parameters": [
           {
@@ -7378,6 +7381,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Create an instance",
         "operationId": "instance_create_v1",
         "parameters": [
           {
@@ -7431,6 +7435,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Fetch an instance",
         "operationId": "instance_view_v1",
         "parameters": [
           {
@@ -7479,6 +7484,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Delete an instance",
         "operationId": "instance_delete_v1",
         "parameters": [
           {
@@ -7522,6 +7528,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Migrate an instance",
         "operationId": "instance_migrate_v1",
         "parameters": [
           {
@@ -7582,6 +7589,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Reboot an instance",
         "operationId": "instance_reboot_v1",
         "parameters": [
           {
@@ -7632,6 +7640,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Fetch an instance's serial console",
         "operationId": "instance_serial_console_v1",
         "parameters": [
           {
@@ -7715,6 +7724,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Stream an instance's serial console",
         "operationId": "instance_serial_console_stream_v1",
         "parameters": [
           {
@@ -7809,6 +7819,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Stop an instance",
         "operationId": "instance_stop_v1",
         "parameters": [
           {
@@ -7951,6 +7962,7 @@
         "tags": [
           "organizations"
         ],
+        "summary": "Fetch an organization",
         "operationId": "organization_view_v1",
         "parameters": [
           {
@@ -7985,6 +7997,7 @@
         "tags": [
           "organizations"
         ],
+        "summary": "Update an organization",
         "operationId": "organization_update_v1",
         "parameters": [
           {
@@ -8029,6 +8042,7 @@
         "tags": [
           "organizations"
         ],
+        "summary": "Delete an organization",
         "operationId": "organization_delete_v1",
         "parameters": [
           {
@@ -8058,6 +8072,7 @@
         "tags": [
           "organizations"
         ],
+        "summary": "Fetch an organization's IAM policy",
         "operationId": "organization_policy_view_v1",
         "parameters": [
           {
@@ -8092,6 +8107,7 @@
         "tags": [
           "organizations"
         ],
+        "summary": "Update an organization's IAM policy",
         "operationId": "organization_policy_update_v1",
         "parameters": [
           {
@@ -8201,6 +8217,7 @@
         "tags": [
           "projects"
         ],
+        "summary": "Create a project",
         "operationId": "project_create_v1",
         "parameters": [
           {
@@ -8247,6 +8264,7 @@
         "tags": [
           "projects"
         ],
+        "summary": "Fetch a project",
         "operationId": "project_view_v1",
         "parameters": [
           {
