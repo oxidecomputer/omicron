@@ -1986,6 +1986,7 @@
           "instances"
         ],
         "summary": "Create an instance",
+        "description": "Use `POST /v1/instances` instead",
         "operationId": "instance_create",
         "parameters": [
           {
@@ -2034,7 +2035,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}": {
@@ -2043,6 +2045,7 @@
           "instances"
         ],
         "summary": "Fetch an instance",
+        "description": "Use `GET /v1/instances/{instance}` instead",
         "operationId": "instance_view",
         "parameters": [
           {
@@ -2087,7 +2090,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -2131,7 +2135,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks": {
@@ -2400,6 +2405,7 @@
           "instances"
         ],
         "summary": "Migrate an instance",
+        "description": "Use `POST /v1/instances/{instance}/migrate` instead",
         "operationId": "instance_migrate",
         "parameters": [
           {
@@ -2454,7 +2460,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces": {
@@ -2788,6 +2795,7 @@
           "instances"
         ],
         "summary": "Reboot an instance",
+        "description": "Use `POST /v1/instances/{instance}/reboot` instead",
         "operationId": "instance_reboot",
         "parameters": [
           {
@@ -2832,7 +2840,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console": {
@@ -2929,6 +2938,7 @@
           "instances"
         ],
         "summary": "Connect to an instance's serial console",
+        "description": "Use `GET /v1/instances/{instance}/serial-console/stream` instead",
         "operationId": "instance_serial_console_stream",
         "parameters": [
           {
@@ -2966,6 +2976,7 @@
             }
           }
         },
+        "deprecated": true,
         "x-dropshot-websocket": {}
       }
     },
@@ -2975,6 +2986,7 @@
           "instances"
         ],
         "summary": "Boot an instance",
+        "description": "Use `POST /v1/instances/{instance}/start` instead",
         "operationId": "instance_start",
         "parameters": [
           {
@@ -3019,7 +3031,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop": {
@@ -3028,6 +3041,7 @@
           "instances"
         ],
         "summary": "Halt an instance",
+        "description": "Use `POST /v1/instances/{instance}/stop` instead",
         "operationId": "instance_stop",
         "parameters": [
           {
@@ -3072,7 +3086,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/policy": {

@@ -2645,6 +2645,7 @@ async fn instance_create_v1(
 }
 
 /// Create an instance
+/// Use `POST /v1/instances` instead
 // TODO-correctness This is supposed to be async.  Is that right?  We can create
 // the instance immediately -- it's just not booted yet.  Maybe the boot
 // operation is what's a separate operation_id.  What about the response code
@@ -2654,8 +2655,9 @@ async fn instance_create_v1(
 // resource created?
 #[endpoint {
     method = POST,
-     path = "/organizations/{organization_name}/projects/{project_name}/instances",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2723,10 +2725,12 @@ struct InstancePathParam {
 }
 
 /// Fetch an instance
+/// Use `GET /v1/instances/{instance}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2811,6 +2815,7 @@ async fn instance_delete_v1(
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2874,10 +2879,12 @@ async fn instance_migrate_v1(
 
 // TODO should this be in the public API?
 /// Migrate an instance
+/// Use `POST /v1/instances/{instance}/migrate` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_migrate(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2939,10 +2946,12 @@ async fn instance_reboot_v1(
 }
 
 /// Reboot an instance
+/// Use `POST /v1/instances/{instance}/reboot` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2996,10 +3005,12 @@ async fn instance_start_v1(
 }
 
 /// Boot an instance
+/// Use `POST /v1/instances/{instance}/start` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3053,10 +3064,12 @@ async fn instance_stop_v1(
 }
 
 /// Halt an instance
+/// Use `POST /v1/instances/{instance}/stop` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3177,10 +3190,12 @@ async fn instance_serial_console_stream_v1(
 }
 
 /// Connect to an instance's serial console
+/// Use `GET /v1/instances/{instance}/serial-console/stream` instead
 #[channel {
     protocol = WEBSOCKETS,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_serial_console_stream(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
