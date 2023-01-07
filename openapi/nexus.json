@@ -7632,8 +7632,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "202": {
+            "description": "successfully enqueued operation",
             "content": {
               "application/json": {
                 "schema": {
@@ -7811,8 +7811,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "202": {
+            "description": "successfully enqueued operation",
             "content": {
               "application/json": {
                 "schema": {
@@ -7862,8 +7862,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "202": {
+            "description": "successfully enqueued operation",
             "content": {
               "application/json": {
                 "schema": {
