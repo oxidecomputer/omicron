@@ -663,7 +663,7 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List users in a specific Silo
+/// List users in a silo
 #[endpoint {
     method = GET,
     path = "/system/silos/{silo_name}/users/all",
@@ -705,6 +705,7 @@ struct UserPathParam {
     user_id: Uuid,
 }
 
+/// Fetch a user
 #[endpoint {
     method = GET,
     path = "/system/silos/{silo_name}/users/id/{user_id}",
@@ -873,6 +874,7 @@ async fn local_idp_user_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete a user
 #[endpoint {
     method = DELETE,
     path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",

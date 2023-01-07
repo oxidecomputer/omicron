@@ -6720,6 +6720,7 @@
         "tags": [
           "system"
         ],
+        "summary": "Delete a user",
         "operationId": "local_idp_user_delete",
         "parameters": [
           {
@@ -6991,7 +6992,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List users in a specific Silo",
+        "summary": "List users in a silo",
         "operationId": "silo_users_list",
         "parameters": [
           {
@@ -7057,6 +7058,7 @@
         "tags": [
           "system"
         ],
+        "summary": "Fetch a user",
         "operationId": "silo_user_view",
         "parameters": [
           {
