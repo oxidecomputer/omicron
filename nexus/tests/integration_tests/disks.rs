@@ -4,6 +4,8 @@
 
 //! Tests basic disk support in the API
 
+use super::metrics::query_for_metrics_until_they_exist;
+
 use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
@@ -31,7 +33,6 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
-use omicron_common::backoff;
 use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{context::OpContext, external_api::params, Nexus};
@@ -1366,33 +1367,13 @@ async fn create_instance_with_disk(client: &ClientTestContext) {
 const ALL_METRICS: [&'static str; 6] =
     ["activated", "read", "write", "read_bytes", "write_bytes", "flush"];
 
-async fn query_for_metrics_until_they_exist(
-    client: &ClientTestContext,
-    path: &str,
-) -> ResultsPage<Measurement> {
-    backoff::retry_notify(
-        backoff::retry_policy_local(),
-        || async {
-            let measurements: ResultsPage<Measurement> =
-                objects_list_page_authz(client, path).await;
-
-            if measurements.items.is_empty() {
-                return Err(backoff::BackoffError::transient("No metrics yet"));
-            }
-            Ok(measurements)
-        },
-        |_, _| {},
-    )
-    .await
-    .expect("Failed to query for measurements")
-}
-
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Normally, Nexus is not registered as a producer for tests.
     // Turn this bit on so we can also test some metrics from Nexus itself.
     cptestctx.server.register_as_producer().await;
 
+    let oximeter = &cptestctx.oximeter;
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_org_and_project(client).await;
@@ -1412,12 +1393,14 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     //
     // Observe that no metrics exist yet; no "upstairs" should have been
     // instantiated on a sled.
+    oximeter.force_collect().await;
     let measurements: ResultsPage<Measurement> =
         objects_list_page_authz(client, &metric_url("read")).await;
     assert!(measurements.items.is_empty());
 
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
+    oximeter.force_collect().await;
 
     for metric in &ALL_METRICS {
         let measurements =
