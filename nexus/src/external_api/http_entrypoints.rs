@@ -664,7 +664,7 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List users in a specific Silo
+/// List users in a silo
 #[endpoint {
     method = GET,
     path = "/system/silos/{silo_name}/users/all",
@@ -706,6 +706,7 @@ struct UserPathParam {
     user_id: Uuid,
 }
 
+/// Fetch a user
 #[endpoint {
     method = GET,
     path = "/system/silos/{silo_name}/users/id/{user_id}",
@@ -874,6 +875,7 @@ async fn local_idp_user_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete a user
 #[endpoint {
     method = DELETE,
     path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",
@@ -976,7 +978,7 @@ async fn organization_list_v1(
 }
 
 /// List organizations
-/// Use `/v1/organizations` instead
+/// Use `GET /v1/organizations` instead
 #[endpoint {
     method = GET,
     path = "/organizations",
@@ -1066,6 +1068,7 @@ async fn organization_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an organization
 #[endpoint {
     method = GET,
     path = "/v1/organizations/{organization}",
@@ -1161,6 +1164,7 @@ async fn organization_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete an organization
 #[endpoint {
     method = DELETE,
     path = "/v1/organizations/{organization}",
@@ -1213,6 +1217,7 @@ async fn organization_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Update an organization
 #[endpoint {
     method = PUT,
     path = "/v1/organizations/{organization}",
@@ -1284,6 +1289,7 @@ async fn organization_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an organization's IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/organizations/{organization}/policy",
@@ -1343,6 +1349,7 @@ async fn organization_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Update an organization's IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/organizations/{organization}/policy",
@@ -1540,6 +1547,7 @@ async fn project_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create a project
 #[endpoint {
     method = POST,
     path = "/v1/projects",
@@ -1606,6 +1614,7 @@ async fn project_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a project
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}",
@@ -2529,6 +2538,7 @@ async fn disk_metrics_list(
 
 // Instances
 
+/// List instances
 #[endpoint {
     method = GET,
     path = "/v1/instances",
@@ -2607,6 +2617,7 @@ async fn instance_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create an instance
 #[endpoint {
     method = POST,
     path = "/v1/instances",
@@ -2637,6 +2648,7 @@ async fn instance_create_v1(
 }
 
 /// Create an instance
+/// Use `POST /v1/instances` instead
 // TODO-correctness This is supposed to be async.  Is that right?  We can create
 // the instance immediately -- it's just not booted yet.  Maybe the boot
 // operation is what's a separate operation_id.  What about the response code
@@ -2646,8 +2658,9 @@ async fn instance_create_v1(
 // resource created?
 #[endpoint {
     method = POST,
-     path = "/organizations/{organization_name}/projects/{project_name}/instances",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2677,6 +2690,7 @@ async fn instance_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an instance
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}",
@@ -2714,10 +2728,12 @@ struct InstancePathParam {
 }
 
 /// Fetch an instance
+/// Use `GET /v1/instances/{instance}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2768,6 +2784,7 @@ async fn instance_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete an instance
 #[endpoint {
     method = DELETE,
     path = "/v1/instances/{instance}",
@@ -2801,6 +2818,7 @@ async fn instance_delete_v1(
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2825,6 +2843,7 @@ async fn instance_delete(
 }
 
 // TODO should this be in the public API?
+/// Migrate an instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/migrate",
@@ -2863,10 +2882,12 @@ async fn instance_migrate_v1(
 
 // TODO should this be in the public API?
 /// Migrate an instance
+/// Use `POST /v1/instances/{instance}/migrate` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_migrate(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2898,6 +2919,7 @@ async fn instance_migrate(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Reboot an instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/reboot",
@@ -2927,10 +2949,12 @@ async fn instance_reboot_v1(
 }
 
 /// Reboot an instance
+/// Use `POST /v1/instances/{instance}/reboot` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2984,10 +3008,12 @@ async fn instance_start_v1(
 }
 
 /// Boot an instance
+/// Use `POST /v1/instances/{instance}/start` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3011,6 +3037,7 @@ async fn instance_start(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Stop an instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/stop",
@@ -3040,10 +3067,12 @@ async fn instance_stop_v1(
 }
 
 /// Halt an instance
+/// Use `POST /v1/instances/{instance}/stop` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3067,6 +3096,7 @@ async fn instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an instance's serial console
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/serial-console",
@@ -3101,10 +3131,12 @@ async fn instance_serial_console_v1(
 }
 
 /// Fetch an instance's serial console
+/// Use `GET /v1/instances/{instance}/serial-console` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_serial_console(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3134,6 +3166,7 @@ async fn instance_serial_console(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Stream an instance's serial console
 #[channel {
     protocol = WEBSOCKETS,
     path = "/v1/instances/{instance}/serial-console/stream",
@@ -3160,10 +3193,12 @@ async fn instance_serial_console_stream_v1(
 }
 
 /// Connect to an instance's serial console
+/// Use `GET /v1/instances/{instance}/serial-console/stream` instead
 #[channel {
     protocol = WEBSOCKETS,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_serial_console_stream(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

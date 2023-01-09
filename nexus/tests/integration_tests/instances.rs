@@ -14,6 +14,9 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_ip_pool;
+use nexus_test_utils::resource_helpers::create_local_user;
+use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
@@ -29,10 +32,12 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
+use omicron_nexus::authz::SiloRole;
 use omicron_nexus::context::OpContext;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
+use omicron_nexus::external_api::shared::SiloIdentityMode;
 use omicron_nexus::external_api::views;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
@@ -3045,6 +3050,98 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         range, since the first is reserved for the default pool, not \
         the requested pool."
     );
+}
+
+#[nexus_test]
+async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create a silo with a Collaborator User
+    let silo =
+        create_silo(&client, "authz", true, SiloIdentityMode::LocalOnly).await;
+    let user_id = create_local_user(
+        client,
+        &silo,
+        &"unpriv".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
+    grant_iam(
+        client,
+        "/system/silos/authz",
+        SiloRole::Collaborator,
+        user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Populate IP Pool
+    populate_ip_pool(&client, "default", None).await;
+
+    // Create test organization and projects.
+    NexusRequest::objects_post(
+        client,
+        "/organizations",
+        &params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: ORGANIZATION_NAME.parse().unwrap(),
+                description: String::new(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("failed to create Organization")
+    .parsed_body::<views::Organization>()
+    .expect("failed to parse new Organization");
+    NexusRequest::objects_post(
+        client,
+        &format!("/organizations/{ORGANIZATION_NAME}/projects"),
+        &params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: PROJECT_NAME.parse().unwrap(),
+                description: String::new(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("failed to create Project")
+    .parsed_body::<views::Project>()
+    .expect("failed to parse new Project");
+
+    // Create an instance using the authorization granted to the collaborator
+    // Silo User.
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("ip-pool-test")).unwrap(),
+            description: String::from("instance to test IP Pool authz"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("inst"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: Some(Name::try_from(String::from("default")).unwrap()),
+        }],
+        disks: vec![],
+        start: true,
+    };
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    NexusRequest::objects_post(client, &url_instances, &instance_params)
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute()
+        .await
+        .expect("Failed to create instance")
+        .parsed_body::<Instance>()
+        .expect("Failed to parse instance");
 }
 
 async fn instance_get(
