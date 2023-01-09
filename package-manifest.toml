@@ -70,7 +70,7 @@ source.rust.binary_names = ["mgs"]
 source.rust.release = true
 source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
 output.type = "zone"
-output.intermediate_only = true
+#output.intermediate_only = true
 
 # Packages not built within Omicron, but which must be imported.
 
@@ -160,12 +160,12 @@ output.intermediate_only = true
 #
 # $ cargo run --release -p omicron-package -- -t switch_variant=asic package
 # $ pfexec ./target/release/omicron-package -t switch_variant=asic install
-[package.switch-asic]
-service_name = "switch"
-only_for_targets.switch_variant = "asic"
-source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
-output.type = "zone"
+#[package.switch-asic]
+#service_name = "switch"
+#only_for_targets.switch_variant = "asic"
+#source.type = "composite"
+#source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
+#output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
@@ -173,9 +173,9 @@ output.type = "zone"
 # - Run the following:
 # $ cargo run --release -p omicron-package -- -t switch_variant=stub package
 # $ pfexec ./target/release/omicron-package -t switch_variant=stub install
-[package.switch-stub]
-service_name = "switch"
-only_for_targets.switch_variant = "stub"
-source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz" ]
-output.type = "zone"
+#[package.switch-stub]
+#service_name = "switch"
+#only_for_targets.switch_variant = "stub"
+#source.type = "composite"
+#source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz" ]
+#output.type = "zone"

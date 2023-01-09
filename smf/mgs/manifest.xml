@@ -12,9 +12,18 @@
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
+  <!--
+    Most omicron services run their binary under `ctrun` because they spawn
+    child processes that should be killed if the service is killed. However,
+    this interferes with sending SIGUSR1 as the refresh method (it's sent to
+    ctrun which then terminates), and MGS spawns _no_ child processes. We
+    therefore omit `ctrun` to allow the simple `:kill -USR1` refresh method
+    below.
+  -->
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/mgs/bin/mgs run /var/svc/manifest/site/mgs/config.toml --address %{config/address} --id %{config/id} &amp;'
+    exec='/opt/oxide/mgs/bin/mgs run /var/svc/manifest/site/mgs/config.toml --address %{config/address} --id %{config/id} &amp;'
     timeout_seconds='0' />
+  <exec_method type='method' name='refresh' exec=':kill -USR1' timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>

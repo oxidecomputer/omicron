@@ -1147,6 +1147,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-smf"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=07d86d85d54e4fe277b7f963c1c0d9fe475e1467#07d86d85d54e4fe277b7f963c1c0d9fe475e1467"
+dependencies = [
+ "libc 0.2.139 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num-derive",
+ "num-traits",
+ "thiserror",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3446,6 +3457,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-derive"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3604,6 +3626,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap 4.1.1",
+ "crucible-smf",
  "dropshot",
  "expectorate",
  "futures",
@@ -3620,6 +3643,8 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "signal-hook",
+ "signal-hook-tokio",
  "slog",
  "slog-dtrace",
  "sp-sim",
