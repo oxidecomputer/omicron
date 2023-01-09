@@ -517,7 +517,7 @@ mod test {
                     log: ConfigLogging::File {
                         level: ConfigLoggingLevel::Debug,
                         if_exists: ConfigLoggingIfExists::Fail,
-                        path: "/nonexistent/path".to_string()
+                        path: "/nonexistent/path".into()
                     },
                     timeseries_db: TimeseriesDbConfig {
                         address: Some("[::1]:8123".parse().unwrap())
