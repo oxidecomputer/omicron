@@ -16,7 +16,7 @@ use crate::{context::ServerContext, store::ArtifactId};
 
 type ArtifactServerApiDesc = ApiDescription<ServerContext>;
 
-/// Return a description of the wicketd api for use in generating an OpenAPI spec
+/// Return a description of the artifact server api for use in generating an OpenAPI spec
 pub fn api() -> ArtifactServerApiDesc {
     fn register_endpoints(
         api: &mut ArtifactServerApiDesc,

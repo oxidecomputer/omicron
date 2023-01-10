@@ -64,7 +64,7 @@ fn copy_dir(
 pub fn test_setup_log(test_name: &str) -> LogContext {
     let log_config = ConfigLogging::File {
         level: ConfigLoggingLevel::Trace,
-        path: String::from("UNUSED"),
+        path: "UNUSED".into(),
         if_exists: ConfigLoggingIfExists::Fail,
     };
 
