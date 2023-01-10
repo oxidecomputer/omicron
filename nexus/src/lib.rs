@@ -251,7 +251,7 @@ impl nexus_test_interface::NexusServer for Server {
     }
 
     async fn close(mut self) {
-        self.apictx.nexus.close_servers().await.unwrap();
+        self.wait_for_finish().await.unwrap()
     }
 }
 
