@@ -9,6 +9,8 @@ members = [
     "gateway-cli",
     "gateway-client",
     "installinator",
+    "installinator-artifactd",
+    "installinator-artifact-client",
     "internal-dns",
     "internal-dns-client",
     "nexus",
@@ -48,6 +50,8 @@ default-members = [
     "gateway-cli",
     "gateway-client",
     "installinator",
+    "installinator-artifactd",
+    "installinator-artifact-client",
     "internal-dns",
     "internal-dns-client",
     "nexus",
@@ -124,6 +128,8 @@ http = "0.2.7"
 httptest = "0.15.4"
 hyper = "0.14"
 indicatif = { version = "0.17.2", features = ["rayon"] }
+installinator-artifactd = { path = "installinator-artifactd" }
+installinator-artifact-client = { path = "installinator-artifact-client" }
 internal-dns = { path = "internal-dns" }
 internal-dns-client = { path = "internal-dns-client" }
 ipnetwork = "0.20"

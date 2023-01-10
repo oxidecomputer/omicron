@@ -2,6 +2,7 @@
 name = "installinator"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
@@ -12,6 +13,7 @@ clap.workspace = true
 ddm-admin-client.workspace = true
 display-error-chain.workspace = true
 futures.workspace = true
+installinator-artifact-client.workspace = true
 itertools.workspace = true
 once_cell.workspace = true
 progenitor-client.workspace = true
@@ -22,9 +24,8 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
-wicketd-client.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
