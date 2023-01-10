@@ -30,7 +30,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: &Logger,
-    ) -> Result<Server, String> {
+    ) -> Result<(Server, NexusTypes::RackInitializationRequest), String> {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
@@ -93,6 +93,7 @@ impl Server {
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
 
+        let mut datasets = vec![];
         // Create all the Zpools requested by the config, and allocate a single
         // Crucible dataset for each. This emulates the setup we expect to have
         // on the physical rack.
@@ -100,7 +101,17 @@ impl Server {
             let zpool_id = uuid::Uuid::new_v4();
             sled_agent.create_zpool(zpool_id, zpool.size).await;
             let dataset_id = uuid::Uuid::new_v4();
-            sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
+            let address =
+                sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
+
+            datasets.push(NexusTypes::DatasetCreateRequest {
+                zpool_id,
+                dataset_id,
+                request: NexusTypes::DatasetPutRequest {
+                    address: address.to_string(),
+                    kind: NexusTypes::DatasetKind::Crucible,
+                },
+            });
 
             // Whenever Nexus tries to allocate a region, it should complete
             // immediately. What efficiency!
@@ -111,7 +122,12 @@ impl Server {
                 .await;
         }
 
-        Ok(Server { sled_agent, http_server })
+        let rack_init_request = NexusTypes::RackInitializationRequest {
+            services: vec![],
+            datasets,
+        };
+
+        Ok((Server { sled_agent, http_server }, rack_init_request))
     }
 
     /// Wait for the given server to shut down
@@ -124,15 +140,16 @@ impl Server {
     }
 }
 
-async fn handoff_to_nexus(log: &Logger, config: &Config) -> Result<(), String> {
+async fn handoff_to_nexus(
+    log: &Logger,
+    config: &Config,
+    request: &NexusTypes::RackInitializationRequest,
+) -> Result<(), String> {
     let nexus_client = NexusClient::new(
         &format!("http://{}", config.nexus_address),
         log.new(o!("component" => "NexusClient")),
     );
-    let services = vec![];
-    let datasets = vec![];
     let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
-    let request = NexusTypes::RackInitializationRequest { services, datasets };
 
     let notify_nexus = || async {
         nexus_client
@@ -170,10 +187,10 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     }
 
-    let server = Server::start(config, &log).await?;
+    let (server, rack_init_request) = Server::start(config, &log).await?;
     info!(log, "sled agent started successfully");
 
-    handoff_to_nexus(&log, &config).await?;
+    handoff_to_nexus(&log, &config, &rack_init_request).await?;
     info!(log, "Handoff to Nexus is complete");
 
     server.wait_for_finish().await
