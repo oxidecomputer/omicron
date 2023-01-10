@@ -356,9 +356,6 @@ impl PeersImpl for HttpPeers {
 #[derive(Debug)]
 struct ArtifactClient {
     log: slog::Logger,
-    // TODO: this currently uses a wicketd client. However, because the standard wicketd server is
-    // not going to listen on the bootstrap network, we'll want to instead set up a separate
-    // artifact server. This artifact server will be shared by both wicketd and sled-agent.
     client: installinator_artifact_client::Client,
 }
 
