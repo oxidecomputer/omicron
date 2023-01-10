@@ -9,11 +9,11 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::nexus::NexusClient;
 use crucible_agent_client::types::State as RegionState;
-
+use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
-use slog::{Drain, Logger};
+use slog::{info, Drain, Logger};
 use std::sync::Arc;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -124,6 +124,35 @@ impl Server {
     }
 }
 
+async fn handoff_to_nexus(log: &Logger, config: &Config) -> Result<(), String> {
+    let nexus_client = NexusClient::new(
+        &format!("http://{}", config.nexus_address),
+        log.new(o!("component" => "NexusClient")),
+    );
+    let services = vec![];
+    let datasets = vec![];
+    let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
+    let request = NexusTypes::RackInitializationRequest { services, datasets };
+
+    let notify_nexus = || async {
+        nexus_client
+            .rack_initialization_complete(&rack_id, &request)
+            .await
+            .map_err(BackoffError::transient)
+    };
+    let log_failure = |err, _| {
+        info!(log, "Failed to handoff to nexus: {err}");
+    };
+    retry_notify(
+        retry_policy_internal_service_aggressive(),
+        notify_nexus,
+        log_failure,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Run an instance of the `Server`
 pub async fn run_server(config: &Config) -> Result<(), String> {
     let (drain, registration) = slog_dtrace::with_drain(
@@ -143,5 +172,9 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
 
     let server = Server::start(config, &log).await?;
     info!(log, "sled agent started successfully");
+
+    handoff_to_nexus(&log, &config).await?;
+    info!(log, "Handoff to Nexus is complete");
+
     server.wait_for_finish().await
 }
