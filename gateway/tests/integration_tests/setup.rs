@@ -153,9 +153,20 @@ pub async fn test_setup_with_config(
         || {
             let comms = &server.apictx.sp_comms;
             let result = if comms.is_discovery_complete()
-                && comms.local_ignition_controller_address_known()
-                && all_sp_ids.iter().all(|&id| comms.address_known(id))
-            {
+                && all_sp_ids.iter().all(|&id| {
+                    // All ids are valid; unwrap finding the handle to each one.
+                    let sp = comms.sp_by_id(id).unwrap();
+
+                    // Have we finished starting up (e.g., binding to our
+                    // listening port)? If not, return false and keep waiting.
+                    let sp_addr = match sp.sp_addr_watch() {
+                        Ok(addr) => addr,
+                        Err(_) => return false,
+                    };
+
+                    // Have we found this SP?
+                    sp_addr.borrow().is_some()
+                }) {
                 Ok(())
             } else {
                 Err(CondCheckError::NotYet)
