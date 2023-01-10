@@ -290,8 +290,7 @@ impl Nexus {
         let _ = self.close_servers().await;
 
         // Insert the new servers.
-        *self.external_servers.lock().await =
-            ExternalServers { ..external_servers };
+        *self.external_servers.lock().await = external_servers;
         self.internal_server.lock().await.replace(internal_server);
     }
 
