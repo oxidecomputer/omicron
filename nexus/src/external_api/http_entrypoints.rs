@@ -472,7 +472,7 @@ async fn policy_update(
 }]
 async fn silo_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByNameOrId<()>>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Silo>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -937,7 +937,7 @@ async fn local_idp_user_set_password(
 }]
 async fn organization_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByNameOrId<()>>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -980,7 +980,7 @@ async fn organization_list_v1(
 }]
 async fn organization_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByNameOrId<()>>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1479,7 +1479,7 @@ async fn project_list_v1(
 }]
 async fn project_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByNameOrId<()>>,
+    query_params: Query<PaginatedByNameOrId>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
@@ -1950,7 +1950,7 @@ pub struct IpPoolPathParam {
 }]
 async fn ip_pool_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByNameOrId<()>>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

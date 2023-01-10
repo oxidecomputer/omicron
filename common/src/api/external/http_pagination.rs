@@ -296,7 +296,7 @@ impl ScanParams for ScanById {
 // We include this now primarily to exercise the interface for doing so.
 
 /// Query parameters for pagination by name or id
-pub type PaginatedByNameOrId<Selector> = PaginationParams<
+pub type PaginatedByNameOrId<Selector = ()> = PaginationParams<
     ScanByNameOrId<Selector>,
     PageSelectorByNameOrId<Selector>,
 >;
@@ -733,7 +733,7 @@ mod test {
     #[test]
     fn test_scan_by_nameid_generic() {
         // Test from_query(): error case.
-        let error = serde_urlencoded::from_str::<PaginatedByNameOrId<()>>(
+        let error = serde_urlencoded::from_str::<PaginatedByNameOrId>(
             "sort_by=id_descending",
         )
         .unwrap_err();
