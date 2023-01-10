@@ -11,7 +11,7 @@ use nexus_types::identity::Resource;
 use uuid::Uuid;
 
 /// Representation of x509 certificates used by services.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Resource)]
+#[derive(Queryable, Insertable, Clone, Selectable, Resource)]
 #[diesel(table_name = certificate)]
 pub struct Certificate {
     #[diesel(embed)]
@@ -21,6 +21,17 @@ pub struct Certificate {
 
     pub cert: Vec<u8>,
     pub key: Vec<u8>,
+}
+
+impl std::fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Certificate")
+            .field("identity", &self.identity)
+            .field("service", &self.service)
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Certificate {
