@@ -176,26 +176,10 @@ impl super::Nexus {
                 cfg.bind_address.set_port(external_servers.https_port());
                 cfg.tls = Some(tls_config);
 
-                let context = if let Some(context) = external_servers
-                    .https
-                    .as_ref()
-                    .map(|server| server.app_private())
-                {
-                    // If an HTTPS server is already running, use that server context.
-                    context.clone()
-                } else if let Some(context) = external_servers
-                    .http
-                    .as_ref()
-                    .map(|server| server.app_private())
-                {
-                    // If an HTTP server is already running, use that server context.
-                    context.clone()
-                } else {
-                    // If we don't have a context object, we can't initialize servers.
-                    return Err(Error::internal_error(
-                        "No HTTP servers running",
-                    ));
-                };
+                let context =
+                    external_servers.get_context().ok_or_else(|| {
+                        Error::internal_error("No server context available")
+                    })?;
 
                 let log =
                     context.log.new(o!("component" => "dropshot_external"));

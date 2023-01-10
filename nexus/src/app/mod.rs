@@ -80,6 +80,23 @@ impl ExternalServers {
     pub fn https_port(&self) -> u16 {
         self.https_port
     }
+
+    /// Returns a context object, if one exists.
+    pub fn get_context(&self) -> Option<Arc<crate::ServerContext>> {
+        if let Some(context) =
+            self.https.as_ref().map(|server| server.app_private())
+        {
+            // If an HTTPS server is already running, use that server context.
+            Some(context.clone())
+        } else if let Some(context) =
+            self.http.as_ref().map(|server| server.app_private())
+        {
+            // If an HTTP server is already running, use that server context.
+            Some(context.clone())
+        } else {
+            None
+        }
+    }
 }
 
 /// Manages an Oxide fleet -- the heart of the control plane
