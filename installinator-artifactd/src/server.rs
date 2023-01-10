@@ -36,6 +36,8 @@ impl ArtifactServer {
     }
 
     /// Starts the artifact server.
+    ///
+    /// The future returned by this method runs forever.
     pub async fn start(self) -> Result<()> {
         let context = ServerContext { artifact_store: self.store };
 

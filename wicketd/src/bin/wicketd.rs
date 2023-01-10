@@ -21,9 +21,11 @@ enum Args {
         #[clap(name = "CONFIG_FILE_PATH", action)]
         config_file_path: PathBuf,
 
+        /// The address for the technician port
         #[clap(short, long, action)]
         address: SocketAddrV6,
 
+        /// The address on the bootstrap network to serve artifacts at
         #[clap(long, action)]
         artifact_address: SocketAddrV6,
     },

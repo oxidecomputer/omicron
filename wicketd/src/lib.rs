@@ -77,7 +77,6 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     )
     .map_err(|err| format!("initializing http server: {}", err))?
     .start();
-    tokio::pin!(wicketd_server_fut);
 
     let artifact_server_fut = installinator_artifactd::ArtifactServer::new(
         store,
@@ -85,23 +84,22 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         &log,
     )
     .start();
-    tokio::pin!(artifact_server_fut);
 
-    let mut wicketd_server_done = false;
-    let mut artifact_server_done = false;
-
-    loop {
-        tokio::select! {
-            res = &mut wicketd_server_fut, if !wicketd_server_done => {
-                wicketd_server_done = true;
-                res.map_err(|err| format!("running wicketd server: {}", err))?;
+    // Both servers should keep running indefinitely. Bail if either server exits, whether as Ok or
+    // as Err.
+    tokio::select! {
+        res = wicketd_server_fut => {
+            match res {
+                Ok(()) => Err("wicketd server exited unexpectedly".to_owned()),
+                Err(err) => Err(format!("running wicketd server: {err}")),
             }
-            res = &mut artifact_server_fut, if !artifact_server_done => {
-                artifact_server_done = true;
-                res.map_err(|err| format!("running artifact server: {:?}", err))?;
-            }
-            else => {
-                break Ok(())
+        }
+        res = artifact_server_fut => {
+            match res {
+                Ok(()) => Err("artifact server exited unexpectedly".to_owned()),
+                // The artifact server returns an anyhow::Error, which has a `Debug` impl that
+                // prints out the chain of errors.
+                Err(err) => Err(format!("running artifact server: {err:?}")),
             }
         }
     }
