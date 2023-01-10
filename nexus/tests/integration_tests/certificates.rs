@@ -315,10 +315,8 @@ async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let clients = &cptestctx.external_clients().await;
-    assert_eq!(clients.len(), 2, "Should have a client for HTTP and HTTPS");
-    let http_client = &clients[0];
-    let https_client = &clients[1];
+    let http_client = &cptestctx.external_http_client().await;
+    let https_client = &cptestctx.external_https_client().await;
 
     let mut root_certs = rustls::RootCertStore::empty();
     root_certs.add(&chain.root_cert).expect("Failed to add certificate");
@@ -351,7 +349,7 @@ async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
 
     // (Test config) Refresh the clients -- the port for the HTTPS interface
     // probably changed.
-    let https_client = &cptestctx.external_clients().await[1];
+    let https_client = &cptestctx.external_https_client().await;
 
     // Requests through the old certificate chain fail -- it was removed.
     chain

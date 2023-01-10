@@ -309,16 +309,18 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn get_external_servers(&self) -> Vec<std::net::SocketAddr> {
-        let mut addrs = vec![];
+    pub async fn get_http_external_server(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
         let external_servers = self.external_servers.lock().await;
-        if let Some(server) = external_servers.http.as_ref() {
-            addrs.push(server.local_addr());
-        }
-        if let Some(server) = external_servers.https.as_ref() {
-            addrs.push(server.local_addr());
-        }
-        addrs
+        external_servers.http.as_ref().map(|server| server.local_addr())
+    }
+
+    pub async fn get_https_external_server(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        let external_servers = self.external_servers.lock().await;
+        external_servers.https.as_ref().map(|server| server.local_addr())
     }
 
     pub async fn get_internal_server(&self) -> Option<std::net::SocketAddr> {

@@ -220,8 +220,12 @@ impl nexus_test_interface::NexusServer for Server {
         Server::start(internal_server).await.unwrap()
     }
 
-    async fn get_http_servers_external(&self) -> Vec<SocketAddr> {
-        self.apictx.nexus.get_external_servers().await
+    async fn get_http_server_external(&self) -> Option<SocketAddr> {
+        self.apictx.nexus.get_http_external_server().await
+    }
+
+    async fn get_https_server_external(&self) -> Option<SocketAddr> {
+        self.apictx.nexus.get_https_external_server().await
     }
 
     async fn get_http_server_internal(&self) -> SocketAddr {

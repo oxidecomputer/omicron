@@ -56,20 +56,34 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.logctx.cleanup_successful();
     }
 
-    pub async fn external_clients(&self) -> Vec<ClientTestContext> {
+    pub async fn external_http_client(&self) -> ClientTestContext {
         self.server
-            .get_http_servers_external()
+            .get_http_server_external()
             .await
-            .iter()
             .map(|addr| {
                 ClientTestContext::new(
-                    *addr,
+                    addr,
                     self.logctx
                         .log
                         .new(o!("component" => "external client test context")),
                 )
             })
-            .collect()
+            .unwrap()
+    }
+
+    pub async fn external_https_client(&self) -> ClientTestContext {
+        self.server
+            .get_https_server_external()
+            .await
+            .map(|addr| {
+                ClientTestContext::new(
+                    addr,
+                    self.logctx
+                        .log
+                        .new(o!("component" => "external client test context")),
+                )
+            })
+            .unwrap()
     }
 }
 
@@ -130,7 +144,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
     let server = N::start_and_populate(&config, &logctx.log).await;
 
-    let external_server_addr = server.get_http_servers_external().await[0];
+    let external_server_addr = server.get_http_server_external().await.unwrap();
     let internal_server_addr = server.get_http_server_internal().await;
 
     let testctx_external = ClientTestContext::new(

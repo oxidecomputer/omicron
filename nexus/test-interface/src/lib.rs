@@ -41,7 +41,8 @@ use uuid::Uuid;
 pub trait NexusServer {
     async fn start_and_populate(config: &Config, log: &Logger) -> Self;
 
-    async fn get_http_servers_external(&self) -> Vec<SocketAddr>;
+    async fn get_http_server_external(&self) -> Option<SocketAddr>;
+    async fn get_https_server_external(&self) -> Option<SocketAddr>;
     async fn get_http_server_internal(&self) -> SocketAddr;
 
     // Previously, as a dataset was created (within the sled agent),
