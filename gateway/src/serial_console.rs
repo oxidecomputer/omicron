@@ -4,9 +4,9 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use crate::communicator::Communicator;
 use crate::error::Error;
 use crate::error::SpCommsError;
+use crate::management_switch::ManagementSwitch;
 use crate::management_switch::SpIdentifier;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
@@ -36,12 +36,14 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 pub(crate) async fn attach(
-    sp_comms: &Communicator,
+    mgmt_switch: &ManagementSwitch,
     sp: SpIdentifier,
     component: SpComponent,
     request: &mut http::Request<Body>,
     log: Logger,
 ) -> Result<http::Response<Body>, Error> {
+    let sp = mgmt_switch.sp(sp)?;
+
     if !request
         .headers()
         .get(header::CONNECTION)
@@ -87,7 +89,10 @@ pub(crate) async fn attach(
         .map(|key| handshake::derive_accept_key(key))
         .ok_or(Error::BadWebsocketConnection("missing websocket key"))?;
 
-    let console = sp_comms.serial_console_attach(sp, component).await?;
+    let console = sp
+        .serial_console_attach(component)
+        .await
+        .map_err(SpCommsError::from)?;
     let upgrade_fut = upgrade::on(request);
     tokio::spawn(async move {
         let upgraded = match upgrade_fut.await {
