@@ -393,7 +393,7 @@ async fn sp_list(
             }
             // Result from our ignition controller.
             Either::Right(ignition_state_result) => {
-                // If `buulk_ignition_state` succeeded, it returns an iterator
+                // If `bulk_ignition_state` succeeded, it returns an iterator
                 // of `(id, state)` pairs; convert that into a HashMap for quick
                 // lookups below.
                 bulk_ignition_state = Some(
