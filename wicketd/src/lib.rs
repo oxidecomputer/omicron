@@ -80,11 +80,6 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     )
     .start();
 
-    installinator_artifactd::ArtifactServer::new(args.artifact_address, &log)
-        .start()
-        .await
-        .map_err(|err| format!("initializing artifact server: {:?}", err))?;
-
     // Both servers should keep running indefinitely. Bail if either server exits, whether as Ok or
     // as Err.
     tokio::select! {
