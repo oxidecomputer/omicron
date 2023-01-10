@@ -34,13 +34,21 @@ impl WicketdArtifactStore {
         Self { log, artifacts: Default::default() }
     }
 
+    pub(crate) fn add_artifact(&self, id: ArtifactId, buf: BufList) {
+        slog::debug!(self.log, "adding artifact"; "id" => ?id, "size" => buf.num_bytes());
+        self.insert(id, buf);
+    }
+
+    // ---
+    // Helper methods
+    // ---
+
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
         self.artifacts.lock().unwrap().get(id).cloned()
     }
 
-    #[allow(dead_code)]
     fn insert(&self, id: ArtifactId, buf: BufList) {
         self.artifacts.lock().unwrap().insert(id, buf);
     }

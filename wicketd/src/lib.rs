@@ -57,7 +57,9 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
 
     let dropshot_config = ConfigDropshot {
         bind_address: SocketAddr::V6(args.address),
-        request_body_max_bytes: 8 << 20, // 8 MiB
+        // The maximum request size is set to 4 GB -- artifacts can be large and there's currently
+        // no way to set a larger request size for some endpoints.
+        request_body_max_bytes: 4 << 30,
         ..Default::default()
     };
 
@@ -72,7 +74,7 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     let wicketd_server_fut = dropshot::HttpServerStarter::new(
         &dropshot_config,
         http_entrypoints::api(),
-        ServerContext { mgs_handle },
+        ServerContext { mgs_handle, artifact_store: store.clone() },
         &log.new(o!("component" => "dropshot (wicketd)")),
     )
     .map_err(|err| format!("initializing http server: {}", err))?
