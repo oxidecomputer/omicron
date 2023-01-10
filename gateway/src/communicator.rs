@@ -4,14 +4,14 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use std::collections::HashMap;
+
 use crate::error::ConfigError;
 use crate::error::SpCommsError;
 use crate::management_switch::ManagementSwitch;
 use crate::management_switch::SpIdentifier;
 use crate::management_switch::SwitchConfig;
 use crate::management_switch::SwitchPort;
-use crate::timeout::Elapsed;
-use crate::timeout::Timeout;
 use futures::stream::FuturesUnordered;
 use futures::Future;
 use futures::Stream;
@@ -23,6 +23,7 @@ use gateway_messages::SpState;
 use gateway_messages::UpdateStatus;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::HostPhase2Provider;
+use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::SpInventory;
 use slog::info;
 use slog::o;
@@ -91,24 +92,12 @@ impl Communicator {
         self.switch.switch_port_to_id(port)
     }
 
-    /// Returns true if we've discovered the IP address of our local ignition
-    /// controller.
-    ///
-    /// This method exists to be polled during test setup (to wait for discovery
-    /// to happen); it should not be called outside tests.
-    pub fn local_ignition_controller_address_known(&self) -> bool {
-        self.switch.ignition_controller().is_some()
-    }
-
-    /// Returns true if we've discovered the IP address of the specified SP.
-    ///
-    /// This method exists to be polled during test setup (to wait for discovery
-    /// to happen); it should not be called outside tests. In particular, it
-    /// panics instead of running an error if `sp` describes an SP that isn't
-    /// known to this communicator or if discovery isn't complete yet.
-    pub fn address_known(&self, sp: SpIdentifier) -> bool {
-        let port = self.switch.switch_port(sp).unwrap().unwrap();
-        self.switch.sp(port).is_some()
+    pub fn sp_by_id(
+        &self,
+        id: SpIdentifier,
+    ) -> Result<&SingleSp, SpCommsError> {
+        let port = self.id_to_port(id)?;
+        Ok(self.switch.sp(port))
     }
 
     /// Ask the local ignition controller for the ignition state of a given SP.
@@ -116,10 +105,7 @@ impl Communicator {
         &self,
         sp: SpIdentifier,
     ) -> Result<IgnitionState, SpCommsError> {
-        let controller = self
-            .switch
-            .ignition_controller()
-            .ok_or(SpCommsError::LocalIgnitionControllerAddressUnknown)?;
+        let controller = self.switch.ignition_controller();
         let port = self.id_to_port(sp)?;
         Ok(controller.ignition_state(port.as_ignition_target()).await?)
     }
@@ -131,11 +117,8 @@ impl Communicator {
     /// enough? Should we try to query the other sidecar?
     pub async fn get_ignition_state_all(
         &self,
-    ) -> Result<Vec<(SpIdentifier, IgnitionState)>, SpCommsError> {
-        let controller = self
-            .switch
-            .ignition_controller()
-            .ok_or(SpCommsError::LocalIgnitionControllerAddressUnknown)?;
+    ) -> Result<HashMap<SpIdentifier, IgnitionState>, SpCommsError> {
+        let controller = self.switch.ignition_controller();
         let bulk_state = controller.bulk_ignition_state().await?;
 
         // map ignition target indices back to `SpIdentifier`s for our caller
@@ -170,10 +153,7 @@ impl Communicator {
         target_sp: SpIdentifier,
         command: IgnitionCommand,
     ) -> Result<(), SpCommsError> {
-        let controller = self
-            .switch
-            .ignition_controller()
-            .ok_or(SpCommsError::LocalIgnitionControllerAddressUnknown)?;
+        let controller = self.switch.ignition_controller();
         let target = self.id_to_port(target_sp)?.as_ignition_target();
         Ok(controller.ignition_command(target, command).await?)
     }
@@ -196,8 +176,7 @@ impl Communicator {
         component: SpComponent,
     ) -> Result<AttachedSerialConsole, SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.serial_console_attach(component).await?)
     }
 
@@ -208,8 +187,7 @@ impl Communicator {
         sp: SpIdentifier,
     ) -> Result<(), SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         sp.serial_console_detach().await?;
         Ok(())
     }
@@ -220,8 +198,7 @@ impl Communicator {
         sp: SpIdentifier,
     ) -> Result<SpState, SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.state().await?)
     }
 
@@ -231,8 +208,7 @@ impl Communicator {
         sp: SpIdentifier,
     ) -> Result<SpInventory, SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.inventory().await?)
     }
 
@@ -255,8 +231,7 @@ impl Communicator {
         image: Vec<u8>,
     ) -> Result<(), SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.start_update(component, update_id, slot, image).await?)
     }
 
@@ -267,8 +242,7 @@ impl Communicator {
         component: SpComponent,
     ) -> Result<UpdateStatus, SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.update_status(component).await?)
     }
 
@@ -280,8 +254,7 @@ impl Communicator {
         update_id: Uuid,
     ) -> Result<(), SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.update_abort(component, update_id).await?)
     }
 
@@ -291,8 +264,7 @@ impl Communicator {
         sp: SpIdentifier,
     ) -> Result<PowerState, SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.power_state().await?)
     }
 
@@ -303,68 +275,31 @@ impl Communicator {
         power_state: PowerState,
     ) -> Result<(), SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         Ok(sp.set_power_state(power_state).await?)
     }
 
     /// Reset a given SP.
     pub async fn reset(&self, sp: SpIdentifier) -> Result<(), SpCommsError> {
         let port = self.id_to_port(sp)?;
-        let sp =
-            self.switch.sp(port).ok_or(SpCommsError::SpAddressUnknown(sp))?;
+        let sp = self.switch.sp(port);
         sp.reset_prepare().await?;
         sp.reset_trigger().await?;
         Ok(())
     }
 
-    /// Query all online SPs.
-    ///
-    /// `ignition_state` should be the state returned by a (recent) call to
-    /// [`crate::communicator::Communicator::get_ignition_state_all()`].
-    ///
-    /// All SPs included in `ignition_state` will be yielded by the returned
-    /// stream. The order in which they are yielded is undefined; the offline
-    /// SPs are likely to be first, but even that is not guaranteed. The item
-    /// yielded by offline SPs will be `None`; the item yielded by online SPs
-    /// will be `Some(Ok(_))` if the future returned by `f` for that item
-    /// completed before `timeout` or `Some(Err(_))` if not.
-    ///
-    /// Note that the timeout is be applied to each _element_ of the returned
-    /// stream rather than the stream as a whole, allowing easy access to which
-    /// SPs timed out based on the yielded value associated with those SPs.
-    ///
-    /// TODO: See note above about bulk_ignition_state where our local ignition
-    /// controller is _not_ included in the returned list, and will therefore
-    /// not be queried by this function. Should we explicitly query our local
-    /// ignition controller? If so, can we remove the ignition state from the
-    /// returned futures?
-    pub fn query_all_online_sps<F, T, Fut>(
-        &self,
-        ignition_state: &[(SpIdentifier, IgnitionState)],
-        timeout: Timeout,
-        f: F,
-    ) -> impl FuturesUnorderedImpl<
-        Item = (SpIdentifier, IgnitionState, Option<Result<T, Elapsed>>),
-    >
+    /// Query all SPs.
+    pub fn query_all_sps<'a, F, T, Fut>(
+        &'a self,
+        mut f: F,
+    ) -> Result<impl FuturesUnorderedImpl<Item = T>, SpCommsError>
     where
-        F: FnMut(SpIdentifier) -> Fut + Clone,
+        F: FnMut(SpIdentifier, &'a SingleSp) -> Fut + Clone + 'a,
         Fut: Future<Output = T>,
     {
-        ignition_state
-            .iter()
-            .copied()
-            .map(move |(id, state)| {
-                let mut f = f.clone();
-                async move {
-                    let val = if state.target.is_some() {
-                        Some(timeout.timeout_at(f(id)).await)
-                    } else {
-                        None
-                    };
-                    (id, state, val)
-                }
-            })
-            .collect::<FuturesUnordered<_>>()
+        let all_sps = self.switch.all_sps()?;
+        Ok(all_sps
+            .map(move |(id, sp)| f(id, sp))
+            .collect::<FuturesUnordered<_>>())
     }
 }

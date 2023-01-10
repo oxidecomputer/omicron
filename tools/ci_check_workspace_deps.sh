@@ -3,7 +3,7 @@ set -u
 
 exit=0
 
-# Only check workspace members
+# Check all workspace members
 readarray -t workspace_crates < <(toml get Cargo.toml workspace.members | jq -r '.[]')
 
 # For all the non-workspace dependencies, grab their non-workspace dependencies

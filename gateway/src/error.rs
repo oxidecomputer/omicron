@@ -27,8 +27,6 @@ pub enum SpCommsError {
     DiscoveryFailed { reason: String },
     #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
     SpDoesNotExist(SpIdentifier),
-    #[error("unknown socket address for local ignition controller")]
-    LocalIgnitionControllerAddressUnknown,
     #[error(
         "unknown socket address for SP (type {:?}, slot {})",
         .0.typ,
@@ -124,7 +122,6 @@ where
         SpCommsError::SpAddressUnknown(_)
         | SpCommsError::DiscoveryFailed { .. }
         | SpCommsError::Timeout { .. }
-        | SpCommsError::LocalIgnitionControllerAddressUnknown
         | SpCommsError::SpCommunicationFailed(_)
         | SpCommsError::UpdateFailed(_) => {
             HttpError::for_internal_error(err.to_string())
