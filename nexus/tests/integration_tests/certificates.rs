@@ -10,7 +10,6 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_certificate;
 use nexus_test_utils::resource_helpers::delete_certificate;
 use nexus_test_utils_macros::nexus_test;
@@ -189,9 +188,11 @@ async fn cert_get(client: &ClientTestContext, cert_name: &str) -> Certificate {
 
 async fn cert_get_expect_not_found(client: &ClientTestContext) {
     let cert_url = format!("{CERTS_URL}/{}", CERT_NAME);
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, &cert_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
+    let error = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &cert_url,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
