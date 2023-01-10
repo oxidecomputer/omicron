@@ -24,7 +24,7 @@ use oxide_vpc::api::ProtoFilter;
 use oxide_vpc::api::Protocol;
 
 trait FromVpcFirewallRule {
-    fn action(&self) -> Action;
+    fn action(&self) -> FirewallAction;
     fn direction(&self) -> Direction;
     fn disabled(&self) -> bool;
     fn hosts(&self) -> Vec<Address>;
@@ -34,10 +34,10 @@ trait FromVpcFirewallRule {
 }
 
 impl FromVpcFirewallRule for VpcFirewallRule {
-    fn action(&self) -> Action {
+    fn action(&self) -> FirewallAction {
         match self.action {
-            VpcFirewallRuleAction::Allow => Action::Allow,
-            VpcFirewallRuleAction::Deny => Action::Deny,
+            VpcFirewallRuleAction::Allow => FirewallAction::Allow,
+            VpcFirewallRuleAction::Deny => FirewallAction::Deny,
         }
     }
 
