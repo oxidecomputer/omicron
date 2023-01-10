@@ -357,7 +357,7 @@ pub async fn login_saml(
         let (authenticated_subject, relay_state_string) =
             match identity_provider {
                 IdentityProviderType::Saml(saml_identity_provider) => {
-                    let body_bytes = body_bytes.into_string().await?;
+                    let body_bytes = body_bytes.as_str()?;
                     saml_identity_provider.authenticated_subject(
                         &body_bytes,
                         nexus.samael_max_issue_delay(),
