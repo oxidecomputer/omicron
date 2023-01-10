@@ -17,10 +17,12 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::ResourceType;
 
 impl DataStore {
     /// Stores a new certificate in the database.
@@ -33,6 +35,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
+        let name = certificate.name().clone();
         diesel::insert_into(dsl::certificate)
             .values(certificate)
             .on_conflict(dsl::id)
@@ -41,7 +44,15 @@ impl DataStore {
             .returning(Certificate::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Certificate,
+                        name.as_str(),
+                    ),
+                )
+            })
     }
 
     pub async fn certificate_list_for(

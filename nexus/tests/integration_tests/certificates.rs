@@ -167,6 +167,7 @@ fn tls_key_to_pem(key: &rustls::PrivateKey) -> Vec<u8> {
 
 const CERTS_URL: &str = "/system/certificates";
 const CERT_NAME: &str = "my-certificate";
+const CERT_NAME2: &str = "my-other-certificate";
 
 async fn certs_list(client: &ClientTestContext) -> Vec<Certificate> {
     NexusRequest::iter_collection_authn(client, CERTS_URL, "", None)
@@ -208,13 +209,15 @@ async fn cert_get_expect_not_found(client: &ClientTestContext) {
 
 async fn cert_create_expect_error(
     client: &ClientTestContext,
+    name: &str,
     cert: Vec<u8>,
     key: Vec<u8>,
+    status: StatusCode,
 ) -> String {
     let url = CERTS_URL.to_string();
     let params = params::CertificateCreate {
         identity: IdentityMetadataCreateParams {
-            name: CERT_NAME.parse().unwrap(),
+            name: name.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
         cert,
@@ -223,7 +226,7 @@ async fn cert_create_expect_error(
 
     NexusRequest::expect_failure_with_body(
         client,
-        StatusCode::BAD_REQUEST,
+        status,
         Method::POST,
         &url,
         &params,
@@ -289,11 +292,26 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     let list = certs_list(&client).await;
     assert_eq!(list.len(), 1, "Expected exactly one certificate");
     assert_eq!(list[0].identity.name, CERT_NAME);
-
     let fetched_cert = cert_get(&client, CERT_NAME).await;
     assert_eq!(fetched_cert.identity.name, CERT_NAME);
 
-    // We can delete the certificate, and it no longer appears in the API
+    // Cannot create a certificate with the same name twice.
+    cert_create_expect_error(
+        &client,
+        CERT_NAME,
+        cert.clone(),
+        key.clone(),
+        StatusCode::CONFLICT,
+    )
+    .await;
+
+    // However, we can create a certificate with a different name.
+    create_certificate(&client, CERT_NAME2, cert.clone(), key.clone()).await;
+    let list = certs_list(&client).await;
+    assert_eq!(list.len(), 2, "Expected exactly two certificates");
+
+    // We can delete the certificates, and they no longer appear in the API
+    delete_certificate(&client, CERT_NAME2).await;
     delete_certificate(&client, CERT_NAME).await;
     let certs = certs_list(&client).await;
     assert!(certs.is_empty());
@@ -373,7 +391,14 @@ async fn test_cannot_create_certificate_with_bad_key(
     for i in 0..key.len() {
         key[i] = !key[i];
     }
-    cert_create_expect_error(&client, cert, key).await;
+    cert_create_expect_error(
+        &client,
+        CERT_NAME,
+        cert,
+        key,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
 }
 
 #[nexus_test]
@@ -389,5 +414,12 @@ async fn test_cannot_create_certificate_with_bad_cert(
     for i in 0..cert.len() {
         cert[i] = !cert[i];
     }
-    cert_create_expect_error(&client, cert, key).await;
+    cert_create_expect_error(
+        &client,
+        CERT_NAME,
+        cert,
+        key,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
 }

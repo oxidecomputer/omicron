@@ -154,6 +154,13 @@ CREATE INDEX ON omicron.public.certificate (
     service
 );
 
+-- Add an index which enforces that certificates have unique names, and which
+-- allows pagination-by-name.
+CREATE UNIQUE INDEX ON omicron.public.certificate (
+    name
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
