@@ -89,6 +89,12 @@ impl CertificateChain {
         tls_cert_to_pem(&self.cert_chain())
     }
 
+    fn make_pki_verifier(&self) -> rustls::client::WebPkiVerifier {
+        let mut root_store = rustls::RootCertStore { roots: vec![] };
+        root_store.add(&self.root_cert).expect("adding root cert");
+        rustls::client::WebPkiVerifier::new(root_store, None)
+    }
+
     // Issues a GET request using the certificate chain.
     async fn do_request(
         &self,
@@ -111,17 +117,10 @@ impl CertificateChain {
                 http_client.request(request).await.map(|_| ())
             }
             "https" => {
-                let make_pki_verifier = || {
-                    let mut root_store =
-                        rustls::RootCertStore { roots: vec![] };
-                    root_store.add(&self.root_cert).expect("adding root cert");
-                    rustls::client::WebPkiVerifier::new(root_store, None)
-                };
-
                 let tls_config = rustls::ClientConfig::builder()
                     .with_safe_defaults()
                     .with_custom_certificate_verifier(Arc::new(
-                        make_pki_verifier(),
+                        self.make_pki_verifier(),
                     ))
                     .with_no_client_auth();
                 let https_connector =
