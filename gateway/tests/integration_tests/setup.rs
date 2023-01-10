@@ -149,13 +149,13 @@ pub async fn test_setup_with_config(
     }
 
     // Wait until the server has figured out the socket address of all those SPs
+    let mgmt_switch = &*server.apictx.mgmt_switch;
     poll::wait_for_condition::<(), Infallible, _, _>(
         || {
-            let comms = &server.apictx.sp_comms;
-            let result = if comms.is_discovery_complete()
+            let result = if mgmt_switch.is_discovery_complete()
                 && all_sp_ids.iter().all(|&id| {
                     // All ids are valid; unwrap finding the handle to each one.
-                    let sp = comms.sp_by_id(id).unwrap();
+                    let sp = mgmt_switch.sp(id).unwrap();
 
                     // Have we finished starting up (e.g., binding to our
                     // listening port)? If not, return false and keep waiting.
@@ -180,10 +180,7 @@ pub async fn test_setup_with_config(
     .unwrap();
 
     // Make sure it discovered the location we expect
-    assert_eq!(
-        server.apictx.sp_comms.location_name().unwrap(),
-        expected_location
-    );
+    assert_eq!(mgmt_switch.location_name().unwrap(), expected_location);
 
     let client = ClientTestContext::new(
         server.http_server.local_addr(),

@@ -9,7 +9,6 @@ use dropshot::HttpError;
 use gateway_messages::SpError;
 use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
-use std::borrow::Borrow;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -54,7 +53,7 @@ pub(crate) enum Error {
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::CommunicationsError(err) => http_err_from_comms_err(err),
+            Error::CommunicationsError(err) => err.into(),
             Error::BadWebsocketConnection(_) => HttpError::for_bad_request(
                 Some("BadWebsocketConnection".to_string()),
                 err.to_string(),
@@ -63,68 +62,72 @@ impl From<Error> for HttpError {
     }
 }
 
-pub(crate) fn http_err_from_comms_err<E>(err: E) -> HttpError
-where
-    E: Borrow<SpCommsError>,
-{
-    let err = err.borrow();
-    match err {
-        SpCommsError::SpDoesNotExist(_) => HttpError::for_bad_request(
-            Some("InvalidSp".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
-            SpError::SerialConsoleAlreadyAttached,
-        )) => HttpError::for_bad_request(
-            Some("SerialConsoleAttached".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
-            SpError::RequestUnsupportedForSp,
-        )) => HttpError::for_bad_request(
-            Some("RequestUnsupportedForSp".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
-            SpError::RequestUnsupportedForComponent,
-        )) => HttpError::for_bad_request(
-            Some("RequestUnsupportedForComponent".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::SpCommunicationFailed(CommunicationError::SpError(
-            SpError::InvalidSlotForComponent,
-        )) => HttpError::for_bad_request(
-            Some("InvalidSlotForComponent".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::UpdateFailed(UpdateError::ImageTooLarge) => {
-            HttpError::for_bad_request(
-                Some("ImageTooLarge".to_string()),
+impl From<SpCommsError> for HttpError {
+    fn from(err: SpCommsError) -> Self {
+        match err {
+            SpCommsError::SpDoesNotExist(_) => HttpError::for_bad_request(
+                Some("InvalidSp".to_string()),
                 err.to_string(),
-            )
-        }
-        SpCommsError::UpdateFailed(UpdateError::Communication(
-            CommunicationError::SpError(SpError::UpdateSlotBusy),
-        )) => HttpError::for_unavail(
-            Some("UpdateSlotBusy".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::UpdateFailed(UpdateError::Communication(
-            CommunicationError::SpError(SpError::UpdateInProgress { .. }),
-        )) => HttpError::for_unavail(
-            Some("UpdateInProgress".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::DiscoveryNotYetComplete => HttpError::for_unavail(
-            Some("DiscoveryNotYetComplete".to_string()),
-            err.to_string(),
-        ),
-        SpCommsError::SpAddressUnknown(_)
-        | SpCommsError::DiscoveryFailed { .. }
-        | SpCommsError::Timeout { .. }
-        | SpCommsError::SpCommunicationFailed(_)
-        | SpCommsError::UpdateFailed(_) => {
-            HttpError::for_internal_error(err.to_string())
+            ),
+            SpCommsError::SpCommunicationFailed(
+                CommunicationError::SpError(
+                    SpError::SerialConsoleAlreadyAttached,
+                ),
+            ) => HttpError::for_bad_request(
+                Some("SerialConsoleAttached".to_string()),
+                err.to_string(),
+            ),
+            SpCommsError::SpCommunicationFailed(
+                CommunicationError::SpError(SpError::RequestUnsupportedForSp),
+            ) => HttpError::for_bad_request(
+                Some("RequestUnsupportedForSp".to_string()),
+                err.to_string(),
+            ),
+            SpCommsError::SpCommunicationFailed(
+                CommunicationError::SpError(
+                    SpError::RequestUnsupportedForComponent,
+                ),
+            ) => HttpError::for_bad_request(
+                Some("RequestUnsupportedForComponent".to_string()),
+                err.to_string(),
+            ),
+            SpCommsError::SpCommunicationFailed(
+                CommunicationError::SpError(SpError::InvalidSlotForComponent),
+            ) => HttpError::for_bad_request(
+                Some("InvalidSlotForComponent".to_string()),
+                err.to_string(),
+            ),
+            SpCommsError::UpdateFailed(UpdateError::ImageTooLarge) => {
+                HttpError::for_bad_request(
+                    Some("ImageTooLarge".to_string()),
+                    err.to_string(),
+                )
+            }
+            SpCommsError::UpdateFailed(UpdateError::Communication(
+                CommunicationError::SpError(SpError::UpdateSlotBusy),
+            )) => HttpError::for_unavail(
+                Some("UpdateSlotBusy".to_string()),
+                err.to_string(),
+            ),
+            SpCommsError::UpdateFailed(UpdateError::Communication(
+                CommunicationError::SpError(SpError::UpdateInProgress {
+                    ..
+                }),
+            )) => HttpError::for_unavail(
+                Some("UpdateInProgress".to_string()),
+                err.to_string(),
+            ),
+            SpCommsError::DiscoveryNotYetComplete => HttpError::for_unavail(
+                Some("DiscoveryNotYetComplete".to_string()),
+                err.to_string(),
+            ),
+            SpCommsError::SpAddressUnknown(_)
+            | SpCommsError::DiscoveryFailed { .. }
+            | SpCommsError::Timeout { .. }
+            | SpCommsError::SpCommunicationFailed(_)
+            | SpCommsError::UpdateFailed(_) => {
+                HttpError::for_internal_error(err.to_string())
+            }
         }
     }
 }
