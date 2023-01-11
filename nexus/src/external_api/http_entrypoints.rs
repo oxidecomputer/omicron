@@ -41,12 +41,10 @@ use dropshot::{
 };
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
-use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
-use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
-use omicron_common::api::external::http_pagination::PagField;
+use omicron_common::api::external::http_pagination::name_or_id_pagination;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
@@ -481,20 +479,18 @@ async fn silo_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let silos = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let silos = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector, ..) => {
                 nexus.silos_list_by_id(&opctx, &page_selector).await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.silos_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector, ..) => {
+                nexus
+                    .silos_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()
@@ -948,20 +944,18 @@ async fn organization_list_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let organizations = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let organizations = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector, ..) => {
                 nexus.organizations_list_by_id(&opctx, &page_selector).await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector, ..) => {
+                nexus
+                    .organizations_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()
@@ -993,20 +987,18 @@ async fn organization_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let organizations = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let organizations = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector, ..) => {
                 nexus.organizations_list_by_id(&opctx, &page_selector).await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector, ..) => {
+                nexus
+                    .organizations_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()
@@ -1433,39 +1425,34 @@ async fn organization_policy_update(
 }]
 async fn project_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::ProjectList>,
+    query_params: Query<PaginatedByNameOrId<params::OrganizationSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &query.organization)?;
-        let params = ScanByNameOrId::from_query(&query.pagination)?;
-        let field = pagination_field_for_scan_params(params);
-        let projects = match field {
-            PagField::Id => {
-                let page_selector =
-                    data_page_params_nameid_id(&rqctx, &query.pagination)?;
+        let projects = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pagparams, selector) => {
+                let organization_lookup =
+                    nexus.organization_lookup(&opctx, &selector)?;
                 nexus
                     .projects_list_by_id(
                         &opctx,
                         &organization_lookup,
-                        &page_selector,
+                        &pagparams,
                     )
                     .await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query.pagination)?
-                        .map_name(|n| Name::ref_cast(n));
+            PaginatedBy::Name(pagparams, selector) => {
+                let organization_lookup =
+                    nexus.organization_lookup(&opctx, &selector)?;
                 nexus
                     .projects_list_by_name(
                         &opctx,
                         &organization_lookup,
-                        &page_selector,
+                        &pagparams.map_name(|n| Name::ref_cast(n)),
                     )
                     .await?
             }
@@ -1474,7 +1461,7 @@ async fn project_list_v1(
         .map(|p| p.into())
         .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query.pagination,
+            &query,
             projects,
             &marker_for_name_or_id,
         )?))
@@ -1499,7 +1486,7 @@ async fn project_list(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_selector = &params::OrganizationSelector {
@@ -1507,11 +1494,8 @@ async fn project_list(
         };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-        let projects = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let projects = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector, ..) => {
                 nexus
                     .projects_list_by_id(
                         &opctx,
@@ -1520,16 +1504,12 @@ async fn project_list(
                     )
                     .await?
             }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
+            PaginatedBy::Name(page_selector, ..) => {
                 nexus
                     .projects_list_by_name(
                         &opctx,
                         &organization_lookup,
-                        &page_selector,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
                     )
                     .await?
             }
@@ -1975,20 +1955,20 @@ async fn ip_pool_list(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-        let pools = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+        let pools = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(page_selector, ..) => {
                 nexus.ip_pools_list_by_id(&opctx, &page_selector).await?
             }
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.ip_pools_list_by_name(&opctx, &page_selector).await?
+            PaginatedBy::Name(page_selector, ..) => {
+                nexus
+                    .ip_pools_list_by_name(
+                        &opctx,
+                        &page_selector.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
             }
         }
         .into_iter()
@@ -2545,30 +2525,43 @@ async fn disk_metrics_list(
 }]
 async fn instance_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::InstanceList>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, &query.project_selector)?;
-        let instances = nexus
-            .project_list_instances(
-                &opctx,
-                &project_lookup,
-                &data_page_params_for(&rqctx, &query.pagination)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query.pagination,
+        let instances = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_instances_by_id(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params,
+                    )
+                    .await?
+            }
+            PaginatedBy::Name(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_instances_by_name(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
+            }
+        }
+        .into_iter()
+        .map(|i| i.into())
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
             instances,
-            &marker_for_name,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2597,7 +2590,7 @@ async fn instance_list(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let instances = nexus
-            .project_list_instances(
+            .project_list_instances_by_name(
                 &opctx,
                 &project_lookup,
                 &data_page_params_for(&rqctx, &query)?
@@ -2928,7 +2921,7 @@ async fn instance_reboot_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -2942,7 +2935,7 @@ async fn instance_reboot_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_reboot(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2987,7 +2980,7 @@ async fn instance_start_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -3001,7 +2994,7 @@ async fn instance_start_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_start(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3046,7 +3039,7 @@ async fn instance_stop_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -3060,7 +3053,7 @@ async fn instance_stop_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_stop(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3104,14 +3097,16 @@ async fn instance_stop(
 async fn instance_serial_console_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<params::InstancePath>,
-    query_params: Query<params::InstanceSerialConsole>,
+    query_params: Query<params::InstanceSerialConsoleRequest>,
+    selector_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
+    let selector = selector_params.into_inner();
     let instance_selector = params::InstanceSelector {
-        project_selector: query.project_selector,
+        project_selector: selector.project_selector,
         instance: path.instance,
     };
     let handler = async {
@@ -3119,10 +3114,7 @@ async fn instance_serial_console_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let data = nexus
-            .instance_serial_console_data(
-                &instance_lookup,
-                &query.console_params,
-            )
+            .instance_serial_console_data(&instance_lookup, &query)
             .await?;
         Ok(HttpResponseOk(data))
     };
