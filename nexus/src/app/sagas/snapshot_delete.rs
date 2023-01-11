@@ -7,7 +7,6 @@ use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use crate::context::OpContext;
 use crate::{authn, authz, db};
-use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -133,13 +132,7 @@ async fn ssd_account_space(
             &opctx,
             params.authz_snapshot.id(),
             params.snapshot.project_id,
-            -i64::try_from(params.snapshot.size.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            params.snapshot.size,
         )
         .await
         .map_err(ActionError::action_failed)?;

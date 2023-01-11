@@ -20,19 +20,19 @@ struct CollectionTarget {
 #[derive(Debug, Clone, Metric)]
 struct VirtualDiskSpaceProvisioned {
     #[datum]
-    bytes_used: i64,
+    bytes_used: u64,
 }
 
 #[derive(Debug, Clone, Metric)]
 struct CpusProvisioned {
     #[datum]
-    cpus: i64,
+    cpus: u64,
 }
 
 #[derive(Debug, Clone, Metric)]
 struct RamProvisioned {
     #[datum]
-    bytes: i64,
+    bytes: u64,
 }
 
 /// An oximeter producer for reporting [`VirtualProvisioningCollection`] information to Clickhouse.

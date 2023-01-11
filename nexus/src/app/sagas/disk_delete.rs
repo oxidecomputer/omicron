@@ -9,7 +9,6 @@ use crate::app::sagas::declare_saga_actions;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db;
-use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -96,13 +95,7 @@ async fn sdd_account_space(
             &opctx,
             deleted_disk.id(),
             params.project_id,
-            -i64::try_from(deleted_disk.size.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            deleted_disk.size,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -123,13 +116,7 @@ async fn sdd_account_space_undo(
             &opctx,
             deleted_disk.id(),
             params.project_id,
-            i64::try_from(deleted_disk.size.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            deleted_disk.size,
         )
         .await
         .map_err(ActionError::action_failed)?;

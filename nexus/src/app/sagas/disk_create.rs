@@ -258,13 +258,7 @@ async fn sdc_account_space(
             &opctx,
             disk_created.id(),
             params.project_id,
-            i64::try_from(disk_created.size.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            disk_created.size,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -285,11 +279,7 @@ async fn sdc_account_space_undo(
             &opctx,
             disk_created.id(),
             params.project_id,
-            -i64::try_from(disk_created.size.to_bytes()).map_err(|e| {
-                Error::internal_error(&format!(
-                    "updating resource provisioning: {e}"
-                ))
-            })?,
+            disk_created.size,
         )
         .await
         .map_err(ActionError::action_failed)?;

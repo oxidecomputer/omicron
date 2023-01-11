@@ -136,14 +136,8 @@ async fn sid_account_resources(
             &opctx,
             params.instance.id(),
             params.instance.project_id,
-            -i64::from(params.instance.runtime_state.ncpus.0 .0),
-            -i64::try_from(params.instance.runtime_state.memory.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            i64::from(params.instance.runtime_state.ncpus.0 .0),
+            params.instance.runtime_state.memory,
         )
         .await
         .map_err(ActionError::action_failed)?;

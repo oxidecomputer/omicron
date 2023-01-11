@@ -5,6 +5,7 @@
 //! Implementation of queries for updating resource provisioning info.
 
 use crate::db::alias::ExpressionAlias;
+use crate::db::model::ByteCount;
 use crate::db::model::ResourceTypeProvisioned;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::model::VirtualProvisioningResource;
@@ -295,7 +296,7 @@ impl VirtualProvisioningCollectionUpdate {
 
     pub fn new_insert_storage(
         id: uuid::Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
         project_id: uuid::Uuid,
         storage_type: crate::db::datastore::StorageType,
     ) -> Self {
@@ -329,7 +330,7 @@ impl VirtualProvisioningCollectionUpdate {
 
     pub fn new_delete_storage(
         id: uuid::Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> Self {
         use virtual_provisioning_collection::dsl as collection_dsl;
@@ -349,14 +350,14 @@ impl VirtualProvisioningCollectionUpdate {
             // ... We subtract the disk usage.
             collection_dsl::virtual_disk_bytes_provisioned
                 .eq(collection_dsl::virtual_disk_bytes_provisioned
-                    + disk_byte_diff),
+                    - disk_byte_diff),
         )
     }
 
     pub fn new_insert_instance(
         id: uuid::Uuid,
         cpus_diff: i64,
-        ram_diff: i64,
+        ram_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> Self {
         use virtual_provisioning_collection::dsl as collection_dsl;
@@ -396,7 +397,7 @@ impl VirtualProvisioningCollectionUpdate {
     pub fn new_delete_instance(
         id: uuid::Uuid,
         cpus_diff: i64,
-        ram_diff: i64,
+        ram_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> Self {
         use virtual_provisioning_collection::dsl as collection_dsl;
@@ -416,9 +417,9 @@ impl VirtualProvisioningCollectionUpdate {
             // ... We update the resource usage.
             (
                 collection_dsl::cpus_provisioned
-                    .eq(collection_dsl::cpus_provisioned + cpus_diff),
+                    .eq(collection_dsl::cpus_provisioned - cpus_diff),
                 collection_dsl::ram_provisioned
-                    .eq(collection_dsl::ram_provisioned + ram_diff),
+                    .eq(collection_dsl::ram_provisioned - ram_diff),
             ),
         )
     }

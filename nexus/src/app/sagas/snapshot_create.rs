@@ -524,13 +524,7 @@ async fn ssc_account_space(
             &opctx,
             snapshot_created.id(),
             params.project_id,
-            i64::try_from(snapshot_created.size.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            snapshot_created.size,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -552,11 +546,7 @@ async fn ssc_account_space_undo(
             &opctx,
             snapshot_created.id(),
             params.project_id,
-            -i64::try_from(snapshot_created.size.to_bytes()).map_err(|e| {
-                Error::internal_error(&format!(
-                    "updating resource provisioning: {e}"
-                ))
-            })?,
+            snapshot_created.size,
         )
         .await?;
     Ok(())

@@ -547,7 +547,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
-    assert_eq!(virtual_provisioning_collection.ram_provisioned, 0);
+    assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
 
     // Query the view of these metrics stored within Clickhouse
     let metric_url = |metric_type: &str, id: Uuid| {
@@ -592,8 +592,8 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 4);
     assert_eq!(
-        virtual_provisioning_collection.ram_provisioned,
-        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap(),
+        virtual_provisioning_collection.ram_provisioned.0,
+        ByteCount::from_gibibytes_u32(1),
     );
 
     // Stop the instance
@@ -617,7 +617,10 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let expected_ram =
         i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap();
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, expected_cpus);
-    assert_eq!(virtual_provisioning_collection.ram_provisioned, expected_ram,);
+    assert_eq!(
+        i64::from(virtual_provisioning_collection.ram_provisioned.0),
+        expected_ram
+    );
     oximeter.force_collect().await;
     for id in vec![organization_id, project_id] {
         query_for_metrics_until_it_contains(
@@ -648,7 +651,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
-    assert_eq!(virtual_provisioning_collection.ram_provisioned, 0);
+    assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
     oximeter.force_collect().await;
     for id in vec![organization_id, project_id] {
         query_for_metrics_until_it_contains(

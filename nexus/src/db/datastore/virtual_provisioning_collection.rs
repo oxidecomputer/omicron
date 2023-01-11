@@ -9,6 +9,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::model::ByteCount;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pool::DbConnection;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
@@ -73,7 +74,9 @@ impl Producer {
                 Sample::new(
                     &CollectionTarget { id: provision.id },
                     &VirtualDiskSpaceProvisioned {
-                        bytes_used: provision.virtual_disk_bytes_provisioned,
+                        bytes_used: provision
+                            .virtual_disk_bytes_provisioned
+                            .into(),
                     },
                 )
             })
@@ -97,7 +100,7 @@ impl Producer {
             .chain(provisions.iter().map(|provision| {
                 Sample::new(
                     &CollectionTarget { id: provision.id },
-                    &RamProvisioned { bytes: provision.ram_provisioned },
+                    &RamProvisioned { bytes: provision.ram_provisioned.into() },
                 )
             }))
             .collect::<Vec<_>>();
@@ -275,7 +278,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_insert_storage(
             opctx,
@@ -292,7 +295,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_insert_storage(
             opctx,
@@ -310,7 +313,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
         storage_type: StorageType,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
@@ -335,7 +338,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_delete_storage(
             opctx,
@@ -351,7 +354,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         self.virtual_provisioning_collection_delete_storage(
             opctx,
@@ -368,7 +371,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        disk_byte_diff: i64,
+        disk_byte_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
             VirtualProvisioningCollectionUpdate::new_delete_storage(
@@ -393,7 +396,7 @@ impl DataStore {
         id: Uuid,
         project_id: Uuid,
         cpus_diff: i64,
-        ram_diff: i64,
+        ram_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
             VirtualProvisioningCollectionUpdate::new_insert_instance(
@@ -416,7 +419,7 @@ impl DataStore {
         id: Uuid,
         project_id: Uuid,
         cpus_diff: i64,
-        ram_diff: i64,
+        ram_diff: ByteCount,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
             VirtualProvisioningCollectionUpdate::new_delete_instance(

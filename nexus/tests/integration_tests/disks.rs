@@ -928,7 +928,9 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
         0
     );
     let virtual_provisioning_collection = datastore
@@ -936,7 +938,9 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
         0
     );
     let virtual_provisioning_collection = datastore
@@ -944,7 +948,9 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
         0
     );
     let virtual_provisioning_collection = datastore
@@ -952,7 +958,9 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
         0
     );
     let virtual_provisioning_collection = datastore
@@ -960,7 +968,9 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
         0
     );
 
@@ -995,15 +1005,17 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
     );
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id2)
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
         0
     );
     let virtual_provisioning_collection = datastore
@@ -1011,24 +1023,24 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
     );
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, *SILO_ID)
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
     );
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, *FLEET_ID)
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
     );
 
     // Ask for a 1 gibibyte disk in the second project.
@@ -1063,24 +1075,26 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
     );
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id2)
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
     );
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, org_id)
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        2 * disk_size.to_bytes() as i64
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
+        2 * disk_size.to_bytes()
     );
 
     // Delete the disk we just created, observe the utilization drop
@@ -1096,15 +1110,17 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
     );
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id2)
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
+        virtual_provisioning_collection
+            .virtual_disk_bytes_provisioned
+            .to_bytes(),
         0
     );
     let virtual_provisioning_collection = datastore
@@ -1112,8 +1128,8 @@ async fn test_disk_virtual_provisioning_collection(
         .await
         .unwrap();
     assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size,
     );
 }
 

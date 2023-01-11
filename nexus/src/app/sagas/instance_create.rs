@@ -12,6 +12,7 @@ use crate::app::{
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::ByteCount as DbByteCount;
 use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
@@ -791,13 +792,7 @@ async fn sic_account_resources(
             instance_id,
             params.project_id,
             i64::from(params.create_params.ncpus.0),
-            i64::try_from(params.create_params.memory.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            DbByteCount(params.create_params.memory),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -818,14 +813,8 @@ async fn sic_account_resources_undo(
             &opctx,
             instance_id,
             params.project_id,
-            -i64::from(params.create_params.ncpus.0),
-            -i64::try_from(params.create_params.memory.to_bytes())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "updating resource provisioning: {e}"
-                    ))
-                })
-                .map_err(ActionError::action_failed)?,
+            i64::from(params.create_params.ncpus.0),
+            DbByteCount(params.create_params.memory),
         )
         .await
         .map_err(ActionError::action_failed)?;

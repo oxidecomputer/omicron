@@ -327,10 +327,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
-    assert_eq!(
-        provision.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
-    );
+    assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -358,8 +355,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     assert_eq!(
-        provision.virtual_disk_bytes_provisioned,
-        2 * disk_size.to_bytes() as i64
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        2 * disk_size.to_bytes()
     );
 
     // Create a disk from this snapshot
@@ -393,8 +390,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     assert_eq!(
-        provision.virtual_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        3 * disk_size.to_bytes()
     );
 
     // Delete snapshot
@@ -417,8 +414,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     assert_eq!(
-        provision.virtual_disk_bytes_provisioned,
-        2 * disk_size.to_bytes() as i64
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        2 * disk_size.to_bytes()
     );
 
     // Delete the disk using the snapshot
@@ -432,10 +429,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
-    assert_eq!(
-        provision.virtual_disk_bytes_provisioned,
-        disk_size.to_bytes() as i64
-    );
+    assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
 
     // Delete the original base disk
     let disk_url = format!("{}/{}", disks_url, base_disk_name);
@@ -448,7 +442,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
-    assert_eq!(provision.virtual_disk_bytes_provisioned, 0);
+    assert_eq!(provision.virtual_disk_bytes_provisioned.to_bytes(), 0);
 }
 
 // Test the various ways Nexus can reject a disk created from a snapshot

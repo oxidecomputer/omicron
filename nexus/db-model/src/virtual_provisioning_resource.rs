@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::virtual_provisioning_resource;
+use crate::ByteCount;
+use omicron_common::api::external;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -29,9 +31,9 @@ pub struct VirtualProvisioningResource {
     pub id: Uuid,
     pub resource_type: String,
 
-    pub virtual_disk_bytes_provisioned: i64,
+    pub virtual_disk_bytes_provisioned: ByteCount,
     pub cpus_provisioned: i64,
-    pub ram_provisioned: i64,
+    pub ram_provisioned: ByteCount,
 }
 
 impl VirtualProvisioningResource {
@@ -39,9 +41,11 @@ impl VirtualProvisioningResource {
         Self {
             id,
             resource_type: resource_type.to_string(),
-            virtual_disk_bytes_provisioned: 0,
+            virtual_disk_bytes_provisioned: ByteCount(
+                external::ByteCount::from(0),
+            ),
             cpus_provisioned: 0,
-            ram_provisioned: 0,
+            ram_provisioned: ByteCount(external::ByteCount::from(0)),
         }
     }
 }
