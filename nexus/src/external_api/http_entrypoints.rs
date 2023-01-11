@@ -5133,42 +5133,9 @@ async fn system_metric(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-
-        let result = match metric_name {
-            SystemMetricName::VirtualDiskSpaceProvisioned => {
-                opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-                nexus
-                    .select_timeseries(
-                        "collection_target:virtual_disk_space_provisioned",
-                        &[&format!("id=={}", query.id)],
-                        query.pagination,
-                        limit,
-                    )
-                    .await?
-            }
-            SystemMetricName::CpusProvisioned => {
-                opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-                nexus
-                    .select_timeseries(
-                        "collection_target:cpus_provisioned",
-                        &[&format!("id=={}", query.id)],
-                        query.pagination,
-                        limit,
-                    )
-                    .await?
-            }
-            SystemMetricName::RamProvisioned => {
-                opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-                nexus
-                    .select_timeseries(
-                        "collection_target:ram_provisioned",
-                        &[&format!("id=={}", query.id)],
-                        query.pagination,
-                        limit,
-                    )
-                    .await?
-            }
-        };
+        let result = nexus
+            .system_metric_lookup(&opctx, metric_name, query, limit)
+            .await?;
 
         Ok(HttpResponseOk(result))
     };
