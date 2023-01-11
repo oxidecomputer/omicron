@@ -33,7 +33,7 @@ fn validate_certs(input: Vec<u8>) -> Result<(), String> {
 
 fn validate_private_key(key: Vec<u8>) -> Result<(), String> {
     let _ = PKey::private_key_from_pem(&key.as_slice())
-        .map_err(|err| format!("Failed to parse private key as PEM: {err}"))?;
+        .map_err(|_| format!("Failed to parse private key as PEM"))?;
 
     Ok(())
 }
