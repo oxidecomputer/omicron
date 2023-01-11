@@ -59,6 +59,35 @@
         }
       }
     },
+    "/disk/{disk_id}/remove-read-only-parent": {
+      "post": {
+        "summary": "Request removal of a read_only_parent from a disk",
+        "description": "This is a thin wrapper around the volume_remove_read_only_parent saga. All we are doing here is, given a disk UUID, figure out what the volume_id is for that disk, then use that to call the volume_remove_read_only_parent saga on it.",
+        "operationId": "cpapi_disk_remove_read_only_parent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "summary": "Report updated state for a disk.",
