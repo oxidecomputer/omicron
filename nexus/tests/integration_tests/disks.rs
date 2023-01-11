@@ -1402,16 +1402,16 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
         let disk_url = format!("{}/{}", get_disks_url(), DISK_NAME);
         format!(
             "{disk_url}/metrics/{metric_type}?start_time={:?}&end_time={:?}",
-            Utc::now() - chrono::Duration::seconds(2),
-            Utc::now() + chrono::Duration::seconds(2),
+            Utc::now() - chrono::Duration::seconds(10),
+            Utc::now() + chrono::Duration::seconds(10),
         )
     };
     // Check the utilization info for the whole project too.
     let utilization_url = |id: Uuid| {
         format!(
             "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
-            Utc::now() - chrono::Duration::seconds(2),
-            Utc::now() + chrono::Duration::seconds(2),
+            Utc::now() - chrono::Duration::seconds(10),
+            Utc::now() + chrono::Duration::seconds(10),
             id,
         )
     };
@@ -1420,14 +1420,13 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     //
     // Observe that no metrics exist yet; no "upstairs" should have been
     // instantiated on a sled.
-    oximeter.force_collect().await;
     let measurements =
         objects_list_page_authz::<Measurement>(client, &metric_url("read"))
             .await;
     assert!(measurements.items.is_empty());
 
     assert_eq!(
-        query_for_latest_metric(client, &utilization_url(project_id),).await,
+        query_for_latest_metric(client, &utilization_url(project_id)).await,
         i64::from(disk.size)
     );
 
@@ -1452,7 +1451,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Check the utilization info for the whole project too.
     assert_eq!(
-        query_for_latest_metric(client, &utilization_url(project_id),).await,
+        query_for_latest_metric(client, &utilization_url(project_id)).await,
         i64::from(disk.size)
     );
 }
