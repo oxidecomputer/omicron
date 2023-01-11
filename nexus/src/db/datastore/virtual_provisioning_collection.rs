@@ -15,9 +15,7 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use diesel::prelude::*;
-use omicron_common::api::external::{
-    DeleteResult, Error, LookupType, ResourceType,
-};
+use omicron_common::api::external::{DeleteResult, Error};
 use oximeter::{types::Sample, Metric, MetricsError, Target};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -207,13 +205,7 @@ impl DataStore {
                 .get_result_async(self.pool_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::VirtualProvision,
-                            LookupType::ById(id),
-                        ),
-                    )
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
                 })?;
         Ok(virtual_provisioning_collection)
     }
