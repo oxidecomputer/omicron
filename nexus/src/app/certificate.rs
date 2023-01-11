@@ -19,7 +19,6 @@ use omicron_common::api::external::NameOrId;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
 use ref_cast::RefCast;
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -82,7 +81,7 @@ impl super::Nexus {
     }
 
     pub async fn certificate_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         params: params::CertificateCreate,
     ) -> CreateResult<db::model::Certificate> {
@@ -122,7 +121,7 @@ impl super::Nexus {
     }
 
     pub async fn certificate_delete(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         certificate_lookup: lookup::Certificate<'_>,
     ) -> DeleteResult {
