@@ -149,13 +149,24 @@ pub async fn test_setup_with_config(
     }
 
     // Wait until the server has figured out the socket address of all those SPs
+    let mgmt_switch = &*server.apictx.mgmt_switch;
     poll::wait_for_condition::<(), Infallible, _, _>(
         || {
-            let comms = &server.apictx.sp_comms;
-            let result = if comms.is_discovery_complete()
-                && comms.local_ignition_controller_address_known()
-                && all_sp_ids.iter().all(|&id| comms.address_known(id))
-            {
+            let result = if mgmt_switch.is_discovery_complete()
+                && all_sp_ids.iter().all(|&id| {
+                    // All ids are valid; unwrap finding the handle to each one.
+                    let sp = mgmt_switch.sp(id).unwrap();
+
+                    // Have we finished starting up (e.g., binding to our
+                    // listening port)? If not, return false and keep waiting.
+                    let sp_addr = match sp.sp_addr_watch() {
+                        Ok(addr) => addr,
+                        Err(_) => return false,
+                    };
+
+                    // Have we found this SP?
+                    sp_addr.borrow().is_some()
+                }) {
                 Ok(())
             } else {
                 Err(CondCheckError::NotYet)
@@ -169,10 +180,7 @@ pub async fn test_setup_with_config(
     .unwrap();
 
     // Make sure it discovered the location we expect
-    assert_eq!(
-        server.apictx.sp_comms.location_name().unwrap(),
-        expected_location
-    );
+    assert_eq!(mgmt_switch.location_name().unwrap(), expected_location);
 
     let client = ClientTestContext::new(
         server.http_server.local_addr(),

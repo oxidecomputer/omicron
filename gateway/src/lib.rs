@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod communicator;
 mod config;
 mod context;
 mod error;
 mod management_switch;
 mod serial_console;
-mod timeout;
 
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
 
@@ -70,9 +68,8 @@ impl Server {
             }
         }
 
-        let apictx = ServerContext::new(config.switch, config.timeouts, &log)
-            .await
-            .map_err(|error| {
+        let apictx =
+            ServerContext::new(config.switch, &log).await.map_err(|error| {
                 format!("initializing server context: {}", error)
             })?;
 

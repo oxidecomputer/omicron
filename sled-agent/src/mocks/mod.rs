@@ -6,8 +6,9 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DiskRuntimeState, InstanceRuntimeState, SledAgentStartupInfo,
-    UpdateArtifactKind, ZpoolPutRequest, ZpoolPutResponse,
+    DiskRuntimeState, InstanceRuntimeState, RackInitializationRequest,
+    SledAgentStartupInfo, UpdateArtifactKind, ZpoolPutRequest,
+    ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -49,5 +50,10 @@ mock! {
             zpool_id: &Uuid,
             info: &ZpoolPutRequest,
         ) -> Result<ZpoolPutResponse>;
+        pub async fn rack_initialization_complete(
+            &self,
+            rack_id: &Uuid,
+            request: &RackInitializationRequest,
+        ) -> Result<()>;
     }
 }

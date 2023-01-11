@@ -11,9 +11,9 @@
   },
   "paths": {
     "/artifacts/{name}/{version}": {
-      "get": {
-        "summary": "Fetch an artifact from the in-memory cache.",
-        "operationId": "get_artifact",
+      "put": {
+        "summary": "An endpoint used to upload artifacts to the server.",
+        "operationId": "put_artifact",
         "parameters": [
           {
             "in": "path",
@@ -34,14 +34,20 @@
             }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -296,6 +302,24 @@
               "power",
               "present"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "present"
+            ]
           }
         ]
       },
@@ -398,34 +422,6 @@
           {
             "type": "object",
             "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "disabled"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "unresponsive"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "serial_number": {
                 "type": "string"
               },
@@ -438,6 +434,24 @@
             },
             "required": [
               "serial_number",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
               "state"
             ]
           }

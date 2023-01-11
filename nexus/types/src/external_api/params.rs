@@ -7,7 +7,6 @@
 use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    http_pagination::{PaginatedByName, PaginatedByNameOrId, PaginationParams},
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
@@ -35,12 +34,12 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub struct DiskPath {
     pub disk: NameOrId,
 }
 
-#[derive(Clone, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -57,7 +56,7 @@ pub struct OptionalOrganizationSelector {
     pub organization_selector: Option<OrganizationSelector>,
 }
 
-#[derive(Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
     #[serde(flatten)]
     pub organization_selector: Option<OrganizationSelector>,
@@ -76,15 +75,45 @@ impl ProjectSelector {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ProjectList {
+pub struct OptionalProjectSelector {
     #[serde(flatten)]
-    pub pagination: PaginatedByNameOrId,
-    #[serde(flatten)]
-    pub organization: OrganizationSelector,
+    pub project_selector: Option<ProjectSelector>,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct OptionalProjectSelector {
+pub struct DiskSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub disk: NameOrId,
+}
+
+impl DiskSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        disk: NameOrId,
+    ) -> Self {
+        DiskSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            disk,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskList {
+    #[serde(flatten)]
+    pub project_selector: ProjectSelector,
+    #[serde(flatten)]
+    pub pagination: PaginatedByName,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskMetricsList {
+    #[serde(flatten)]
+    pub pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
+
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
 }
@@ -147,23 +176,6 @@ impl InstanceSelector {
             instance,
         }
     }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByName,
-    #[serde(flatten)]
-    pub project_selector: ProjectSelector,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceSerialConsole {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-
-    #[serde(flatten)]
-    pub console_params: InstanceSerialConsoleRequest,
 }
 
 // Silos

@@ -234,7 +234,7 @@ async fn poll_sps(
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            match client.sp_list(Some(MGS_TIMEOUT_MS)).await {
+            match client.sp_list().await {
                 Ok(val) => {
                     if update_inventory(
                         &log,
