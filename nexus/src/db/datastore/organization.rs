@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -65,13 +66,7 @@ impl DataStore {
                 .await
                 .map_err(|e| match e {
                     AsyncInsertError::CollectionNotFound => {
-                        Error::InternalError {
-                            internal_message: format!(
-                                "attempting to create an \
-                            organization under non-existent silo {}",
-                                silo_id
-                            ),
-                        }
+                        authz_silo.not_found()
                     }
                     AsyncInsertError::DatabaseError(e) => {
                         public_error_from_diesel_pool(
