@@ -215,7 +215,7 @@ impl super::Nexus {
                         "Initializing HTTPS server: {e}"
                     ))
                 })?;
-                external_servers.https.replace(server_starter_external.start());
+                external_servers.set_https(server_starter_external.start());
             }
             // Refresh an existing server.
             (Some(tls_config), Some(https)) => {
@@ -227,7 +227,7 @@ impl super::Nexus {
                 https.refresh_tls(&tls_config).await.map_err(|e| {
                     Error::internal_error(&format!("Cannot refresh TLS: {e}"))
                 })?;
-                external_servers.https.replace(https);
+                external_servers.set_https(https);
             }
             // Tear down an existing server.
             (None, Some(https)) => {

@@ -77,6 +77,10 @@ impl ExternalServers {
         self.http = Some(http);
     }
 
+    pub fn set_https(&mut self, https: DropshotServer) {
+        self.https = Some(https);
+    }
+
     pub fn https_port(&self) -> u16 {
         self.https_port
     }
