@@ -9,6 +9,8 @@
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::Name;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Identity-related accessors for resources.
@@ -39,6 +41,18 @@ pub trait Resource {
     }
 }
 
+/// Identity-related metadata that's included in "asset" public API objects
+/// (which generally have no name or description)
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct AssetIdentityMetadata {
+    /// unique, immutable, system-controlled identifier for each resource
+    pub id: Uuid,
+    /// timestamp when this resource was created
+    pub time_created: DateTime<Utc>,
+    /// timestamp when this resource was last modified
+    pub time_modified: DateTime<Utc>,
+}
+
 /// Identity-related accessors for assets.
 ///
 /// These are objects similar to [`Resource`], but without
@@ -49,4 +63,12 @@ pub trait Asset {
     fn id(&self) -> Uuid;
     fn time_created(&self) -> DateTime<Utc>;
     fn time_modified(&self) -> DateTime<Utc>;
+
+    fn identity(&self) -> AssetIdentityMetadata {
+        AssetIdentityMetadata {
+            id: self.id(),
+            time_created: self.time_created(),
+            time_modified: self.time_modified(),
+        }
+    }
 }

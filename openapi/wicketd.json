@@ -1,0 +1,470 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Technician Port Control Service",
+    "description": "API for use by the technician port TUI: wicket",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/artifacts/{name}/{version}": {
+      "put": {
+        "summary": "An endpoint used to upload artifacts to the server.",
+        "operationId": "put_artifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "description": "The artifact's name.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "description": "The version of the artifact.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/inventory": {
+      "get": {
+        "summary": "A status endpoint used to report high level information known to wicketd.",
+        "description": "This endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
+        "operationId": "get_inventory",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackV1Inventory"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "RackV1Inventory": {
+        "description": "The current state of the v1 Rack as known to wicketd",
+        "type": "object",
+        "properties": {
+          "sps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpInventory"
+            }
+          }
+        },
+        "required": [
+          "sps"
+        ]
+      },
+      "SpComponentInfo": {
+        "description": "Overview of a single SP component.",
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "description": "`capabilities` is a bitmask; interpret it via [`gateway_messages::DeviceCapabilities`].",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "component": {
+            "description": "The unique identifier for this component.",
+            "type": "string"
+          },
+          "description": {
+            "description": "A human-readable description of the component.",
+            "type": "string"
+          },
+          "device": {
+            "description": "The name of the physical device.",
+            "type": "string"
+          },
+          "presence": {
+            "description": "Whether or not the component is present, to the best of the SP's ability to judge.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentPresence"
+              }
+            ]
+          },
+          "serial_number": {
+            "nullable": true,
+            "description": "The component's serial number, if it has one.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capabilities",
+          "component",
+          "description",
+          "device",
+          "presence"
+        ]
+      },
+      "SpComponentPresence": {
+        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).",
+        "oneOf": [
+          {
+            "description": "The component is present.",
+            "type": "string",
+            "enum": [
+              "present"
+            ]
+          },
+          {
+            "description": "The component is not present.",
+            "type": "string",
+            "enum": [
+              "not_present"
+            ]
+          },
+          {
+            "description": "The component is present but in a failed or faulty state.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The SP is unable to determine the presence of the component.",
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          {
+            "description": "The SP's attempt to determine the presence of the component timed out.",
+            "type": "string",
+            "enum": [
+              "timeout"
+            ]
+          },
+          {
+            "description": "The SP's attempt to determine the presence of the component failed.",
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          }
+        ]
+      },
+      "SpIdentifier": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/SpType"
+          }
+        },
+        "required": [
+          "slot",
+          "type"
+        ]
+      },
+      "SpIgnition": {
+        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "present": {
+                "type": "string",
+                "enum": [
+                  "no"
+                ]
+              }
+            },
+            "required": [
+              "present"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ctrl_detect_0": {
+                "type": "boolean"
+              },
+              "ctrl_detect_1": {
+                "type": "boolean"
+              },
+              "flt_a2": {
+                "type": "boolean"
+              },
+              "flt_a3": {
+                "type": "boolean"
+              },
+              "flt_rot": {
+                "type": "boolean"
+              },
+              "flt_sp": {
+                "type": "boolean"
+              },
+              "id": {
+                "$ref": "#/components/schemas/SpIgnitionSystemType"
+              },
+              "power": {
+                "type": "boolean"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "yes"
+                ]
+              }
+            },
+            "required": [
+              "ctrl_detect_0",
+              "ctrl_detect_1",
+              "flt_a2",
+              "flt_a3",
+              "flt_rot",
+              "flt_sp",
+              "id",
+              "power",
+              "present"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "present"
+            ]
+          }
+        ]
+      },
+      "SpIgnitionSystemType": {
+        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "sidecar"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "psc"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "system_type"
+            ]
+          }
+        ]
+      },
+      "SpInventory": {
+        "description": "SP related data",
+        "type": "object",
+        "properties": {
+          "components": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpComponentInfo"
+            }
+          },
+          "id": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          },
+          "ignition": {
+            "$ref": "#/components/schemas/SpIgnition"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SpState"
+          }
+        },
+        "required": [
+          "id",
+          "ignition",
+          "state"
+        ]
+      },
+      "SpState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "serial_number": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "serial_number",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpType": {
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
+        ]
+      }
+    }
+  }
+}

@@ -10,12 +10,15 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::IdentityMetadataCreateParams;
-use crate::db::datastore::LookupType;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Name;
+use crate::db::model::Silo;
 use crate::db::model::SiloUser;
+use crate::db::model::SiloUserPasswordHash;
+use crate::db::model::SiloUserPasswordUpdate;
 use crate::db::model::UserBuiltin;
+use crate::db::model::UserProvisionType;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::external_api::params;
@@ -24,16 +27,23 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Asset;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
+use omicron_common::bail_unless;
 use uuid::Uuid;
 
 impl DataStore {
     /// Create a silo user
+    // TODO-security This function should take an OpContext and do an authz
+    // check.
     pub async fn silo_user_create(
         &self,
         authz_silo: &authz::Silo,
@@ -200,6 +210,96 @@ impl DataStore {
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Updates or deletes the password hash for a given Silo user
+    ///
+    /// If `password_hash` is `Some(...)`, the provided value is stored as the
+    /// user's password hash.  Otherwise, any existing hash is deleted so that
+    /// it cannot be used for authentication any more.
+    pub async fn silo_user_password_hash_set(
+        &self,
+        opctx: &OpContext,
+        db_silo: &Silo,
+        authz_silo_user: &authz::SiloUser,
+        db_silo_user: &SiloUser,
+        db_silo_user_password_hash: Option<SiloUserPasswordHash>,
+    ) -> UpdateResult<()> {
+        opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
+
+        // Verify that the various objects we're given actually match up.
+        // Failures here reflect bugs, not bad input.
+        bail_unless!(db_silo.id() == db_silo_user.silo_id);
+        bail_unless!(db_silo_user.id() == authz_silo_user.id());
+        if let Some(db_silo_user_password_hash) = &db_silo_user_password_hash {
+            bail_unless!(
+                db_silo_user_password_hash.silo_user_id == db_silo_user.id()
+            );
+        }
+
+        // Verify that this Silo supports setting local passwords on users.
+        // The caller is supposed to have verified this already.
+        bail_unless!(db_silo.user_provision_type == UserProvisionType::ApiOnly);
+
+        use db::schema::silo_user_password_hash::dsl;
+
+        if let Some(db_silo_user_password_hash) = db_silo_user_password_hash {
+            let hash_for_update = db_silo_user_password_hash.hash.clone();
+            diesel::insert_into(dsl::silo_user_password_hash)
+                .values(db_silo_user_password_hash)
+                .on_conflict(dsl::silo_user_id)
+                .do_update()
+                .set(SiloUserPasswordUpdate::new(hash_for_update))
+                .execute_async(self.pool_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                })?;
+        } else {
+            diesel::delete(dsl::silo_user_password_hash)
+                .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                .execute_async(self.pool_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                })?;
+        }
+
+        Ok(())
+    }
+
+    /// Fetches the stored password hash for a given Silo user
+    ///
+    /// Returns:
+    ///
+    /// - `Ok(Some(SiloUserPasswordHash))` if the hash was found
+    /// - `Ok(None)` if we successfully queried for it but found none
+    /// - `Err(...)` otherwise
+    pub async fn silo_user_password_hash_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_silo_user: &authz::SiloUser,
+    ) -> LookupResult<Option<SiloUserPasswordHash>> {
+        // Although it should be safe enough to leak a password hash, there's no
+        // reason to give it out to people who only have "read" access to the
+        // user.  So we check for "modify" here.  (Arguably we could consider
+        // the password a separate resource nested under the user, so that this
+        // would be a check on "read" of the user's password.  This doesn't seem
+        // worth the effort right now.)
+        opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
+
+        use db::schema::silo_user_password_hash::dsl;
+        Ok(dsl::silo_user_password_hash
+            .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+            .select(SiloUserPasswordHash::as_select())
+            .load_async::<SiloUserPasswordHash>(
+                self.pool_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?
+            .pop())
     }
 
     pub async fn users_builtin_list_by_name(

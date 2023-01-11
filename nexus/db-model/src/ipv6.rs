@@ -16,9 +16,19 @@ use diesel::sql_types::Inet;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
 use omicron_common::api::external::Error;
+use serde::{Deserialize, Serialize};
 
 #[derive(
-    Clone, Copy, AsExpression, FromSqlRow, PartialEq, Ord, PartialOrd, Eq,
+    Clone,
+    Copy,
+    AsExpression,
+    FromSqlRow,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Eq,
+    Deserialize,
+    Serialize,
 )]
 #[diesel(sql_type = Inet)]
 pub struct Ipv6Addr(std::net::Ipv6Addr);

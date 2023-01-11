@@ -5,29 +5,30 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-bytes = "1.2.1"
-chrono = { version = "0.4",  features = [ "serde" ] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-headers = "0.3.8"
-http = "0.2.7"
-hyper = "0.14"
-omicron-common = { path = "../../common" }
-omicron-nexus = { path = ".." }
-omicron-sled-agent = { path = "../../sled-agent" }
-omicron-test-utils = { path = "../../test-utils" }
-oximeter = { version = "0.1.0", path = "../../oximeter/oximeter" }
-oximeter-client = { path = "../../oximeter-client" }
-oximeter-collector = { version = "0.1.0",  path = "../../oximeter/collector" }
-oximeter-producer = { version = "0.1.0",  path = "../../oximeter/producer" }
-parse-display = "0.6.0"
-serde = { version = "1.0",  features = [ "derive" ] }
-serde_json = "1.0"
-serde_urlencoded = "0.7.1"
-slog = { version = "2.7",  features = [ "max_level_trace", "release_max_level_debug" ] }
-uuid = { version = "1.2.1", features = [ "serde", "v4" ] }
+anyhow.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+dropshot.workspace = true
+headers.workspace = true
+http.workspace = true
+hyper.workspace = true
+nexus-test-interface.workspace = true
+omicron-common.workspace = true
+omicron-nexus.workspace = true
+omicron-sled-agent.workspace = true
+omicron-test-utils.workspace = true
+oximeter.workspace = true
+oximeter-client.workspace = true
+oximeter-collector.workspace = true
+oximeter-producer.workspace = true
+parse-display.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_urlencoded.workspace = true
+slog.workspace = true
+uuid.workspace = true
 
 [build-dependencies]
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-omicron-test-utils = { path = "../../test-utils" }
-tokio = { version = "1.21" }
+dropshot.workspace = true
+omicron-test-utils.workspace = true
+tokio.workspace = true

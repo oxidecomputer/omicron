@@ -11,6 +11,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use nexus_test_interface::NexusServer;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -18,11 +19,14 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::params::UserId;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
+use omicron_nexus::external_api::views::User;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
@@ -59,9 +63,39 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("failed to make \"create\" request")
+        .expect(&format!("failed to make \"create\" request to {path}"))
         .parsed_body()
         .unwrap()
+}
+
+pub async fn object_delete(client: &ClientTestContext, path: &str) {
+    NexusRequest::object_delete(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect(&format!("failed to make \"delete\" request to {path}"));
+}
+
+pub async fn populate_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) -> IpPoolRange {
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
+    let range = object_create(
+        client,
+        format!("/system/ip-pools/{}/ranges/add", pool_name).as_str(),
+        &ip_range,
+    )
+    .await;
+    range
 }
 
 /// Create an IP pool with a single range for testing.
@@ -73,16 +107,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-    project_path: Option<params::ProjectPath>,
 ) -> (IpPool, IpPoolRange) {
-    let ip_range = ip_range.unwrap_or_else(|| {
-        use std::net::Ipv4Addr;
-        IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 0),
-            Ipv4Addr::new(10, 0, 255, 255),
-        ))
-        .unwrap()
-    });
     let pool = object_create(
         client,
         "/system/ip-pools",
@@ -91,16 +116,10 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
-            project: project_path,
         },
     )
     .await;
-    let range = object_create(
-        client,
-        format!("/system/ip-pools/{}/ranges/add", pool_name).as_str(),
-        &ip_range,
-    )
-    .await;
+    let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
 }
 
@@ -122,6 +141,23 @@ pub async fn create_silo(
             identity_mode,
             admin_group_name: None,
         },
+    )
+    .await
+}
+
+pub async fn create_local_user(
+    client: &ClientTestContext,
+    silo: &views::Silo,
+    username: &UserId,
+    password: params::UserPassword,
+) -> User {
+    let silo_name = &silo.identity.name;
+    let url =
+        format!("/system/silos/{}/identity-providers/local/users", silo_name);
+    object_create(
+        client,
+        &url,
+        &params::UserCreate { external_id: username.to_owned(), password },
     )
     .await
 }
@@ -187,6 +223,19 @@ pub async fn create_disk(
         },
     )
     .await
+}
+
+pub async fn delete_disk(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    disk_name: &str,
+) {
+    let url = format!(
+        "/organizations/{}/projects/{}/disks/{}",
+        organization_name, project_name, disk_name
+    );
+    object_delete(client, &url).await
 }
 
 /// Creates an instance with a default NIC and no disks.
@@ -414,7 +463,9 @@ impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
 
     // Creates fake physical storage, an organization, and a project.
-    pub async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
+    pub async fn new<N: NexusServer>(
+        cptestctx: &ControlPlaneTestContext<N>,
+    ) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
 
         let mut disk_test = Self { sled_agent, zpools: vec![] };
@@ -422,14 +473,18 @@ impl DiskTest {
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
         for _ in 0..3 {
             disk_test
-                .add_zpool_with_dataset(Self::DEFAULT_ZPOOL_SIZE_GIB)
+                .add_zpool_with_dataset(cptestctx, Self::DEFAULT_ZPOOL_SIZE_GIB)
                 .await;
         }
 
         disk_test
     }
 
-    pub async fn add_zpool_with_dataset(&mut self, gibibytes: u32) {
+    pub async fn add_zpool_with_dataset<N: NexusServer>(
+        &mut self,
+        cptestctx: &ControlPlaneTestContext<N>,
+        gibibytes: u32,
+    ) {
         let zpool = TestZpool {
             id: Uuid::new_v4(),
             size: ByteCount::from_gibibytes_u32(gibibytes),
@@ -439,7 +494,10 @@ impl DiskTest {
         self.sled_agent.create_zpool(zpool.id, zpool.size.to_bytes()).await;
 
         for dataset in &zpool.datasets {
-            self.sled_agent.create_crucible_dataset(zpool.id, dataset.id).await;
+            let address = self
+                .sled_agent
+                .create_crucible_dataset(zpool.id, dataset.id)
+                .await;
 
             // By default, regions are created immediately.
             let crucible = self
@@ -448,6 +506,16 @@ impl DiskTest {
                 .await;
             crucible
                 .set_create_callback(Box::new(|_| RegionState::Created))
+                .await;
+
+            let address = match address {
+                std::net::SocketAddr::V6(addr) => addr,
+                _ => panic!("Unsupported address type: {address} "),
+            };
+
+            cptestctx
+                .server
+                .upsert_crucible_dataset(dataset.id, zpool.id, address)
                 .await;
         }
 

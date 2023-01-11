@@ -19,12 +19,11 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_instance_with;
-use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -40,6 +39,9 @@ use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
@@ -71,7 +73,7 @@ fn get_disk_detach_url(instance_name: &str) -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_organization(&client, ORG_NAME).await;
     let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -830,9 +832,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create another three zpools, all 10 gibibytes, each with one dataset
-    test.add_zpool_with_dataset(10).await;
-    test.add_zpool_with_dataset(10).await;
-    test.add_zpool_with_dataset(10).await;
+    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx, 10).await;
 
     create_org_and_project(client).await;
 
@@ -1075,9 +1077,9 @@ async fn test_multiple_disks_multiple_zpools(
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    test.add_zpool_with_dataset(10).await;
-    test.add_zpool_with_dataset(10).await;
-    test.add_zpool_with_dataset(10).await;
+    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx, 10).await;
+    test.add_zpool_with_dataset(cptestctx, 10).await;
 
     create_org_and_project(client).await;
 
@@ -1152,7 +1154,7 @@ async fn query_for_metrics_until_they_exist(
     path: &str,
 ) -> ResultsPage<Measurement> {
     backoff::retry_notify(
-        backoff::internal_service_policy(),
+        backoff::retry_policy_local(),
         || async {
             let measurements: ResultsPage<Measurement> =
                 objects_list_page_authz(client, path).await;

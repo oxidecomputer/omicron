@@ -79,15 +79,18 @@ lazy_static! {
         "/system/silos/{}/identity-providers/local/users/{{id}}",
         DEFAULT_SILO.identity().name,
     );
+    pub static ref DEMO_SILO_USER_ID_SET_PASSWORD_URL: String = format!(
+        "/system/silos/{}/identity-providers/local/users/{{id}}/set-password",
+        DEFAULT_SILO.identity().name,
+    );
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
     pub static ref DEMO_ORG_URL: String =
-        format!("/organizations/{}", *DEMO_ORG_NAME);
+        format!("/v1/organizations/{}", *DEMO_ORG_NAME);
     pub static ref DEMO_ORG_POLICY_URL: String =
-        format!("{}/policy", *DEMO_ORG_URL);
-    pub static ref DEMO_ORG_PROJECTS_URL: String =
-        format!("{}/projects", *DEMO_ORG_URL);
+        format!("/v1/organizations/{}/policy", *DEMO_ORG_NAME);
+    pub static ref DEMO_ORG_PROJECTS_URL: String = format!("/v1/projects?organization={}", *DEMO_ORG_NAME);
     pub static ref DEMO_ORG_CREATE: params::OrganizationCreate =
         params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
@@ -99,19 +102,20 @@ lazy_static! {
     // Project used for testing
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
     pub static ref DEMO_PROJECT_URL: String =
-        format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
+        format!("/v1/projects/{}?organization={}", *DEMO_PROJECT_NAME, *DEMO_ORG_NAME);
+    pub static ref DEMO_PROJECT_SELECTOR: String =
+        format!("?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_POLICY_URL: String =
-        format!("{}/policy", *DEMO_PROJECT_URL);
+        format!("/v1/projects/{}/policy?organization={}", *DEMO_PROJECT_NAME, *DEMO_ORG_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
-        format!("{}/disks", *DEMO_PROJECT_URL);
+        format!("/organizations/{}/projects/{}/disks", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
-        format!("{}/images", *DEMO_PROJECT_URL);
-    pub static ref DEMO_PROJECT_URL_INSTANCES: String =
-        format!("{}/instances", *DEMO_PROJECT_URL);
+        format!("/organizations/{}/projects/{}/images", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
-        format!("{}/snapshots", *DEMO_PROJECT_URL);
+        format!("/organizations/{}/projects/{}/snapshots", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
-        format!("{}/vpcs", *DEMO_PROJECT_URL);
+        format!("/organizations/{}/projects/{}/vpcs", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -123,13 +127,13 @@ lazy_static! {
     // VPC used for testing
     pub static ref DEMO_VPC_NAME: Name = "demo-vpc".parse().unwrap();
     pub static ref DEMO_VPC_URL: String =
-        format!("{}/{}", *DEMO_PROJECT_URL_VPCS, *DEMO_VPC_NAME);
+        format!("/organizations/{}/projects/{}/vpcs/{}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_FIREWALL_RULES: String =
-        format!("{}/firewall/rules", *DEMO_VPC_URL);
+        format!("/organizations/{}/projects/{}/vpcs/{}/firewall/rules", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_ROUTERS: String =
-        format!("{}/routers", *DEMO_VPC_URL);
+        format!("/organizations/{}/projects/{}/vpcs/{}/routers", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_SUBNETS: String =
-        format!("{}/subnets", *DEMO_VPC_URL);
+        format!("/organizations/{}/projects/{}/vpcs/{}/subnets", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_CREATE: params::VpcCreate =
         params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -220,29 +224,31 @@ lazy_static! {
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
     pub static ref DEMO_INSTANCE_URL: String =
-        format!("{}/{}", *DEMO_PROJECT_URL_INSTANCES, *DEMO_INSTANCE_NAME);
+        format!("/v1/instances/{}?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_START_URL: String =
-        format!("{}/start", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/start?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_STOP_URL: String =
-        format!("{}/stop", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/stop?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_REBOOT_URL: String =
-        format!("{}/reboot", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/reboot?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_INSTANCE_MIGRATE_URL: String =
-        format!("{}/migrate", *DEMO_INSTANCE_URL);
+        format!("/v1/instances/{}/migrate?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
+        format!("/v1/instances/{}/serial-console?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_INSTANCE_SERIAL_STREAM_URL: String =
+        format!("/v1/instances/{}/serial-console/stream?organization={}&project={}", *DEMO_INSTANCE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+
+    // To be migrated...
     pub static ref DEMO_INSTANCE_DISKS_URL: String =
-        format!("{}/disks", *DEMO_INSTANCE_URL);
+        format!("/organizations/{}/projects/{}/instances/{}/disks", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_DISKS_ATTACH_URL: String =
         format!("{}/attach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
-        format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+        format!("/organizations/{}/projects/{}/instances/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
-        format!("{}/external-ips", *DEMO_INSTANCE_URL);
-    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
-        format!("{}/serial-console", *DEMO_INSTANCE_URL);
-    pub static ref DEMO_INSTANCE_SERIAL_STREAM_URL: String =
-        format!("{}/serial-console/stream", *DEMO_INSTANCE_URL);
+        format!("/organizations/{}/projects/{}/instances/{}/external-ips", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -256,7 +262,7 @@ lazy_static! {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![
-                params::ExternalIpCreate::Ephemeral { pool_name: None }
+                params::ExternalIpCreate::Ephemeral { pool_name: Some(DEMO_IP_POOL_NAME.clone()) }
             ],
             disks: vec![],
             start: true,
@@ -323,14 +329,13 @@ lazy_static! {
 
     // IP Pools
     pub static ref DEMO_IP_POOLS_URL: &'static str = "/system/ip-pools";
-    pub static ref DEMO_IP_POOL_NAME: Name = "pool0".parse().unwrap();
+    pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
         params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
             },
-            project: None,
         };
     pub static ref DEMO_IP_POOL_URL: String = format!("/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
@@ -349,8 +354,7 @@ lazy_static! {
     pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
     // IP Pools (Services)
-    pub static ref DEMO_IP_POOLS_SERVICE_URL: &'static str = "/system/ip-pools-service";
-    pub static ref DEMO_IP_POOL_SERVICE_URL: String = format!("{}/{}", *DEMO_IP_POOLS_SERVICE_URL, RACK_UUID);
+    pub static ref DEMO_IP_POOL_SERVICE_URL: &'static str = "/system/ip-pools-service";
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_SERVICE_URL);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_SERVICE_RANGES_URL);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL);
@@ -415,6 +419,7 @@ lazy_static! {
     // Users
     pub static ref DEMO_USER_CREATE: params::UserCreate = params::UserCreate {
         external_id: params::UserId::from_str("dummy-user").unwrap(),
+        password: params::UserPassword::InvalidPassword,
     };
 }
 
@@ -789,6 +794,17 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::to_value(
+                    params::UserPassword::InvalidPassword
+                ).unwrap()),
+            ],
+        },
+
+        VerifyEndpoint {
             url: "/groups",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
@@ -800,7 +816,7 @@ lazy_static! {
         /* Organizations */
 
         VerifyEndpoint {
-            url: "/organizations",
+            url: "/v1/organizations",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -808,15 +824,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_ORG_CREATE).unwrap()
                 )
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/organizations/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 
@@ -873,15 +880,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap()
                 ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/projects/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 
@@ -1261,15 +1259,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap()
                 ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/instances/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 

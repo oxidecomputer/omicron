@@ -11,6 +11,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::saga_interface::SagaContext;
 use anyhow::Context;
+use futures::future::BoxFuture;
 use futures::StreamExt;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
@@ -24,8 +25,36 @@ use steno::DagBuilder;
 use steno::SagaDag;
 use steno::SagaId;
 use steno::SagaName;
+use steno::SagaResult;
 use steno::SagaResultOk;
 use uuid::Uuid;
+
+/// Encapsulates a saga to be run before we actually start running it
+///
+/// At this point, we've built the DAG, loaded it into the SEC, etc. but haven't
+/// started it running.  This is a useful point to inject errors, inspect the
+/// DAG, etc.
+pub struct RunnableSaga {
+    id: SagaId,
+    fut: BoxFuture<'static, SagaResult>,
+}
+
+impl RunnableSaga {
+    pub fn id(&self) -> SagaId {
+        self.id
+    }
+}
+
+pub fn create_saga_dag<N: NexusSaga>(
+    params: N::Params,
+) -> Result<SagaDag, Error> {
+    let builder = DagBuilder::new(SagaName::new(N::NAME));
+    let dag = N::make_saga_dag(&params, builder)?;
+    let params = serde_json::to_value(&params).map_err(|e| {
+        SagaInitError::SerializeError(String::from("saga params"), e)
+    })?;
+    Ok(SagaDag::new(dag, params))
+}
 
 impl super::Nexus {
     pub async fn sagas_list(
@@ -66,27 +95,18 @@ impl super::Nexus {
             })?
     }
 
-    /// Given a saga type and parameters, create a new saga and execute it.
-    pub(crate) async fn execute_saga<N: NexusSaga>(
+    pub async fn create_runnable_saga(
         self: &Arc<Self>,
-        params: N::Params,
-    ) -> Result<SagaResultOk, Error> {
-        let saga = {
-            let builder = DagBuilder::new(SagaName::new(N::NAME));
-            let dag = N::make_saga_dag(&params, builder)?;
-            let params = serde_json::to_value(&params).map_err(|e| {
-                SagaInitError::SerializeError(String::from("saga params"), e)
-            })?;
-            SagaDag::new(dag, params)
-        };
-
+        dag: SagaDag,
+    ) -> Result<RunnableSaga, Error> {
+        // Construct the context necessary to execute this saga.
         let saga_id = SagaId(Uuid::new_v4());
         let saga_logger = self.log.new(o!(
-            "saga_name" => saga.saga_name().to_string(),
+            "saga_name" => dag.saga_name().to_string(),
             "saga_id" => saga_id.to_string()
         ));
         let saga_context = Arc::new(Arc::new(SagaContext::new(
-            Arc::clone(self),
+            self.clone(),
             saga_logger,
             Arc::clone(&self.authz),
         )));
@@ -95,7 +115,7 @@ impl super::Nexus {
             .saga_create(
                 saga_id,
                 saga_context,
-                Arc::new(saga),
+                Arc::new(dag),
                 ACTION_REGISTRY.clone(),
             )
             .await
@@ -106,14 +126,20 @@ impl super::Nexus {
                 // Steno.
                 Error::internal_error(&format!("{:#}", error))
             })?;
+        Ok(RunnableSaga { id: saga_id, fut: future })
+    }
 
+    pub async fn run_saga(
+        &self,
+        runnable_saga: RunnableSaga,
+    ) -> Result<SagaResultOk, Error> {
         self.sec_client
-            .saga_start(saga_id)
+            .saga_start(runnable_saga.id)
             .await
             .context("starting saga")
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
 
-        let result = future.await;
+        let result = runnable_saga.fut.await;
         result.kind.map_err(|saga_error| {
             saga_error
                 .error_source
@@ -124,5 +150,24 @@ impl super::Nexus {
                     saga_error.error_node_name
                 ))
         })
+    }
+
+    pub fn sec(&self) -> &steno::SecClient {
+        &self.sec_client
+    }
+
+    /// Given a saga type and parameters, create a new saga and execute it.
+    pub(crate) async fn execute_saga<N: NexusSaga>(
+        self: &Arc<Self>,
+        params: N::Params,
+    ) -> Result<SagaResultOk, Error> {
+        // Construct the DAG specific to this saga.
+        let dag = create_saga_dag::<N>(params)?;
+
+        // Register the saga with the saga executor.
+        let runnable_saga = self.create_runnable_saga(dag).await?;
+
+        // Actually run the saga to completion.
+        self.run_saga(runnable_saga).await
     }
 }

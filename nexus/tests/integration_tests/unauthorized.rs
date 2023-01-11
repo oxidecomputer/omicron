@@ -19,9 +19,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authn::external::spoof;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
 // unauthorized requests to make sure we get the expected behavior (generally:
@@ -67,7 +69,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap(),
+                    .expect(&format!("Failed to GET from URL: {url}")),
                 id_routes,
             ),
             SetupReq::Post { url, body, id_routes } => (
@@ -76,7 +78,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap(),
+                    .expect(&format!("Failed to POST to URL: {url}")),
                 id_routes,
             ),
         };
@@ -195,15 +197,15 @@ lazy_static! {
             id_routes: vec![
                 &*DEMO_SILO_USER_ID_GET_URL,
                 &*DEMO_SILO_USER_ID_DELETE_URL,
+                &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
         },
-        // Create an IP pool
-        SetupReq::Post {
-            url: &*DEMO_IP_POOLS_URL,
-            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+        // Get the default IP pool
+        SetupReq::Get {
+            url: &*DEMO_IP_POOL_URL,
             id_routes: vec!["/system/by-id/ip-pools/{id}"],
         },
-        // Create an IP Pool range
+        // Create an IP pool range
         SetupReq::Post {
             url: &*DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
@@ -211,15 +213,15 @@ lazy_static! {
         },
         // Create an Organization
         SetupReq::Post {
-            url: "/organizations",
+            url: "/v1/organizations",
             body: serde_json::to_value(&*DEMO_ORG_CREATE).unwrap(),
-            id_routes: vec!["/by-id/organizations/{id}"],
+            id_routes: vec![],
         },
         // Create a Project in the Organization
         SetupReq::Post {
             url: &*DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
-            id_routes: vec!["/by-id/projects/{id}"],
+            id_routes: vec![],
         },
         // Create a VPC in the Project
         SetupReq::Post {
@@ -255,7 +257,7 @@ lazy_static! {
         SetupReq::Post {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
-            id_routes: vec!["/by-id/instances/{id}"],
+            id_routes: vec!["/v1/instances/{id}"],
         },
         // Lookup the previously created NIC
         SetupReq::Get {
@@ -412,7 +414,7 @@ async fn verify_endpoint(
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap()
+                    .expect(&format!("Failed to GET: {uri}"))
                     .parsed_body::<serde_json::Value>()
                     .unwrap(),
             )

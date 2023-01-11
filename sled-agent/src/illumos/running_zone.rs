@@ -6,8 +6,8 @@
 
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm::Etherstub;
+use crate::illumos::link::{Link, VnicAllocator};
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::Port;
 use ipnetwork::IpNetwork;
@@ -97,6 +97,7 @@ pub enum GetZoneError {
 
 /// Represents a running zone.
 pub struct RunningZone {
+    running: bool,
     inner: InstalledZone,
 }
 
@@ -135,7 +136,7 @@ impl RunningZone {
         // Boot the zone.
         info!(zone.log, "Zone booting");
 
-        Zones::boot(&zone.name)?;
+        Zones::boot(&zone.name).await?;
 
         // Wait for the network services to come online, so future
         // requests to create addresses can operate immediately.
@@ -147,7 +148,7 @@ impl RunningZone {
             }
         })?;
 
-        Ok(RunningZone { inner: zone })
+        Ok(RunningZone { running: true, inner: zone })
     }
 
     pub async fn ensure_address(
@@ -190,7 +191,8 @@ impl RunningZone {
     ) -> Result<IpNetwork, EnsureAddressError> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
         let addrobj = AddrObject::new(
-                self.inner.physical_nic
+                self.inner
+                    .link
                     .as_ref()
                     .expect("Cannot allocate external address on zone without physical NIC")
                     .name(),
@@ -249,6 +251,7 @@ impl RunningZone {
         addrtype: AddressRequest,
     ) -> Result<Self, GetZoneError> {
         let zone_info = Zones::get()
+            .await
             .map_err(|err| GetZoneError::GetZones {
                 prefix: zone_prefix.to_string(),
                 err,
@@ -284,10 +287,11 @@ impl RunningZone {
             },
         )?;
 
-        let control_vnic = Vnic::wrap_existing(vnic_name)
+        let control_vnic = Link::wrap_existing(vnic_name)
             .expect("Failed to wrap valid control VNIC");
 
         Ok(Self {
+            running: true,
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
                 name: zone_name.to_string(),
@@ -296,7 +300,7 @@ impl RunningZone {
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
-                physical_nic: None,
+                link: None,
             },
         })
     }
@@ -305,17 +309,38 @@ impl RunningZone {
     pub fn opte_ports(&self) -> &[Port] {
         &self.inner.opte_ports
     }
+
+    /// Halts and removes the zone, awaiting its termination.
+    ///
+    /// Allows callers to synchronously stop a zone, and inspect an error.
+    pub async fn stop(&mut self) -> Result<(), String> {
+        if self.running {
+            self.running = false;
+            let log = self.inner.log.clone();
+            let name = self.name().to_string();
+            Zones::halt_and_remove_logged(&log, &name)
+                .await
+                .map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        match Zones::halt_and_remove_logged(&self.inner.log, self.name()) {
-            Ok(()) => {
-                info!(self.inner.log, "Stopped and uninstalled zone")
-            }
-            Err(e) => {
-                warn!(self.inner.log, "Failed to stop zone: {}", e)
-            }
+        if self.running {
+            let log = self.inner.log.clone();
+            let name = self.name().to_string();
+            tokio::task::spawn(async move {
+                match Zones::halt_and_remove_logged(&log, &name).await {
+                    Ok(()) => {
+                        info!(log, "Stopped and uninstalled zone")
+                    }
+                    Err(e) => {
+                        warn!(log, "Failed to stop zone: {}", e)
+                    }
+                }
+            });
         }
     }
 }
@@ -346,14 +371,13 @@ pub struct InstalledZone {
     name: String,
 
     // NIC used for control plane communication.
-    control_vnic: Vnic,
+    control_vnic: Link,
 
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<Port>,
 
     // Physical NIC possibly provisioned to the zone.
-    // TODO: Remove once Nexus traffic is transmitted over OPTE.
-    physical_nic: Option<Vnic>,
+    link: Option<Link>,
 }
 
 impl InstalledZone {
@@ -384,7 +408,8 @@ impl InstalledZone {
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         opte_ports: Vec<Port>,
-        physical_nic: Option<Vnic>,
+        link: Option<Link>,
+        limit_priv: Vec<String>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
             InstallZoneError::CreateVnic { zone: zone_name.to_string(), err }
@@ -398,7 +423,7 @@ impl InstalledZone {
             .iter()
             .map(|port| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
-            .chain(physical_nic.as_ref().map(|vnic| vnic.name().to_string()))
+            .chain(link.as_ref().map(|vnic| vnic.name().to_string()))
             .collect();
 
         Zones::install_omicron_zone(
@@ -408,7 +433,9 @@ impl InstalledZone {
             &datasets,
             &devices,
             net_device_names,
+            limit_priv,
         )
+        .await
         .map_err(|err| InstallZoneError::InstallZone {
             zone: full_zone_name.to_string(),
             image_path: zone_image_path.clone(),
@@ -420,7 +447,7 @@ impl InstalledZone {
             name: full_zone_name,
             control_vnic,
             opte_ports,
-            physical_nic,
+            link,
         })
     }
 }

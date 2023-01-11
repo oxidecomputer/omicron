@@ -21,8 +21,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -68,8 +67,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -139,8 +137,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -186,8 +183,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -196,8 +192,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -241,8 +236,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -253,8 +247,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -265,8 +258,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -277,8 +269,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -364,8 +355,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -381,6 +371,33 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zpools": {
+      "get": {
+        "operationId": "zpools_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Zpool",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Zpool"
+                  }
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -586,11 +603,6 @@
           "device": {
             "type": "string"
           },
-          "gen": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
           "name": {
             "type": "string"
           },
@@ -606,7 +618,6 @@
         },
         "required": [
           "device",
-          "gen",
           "name",
           "read_only",
           "slot",
@@ -1461,6 +1472,20 @@
           {
             "type": "object",
             "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "management_gateway_service"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "asic": {
                 "$ref": "#/components/schemas/DendriteAsic"
               },
@@ -1525,15 +1550,15 @@
               "$ref": "#/components/schemas/ServiceType"
             }
           },
-          "zone_name": {
-            "type": "string"
+          "zone_type": {
+            "$ref": "#/components/schemas/ZoneType"
           }
         },
         "required": [
           "addresses",
           "id",
           "services",
-          "zone_name"
+          "zone_type"
         ]
       },
       "Slot": {
@@ -1683,6 +1708,16 @@
                 "format": "uint64",
                 "minimum": 0
               },
+              "blocks_per_extent": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "extent_count": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
               "gen": {
                 "type": "integer",
                 "format": "uint64",
@@ -1700,6 +1735,8 @@
             },
             "required": [
               "block_size",
+              "blocks_per_extent",
+              "extent_count",
               "gen",
               "opts",
               "type"
@@ -1833,6 +1870,28 @@
         },
         "required": [
           "rules"
+        ]
+      },
+      "ZoneType": {
+        "description": "The type of zone which may be requested from Sled Agent",
+        "type": "string",
+        "enum": [
+          "internal_dns",
+          "nexus",
+          "oximeter",
+          "switch"
+        ]
+      },
+      "Zpool": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       }
     }

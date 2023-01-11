@@ -9,11 +9,9 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::bootstrap::params::SledAgentRequest;
 use crate::nexus::LazyNexusClient;
-use omicron_common::backoff::{
-    internal_service_policy_with_max, retry_notify, BackoffError,
-};
+use crate::services::ServiceManager;
 use slog::Logger;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -21,7 +19,6 @@ use uuid::Uuid;
 pub struct Server {
     /// Dropshot server for the API.
     http_server: dropshot::HttpServer<SledAgent>,
-    _nexus_notifier_handle: tokio::task::JoinHandle<()>,
 }
 
 impl Server {
@@ -37,14 +34,14 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: Logger,
-        addr: SocketAddrV6,
-        is_scrimlet: bool,
         request: SledAgentRequest,
+        services: ServiceManager,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
 
+        let addr = request.sled_address();
         let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip())
             .map_err(|e| e.to_string())?;
 
@@ -52,8 +49,8 @@ impl Server {
             &config,
             log.clone(),
             lazy_nexus_client.clone(),
-            addr,
             request,
+            services,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -71,61 +68,7 @@ impl Server {
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
 
-        let sled_address = http_server.local_addr();
-        let sled_id = config.id;
-        let nexus_notifier_handle = tokio::task::spawn(async move {
-            // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped exponential
-            // backoff.
-            //
-            // TODO-robustness if this returns a 400 error, we probably want to
-            // return a permanent error from the `notify_nexus` closure.
-            let notify_nexus = || async {
-                info!(
-                    log,
-                    "contacting server nexus, registering sled: {}", sled_id
-                );
-                let role = if is_scrimlet {
-                    nexus_client::types::SledRole::Scrimlet
-                } else {
-                    nexus_client::types::SledRole::Gimlet
-                };
-
-                let nexus_client = lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
-                nexus_client
-                    .sled_agent_put(
-                        &sled_id,
-                        &nexus_client::types::SledAgentStartupInfo {
-                            sa_address: sled_address.to_string(),
-                            role,
-                        },
-                    )
-                    .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))
-            };
-            let log_notification_failure = |err, delay| {
-                warn!(
-                    log,
-                    "failed to notify nexus about sled agent: {}, will retry in {:?}", err, delay;
-                );
-            };
-            retry_notify(
-                internal_service_policy_with_max(
-                    std::time::Duration::from_secs(1),
-                ),
-                notify_nexus,
-                log_notification_failure,
-            )
-            .await
-            .expect("Expected an infinite retry loop contacting Nexus");
-        });
-        Ok(Server {
-            http_server,
-            _nexus_notifier_handle: nexus_notifier_handle,
-        })
+        Ok(Server { http_server })
     }
 
     /// Wait for the given server to shut down

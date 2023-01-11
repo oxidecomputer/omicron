@@ -9,7 +9,6 @@ use super::setup;
 use super::SpStateExt;
 use dropshot::test_util;
 use dropshot::Method;
-use dropshot::ResultsPage;
 use gateway_messages::SpPort;
 use http::StatusCode;
 use omicron_gateway::http_entrypoints::SpIdentifier;
@@ -50,10 +49,9 @@ async fn bulk_sp_get_all_online() {
 
     let url = format!("{}", client.url("/sp"));
 
-    let page: ResultsPage<SpInfo> =
-        test_util::objects_list_page(client, &url).await;
+    let sps: Vec<SpInfo> = test_util::object_get(client, &url).await;
 
-    assert_eq_unordered!(page.items, expected);
+    assert_eq_unordered!(sps, expected);
 
     testctx.teardown().await;
 }
@@ -86,7 +84,9 @@ async fn bulk_sp_get_one_sp_powered_off() {
         if sp.info.id == (SpIdentifier { typ: SpType::Sled, slot: 0 }) {
             // TODO maybe extract into a `toggle_power()` helper?
             sp.info.details = match sp.info.details {
-                SpIgnition::Absent => panic!("bad ignition state"),
+                SpIgnition::Absent | SpIgnition::CommunicationFailed { .. } => {
+                    panic!("bad ignition state")
+                }
                 SpIgnition::Present {
                     id,
                     power: _power,
@@ -107,15 +107,13 @@ async fn bulk_sp_get_one_sp_powered_off() {
                     flt_sp,
                 },
             };
-            sp.details = SpState::Disabled;
         }
     }
 
     let url = format!("{}", client.url("/sp"));
-    let page: ResultsPage<SpInfo> =
-        test_util::objects_list_page(client, &url).await;
+    let sps: Vec<SpInfo> = test_util::object_get(client, &url).await;
 
-    assert_eq_unordered!(page.items, expected);
+    assert_eq_unordered!(sps, expected);
 
     testctx.teardown().await;
 }
@@ -140,28 +138,24 @@ async fn bulk_sp_get_one_sp_unresponsive() {
         .set_responsiveness(Responsiveness::Unresponsive)
         .await;
 
-    // With an unresponsive SP, we should get back an initial page containing
-    // the responsive SPs, then the subsequent page will eventually give us the
-    // unresponsive one. Remove it from `expected` and set it to unresponsive.
-    let sled_0_index = expected
-        .iter()
-        .position(|sp| {
-            sp.info.id == SpIdentifier { typ: SpType::Sled, slot: 0 }
-        })
-        .unwrap();
-    let mut expected_sled_0 = expected.remove(sled_0_index);
-    expected_sled_0.details = SpState::Unresponsive;
+    // What error message do we expect from MGS if an SP has previously been
+    // found but is no longer responsive? Hard coding the exact message here
+    // feels a little fragile, but (a) the number of attempts present in this
+    // string is in our test control (our test config file) and (b) should not
+    // change much.
+    let unresponsive_errmsg = "error communicating with SP: RPC call failed (gave up after 3 attempts)".to_string();
+
+    // Set sled 0 expected state to timeout
+    expected
+        .iter_mut()
+        .find(|sp| sp.info.id == SpIdentifier { typ: SpType::Sled, slot: 0 })
+        .unwrap()
+        .details =
+        SpState::CommunicationFailed { message: unresponsive_errmsg };
 
     let url = format!("{}", client.url("/sp"));
-    let page: ResultsPage<SpInfo> =
-        test_util::objects_list_page(client, &url).await;
-    assert_eq_unordered!(page.items, expected);
-
-    // get the subsequent page, which should tell us about the unresponsive SP
-    let url = format!("{}?page_token={}", url, page.next_page.unwrap());
-    let page: ResultsPage<SpInfo> =
-        test_util::objects_list_page(client, &url).await;
-    assert_eq_unordered!(page.items, [expected_sled_0]);
+    let sps: Vec<SpInfo> = test_util::object_get(client, &url).await;
+    assert_eq_unordered!(sps, expected);
 
     testctx.teardown().await;
 }

@@ -25,8 +25,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -64,8 +63,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -103,8 +101,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -142,8 +139,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -172,6 +168,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization by id",
+        "description": "Use `GET /v1/organizations/{organization}` instead",
         "operationId": "organization_view_by_id",
         "parameters": [
           {
@@ -181,8 +178,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -202,7 +198,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/projects/{id}": {
@@ -211,6 +208,7 @@
           "projects"
         ],
         "summary": "Fetch a project by id",
+        "description": "Use `GET /v1/projects/{project}` instead",
         "operationId": "project_view_by_id",
         "parameters": [
           {
@@ -220,8 +218,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -241,7 +238,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/snapshots/{id}": {
@@ -259,8 +257,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -298,8 +295,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -337,8 +333,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -376,8 +371,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -415,8 +409,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -547,8 +540,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -557,16 +549,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -619,6 +609,56 @@
         }
       }
     },
+    "/login/{silo_name}/local": {
+      "post": {
+        "tags": [
+          "login"
+        ],
+        "summary": "Authenticate a user (i.e., log in) via username and password",
+        "operationId": "login_local",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsernamePasswordCredentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "303": {
+            "description": "redirect (see other)",
+            "headers": {
+              "location": {
+                "description": "HTTP \"Location\" header",
+                "style": "simple",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/login/{silo_name}/saml/{provider_name}": {
       "get": {
         "tags": [
@@ -634,8 +674,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -643,8 +682,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -673,8 +711,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Authenticate a user",
-        "description": "Either receive a username and password, or some sort of identity provider data (like a SAMLResponse). Use these to set the user's session cookie.",
+        "summary": "Authenticate a user (i.e., log in) via SAML",
         "operationId": "login_saml",
         "parameters": [
           {
@@ -683,8 +720,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -692,8 +728,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -755,6 +790,7 @@
           "organizations"
         ],
         "summary": "List organizations",
+        "description": "Use `GET /v1/organizations` instead",
         "operationId": "organization_list",
         "parameters": [
           {
@@ -766,8 +802,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -776,16 +811,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -806,6 +839,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -813,6 +847,7 @@
           "organizations"
         ],
         "summary": "Create an organization",
+        "description": "Use `POST /v1/organizations` instead",
         "operationId": "organization_create",
         "requestBody": {
           "content": {
@@ -841,7 +876,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}": {
@@ -850,6 +886,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization",
+        "description": "Use `GET /v1/organizations/{organization}` instead",
         "operationId": "organization_view",
         "parameters": [
           {
@@ -859,8 +896,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -880,13 +916,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "organizations"
         ],
         "summary": "Update an organization",
+        "description": "Use `PUT /v1/organizations/{organization}` instead",
         "operationId": "organization_update",
         "parameters": [
           {
@@ -896,8 +934,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -927,13 +964,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "organizations"
         ],
         "summary": "Delete an organization",
+        "description": "Use `DELETE /v1/organizations/{organization}` instead",
         "operationId": "organization_delete",
         "parameters": [
           {
@@ -943,8 +982,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -957,7 +995,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/policy": {
@@ -966,6 +1005,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization's IAM policy",
+        "description": "Use `GET /v1/organizations/{organization}/policy` instead",
         "operationId": "organization_policy_view",
         "parameters": [
           {
@@ -975,8 +1015,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -996,13 +1035,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "organizations"
         ],
         "summary": "Update an organization's IAM policy",
+        "description": "Use `PUT /v1/organizations/{organization}/policy` instead",
         "operationId": "organization_policy_update",
         "parameters": [
           {
@@ -1012,8 +1053,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -1043,7 +1083,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects": {
@@ -1052,6 +1093,7 @@
           "projects"
         ],
         "summary": "List projects",
+        "description": "Use `GET /v1/projects` instead",
         "operationId": "project_list",
         "parameters": [
           {
@@ -1063,8 +1105,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -1073,16 +1114,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -1091,8 +1130,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1113,6 +1151,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -1120,6 +1159,7 @@
           "projects"
         ],
         "summary": "Create a project",
+        "description": "Use `POST /v1/projects` instead",
         "operationId": "project_create",
         "parameters": [
           {
@@ -1129,8 +1169,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -1160,7 +1199,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}": {
@@ -1169,6 +1209,7 @@
           "projects"
         ],
         "summary": "Fetch a project",
+        "description": "Use `GET /v1/projects/{project}` instead",
         "operationId": "project_view",
         "parameters": [
           {
@@ -1178,8 +1219,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1188,8 +1228,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1209,13 +1248,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "projects"
         ],
         "summary": "Update a project",
+        "description": "Use `PUT /v1/projects/{project}` instead",
         "operationId": "project_update",
         "parameters": [
           {
@@ -1225,8 +1266,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1235,8 +1275,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -1266,13 +1305,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "projects"
         ],
         "summary": "Delete a project",
+        "description": "Use `DELETE /v1/projects/{project}` instead",
         "operationId": "project_delete",
         "parameters": [
           {
@@ -1282,8 +1323,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1292,8 +1332,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1306,7 +1345,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/disks": {
@@ -1326,8 +1366,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -1336,16 +1375,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -1354,8 +1391,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1364,8 +1400,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1402,8 +1437,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1412,8 +1446,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -1460,8 +1493,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1469,8 +1501,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1478,8 +1509,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1514,8 +1544,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1523,8 +1552,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1532,8 +1560,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1563,8 +1590,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1572,8 +1598,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/DiskMetricName"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1581,8 +1606,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1590,8 +1614,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -1600,8 +1623,7 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -1612,8 +1634,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -1622,8 +1643,7 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -1632,8 +1652,7 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -1675,8 +1694,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -1685,16 +1703,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -1703,8 +1719,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1713,8 +1728,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1752,8 +1766,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1762,8 +1775,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -1811,8 +1823,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1820,8 +1831,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1829,8 +1839,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1866,8 +1875,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1875,8 +1883,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1884,8 +1891,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1918,8 +1924,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -1928,16 +1933,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -1946,8 +1949,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -1956,8 +1958,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1985,6 +1986,7 @@
           "instances"
         ],
         "summary": "Create an instance",
+        "description": "Use `POST /v1/instances` instead",
         "operationId": "instance_create",
         "parameters": [
           {
@@ -1994,8 +1996,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2004,8 +2005,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -2035,7 +2035,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}": {
@@ -2044,6 +2045,7 @@
           "instances"
         ],
         "summary": "Fetch an instance",
+        "description": "Use `GET /v1/instances/{instance}` instead",
         "operationId": "instance_view",
         "parameters": [
           {
@@ -2052,8 +2054,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2061,8 +2062,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2070,8 +2070,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2091,7 +2090,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -2106,8 +2106,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2115,8 +2114,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2124,8 +2122,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2138,7 +2135,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks": {
@@ -2158,8 +2156,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -2168,16 +2165,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -2185,8 +2180,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2194,8 +2188,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2203,8 +2196,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2242,8 +2234,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2251,8 +2242,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2260,8 +2250,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -2308,8 +2297,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2317,8 +2305,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2326,8 +2313,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -2374,8 +2360,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2383,8 +2368,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2392,8 +2376,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2422,6 +2405,7 @@
           "instances"
         ],
         "summary": "Migrate an instance",
+        "description": "Use `POST /v1/instances/{instance}/migrate` instead",
         "operationId": "instance_migrate",
         "parameters": [
           {
@@ -2430,8 +2414,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2439,8 +2422,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2448,8 +2430,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -2479,7 +2460,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces": {
@@ -2499,8 +2481,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -2509,16 +2490,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -2526,8 +2505,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2535,8 +2513,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2544,8 +2521,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2581,8 +2557,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2590,8 +2565,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2599,8 +2573,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -2647,8 +2620,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2656,8 +2628,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2665,8 +2636,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2674,8 +2644,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2710,8 +2679,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2719,8 +2687,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2728,8 +2695,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2737,8 +2703,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -2784,8 +2749,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2793,8 +2757,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2802,8 +2765,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2811,8 +2773,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2834,6 +2795,7 @@
           "instances"
         ],
         "summary": "Reboot an instance",
+        "description": "Use `POST /v1/instances/{instance}/reboot` instead",
         "operationId": "instance_reboot",
         "parameters": [
           {
@@ -2842,8 +2804,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2851,8 +2812,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2860,8 +2820,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -2881,7 +2840,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console": {
@@ -2890,6 +2850,7 @@
           "instances"
         ],
         "summary": "Fetch an instance's serial console",
+        "description": "Use `GET /v1/instances/{instance}/serial-console` instead",
         "operationId": "instance_serial_console",
         "parameters": [
           {
@@ -2898,8 +2859,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2907,8 +2867,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2916,8 +2875,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -2928,8 +2886,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -2940,8 +2897,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -2952,8 +2908,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -2973,7 +2928,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream": {
@@ -2982,6 +2938,7 @@
           "instances"
         ],
         "summary": "Connect to an instance's serial console",
+        "description": "Use `GET /v1/instances/{instance}/serial-console/stream` instead",
         "operationId": "instance_serial_console_stream",
         "parameters": [
           {
@@ -2990,8 +2947,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -2999,8 +2955,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3008,8 +2963,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3022,6 +2976,7 @@
             }
           }
         },
+        "deprecated": true,
         "x-dropshot-websocket": {}
       }
     },
@@ -3031,6 +2986,7 @@
           "instances"
         ],
         "summary": "Boot an instance",
+        "description": "Use `POST /v1/instances/{instance}/start` instead",
         "operationId": "instance_start",
         "parameters": [
           {
@@ -3039,8 +2995,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3048,8 +3003,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3057,8 +3011,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3078,7 +3031,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop": {
@@ -3087,6 +3041,7 @@
           "instances"
         ],
         "summary": "Halt an instance",
+        "description": "Use `POST /v1/instances/{instance}/stop` instead",
         "operationId": "instance_stop",
         "parameters": [
           {
@@ -3095,8 +3050,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3104,8 +3058,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3113,8 +3066,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3134,7 +3086,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/policy": {
@@ -3143,6 +3096,7 @@
           "projects"
         ],
         "summary": "Fetch a project's IAM policy",
+        "description": "Use `GET /v1/projects/{project}/policy` instead",
         "operationId": "project_policy_view",
         "parameters": [
           {
@@ -3152,8 +3106,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3162,8 +3115,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3183,7 +3135,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
@@ -3199,8 +3152,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3209,8 +3161,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -3260,8 +3211,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -3270,16 +3220,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -3288,8 +3236,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3298,8 +3245,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3337,8 +3283,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3347,8 +3292,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -3395,8 +3339,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3404,8 +3347,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3413,8 +3355,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3449,8 +3390,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3458,8 +3398,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3467,8 +3406,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3501,8 +3439,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -3511,16 +3448,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -3529,8 +3464,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3539,8 +3473,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3577,8 +3510,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3587,8 +3519,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -3635,8 +3566,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3644,8 +3574,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3653,8 +3582,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3689,8 +3617,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3698,8 +3625,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3707,8 +3633,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -3753,8 +3678,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3762,8 +3686,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3771,8 +3694,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3802,8 +3724,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3811,8 +3732,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3820,8 +3740,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -3856,8 +3775,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3865,8 +3783,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3874,8 +3791,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -3925,8 +3841,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -3935,16 +3850,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -3952,8 +3865,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3961,8 +3873,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -3970,8 +3881,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4007,8 +3917,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4016,8 +3925,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4025,8 +3933,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -4073,8 +3980,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4082,8 +3988,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4091,8 +3996,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4100,8 +4004,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4136,8 +4039,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4145,8 +4047,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4154,8 +4055,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4163,8 +4063,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -4209,8 +4108,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4218,8 +4116,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4227,8 +4124,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4236,8 +4132,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4271,8 +4166,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -4281,16 +4175,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -4298,8 +4190,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4307,8 +4198,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4316,8 +4206,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4325,8 +4214,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4362,8 +4250,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4371,8 +4258,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4380,8 +4266,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4389,8 +4274,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -4437,8 +4321,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4446,8 +4329,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4455,8 +4337,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4464,8 +4345,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4473,8 +4353,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4509,8 +4388,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4518,8 +4396,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4527,8 +4404,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4536,8 +4412,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4545,8 +4420,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -4591,8 +4465,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4600,8 +4473,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4609,8 +4481,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4618,8 +4489,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4627,8 +4497,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4661,8 +4530,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -4671,16 +4539,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -4688,8 +4554,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4697,8 +4562,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4706,8 +4570,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4743,8 +4606,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4752,8 +4614,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4761,8 +4622,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -4809,8 +4669,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4818,8 +4677,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4827,8 +4685,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4836,8 +4693,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -4872,8 +4728,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4881,8 +4736,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4890,8 +4744,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4899,8 +4752,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -4945,8 +4797,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4954,8 +4805,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4963,8 +4813,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -4972,8 +4821,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5006,8 +4854,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -5016,16 +4863,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "path",
@@ -5033,8 +4878,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -5042,8 +4886,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -5051,8 +4894,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -5060,8 +4902,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5164,8 +5005,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -5174,8 +5014,7 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -5214,8 +5053,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5282,8 +5120,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -5292,16 +5129,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -5343,8 +5178,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -5353,16 +5187,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -5437,8 +5269,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5474,8 +5305,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5506,8 +5336,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5545,8 +5374,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5584,8 +5412,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5625,8 +5452,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -5635,16 +5461,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -5684,8 +5508,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5725,8 +5548,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -5735,16 +5557,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -5784,8 +5604,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5826,8 +5645,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -5836,16 +5654,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -5920,8 +5736,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5957,8 +5772,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -5991,8 +5805,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6001,16 +5814,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -6083,8 +5894,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -6119,8 +5929,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -6165,8 +5974,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -6197,8 +6005,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -6209,8 +6016,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6219,8 +6025,7 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -6258,8 +6063,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -6306,8 +6110,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -6333,25 +6136,13 @@
         }
       }
     },
-    "/system/ip-pools-service/{rack_id}": {
+    "/system/ip-pools-service": {
       "get": {
         "tags": [
           "system"
         ],
-        "summary": "Fetch an IP pool used for Oxide services.",
+        "summary": "Fetch the IP pool used for Oxide services.",
         "operationId": "ip_pool_service_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -6372,25 +6163,15 @@
         }
       }
     },
-    "/system/ip-pools-service/{rack_id}/ranges": {
+    "/system/ip-pools-service/ranges": {
       "get": {
         "tags": [
           "system"
         ],
-        "summary": "List ranges for an IP pool used for Oxide services.",
+        "summary": "List ranges for the IP pool used for Oxide services.",
         "description": "Ranges are ordered by their first address.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          },
           {
             "in": "query",
             "name": "limit",
@@ -6400,8 +6181,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6410,8 +6190,7 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -6435,25 +6214,13 @@
         "x-dropshot-pagination": true
       }
     },
-    "/system/ip-pools-service/{rack_id}/ranges/add": {
+    "/system/ip-pools-service/ranges/add": {
       "post": {
         "tags": [
           "system"
         ],
         "summary": "Add a range to an IP pool used for Oxide services.",
         "operationId": "ip_pool_service_range_add",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6484,25 +6251,13 @@
         }
       }
     },
-    "/system/ip-pools-service/{rack_id}/ranges/remove": {
+    "/system/ip-pools-service/ranges/remove": {
       "post": {
         "tags": [
           "system"
         ],
         "summary": "Remove a range from an IP pool used for Oxide services.",
         "operationId": "ip_pool_service_range_remove",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6605,8 +6360,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6615,16 +6369,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -6663,8 +6415,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -6705,8 +6456,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6715,16 +6465,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -6799,8 +6547,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -6837,8 +6584,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -6869,8 +6615,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -6881,8 +6626,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -6891,16 +6635,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -6940,8 +6682,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -6979,6 +6720,7 @@
         "tags": [
           "system"
         ],
+        "summary": "Delete a user",
         "operationId": "local_idp_user_delete",
         "parameters": [
           {
@@ -6988,8 +6730,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -6999,13 +6740,64 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Set or invalidate a user's password",
+        "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
+        "operationId": "local_idp_user_set_password",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -7031,8 +6823,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -7080,8 +6871,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -7090,8 +6880,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -7129,8 +6918,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -7166,8 +6954,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -7205,7 +6992,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List users in a specific Silo",
+        "summary": "List users in a silo",
         "operationId": "silo_users_list",
         "parameters": [
           {
@@ -7215,8 +7002,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -7227,8 +7013,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -7237,16 +7022,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -7275,6 +7058,7 @@
         "tags": [
           "system"
         ],
+        "summary": "Fetch a user",
         "operationId": "silo_user_view",
         "parameters": [
           {
@@ -7284,8 +7068,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -7295,8 +7078,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -7356,8 +7138,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -7366,16 +7147,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -7414,8 +7193,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -7455,8 +7233,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -7465,8 +7242,7 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -7507,8 +7283,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -7517,16 +7292,14 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -7548,6 +7321,1186 @@
           }
         },
         "x-dropshot-pagination": true
+      }
+    },
+    "/v1/instances": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List instances",
+        "operationId": "instance_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Create an instance",
+        "operationId": "instance_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Fetch an instance",
+        "operationId": "instance_view_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Delete an instance",
+        "operationId": "instance_delete_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/migrate": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Migrate an instance",
+        "operationId": "instance_migrate_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMigrate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/reboot": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Reboot an instance",
+        "operationId": "instance_reboot_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/serial-console": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Fetch an instance's serial console",
+        "operationId": "instance_serial_console_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_start",
+            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_bytes",
+            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "most_recent",
+            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/serial-console/stream": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Stream an instance's serial console",
+        "operationId": "instance_serial_console_stream_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-dropshot-websocket": {}
+      }
+    },
+    "/v1/instances/{instance}/start": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Boot an instance",
+        "operationId": "instance_start_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/stop": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Stop an instance",
+        "operationId": "instance_stop_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/organizations": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "List organizations",
+        "operationId": "organization_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Create an organization",
+        "operationId": "organization_create_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization}": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Fetch an organization",
+        "operationId": "organization_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Update an organization",
+        "operationId": "organization_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Delete an organization",
+        "operationId": "organization_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization}/policy": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Fetch an organization's IAM policy",
+        "operationId": "organization_policy_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Update an organization's IAM policy",
+        "operationId": "organization_policy_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List projects",
+        "operationId": "project_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Create a project",
+        "operationId": "project_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{project}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Fetch a project",
+        "operationId": "project_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Update a project",
+        "operationId": "project_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Delete a project",
+        "operationId": "project_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{project}/policy": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Fetch a project's IAM policy",
+        "operationId": "project_policy_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Update a project's IAM policy",
+        "operationId": "project_policy_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   },
@@ -9644,11 +10597,6 @@
               }
             ]
           },
-          "project_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
-          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -9676,12 +10624,6 @@
             "type": "string"
           },
           "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "organization": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "project": {
             "$ref": "#/components/schemas/Name"
           }
         },
@@ -10209,6 +11151,12 @@
             ]
           }
         }
+      },
+      "Password": {
+        "title": "A password used to authenticate a user",
+        "description": "Passwords may be subject to additional constraints.",
+        "type": "string",
+        "maxLength": 512
       },
       "Project": {
         "description": "Client view of a [`Project`]",
@@ -11698,10 +12646,19 @@
                 "$ref": "#/components/schemas/UserId"
               }
             ]
+          },
+          "password": {
+            "description": "password used to log in",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserPassword"
+              }
+            ]
           }
         },
         "required": [
-          "external_id"
+          "external_id",
+          "password"
         ]
       },
       "UserId": {
@@ -11710,6 +12667,45 @@
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]$",
         "maxLength": 63
+      },
+      "UserPassword": {
+        "description": "Parameters for setting a user's password",
+        "oneOf": [
+          {
+            "description": "Sets the user's password to the provided value",
+            "type": "object",
+            "properties": {
+              "details": {
+                "$ref": "#/components/schemas/Password"
+              },
+              "user_password_value": {
+                "type": "string",
+                "enum": [
+                  "password"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "user_password_value"
+            ]
+          },
+          {
+            "description": "Invalidates any current password (disabling password authentication)",
+            "type": "object",
+            "properties": {
+              "user_password_value": {
+                "type": "string",
+                "enum": [
+                  "invalid_password"
+                ]
+              }
+            },
+            "required": [
+              "user_password_value"
+            ]
+          }
+        ]
       },
       "UserResultsPage": {
         "description": "A single page of results",
@@ -11730,6 +12726,22 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UsernamePasswordCredentials": {
+        "description": "Credentials for local user login",
+        "type": "object",
+        "properties": {
+          "password": {
+            "$ref": "#/components/schemas/Password"
+          },
+          "username": {
+            "$ref": "#/components/schemas/UserId"
+          }
+        },
+        "required": [
+          "password",
+          "username"
         ]
       },
       "Vpc": {
@@ -12648,6 +13660,27 @@
           "read_bytes",
           "write",
           "write_bytes"
+        ]
+      },
+      "NameOrId": {
+        "oneOf": [
+          {
+            "title": "id",
+            "allOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              }
+            ]
+          },
+          {
+            "title": "name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
         ]
       }
     }

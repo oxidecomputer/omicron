@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`ExternalIp`]s.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
@@ -12,7 +13,6 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
-use crate::db::model::IpPool;
 use crate::db::model::Name;
 use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -24,8 +24,8 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
-use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::Name as ExternalName;
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -34,14 +34,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        project_id: Uuid,
         instance_id: Uuid,
+        pool_id: Uuid,
     ) -> CreateResult<ExternalIp> {
         let data = IncompleteExternalIp::for_instance_source_nat(
             ip_id,
-            project_id,
             instance_id,
-            /* pool_id = */ None,
+            pool_id,
         );
         self.allocate_external_ip(opctx, data).await
     }
@@ -51,53 +50,19 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        project_id: Uuid,
         instance_id: Uuid,
         pool_name: Option<Name>,
     ) -> CreateResult<ExternalIp> {
-        let pool_id = if let Some(ref name) = pool_name {
-            // We'd like to add authz checks here, and use the `LookupPath`
-            // methods on the project-scoped view of this resource. It's not
-            // entirely clear how that'll work in the API, so see RFD 288 and
-            // https://github.com/oxidecomputer/omicron/issues/1470 for more
-            // details.
-            //
-            // For now, we just ensure that the pool is either unreserved, or
-            // reserved for the instance's project.
-            use db::schema::ip_pool::dsl;
-            Some(
-                dsl::ip_pool
-                    .filter(dsl::name.eq(name.clone()))
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(
-                        dsl::project_id
-                            .is_null()
-                            .or(dsl::project_id.eq(Some(project_id))),
-                    )
-                    .select(IpPool::as_select())
-                    .first_async::<IpPool>(self.pool_authorized(opctx).await?)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::IpPool,
-                                LookupType::ByName(name.to_string()),
-                            ),
-                        )
-                    })?
-                    .identity
-                    .id,
-            )
-        } else {
-            None
-        };
-        let data = IncompleteExternalIp::for_ephemeral(
-            ip_id,
-            project_id,
-            instance_id,
-            pool_id,
-        );
+        let name = pool_name.unwrap_or_else(|| {
+            Name(ExternalName::from_str("default").unwrap())
+        });
+        let (.., pool) = self
+            .ip_pools_fetch_for(opctx, authz::Action::CreateChild, &name)
+            .await?;
+        let pool_id = pool.identity.id;
+
+        let data =
+            IncompleteExternalIp::for_ephemeral(ip_id, instance_id, pool_id);
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -106,10 +71,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        rack_id: Uuid,
     ) -> CreateResult<ExternalIp> {
-        let (.., pool) =
-            self.ip_pools_lookup_by_rack_id(opctx, rack_id).await?;
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
 
         let data = IncompleteExternalIp::for_service(ip_id, pool.id());
         self.allocate_external_ip(opctx, data).await

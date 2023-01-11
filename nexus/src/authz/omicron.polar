@@ -243,13 +243,13 @@ resource SiloUser {
 	# of the only areas of Silo configuration that Fleet Administrators have
 	# permissions on.
 	relations = { parent_silo: Silo, parent_fleet: Fleet };
-	"list_children" if "viewer" on "parent_silo";
-	"read" if "viewer" on "parent_silo";
+	"list_children" if "read" on "parent_silo";
+	"read" if "read" on "parent_silo";
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
-	"list_children" if "admin" on "parent_fleet";
+	"list_children" if "read" on "parent_fleet";
+	"read" if "read" on "parent_fleet";
 	"modify" if "admin" on "parent_fleet";
-	"read" if "admin" on "parent_fleet";
 	"create_child" if "admin" on "parent_fleet";
 }
 has_relation(silo: Silo, "parent_silo", user: SiloUser)
@@ -273,8 +273,8 @@ resource SiloGroup {
 	];
 
 	relations = { parent_silo: Silo };
-	"list_children" if "viewer" on "parent_silo";
-	"read" if "viewer" on "parent_silo";
+	"list_children" if "read" on "parent_silo";
+	"read" if "read" on "parent_silo";
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
 }
@@ -372,6 +372,11 @@ resource IpPoolList {
 }
 has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 	if ip_pool_list.fleet = fleet;
+
+# Any authenticated user can create a child of a provided IP Pool.
+# This is necessary to use the pools when provisioning instances.
+has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
+	if silo in actor.silo and silo.fleet = ip_pool.fleet;
 
 # Describes the policy for accessing "/system/images" (in the API)
 resource GlobalImageList {

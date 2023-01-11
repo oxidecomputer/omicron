@@ -11,6 +11,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_detach_many::DatastoreDetachManyTarget;
 use crate::db::collection_detach_many::DetachManyError;
+use crate::db::collection_insert::AsyncInsertError;
+use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -18,6 +20,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
+use crate::db::model::Project;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
@@ -60,20 +63,31 @@ impl DataStore {
     // what this function does under the hood).
     pub async fn project_create_instance(
         &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
         instance: Instance,
     ) -> CreateResult<Instance> {
         use db::schema::instance::dsl;
 
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
         let gen = instance.runtime().gen;
         let name = instance.name().clone();
-        let instance: Instance = diesel::insert_into(dsl::instance)
-            .values(instance)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .returning(Instance::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+        let project_id = instance.project_id;
+
+        let instance: Instance = Project::insert_resource(
+            project_id,
+            diesel::insert_into(dsl::instance)
+                .values(instance)
+                .on_conflict(dsl::id)
+                .do_update()
+                .set(dsl::time_modified.eq(dsl::time_modified)),
+        )
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => authz_project.not_found(),
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(
@@ -81,7 +95,8 @@ impl DataStore {
                         name.as_str(),
                     ),
                 )
-            })?;
+            }
+        })?;
 
         bail_unless!(
             instance.runtime().state.state()

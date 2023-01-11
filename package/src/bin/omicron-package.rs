@@ -10,7 +10,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
 use omicron_sled_agent::cleanup_networking_resources;
-use omicron_sled_agent::zone;
+use omicron_sled_agent::{zfs, zone, zpool};
 use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
@@ -18,12 +18,13 @@ use omicron_zone_package::target::Target;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use slog::debug;
-use slog::info;
 use slog::o;
 use slog::Drain;
 use slog::Logger;
+use slog::{info, warn};
 use std::env;
 use std::fs::create_dir_all;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
@@ -70,6 +71,15 @@ struct Args {
         default_value = DEFAULT_TARGET,
     )]
     target: Target,
+
+    #[clap(
+        short,
+        long,
+        help = "Skip confirmation prompt for destructive operations",
+        action,
+        default_value_t = false
+    )]
+    force: bool,
 
     #[clap(subcommand)]
     subcommand: SubCommand,
@@ -311,7 +321,7 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
     Ok(())
 }
 
-fn do_unpack(
+async fn do_unpack(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
@@ -335,15 +345,20 @@ fn do_unpack(
                 "src" => %src.to_string_lossy(),
                 "dst" => %dst.to_string_lossy(),
             );
-            std::fs::copy(&src, &dst)?;
+            std::fs::copy(&src, &dst).map_err(|err| {
+                anyhow!(
+                    "Failed to copy {src} to {dst}: {err}",
+                    src = src.display(),
+                    dst = dst.display()
+                )
+            })?;
             Ok(())
         },
     )?;
 
     if env::var("OMICRON_NO_UNINSTALL").is_err() {
         // Ensure we start from a clean slate - remove all zones & packages.
-        uninstall_all_packages(config);
-        uninstall_all_omicron_zones()?;
+        do_uninstall(config).await?;
     }
 
     // Extract all global zone services.
@@ -395,20 +410,71 @@ fn do_activate(config: &Config, install_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn do_install(
+async fn do_install(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
 ) -> Result<()> {
-    do_unpack(config, artifact_dir, install_dir)?;
+    do_unpack(config, artifact_dir, install_dir).await?;
     do_activate(config, install_dir)
 }
 
-fn uninstall_all_omicron_zones() -> Result<()> {
-    zone::Zones::get()?.into_par_iter().try_for_each(|zone| -> Result<()> {
-        zone::Zones::halt_and_remove(zone.name())?;
-        Ok(())
-    })?;
+async fn uninstall_all_omicron_zones() -> Result<()> {
+    const CONCURRENCY_CAP: usize = 32;
+    futures::stream::iter(zone::Zones::get().await?)
+        .map(Ok::<_, anyhow::Error>)
+        .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
+            zone::Zones::halt_and_remove(zone.name()).await?;
+            Ok(())
+        })
+        .await?;
+    Ok(())
+}
+
+fn get_all_omicron_datasets() -> Result<Vec<String>> {
+    let mut datasets = vec![];
+
+    // Collect all datasets within Oxide zpools.
+    //
+    // This includes cockroachdb, clickhouse, and crucible datasets.
+    let zpools = zpool::Zpool::list()?;
+    for pool in &zpools {
+        let pool = pool.to_string();
+        for dataset in &zfs::Zfs::list_datasets(&pool)? {
+            datasets.push(format!("{pool}/{dataset}"));
+        }
+    }
+
+    // Collect all datasets for Oxide zones.
+    for dataset in &zfs::Zfs::list_datasets(&zfs::ZONE_ZFS_DATASET)? {
+        datasets.push(format!("{}/{dataset}", zfs::ZONE_ZFS_DATASET));
+    }
+
+    Ok(datasets)
+}
+
+fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
+    let datasets = match get_all_omicron_datasets() {
+        Err(e) => {
+            warn!(config.log, "Failed to get omicron datasets: {}", e);
+            return Ok(());
+        }
+        Ok(datasets) => datasets,
+    };
+
+    if datasets.is_empty() {
+        return Ok(());
+    }
+
+    config.confirm(&format!(
+        "About to delete the following datasets: {:#?}",
+        datasets
+    ))?;
+    for dataset in &datasets {
+        info!(config.log, "Deleting dataset: {dataset}");
+        zfs::Zfs::destroy_dataset(dataset)?;
+    }
+
     Ok(())
 }
 
@@ -426,7 +492,9 @@ fn uninstall_all_packages(config: &Config) {
             .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
         let _ = smf::Config::delete().force().run(&package.service_name);
     }
+}
 
+fn uninstall_omicron_config() {
     // Once all packages have been removed, also remove any locally-stored
     // configuration.
     remove_all_unless_already_removed(omicron_common::OMICRON_CONFIG_PATH)
@@ -479,13 +547,22 @@ fn remove_all_except<P: AsRef<Path>>(
     Ok(())
 }
 
-async fn do_uninstall(config: &Config) -> Result<()> {
+async fn do_deactivate(config: &Config) -> Result<()> {
     info!(&config.log, "Removing all Omicron zones");
-    uninstall_all_omicron_zones()?;
+    uninstall_all_omicron_zones().await?;
     info!(config.log, "Uninstalling all packages");
     uninstall_all_packages(config);
     info!(config.log, "Removing networking resources");
     cleanup_networking_resources(&config.log).await?;
+    Ok(())
+}
+
+async fn do_uninstall(config: &Config) -> Result<()> {
+    do_deactivate(config).await?;
+    info!(config.log, "Uninstalling Omicron configuration");
+    uninstall_omicron_config();
+    info!(config.log, "Removing datasets");
+    uninstall_all_omicron_datasets(config)?;
     Ok(())
 }
 
@@ -494,6 +571,7 @@ async fn do_clean(
     artifact_dir: &Path,
     install_dir: &Path,
 ) -> Result<()> {
+    do_uninstall(&config).await?;
     info!(
         config.log,
         "Removing artifacts from {}",
@@ -590,6 +668,27 @@ struct Config {
     package_config: PackageConfig,
     // Description of the target we're trying to operate on.
     target: Target,
+    // True if we should skip confirmations for destructive operations.
+    force: bool,
+}
+
+impl Config {
+    /// Prompts the user for input before proceeding with an operation.
+    fn confirm(&self, prompt: &str) -> Result<()> {
+        if self.force {
+            return Ok(());
+        }
+
+        print!("{prompt}\n[yY to confirm] >> ");
+        let _ = std::io::stdout().flush();
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        match input.as_str().trim() {
+            "y" | "Y" => Ok(()),
+            _ => bail!("Aborting"),
+        }
+    }
 }
 
 #[tokio::main]
@@ -604,8 +703,12 @@ async fn main() -> Result<()> {
 
     debug!(log, "target: {:?}", args.target);
 
-    let config =
-        Config { log: log.clone(), package_config, target: args.target };
+    let config = Config {
+        log: log.clone(),
+        package_config,
+        target: args.target,
+        force: args.force,
+    };
 
     // Use a CWD that is the root of the Omicron repository.
     if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
@@ -623,7 +726,19 @@ async fn main() -> Result<()> {
             artifact_dir,
             install_dir,
         }) => {
-            do_install(&config, &artifact_dir, &install_dir)?;
+            do_install(&config, &artifact_dir, &install_dir).await?;
+        }
+        SubCommand::Deploy(DeployCommand::Unpack {
+            artifact_dir,
+            install_dir,
+        }) => {
+            do_unpack(&config, &artifact_dir, &install_dir).await?;
+        }
+        SubCommand::Deploy(DeployCommand::Activate { install_dir }) => {
+            do_activate(&config, &install_dir)?;
+        }
+        SubCommand::Deploy(DeployCommand::Deactivate) => {
+            do_deactivate(&config).await?;
         }
         SubCommand::Deploy(DeployCommand::Uninstall) => {
             do_uninstall(&config).await?;
@@ -632,17 +747,7 @@ async fn main() -> Result<()> {
             artifact_dir,
             install_dir,
         }) => {
-            do_uninstall(&config).await?;
             do_clean(&config, &artifact_dir, &install_dir).await?;
-        }
-        SubCommand::Deploy(DeployCommand::Unpack {
-            artifact_dir,
-            install_dir,
-        }) => {
-            do_unpack(&config, &artifact_dir, &install_dir)?;
-        }
-        SubCommand::Deploy(DeployCommand::Activate { install_dir }) => {
-            do_activate(&config, &install_dir)?;
         }
     }
 

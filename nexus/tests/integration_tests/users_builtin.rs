@@ -3,11 +3,13 @@
 use dropshot::ResultsPage;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authn;
 use omicron_nexus::external_api::views::UserBuiltin;
 use std::collections::BTreeMap;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {

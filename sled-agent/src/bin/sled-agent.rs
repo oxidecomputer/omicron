@@ -15,6 +15,7 @@ use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::sp::SimSpConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
 use std::path::PathBuf;
+use uuid::Uuid;
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -98,7 +99,7 @@ async fn do_run() -> Result<(), CmdError> {
 
             // Configure and run the Bootstrap server.
             let bootstrap_config = BootstrapConfig {
-                id: config.id,
+                id: Uuid::new_v4(),
                 bind_address: bootstrap_address,
                 log: config.log.clone(),
                 rss_config,

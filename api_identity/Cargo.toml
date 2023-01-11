@@ -1,6 +1,6 @@
 [package]
 name = "api_identity"
-description = "macro used by for Oxide control plane resources with an identity"
+description = "macro used for Oxide control plane resources with an identity"
 version = "0.1.0"
 authors = ["David Pacheco <dap@oxidecomputer.com>"]
 edition = "2021"
@@ -11,6 +11,6 @@ license = "MPL-2.0"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0.0"
-quote = "1.0.0"
-syn = { version = "1.0.17", features = [ "full" ] }
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true

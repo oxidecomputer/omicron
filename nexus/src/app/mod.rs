@@ -33,7 +33,7 @@ mod organization;
 mod oximeter;
 mod project;
 mod rack;
-mod saga;
+pub mod saga;
 mod session;
 mod silo;
 mod sled;
@@ -46,7 +46,7 @@ mod vpc_subnet;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
-mod sagas;
+pub mod sagas;
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.

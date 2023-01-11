@@ -74,7 +74,13 @@ fn extract_targets_from_volume_construction_request(
             // noop
         }
 
-        VolumeConstructionRequest::Region { block_size: _, opts, gen: _ } => {
+        VolumeConstructionRequest::Region {
+            block_size: _,
+            blocks_per_extent: _,
+            extent_count: _,
+            opts,
+            gen: _,
+        } => {
             for target in &opts.target {
                 vec.push(*target);
             }
@@ -250,6 +256,14 @@ impl SledAgent {
         self.disks.sim_ensure(&disk_id, initial_state, target).await
     }
 
+    pub async fn instance_count(&self) -> usize {
+        self.instances.size().await
+    }
+
+    pub async fn disk_count(&self) -> usize {
+        self.disks.size().await
+    }
+
     pub async fn instance_poke(&self, id: Uuid) {
         self.instances.sim_poke(id).await;
     }
@@ -268,8 +282,8 @@ impl SledAgent {
         &self,
         zpool_id: Uuid,
         dataset_id: Uuid,
-    ) {
-        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await;
+    ) -> SocketAddr {
+        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
     }
 
     /// Returns a crucible dataset within a particular zpool.

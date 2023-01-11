@@ -7,8 +7,9 @@
 use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
+    http_pagination::{PaginatedByName, PaginatedByNameOrId},
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -17,6 +18,109 @@ use serde::{
 };
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OrganizationPath {
+    pub organization: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectPath {
+    pub project: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstancePath {
+    pub instance: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OrganizationSelector {
+    pub organization: NameOrId,
+}
+
+impl From<Name> for OrganizationSelector {
+    fn from(name: Name) -> Self {
+        OrganizationSelector { organization: name.into() }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalOrganizationSelector {
+    #[serde(flatten)]
+    pub organization_selector: Option<OrganizationSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectSelector {
+    #[serde(flatten)]
+    pub organization_selector: Option<OrganizationSelector>,
+    pub project: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl ProjectSelector {
+    pub fn new(organization: Option<NameOrId>, project: NameOrId) -> Self {
+        ProjectSelector {
+            organization_selector: organization
+                .map(|o| OrganizationSelector { organization: o }),
+            project,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectList {
+    #[serde(flatten)]
+    pub pagination: PaginatedByNameOrId,
+    #[serde(flatten)]
+    pub organization: OrganizationSelector,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalProjectSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub instance: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl InstanceSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        instance: NameOrId,
+    ) -> Self {
+        InstanceSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            instance,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceList {
+    #[serde(flatten)]
+    pub pagination: PaginatedByName,
+    #[serde(flatten)]
+    pub project_selector: ProjectSelector,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceSerialConsole {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+
+    #[serde(flatten)]
+    pub console_params: InstanceSerialConsoleRequest,
+}
 
 // Silos
 
@@ -45,6 +149,8 @@ pub struct SiloCreate {
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
+    /// password used to log in
+    pub password: UserPassword,
 }
 
 /// A username for a local-only user
@@ -87,6 +193,105 @@ impl JsonSchema for UserId {
     ) -> schemars::schema::Schema {
         Name::json_schema(gen)
     }
+}
+
+/// A password used for authenticating a local-only user
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
+// We store both the raw String and nexus_passwords::Password forms of the
+// password.  That's because `nexus_passwords::Password` does not support
+// getting the String back out (by design), but we may need to do that in order
+// to impl Serialize.  See the `From<Password> for String` impl below.
+pub struct Password(String, nexus_passwords::Password);
+
+impl FromStr for Password {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Password::try_from(String::from(value))
+    }
+}
+
+// Used to impl `Deserialize`
+impl TryFrom<String> for Password {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let inner = nexus_passwords::Password::new(&value)
+            .map_err(|e| format!("unsupported password: {:#}", e))?;
+        // TODO-security If we want to apply password policy rules, this seems
+        // like the place.  We presumably want to also document them in the
+        // OpenAPI schema below.
+        Ok(Password(value, inner))
+    }
+}
+
+// This "From" impl only exists to make it easier to derive `Serialize`.  That
+// in turn is only to make this easier to use from the test suite.  (There's no
+// other reason structs in this file should need to impl Serialize at all.)
+impl From<Password> for String {
+    fn from(password: Password) -> Self {
+        password.0
+    }
+}
+
+impl JsonSchema for Password {
+    fn schema_name() -> String {
+        "Password".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some(
+                    "A password used to authenticate a user".to_string(),
+                ),
+                // TODO-doc If we apply password strength rules, they should
+                // presumably be documented here.
+                description: Some(
+                    "Passwords may be subject to additional constraints."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(
+                    u32::try_from(nexus_passwords::MAX_PASSWORD_LENGTH)
+                        .unwrap(),
+                ),
+                min_length: None,
+                pattern: None,
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl AsRef<nexus_passwords::Password> for Password {
+    fn as_ref(&self) -> &nexus_passwords::Password {
+        &self.1
+    }
+}
+
+/// Parameters for setting a user's password
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "user_password_value", content = "details")]
+pub enum UserPassword {
+    /// Sets the user's password to the provided value
+    Password(Password),
+    /// Invalidates any current password (disabling password authentication)
+    InvalidPassword,
+}
+
+/// Credentials for local user login
+#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+pub struct UsernamePasswordCredentials {
+    pub username: UserId,
+    pub password: Password,
 }
 
 // Silo identity providers
@@ -379,14 +584,6 @@ pub struct NetworkInterfaceUpdate {
 
 // IP POOLS
 
-// Type used to identify a Project in request bodies, where one may not have
-// the path in the request URL.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct ProjectPath {
-    pub organization: Name,
-    pub project: Name,
-}
-
 /// Create-time parameters for an IP Pool.
 ///
 /// See [`IpPool`](crate::external_api::views::IpPool)
@@ -394,8 +591,6 @@ pub struct ProjectPath {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    #[serde(flatten)]
-    pub project: Option<ProjectPath>,
 }
 
 /// Parameters for updating an IP Pool
