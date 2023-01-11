@@ -22,18 +22,46 @@ use ref_cast::RefCast;
 use std::sync::Arc;
 use uuid::Uuid;
 
-fn validate_certs(input: Vec<u8>) -> Result<(), String> {
+#[derive(Debug, thiserror::Error)]
+pub enum CertificateError {
+    #[error("Failed to parse certificate: {0}")]
+    BadCertificate(openssl::error::ErrorStack),
+
+    #[error("Certificate not found")]
+    CertificateNotFound,
+
+    #[error("Failed to parse private key")]
+    BadPrivateKey(openssl::error::ErrorStack),
+}
+
+impl From<CertificateError> for Error {
+    fn from(error: CertificateError) -> Self {
+        use CertificateError::*;
+        match error {
+            BadCertificate(_) | CertificateNotFound => Error::InvalidValue {
+                label: String::from("certificate"),
+                message: error.to_string(),
+            },
+            BadPrivateKey(_) => Error::InvalidValue {
+                label: String::from("private-key"),
+                message: error.to_string(),
+            },
+        }
+    }
+}
+
+fn validate_certs(input: Vec<u8>) -> Result<(), CertificateError> {
     let certs = X509::stack_from_pem(&input.as_slice())
-        .map_err(|err| format!("Failed to parse certificate as PEM: {err}"))?;
+        .map_err(CertificateError::BadCertificate)?;
     if certs.is_empty() {
-        return Err("could not parse".to_string());
+        return Err(CertificateError::CertificateNotFound);
     }
     Ok(())
 }
 
-fn validate_private_key(key: Vec<u8>) -> Result<(), String> {
+fn validate_private_key(key: Vec<u8>) -> Result<(), CertificateError> {
     let _ = PKey::private_key_from_pem(&key.as_slice())
-        .map_err(|_| format!("Failed to parse private key as PEM"))?;
+        .map_err(CertificateError::BadPrivateKey)?;
 
     Ok(())
 }
@@ -58,14 +86,8 @@ impl super::Nexus {
         opctx: &OpContext,
         params: params::CertificateCreate,
     ) -> CreateResult<db::model::Certificate> {
-        validate_certs(params.cert.clone()).map_err(|e| {
-            warn!(self.log, "bad cert: {e}");
-            Error::InvalidValue { label: String::from("cert"), message: e }
-        })?;
-        validate_private_key(params.key.clone()).map_err(|e| {
-            warn!(self.log, "bad key: {e}");
-            Error::InvalidValue { label: String::from("key"), message: e }
-        })?;
+        validate_certs(params.cert.clone())?;
+        validate_private_key(params.key.clone())?;
 
         let new_certificate = db::model::Certificate::new(
             Uuid::new_v4(),
