@@ -4,7 +4,7 @@
 
 //! Tests basic instance support in the API
 
-use super::metrics::query_for_metrics_until_it_contains;
+use super::metrics::query_for_latest_metric;
 
 use chrono::Utc;
 use http::method::Method;
@@ -526,7 +526,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
 
-    // Create an IP pool and  project that we'll use for testing.
+    // Create an IP pool and project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
     let organization_id =
         create_organization(&client, ORGANIZATION_NAME).await.identity.id;
@@ -559,27 +559,27 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     };
     oximeter.force_collect().await;
     for id in vec![organization_id, project_id] {
-        query_for_metrics_until_it_contains(
-            client,
-            &metric_url("virtual_disk_space_provisioned", id),
-            0,
-            0,
-        )
-        .await;
-        query_for_metrics_until_it_contains(
-            client,
-            &metric_url("cpus_provisioned", id),
-            0,
-            0,
-        )
-        .await;
-        query_for_metrics_until_it_contains(
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(query_for_latest_metric(
             client,
             &metric_url("ram_provisioned", id),
-            0,
-            0,
         )
-        .await;
+        .await, 0);
     }
 
     // Create an instance.
@@ -623,20 +623,27 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     );
     oximeter.force_collect().await;
     for id in vec![organization_id, project_id] {
-        query_for_metrics_until_it_contains(
-            client,
-            &metric_url("cpus_provisioned", id),
-            1,
-            expected_cpus,
-        )
-        .await;
-        query_for_metrics_until_it_contains(
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", id),
+            )
+            .await,
+            expected_cpus
+        );
+        assert_eq!(query_for_latest_metric(
             client,
             &metric_url("ram_provisioned", id),
-            1,
-            expected_ram,
         )
-        .await;
+        .await, expected_ram);
     }
 
     // Stop the instance
@@ -654,20 +661,27 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
     oximeter.force_collect().await;
     for id in vec![organization_id, project_id] {
-        query_for_metrics_until_it_contains(
-            client,
-            &metric_url("cpus_provisioned", id),
-            2,
-            0,
-        )
-        .await;
-        query_for_metrics_until_it_contains(
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(query_for_latest_metric(
             client,
             &metric_url("ram_provisioned", id),
-            2,
-            0,
         )
-        .await;
+        .await, 0);
     }
 }
 

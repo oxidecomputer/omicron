@@ -4,13 +4,14 @@
 
 //! Tests basic disk support in the API
 
-use super::metrics::query_for_metrics_until_they_exist;
+use super::metrics::{
+    query_for_latest_metric, query_for_metrics_until_they_exist,
+};
 
 use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
-use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -1393,7 +1394,8 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_org_and_project(client).await;
-    create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    let disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    oximeter.force_collect().await;
 
     // Whenever we grab this URL, get the surrounding few seconds of metrics.
     let metric_url = |metric_type: &str| {
@@ -1404,15 +1406,30 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             Utc::now() + chrono::Duration::seconds(2),
         )
     };
+    // Check the utilization info for the whole project too.
+    let utilization_url = |id: Uuid| {
+        format!(
+            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
+            Utc::now() - chrono::Duration::seconds(2),
+            Utc::now() + chrono::Duration::seconds(2),
+            id,
+        )
+    };
 
     // Try accessing metrics before we attach the disk to an instance.
     //
     // Observe that no metrics exist yet; no "upstairs" should have been
     // instantiated on a sled.
     oximeter.force_collect().await;
-    let measurements: ResultsPage<Measurement> =
-        objects_list_page_authz(client, &metric_url("read")).await;
+    let measurements =
+        objects_list_page_authz::<Measurement>(client, &metric_url("read"))
+            .await;
     assert!(measurements.items.is_empty());
+
+    assert_eq!(
+        query_for_latest_metric(client, &utilization_url(project_id),).await,
+        i64::from(disk.size)
+    );
 
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
@@ -1434,37 +1451,26 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Check the utilization info for the whole project too.
-    let utilization_url = |id: Uuid| {
-        format!(
-            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
-            Utc::now() - chrono::Duration::seconds(20),
-            Utc::now() + chrono::Duration::seconds(20),
-            id,
-        )
-    };
-
-    // We should create measurements when the disk is created, and again when
-    // it's modified. However, due to our inability to control the sampling
-    // rate, we just keep polling until we see *something*.
-    //
-    // Normally we'll see two measurements, but it's possible to only see one
-    // if the producer interface is queried in between the two samples.
-    let measurements = query_for_metrics_until_they_exist(
-        client,
-        &utilization_url(project_id),
-    )
-    .await;
-    assert!(!measurements.items.is_empty());
+    assert_eq!(
+        query_for_latest_metric(client, &utilization_url(project_id),).await,
+        i64::from(disk.size)
+    );
 }
 
 #[nexus_test]
 async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
+    // Normally, Nexus is not registered as a producer for tests.
+    // Turn this bit on so we can also test some metrics from Nexus itself.
+    cptestctx.server.register_as_producer().await;
+
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_org_and_project(client).await;
     create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
 
+    let oximeter = &cptestctx.oximeter;
+    oximeter.force_collect().await;
     for metric in &ALL_METRICS {
         let collection_url =
             format!("{}/{DISK_NAME}/metrics/{metric}", get_disks_url());
@@ -1474,7 +1480,7 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
             Utc::now() + chrono::Duration::seconds(2),
         );
 
-        query_for_metrics_until_they_exist(
+        objects_list_page_authz::<Measurement>(
             client,
             &format!("{collection_url}?{initial_params}"),
         )

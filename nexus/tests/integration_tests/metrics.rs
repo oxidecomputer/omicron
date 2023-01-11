@@ -5,7 +5,6 @@
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use omicron_common::backoff;
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 
@@ -13,56 +12,28 @@ pub async fn query_for_metrics_until_they_exist(
     client: &ClientTestContext,
     path: &str,
 ) -> ResultsPage<Measurement> {
-    backoff::retry_notify(
-        backoff::retry_policy_local(),
-        || async {
-            let measurements: ResultsPage<Measurement> =
-                objects_list_page_authz(client, path).await;
+    loop {
+        let measurements: ResultsPage<Measurement> =
+            objects_list_page_authz(client, path).await;
 
-            if measurements.items.is_empty() {
-                return Err(backoff::BackoffError::transient("No metrics yet"));
-            }
-            Ok(measurements)
-        },
-        |error, _| {
-            eprintln!("Failed to query {path}: {error}");
-        },
-    )
-    .await
-    .expect("Failed to query for measurements")
+        if !measurements.items.is_empty() {
+            return measurements;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
 }
 
-pub async fn query_for_metrics_until_it_contains(
+pub async fn query_for_latest_metric(
     client: &ClientTestContext,
     path: &str,
-    index: usize,
-    value: i64,
-) -> ResultsPage<Measurement> {
-    backoff::retry_notify(
-        backoff::retry_policy_local(),
-        || async {
-            let measurements: ResultsPage<Measurement> =
-                objects_list_page_authz(client, path).await;
+) -> i64 {
+    let measurements: ResultsPage<Measurement> =
+        objects_list_page_authz(client, path).await;
 
-            if measurements.items.len() <= index {
-                return Err(backoff::BackoffError::transient(format!(
-                    "Not enough metrics yet (only seen: {:?})",
-                    measurements.items
-                )));
-            }
-
-            let item = &measurements.items[index];
-            let datum = match item.datum() {
-                Datum::I64(c) => c,
-                _ => panic!("Unexpected datum type {:?}", item.datum()),
-            };
-            assert_eq!(*datum, value, "Datum exists, but has the wrong value");
-            Ok(measurements)
-        },
-        |error, _| {
-            eprintln!("Failed to query {path}: {error}");
-        },
-    )
-    .await
-    .expect("Failed to query for measurements")
+    let item = &measurements.items[measurements.items.len() - 1];
+    let datum = match item.datum() {
+        Datum::I64(c) => c,
+        _ => panic!("Unexpected datum type {:?}", item.datum()),
+    };
+    return *datum;
 }
