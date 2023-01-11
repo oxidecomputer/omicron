@@ -3,27 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::virtual_provisioning_collection;
+use parse_display::Display;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Display)]
 pub enum CollectionTypeProvisioned {
     Project,
     Organization,
     Silo,
     Fleet,
-}
-
-impl std::fmt::Display for CollectionTypeProvisioned {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CollectionTypeProvisioned::Project => write!(f, "project"),
-            CollectionTypeProvisioned::Organization => {
-                write!(f, "organization")
-            }
-            CollectionTypeProvisioned::Silo => write!(f, "silo"),
-            CollectionTypeProvisioned::Fleet => write!(f, "fleet"),
-        }
-    }
 }
 
 /// Describes virtual_provisioning_collection for a collection
