@@ -107,7 +107,7 @@ impl<U, T> RunnableQuery<U> for T where
 pub struct DataStore {
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer:
-        virtual_provisioning_collection::Producer,
+        crate::app::provisioning::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -118,7 +118,7 @@ impl DataStore {
         DataStore {
             pool,
             virtual_provisioning_collection_producer:
-                virtual_provisioning_collection::Producer::new(),
+                crate::app::provisioning::Producer::new(),
         }
     }
 

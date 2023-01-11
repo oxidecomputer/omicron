@@ -20,19 +20,19 @@ struct CollectionTarget {
 #[derive(Debug, Clone, Metric)]
 struct VirtualDiskSpaceProvisioned {
     #[datum]
-    bytes_used: u64,
+    bytes_used: i64,
 }
 
 #[derive(Debug, Clone, Metric)]
 struct CpusProvisioned {
     #[datum]
-    cpus: u64,
+    cpus: i64,
 }
 
 #[derive(Debug, Clone, Metric)]
 struct RamProvisioned {
     #[datum]
-    bytes: u64,
+    bytes: i64,
 }
 
 /// An oximeter producer for reporting [`VirtualProvisioningCollection`] information to Clickhouse.
@@ -69,7 +69,9 @@ impl Producer {
                 Sample::new(
                     &CollectionTarget { id: provision.id },
                     &VirtualDiskSpaceProvisioned {
-                        bytes_used: provision.virtual_disk_bytes_provisioned,
+                        bytes_used: provision
+                            .virtual_disk_bytes_provisioned
+                            .into(),
                     },
                 )
             })
@@ -93,7 +95,7 @@ impl Producer {
             .chain(provisions.iter().map(|provision| {
                 Sample::new(
                     &CollectionTarget { id: provision.id },
-                    &RamProvisioned { bytes: provision.ram_provisioned },
+                    &RamProvisioned { bytes: provision.ram_provisioned.into() },
                 )
             }))
             .collect::<Vec<_>>();
@@ -116,4 +118,3 @@ impl oximeter::Producer for Producer {
         Ok(Box::new(samples.into_iter()))
     }
 }
-

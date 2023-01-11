@@ -34,6 +34,7 @@ mod metrics;
 mod organization;
 mod oximeter;
 mod project;
+pub mod provisioning;
 mod rack;
 pub mod saga;
 mod session;
