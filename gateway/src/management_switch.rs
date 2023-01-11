@@ -21,6 +21,7 @@ use self::location_map::ValidatedLocationConfig;
 
 use crate::error::ConfigError;
 use crate::error::SpCommsError;
+use gateway_messages::IgnitionState;
 use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::SingleSp;
 use once_cell::sync::OnceCell;
@@ -29,6 +30,7 @@ use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 use slog::o;
+use slog::warn;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -76,10 +78,7 @@ pub enum SpType {
 pub(crate) struct SwitchPort(usize);
 
 impl SwitchPort {
-    pub(crate) fn as_ignition_target(self) -> u8 {
-        // TODO should we use a u16 to describe ignition targets instead? rack
-        // v1 is limited to 36, unclear what ignition will look like in future
-        // products
+    fn as_ignition_target(self) -> u8 {
         assert!(
             self.0 <= usize::from(u8::MAX),
             "cannot exceed 255 ignition targets / switch ports"
@@ -89,11 +88,12 @@ impl SwitchPort {
 }
 
 #[derive(Debug)]
-pub(crate) struct ManagementSwitch {
+pub struct ManagementSwitch {
     local_ignition_controller_port: SwitchPort,
     sockets: Arc<HashMap<SwitchPort, SingleSp>>,
     location_map: Arc<OnceCell<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
+    log: Logger,
 }
 
 impl Drop for ManagementSwitch {
@@ -110,6 +110,8 @@ impl ManagementSwitch {
         host_phase2_provider: T,
         log: &Logger,
     ) -> Result<Self, ConfigError> {
+        let log = log.new(o!("component" => "ManagementSwitch"));
+
         // begin by binding to all our configured ports; insert them into a map
         // keyed by the switch port they're listening on
         let mut sockets = HashMap::with_capacity(config.port.len());
@@ -176,12 +178,13 @@ impl ManagementSwitch {
             location_map,
             sockets,
             discovery_task,
+            log,
         })
     }
 
     /// Have we completed the discovery process to know how to map logical SP
     /// positions to switch ports?
-    pub(super) fn is_discovery_complete(&self) -> bool {
+    pub fn is_discovery_complete(&self) -> bool {
         self.location_map.get().is_some()
     }
 
@@ -199,22 +202,80 @@ impl ManagementSwitch {
     ///
     /// This matches one of the names specified as a possible location in the
     /// configuration we were given.
-    pub(super) fn location_name(&self) -> Result<&str, SpCommsError> {
+    pub fn location_name(&self) -> Result<&str, SpCommsError> {
         self.location_map().map(|m| m.location_name())
     }
 
-    /// Get the socket to use to communicate with an SP and the socket address
-    /// of that SP.
-    pub(crate) fn sp(&self, port: SwitchPort) -> Option<&SingleSp> {
-        self.sockets.get(&port)
+    /// Get the handle for communicating with an SP by its switch port.
+    ///
+    /// This is infallible: [`SwitchPort`] is a newtype that we control, and
+    /// we only hand out instances that match our configuration.
+    fn port_to_sp(&self, port: SwitchPort) -> &SingleSp {
+        self.sockets.get(&port).unwrap()
     }
 
-    /// Get the socket connected to the local ignition controller.
-    pub(crate) fn ignition_controller(&self) -> Option<&SingleSp> {
-        self.sp(self.local_ignition_controller_port)
+    /// Get the switch port associated with the given logical identifier.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if discovery is not yet complete (i.e., we don't
+    /// know the logical identifiers of any SP yet!) or if `id` specifies an SP
+    /// that doesn't exist in our discovered location map.
+    fn get_port(&self, id: SpIdentifier) -> Result<SwitchPort, SpCommsError> {
+        let location_map = self.location_map()?;
+        let port = location_map
+            .id_to_port(id)
+            .ok_or(SpCommsError::SpDoesNotExist(id))?;
+        Ok(port)
     }
 
-    pub(crate) fn switch_port_from_ignition_target(
+    /// Get the handle for communicating with an SP by its logical identifier.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if discovery is not yet complete (i.e., we don't
+    /// know the logical identifiers of any SP yet!) or if `id` specifies an SP
+    /// that doesn't exist in our discovered location map.
+    pub fn sp(&self, id: SpIdentifier) -> Result<&SingleSp, SpCommsError> {
+        let port = self.get_port(id)?;
+        Ok(self.port_to_sp(port))
+    }
+
+    /// Get the ignition target number of an SP by its logical identifier.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if discovery is not yet complete (i.e., we don't
+    /// know the logical identifiers of any SP yet!) or if `id` specifies an SP
+    /// that doesn't exist in our discovered location map.
+    pub fn ignition_target(
+        &self,
+        id: SpIdentifier,
+    ) -> Result<u8, SpCommsError> {
+        let port = self.get_port(id)?;
+        Ok(port.as_ignition_target())
+    }
+
+    /// Get an iterator providing the ID and handle to communicate with every SP
+    /// we know about.
+    ///
+    /// This function can only fail if we have not yet completed discovery (and
+    /// therefore can't map our switch ports to SP identities).
+    pub(crate) fn all_sps(
+        &self,
+    ) -> Result<impl Iterator<Item = (SpIdentifier, &SingleSp)>, SpCommsError>
+    {
+        let location_map = self.location_map()?;
+        Ok(location_map
+            .all_sp_ids()
+            .map(|(port, id)| (id, self.port_to_sp(port))))
+    }
+
+    pub(crate) fn ignition_controller(&self) -> &SingleSp {
+        self.port_to_sp(self.local_ignition_controller_port)
+    }
+
+    fn switch_port_from_ignition_target(
         &self,
         target: usize,
     ) -> Option<SwitchPort> {
@@ -226,17 +287,43 @@ impl ManagementSwitch {
         }
     }
 
-    pub(crate) fn switch_port(
+    /// Ask the local ignition controller for the ignition state of all SPs.
+    pub(crate) async fn bulk_ignition_state(
         &self,
-        id: SpIdentifier,
-    ) -> Result<Option<SwitchPort>, SpCommsError> {
-        self.location_map().map(|m| m.id_to_port(id))
-    }
+    ) -> Result<
+        impl Iterator<Item = (SpIdentifier, IgnitionState)> + '_,
+        SpCommsError,
+    > {
+        let controller = self.ignition_controller();
+        let location_map = self.location_map()?;
+        let bulk_state = controller.bulk_ignition_state().await?;
 
-    pub(crate) fn switch_port_to_id(
-        &self,
-        port: SwitchPort,
-    ) -> Result<SpIdentifier, SpCommsError> {
-        self.location_map().map(|m| m.port_to_id(port))
+        Ok(bulk_state.into_iter().enumerate().filter_map(|(target, state)| {
+            // If the SP returns an ignition target we don't have a port
+            // for, discard it. This _shouldn't_ happen, but may if:
+            //
+            // 1. We're getting bogus messages from the SP.
+            // 2. We're misconfigured and don't know about all ports.
+            //
+            // Case 2 may happen intentionally during development and
+            // testing.
+            match self.switch_port_from_ignition_target(target) {
+                Some(port) => {
+                    let id = location_map.port_to_id(port);
+                    Some((id, state))
+                }
+                None => {
+                    warn!(
+                        self.log,
+                        concat!(
+                            "ignoring unknown ignition target {}",
+                            " returned by ignition controller SP"
+                        ),
+                        target,
+                    );
+                    None
+                }
+            }
+        }))
     }
 }

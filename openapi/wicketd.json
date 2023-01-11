@@ -10,48 +10,6 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts/{name}/{version}": {
-      "get": {
-        "summary": "Fetch an artifact from the in-memory cache.",
-        "operationId": "get_artifact",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "description": "The artifact's name.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version",
-            "description": "The version of the artifact.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/inventory": {
       "get": {
         "summary": "A status endpoint used to report high level information known to wicketd.",
@@ -296,6 +254,24 @@
               "power",
               "present"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "present"
+            ]
           }
         ]
       },
@@ -398,34 +374,6 @@
           {
             "type": "object",
             "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "disabled"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "unresponsive"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "serial_number": {
                 "type": "string"
               },
@@ -438,6 +386,24 @@
             },
             "required": [
               "serial_number",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
               "state"
             ]
           }

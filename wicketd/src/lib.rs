@@ -2,14 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod artifacts;
 mod config;
 mod context;
 mod http_entrypoints;
 mod inventory;
 mod mgs;
 
-use artifacts::ArtifactStore;
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use inventory::{RackV1Inventory, SpInventory};
@@ -34,6 +32,7 @@ pub fn run_openapi() -> Result<(), String> {
 /// Command line arguments for wicketd
 pub struct Args {
     pub address: SocketAddrV6,
+    pub artifact_address: SocketAddrV6,
 }
 
 /// Run an instance of the wicketd server
@@ -60,22 +59,43 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         ..Default::default()
     };
 
-    let artifact_store = ArtifactStore::new(&log);
-
     let mgs_manager = MgsManager::new(&log, config.mgs_addr);
     let mgs_handle = mgs_manager.get_handle();
     tokio::spawn(async move {
         mgs_manager.run().await;
     });
 
-    let server = dropshot::HttpServerStarter::new(
+    let wicketd_server_fut = dropshot::HttpServerStarter::new(
         &dropshot_config,
         http_entrypoints::api(),
-        ServerContext { artifact_store, mgs_handle },
+        ServerContext { mgs_handle },
         &log.new(o!("component" => "dropshot (wicketd)")),
     )
     .map_err(|err| format!("initializing http server: {}", err))?
     .start();
 
-    server.await
+    let artifact_server_fut = installinator_artifactd::ArtifactServer::new(
+        args.artifact_address,
+        &log,
+    )
+    .start();
+
+    // Both servers should keep running indefinitely. Bail if either server exits, whether as Ok or
+    // as Err.
+    tokio::select! {
+        res = wicketd_server_fut => {
+            match res {
+                Ok(()) => Err("wicketd server exited unexpectedly".to_owned()),
+                Err(err) => Err(format!("running wicketd server: {err}")),
+            }
+        }
+        res = artifact_server_fut => {
+            match res {
+                Ok(()) => Err("artifact server exited unexpectedly".to_owned()),
+                // The artifact server returns an anyhow::Error, which has a `Debug` impl that
+                // prints out the chain of errors.
+                Err(err) => Err(format!("running artifact server: {err:?}")),
+            }
+        }
+    }
 }

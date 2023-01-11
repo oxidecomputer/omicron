@@ -9,10 +9,10 @@ local_ignition_controller_port = 0
 
 # when sending UDP RPC packets to an SP, how many total attempts do we make
 # before giving up?
-rpc_max_attempts = 5
+rpc_max_attempts = 3
 
 # sleep time between UDP RPC resends (up to `rpc_max_attempts`)
-rpc_per_attempt_timeout_millis = 5000
+rpc_per_attempt_timeout_millis = 1000
 
 [switch.location]
 # possible locations where MGS could be running; these names appear in logs and
@@ -76,9 +76,6 @@ multicast_addr = "[::1]:0"
 [switch.port.3.location]
 switch0 = ["sled", 1]
 switch1 = ["sled", 1]
-
-[timeouts]
-bulk_request_default_millis = 10_000
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel

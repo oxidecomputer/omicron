@@ -12,18 +12,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Timeouts {
-    /// Default timeout for requests that collect responses from multiple
-    /// targets, if the client doesn't provide one.
-    pub bulk_request_default_millis: u64,
-}
-
 /// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /// Various timeouts
-    pub timeouts: Timeouts,
     /// Configuration of the management switch.
     pub switch: SwitchConfig,
     /// Server-wide logging configuration.

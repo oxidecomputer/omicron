@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// Copyright 2023 Oxide Computer Company
+
 //! User provided dropshot server context
 
-use crate::MgsHandle;
+use crate::store::ArtifactStore;
 
-/// Shared state used by API handlers
 pub struct ServerContext {
-    pub mgs_handle: MgsHandle,
+    pub(crate) artifact_store: ArtifactStore,
 }
