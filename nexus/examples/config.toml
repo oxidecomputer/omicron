@@ -48,6 +48,7 @@ request_body_max_bytes = 1048576
 [deployment.dropshot_internal]
 # IP Address and TCP port on which to listen for the internal API
 bind_address = "127.0.0.1:12221"
+request_body_max_bytes = 1048576
 
 [deployment.subnet]
 net = "fd00:1122:3344:0100::/56"

@@ -221,7 +221,9 @@ pub async fn start_sled_agent(
         },
     };
 
-    sim::Server::start(&config, &log).await
+    let (server, _rack_init_request) =
+        sim::Server::start(&config, &log).await?;
+    Ok(server)
 }
 
 pub async fn start_oximeter(

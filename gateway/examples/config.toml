@@ -70,9 +70,6 @@ multicast_addr = "[ff15:0:1de::2]:33320"
 switch0 = ["sled", 1]
 switch1 = ["sled", 1]
 
-[timeouts]
-bulk_request_default_millis = 5_000
-
 [log]
 # Show log messages of this level and more severe
 level = "debug"

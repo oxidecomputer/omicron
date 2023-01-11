@@ -12,6 +12,7 @@ use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use futures::StreamExt;
+use installinator_artifact_client::ClientError;
 use itertools::Itertools;
 use tokio::{sync::mpsc, time::Instant};
 
@@ -313,8 +314,7 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
 }
 
 /// The send side of the channel over which data is sent.
-pub(crate) type FetchSender =
-    mpsc::Sender<Result<Bytes, progenitor_client::Error>>;
+pub(crate) type FetchSender = mpsc::Sender<Result<Bytes, ClientError>>;
 
 /// A [`PeersImpl`] that uses HTTP to fetch artifacts from peers. This is the real implementation.
 #[derive(Clone, Debug)]
@@ -356,10 +356,7 @@ impl PeersImpl for HttpPeers {
 #[derive(Debug)]
 struct ArtifactClient {
     log: slog::Logger,
-    // TODO: this currently uses a wicketd client. However, because the standard wicketd server is
-    // not going to listen on the bootstrap network, we'll want to instead set up a separate
-    // artifact server. This artifact server will be shared by both wicketd and sled-agent.
-    client: wicketd_client::Client,
+    client: installinator_artifact_client::Client,
 }
 
 impl ArtifactClient {
@@ -368,7 +365,8 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client = wicketd_client::Client::new(&endpoint, log.clone());
+        let client =
+            installinator_artifact_client::Client::new(&endpoint, log.clone());
         Self { log, client }
     }
 
@@ -380,8 +378,7 @@ impl ArtifactClient {
         {
             Ok(artifact_bytes) => artifact_bytes,
             Err(error) => {
-                // TODO: does this lose too much info (wicketd_client::types::Error)?
-                _ = sender.send(Err(error.into_untyped())).await;
+                _ = sender.send(Err(error)).await;
                 return;
             }
         };
