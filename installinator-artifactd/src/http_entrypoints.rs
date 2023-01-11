@@ -10,7 +10,6 @@ use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
     RequestContext,
 };
-use hyper::Body;
 
 use crate::{context::ServerContext, store::ArtifactId};
 
@@ -41,8 +40,9 @@ async fn get_artifact(
     rqctx: Arc<RequestContext<ServerContext>>,
     path: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-    match rqctx.context().artifact_store.get_artifact(&path.into_inner()) {
-        Some(bytes) => Ok(HttpResponseOk(Body::from(bytes).into())),
+    match rqctx.context().artifact_store.get_artifact(&path.into_inner()).await
+    {
+        Some(body) => Ok(HttpResponseOk(body.into())),
         None => {
             Err(HttpError::for_not_found(None, "Artifact not found".into()))
         }

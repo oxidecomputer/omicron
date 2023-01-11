@@ -10,7 +10,10 @@ use std::net::SocketAddrV6;
 
 use anyhow::{anyhow, Result};
 
-use crate::{context::ServerContext, store::ArtifactStore};
+use crate::{
+    context::ServerContext,
+    store::{ArtifactGetter, ArtifactStore},
+};
 
 /// The installinator artifact server.
 #[derive(Debug)]
@@ -22,9 +25,13 @@ pub struct ArtifactServer {
 
 impl ArtifactServer {
     /// Creates a new artifact server with the given address.
-    pub fn new(address: SocketAddrV6, log: &slog::Logger) -> Self {
+    pub fn new<Getter: ArtifactGetter>(
+        getter: Getter,
+        address: SocketAddrV6,
+        log: &slog::Logger,
+    ) -> Self {
         let log = log.new(slog::o!("component" => "installinator artifactd"));
-        let store = ArtifactStore::new(&log);
+        let store = ArtifactStore::new(getter, &log);
         Self { address, log, store }
     }
 

@@ -110,6 +110,7 @@ crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev
 display-error-chain = "0.1.1"
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
+debug-ignore = "1.0.3"
 derive_more = "0.99.17"
 diesel = { version = "2.0.2" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }

@@ -6,13 +6,14 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
-bytes.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 hyper.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
+tokio.workspace = true
 
 omicron-common.workspace = true
 

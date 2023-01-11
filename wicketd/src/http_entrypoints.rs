@@ -5,11 +5,16 @@
 //! HTTP entrypoint functions for wicketd
 
 use crate::RackV1Inventory;
+use buf_list::BufList;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
+use dropshot::Path;
 use dropshot::RequestContext;
+use dropshot::UntypedBody;
+use installinator_artifactd::ArtifactId;
 use std::sync::Arc;
 
 use crate::ServerContext;
@@ -22,6 +27,7 @@ pub fn api() -> WicketdApiDescription {
         api: &mut WicketdApiDescription,
     ) -> Result<(), String> {
         api.register(get_inventory)?;
+        api.register(put_artifact)?;
         Ok(())
     }
 
@@ -52,4 +58,23 @@ async fn get_inventory(
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))
         }
     }
+}
+
+/// An endpoint used to upload artifacts to the server.
+#[endpoint {
+    method = PUT,
+    path = "/artifacts/{name}/{version}",
+}]
+async fn put_artifact(
+    rqctx: Arc<RequestContext<ServerContext>>,
+    path: Path<ArtifactId>,
+    body: UntypedBody,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    // TODO: do we need to return more information with the response?
+
+    // TODO: `UntypedBody` is currently inefficient for large request bodies -- it does many copies
+    // and allocations. Replace this with a better solution once it's available in dropshot.
+    let buf_list = BufList::from_iter([body.as_bytes()]);
+    rqctx.context().artifact_store.add_artifact(path.into_inner(), buf_list);
+    Ok(HttpResponseUpdatedNoContent())
 }
