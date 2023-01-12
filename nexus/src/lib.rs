@@ -182,7 +182,9 @@ impl Server {
         let nexus = &self.apictx.nexus;
 
         nexus
-            .register_as_producer(nexus.get_internal_server().await.unwrap())
+            .register_as_producer(
+                nexus.get_internal_server_address().await.unwrap(),
+            )
             .await;
     }
 }
@@ -220,16 +222,16 @@ impl nexus_test_interface::NexusServer for Server {
         Server::start(internal_server).await.unwrap()
     }
 
-    async fn get_http_server_external(&self) -> Option<SocketAddr> {
-        self.apictx.nexus.get_http_external_server().await
+    async fn get_http_server_external_address(&self) -> Option<SocketAddr> {
+        self.apictx.nexus.get_http_external_server_address().await
     }
 
-    async fn get_https_server_external(&self) -> Option<SocketAddr> {
-        self.apictx.nexus.get_https_external_server().await
+    async fn get_https_server_external_address(&self) -> Option<SocketAddr> {
+        self.apictx.nexus.get_https_external_server_address().await
     }
 
-    async fn get_http_server_internal(&self) -> SocketAddr {
-        self.apictx.nexus.get_internal_server().await.unwrap()
+    async fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.apictx.nexus.get_internal_server_address().await.unwrap()
     }
 
     async fn upsert_crucible_dataset(
