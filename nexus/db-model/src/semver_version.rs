@@ -9,7 +9,6 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
 use parse_display::Display;
-use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 
 // We wrap semver::Version in external to impl JsonSchema, and we wrap it again
@@ -24,11 +23,9 @@ use serde::{Deserialize, Serialize};
     Deserialize,
     PartialEq,
     Display,
-    RefCast,
 )]
 #[diesel(sql_type = sql_types::Text)]
 #[display("{0}")]
-#[repr(transparent)]
 pub struct SemverVersion(pub external::SemverVersion);
 
 NewtypeFrom! { () pub struct SemverVersion(external::SemverVersion); }

@@ -421,9 +421,9 @@ pub struct SystemVersion {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SystemUpdate {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
     pub version: SemverVersion,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

@@ -38,7 +38,7 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::{SemverVersion, UpdateArtifactKind};
+use crate::db::model::UpdateArtifactKind;
 use crate::db::DataStore;
 use anyhow::anyhow;
 use authz_macros::authz_resource;
@@ -966,7 +966,7 @@ authz_resource! {
 authz_resource! {
     name = "SystemUpdate",
     parent = "Fleet",
-    primary_key = SemverVersion,
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

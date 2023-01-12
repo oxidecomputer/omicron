@@ -41,7 +41,7 @@ pub struct CreateComponentUpdate {
     version: external::SemverVersion,
     component_type: UpdateableComponentType,
     parent_id: Option<Uuid>,
-    system_update_version: external::SemverVersion,
+    system_update_id: Uuid,
 }
 
 pub struct CreateUpdateableComponent {
@@ -312,9 +312,12 @@ impl super::Nexus {
     ) -> CreateResult<db::model::SystemUpdate> {
         let now = Utc::now();
         let update = db::model::SystemUpdate {
+            identity: db::model::SystemUpdateIdentity {
+                id: Uuid::new_v4(),
+                time_created: now,
+                time_modified: now,
+            },
             version: SemverVersion(create_update.version),
-            time_created: now,
-            time_modified: now,
         };
         self.db_datastore.system_update_create(opctx, update).await
     }
@@ -341,7 +344,7 @@ impl super::Nexus {
         self.db_datastore
             .component_update_create(
                 opctx,
-                create_update.system_update_version.into(),
+                create_update.system_update_id,
                 update,
             )
             .await
@@ -363,13 +366,13 @@ impl super::Nexus {
         Ok(db_system_update)
     }
 
-    pub async fn system_updates_list_by_version(
+    pub async fn system_updates_list_by_id(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, db::model::SemverVersion>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SystemUpdate> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.db_datastore.system_updates_list_by_version(opctx, pagparams).await
+        self.db_datastore.system_updates_list_by_id(opctx, pagparams).await
     }
 
     pub async fn system_update_list_components(
@@ -380,14 +383,13 @@ impl super::Nexus {
         // TODO: I don't think this is the right way to do this auth check
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        // make sure the system update exists before fetching components, otherwise 404
-        let _ = LookupPath::new(opctx, &self.db_datastore)
+        let (authz_update, ..) = LookupPath::new(opctx, &self.db_datastore)
             .system_update_version(version.clone().into())
             .fetch()
             .await?;
 
         self.db_datastore
-            .system_update_components_list(opctx, version.clone().into())
+            .system_update_components_list(opctx, &authz_update)
             .await
     }
 
@@ -450,16 +452,8 @@ mod tests {
             cptestctx.server.apictx.nexus.datastore().clone(),
         )
     }
-    pub fn test_pagparams(
-    ) -> DataPageParams<'static, nexus_db_model::SemverVersion> {
-        DataPageParams {
-            marker: None,
-            direction: PaginationOrder::Ascending,
-            limit: NonZeroU32::new(100).unwrap(),
-        }
-    }
 
-    pub fn test_pagparams_by_id() -> DataPageParams<'static, Uuid> {
+    pub fn test_pagparams() -> DataPageParams<'static, Uuid> {
         DataPageParams {
             marker: None,
             direction: PaginationOrder::Ascending,
@@ -474,7 +468,7 @@ mod tests {
 
         // starts out empty
         let system_updates = nexus
-            .system_updates_list_by_version(&opctx, &test_pagparams())
+            .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
@@ -491,27 +485,24 @@ mod tests {
 
         // now there should be two system updates
         let system_updates = nexus
-            .system_updates_list_by_version(&opctx, &test_pagparams())
+            .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
         assert_eq!(system_updates.len(), 2);
 
-        // let's also make sure we can fetch them by version. goofy assert but
-        // we don't have IDs to compare
+        // let's also make sure we can fetch them by version
         let su1_fetched = nexus
             .system_update_fetch_by_version(&opctx, &su1.version)
             .await
             .unwrap();
-        assert_eq!(su1.version, su1_fetched.version);
-        assert_eq!(su1.time_created, su1_fetched.time_created);
+        assert_eq!(su1.identity.id, su1_fetched.identity.id);
 
         let su2_fetched = nexus
             .system_update_fetch_by_version(&opctx, &su2.version)
             .await
             .unwrap();
-        assert_eq!(su2.version, su2_fetched.version);
-        assert_eq!(su2.time_created, su2_fetched.time_created);
+        assert_eq!(su2.identity.id, su2_fetched.identity.id);
 
         // now create two component updates for update 1, one at root, and one
         // hanging off the first
@@ -522,7 +513,7 @@ mod tests {
                     version: external::SemverVersion::new(1, 0, 0),
                     component_type: UpdateableComponentType::BootloaderForRot,
                     parent_id: None,
-                    system_update_version: su1.version.clone().into(),
+                    system_update_id: su1.identity.id,
                 },
             )
             .await
@@ -534,7 +525,7 @@ mod tests {
                     version: external::SemverVersion::new(2, 0, 0),
                     component_type: UpdateableComponentType::HubrisForGimletSp,
                     parent_id: Some(cu1.identity.id),
-                    system_update_version: su1.version.clone().into(),
+                    system_update_id: su1.identity.id,
                 },
             )
             .await
@@ -564,7 +555,7 @@ mod tests {
 
         // starts out empty
         let components = nexus
-            .updateable_components_list_by_id(&opctx, &test_pagparams_by_id())
+            .updateable_components_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
@@ -597,7 +588,7 @@ mod tests {
 
         // now there should be 2
         let components = nexus
-            .updateable_components_list_by_id(&opctx, &test_pagparams_by_id())
+            .updateable_components_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 

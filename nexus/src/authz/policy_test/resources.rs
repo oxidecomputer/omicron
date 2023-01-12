@@ -7,7 +7,6 @@
 use super::resource_builder::ResourceBuilder;
 use super::resource_builder::ResourceSet;
 use crate::authz;
-use crate::db::model::SemverVersion;
 use omicron_common::api::external::LookupType;
 use oso::PolarClass;
 use std::collections::BTreeSet;
@@ -111,11 +110,12 @@ pub async fn make_resources<'a>(
         LookupType::ByName(device_access_token),
     ));
 
-    let system_update_version = SemverVersion::new(1, 0, 0);
+    let system_update_id =
+        "9c86d713-1bc2-4927-9892-ada3eb6f5f62".parse().unwrap();
     builder.new_resource(authz::SystemUpdate::new(
         authz::FLEET.clone(),
-        system_update_version.clone(),
-        LookupType::ByCompositeId(system_update_version.to_string()),
+        system_update_id,
+        LookupType::ById(system_update_id),
     ));
 
     builder.build()

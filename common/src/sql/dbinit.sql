@@ -1423,12 +1423,20 @@ CREATE INDEX ON omicron.public.update_available_artifact (
  * System updates
  */
 CREATE TABLE omicron.public.system_update (
-    /* Unique semver version */
-    version STRING(64) PRIMARY KEY,
+    /* Identity metadata (asset) */
+    id UUID NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL
+    time_modified TIMESTAMPTZ NOT NULL,
 
-    -- TODO: there will be more stuff here, like artifact_url
+    /* Unique semver version */
+    /* TODO: If the version is really supposed to be unique, we could make it the PK? */
+    version STRING(40) PRIMARY KEY
+);
+
+-- This index is used for the join with components... until the join table is
+-- converted to use version
+CREATE UNIQUE INDEX ON omicron.public.system_update (
+    id
 );
 
 CREATE TYPE omicron.public.updateable_component_type AS ENUM (
@@ -1460,7 +1468,7 @@ CREATE TABLE omicron.public.component_update (
     -- multiple instances of a given device kind
 
     -- TODO: figure out the actual length version strings should have
-    version STRING(64) NOT NULL,
+    version STRING(40) NOT NULL,
     component_type omicron.public.updateable_component_type NOT NULL,
     parent_id UUID
 );
@@ -1471,10 +1479,10 @@ CREATE TABLE omicron.public.component_update (
  * may be part of more than one system update.
  */
 CREATE TABLE omicron.public.system_update_component_update (
-    system_update_version STRING(64) NOT NULL,
+    system_update_id UUID NOT NULL,
     component_update_id UUID NOT NULL,
 
-    PRIMARY KEY (system_update_version, component_update_id)
+    PRIMARY KEY (system_update_id, component_update_id)
 );
 
 /*
