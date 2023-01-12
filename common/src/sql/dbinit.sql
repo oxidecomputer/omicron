@@ -1433,8 +1433,8 @@ CREATE TABLE omicron.public.system_update (
     version STRING(40) PRIMARY KEY
 );
 
--- This index is used for the join with components... until the join table is
--- converted to use version
+ 
+-- Used for the join with components. That and pagination is all id is used for
 CREATE UNIQUE INDEX ON omicron.public.system_update (
     id
 );

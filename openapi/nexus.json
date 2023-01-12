@@ -8615,7 +8615,7 @@
         "x-dropshot-pagination": true
       }
     },
-    "/v1/system/update/updates/{id}": {
+    "/v1/system/update/updates/{version}": {
       "get": {
         "tags": [
           "system"
@@ -8625,11 +8625,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "id",
+            "name": "version",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SemverVersion"
             }
           }
         ],
@@ -8653,7 +8652,7 @@
         }
       }
     },
-    "/v1/system/update/updates/{id}/components": {
+    "/v1/system/update/updates/{version}/components": {
       "get": {
         "tags": [
           "system"
@@ -8663,11 +8662,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "id",
+            "name": "version",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SemverVersion"
             }
           }
         ],
@@ -8691,7 +8689,7 @@
         }
       }
     },
-    "/v1/system/update/updates/{id}/start": {
+    "/v1/system/update/updates/{version}/start": {
       "post": {
         "tags": [
           "system"
@@ -8701,11 +8699,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "id",
+            "name": "version",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SemverVersion"
             }
           }
         ],
@@ -8722,7 +8719,7 @@
         }
       }
     },
-    "/v1/system/update/updates/{id}/stop": {
+    "/v1/system/update/updates/{version}/stop": {
       "post": {
         "tags": [
           "system"
@@ -8732,11 +8729,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "id",
+            "name": "version",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/SemverVersion"
             }
           }
         ],
