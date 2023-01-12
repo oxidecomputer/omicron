@@ -7,7 +7,6 @@
 use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    http_pagination::{PaginatedByName, PaginatedByNameOrId},
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
@@ -34,7 +33,7 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -51,7 +50,7 @@ pub struct OptionalOrganizationSelector {
     pub organization_selector: Option<OrganizationSelector>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
     #[serde(flatten)]
     pub organization_selector: Option<OrganizationSelector>,
@@ -67,14 +66,6 @@ impl ProjectSelector {
             project,
         }
     }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByNameOrId,
-    #[serde(flatten)]
-    pub organization: OrganizationSelector,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -103,23 +94,6 @@ impl InstanceSelector {
             instance,
         }
     }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByName,
-    #[serde(flatten)]
-    pub project_selector: ProjectSelector,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceSerialConsole {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-
-    #[serde(flatten)]
-    pub console_params: InstanceSerialConsoleRequest,
 }
 
 // Silos

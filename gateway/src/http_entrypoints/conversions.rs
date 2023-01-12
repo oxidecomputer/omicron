@@ -6,6 +6,8 @@
 
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
+use crate::error::SpCommsError;
+
 use super::PowerState;
 use super::SpComponentInfo;
 use super::SpComponentList;
@@ -20,6 +22,7 @@ use super::UpdatePreparationProgress;
 use dropshot::HttpError;
 use gateway_messages::SpComponent;
 use gateway_messages::UpdateStatus;
+use gateway_sp_comms::error::CommunicationError;
 
 // wrap `SpComponent::try_from(&str)` into a usable form for dropshot endpoints
 pub(super) fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
@@ -88,9 +91,22 @@ impl From<PowerState> for gateway_messages::PowerState {
     }
 }
 
-impl From<gateway_messages::SpState> for SpState {
-    fn from(state: gateway_messages::SpState) -> Self {
-        Self::Enabled { serial_number: hex::encode(&state.serial_number[..]) }
+impl From<Result<gateway_messages::SpState, SpCommsError>> for SpState {
+    fn from(result: Result<gateway_messages::SpState, SpCommsError>) -> Self {
+        match result {
+            Ok(state) => Self::Enabled {
+                serial_number: hex::encode(&state.serial_number[..]),
+            },
+            Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
+impl From<Result<gateway_messages::SpState, CommunicationError>> for SpState {
+    fn from(
+        result: Result<gateway_messages::SpState, CommunicationError>,
+    ) -> Self {
+        result.map_err(SpCommsError::from).into()
     }
 }
 
@@ -115,6 +131,29 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
         } else {
             Self::Absent
         }
+    }
+}
+
+impl From<Result<gateway_messages::IgnitionState, SpCommsError>>
+    for SpIgnition
+{
+    fn from(
+        result: Result<gateway_messages::IgnitionState, SpCommsError>,
+    ) -> Self {
+        match result {
+            Ok(state) => state.into(),
+            Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
+impl From<Result<gateway_messages::IgnitionState, CommunicationError>>
+    for SpIgnition
+{
+    fn from(
+        result: Result<gateway_messages::IgnitionState, CommunicationError>,
+    ) -> Self {
+        result.map_err(SpCommsError::from).into()
     }
 }
 

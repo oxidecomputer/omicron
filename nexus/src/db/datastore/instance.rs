@@ -112,7 +112,25 @@ impl DataStore {
         Ok(instance)
     }
 
-    pub async fn project_list_instances(
+    pub async fn project_list_instances_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Instance> {
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+
+        use db::schema::instance::dsl;
+        paginated(dsl::instance, dsl::id, &pagparams)
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(Instance::as_select())
+            .load_async::<Instance>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn project_list_instances_by_name(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
@@ -122,8 +140,8 @@ impl DataStore {
 
         use db::schema::instance::dsl;
         paginated(dsl::instance, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::time_deleted.is_null())
             .select(Instance::as_select())
             .load_async::<Instance>(self.pool_authorized(opctx).await?)
             .await

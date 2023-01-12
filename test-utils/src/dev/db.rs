@@ -83,19 +83,7 @@ pub struct CockroachStarterBuilder {
 
 impl CockroachStarterBuilder {
     pub fn new() -> CockroachStarterBuilder {
-        CockroachStarterBuilder::new_with_cmd(COCKROACHDB_BIN)
-    }
-
-    fn new_with_cmd(cmd: &str) -> CockroachStarterBuilder {
-        let mut builder = CockroachStarterBuilder {
-            store_dir: None,
-            listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
-            env: BTreeMap::new(),
-            args: vec![String::from(cmd)],
-            cmd_builder: tokio::process::Command::new(cmd),
-            start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
-            redirect_stdio: false,
-        };
+        let mut builder = CockroachStarterBuilder::new_raw(COCKROACHDB_BIN);
 
         // Copy the current set of environment variables.  We could instead
         // allow the default behavior of inheriting the current process
@@ -128,6 +116,24 @@ impl CockroachStarterBuilder {
             .arg("--insecure")
             .arg("--http-addr=:0");
         builder
+    }
+
+    /// Helper for constructing a `CockroachStarterBuilder` that runs a specific
+    /// command instead of the usual `cockroach` binary
+    ///
+    /// This is used by `new()` as a starting point.  It's also used by the
+    /// tests to trigger failure modes that would be hard to reproduce with
+    /// `cockroach` itself.
+    fn new_raw(cmd: &str) -> CockroachStarterBuilder {
+        CockroachStarterBuilder {
+            store_dir: None,
+            listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
+            env: BTreeMap::new(),
+            args: vec![String::from(cmd)],
+            cmd_builder: tokio::process::Command::new(cmd),
+            start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
+            redirect_stdio: false,
+        }
     }
 
     /// Redirect stdout and stderr for the "cockroach" process to files within
@@ -1027,7 +1033,7 @@ mod test {
     // Tests what happens if the "cockroach" command cannot be found.
     #[tokio::test]
     async fn test_bad_cmd() {
-        let builder = CockroachStarterBuilder::new_with_cmd("/nonexistent");
+        let builder = CockroachStarterBuilder::new_raw("/nonexistent");
         let _ = test_database_start_failure(builder.build().unwrap()).await;
     }
 
@@ -1172,7 +1178,7 @@ mod test {
         // simpler (and faster) if we don't.  But we do need something that
         // won't exit before we get a chance to trigger an error and that can
         // also accept the extra arguments that the builder will provide.
-        let mut builder = CockroachStarterBuilder::new_with_cmd("bash");
+        let mut builder = CockroachStarterBuilder::new_raw("bash");
         builder.arg("-c").arg("sleep 60");
         let starter = builder.build().unwrap();
 
@@ -1183,17 +1189,22 @@ mod test {
         std::fs::create_dir(&listen_url_file)
             .expect("pre-creating listen-URL path as directory");
         let (temp_dir, error) = test_database_start_failure(starter).await;
-
-        if let CockroachStartError::Unknown { source } = error {
+        let mut expected_error = false;
+        if let CockroachStartError::Unknown { source } = &error {
             let message = format!("{:#}", source);
             eprintln!("error message was: {}", message);
             // Verify the error message refers to the listening file (since
             // that's what we were operating on) and also reflects the EISDIR
             // error.
-            assert!(message.starts_with("checking listen file \""));
-            assert!(message.contains("Is a directory"));
-        } else {
-            panic!("unexpected error trying to start database: {:#}", error);
+            expected_error = message.starts_with("checking listen file \"")
+                && message.contains("Is a directory")
+        }
+        if !expected_error {
+            panic!(
+                "unexpected error from CockroachStarter::start(): \
+                expected error checking listen file, found {:#}",
+                error
+            );
         }
 
         // Clean up the temporary directory -- carefully.  Since we know exactly
