@@ -350,16 +350,16 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn system_update_fetch_by_id(
+    pub async fn system_update_fetch_by_version(
         &self,
         opctx: &OpContext,
-        update_id: &Uuid,
+        version: &external::SemverVersion,
     ) -> LookupResult<db::model::SystemUpdate> {
         // TODO: I don't think this is the right way to do this auth check
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         let (.., db_system_update) = LookupPath::new(opctx, &self.db_datastore)
-            .system_update_id(*update_id)
+            .system_update_version(version.clone().into())
             .fetch()
             .await?;
 
@@ -378,13 +378,13 @@ impl super::Nexus {
     pub async fn system_update_list_components(
         &self,
         opctx: &OpContext,
-        update_id: &Uuid,
+        version: &external::SemverVersion,
     ) -> ListResultVec<db::model::ComponentUpdate> {
         // TODO: I don't think this is the right way to do this auth check
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         let (authz_update, ..) = LookupPath::new(opctx, &self.db_datastore)
-            .system_update_id(*update_id)
+            .system_update_version(version.clone().into())
             .fetch()
             .await?;
 
@@ -474,24 +474,14 @@ mod tests {
 
         assert_eq!(system_updates.len(), 0);
 
-        let su1 = nexus
-            .system_update_create(
-                &opctx,
-                CreateSystemUpdate {
-                    version: external::SemverVersion::new(1, 0, 0),
-                },
-            )
-            .await
-            .unwrap();
-        let su2 = nexus
-            .system_update_create(
-                &opctx,
-                CreateSystemUpdate {
-                    version: external::SemverVersion::new(2, 0, 0),
-                },
-            )
-            .await
-            .unwrap();
+        let su1_create = CreateSystemUpdate {
+            version: external::SemverVersion::new(1, 0, 0),
+        };
+        let su1 = nexus.system_update_create(&opctx, su1_create).await.unwrap();
+        let su2_create = CreateSystemUpdate {
+            version: external::SemverVersion::new(2, 0, 0),
+        };
+        let su2 = nexus.system_update_create(&opctx, su2_create).await.unwrap();
 
         // now there should be two system updates
         let system_updates = nexus
@@ -499,8 +489,20 @@ mod tests {
             .await
             .unwrap();
 
-        dbg!(system_updates.clone());
         assert_eq!(system_updates.len(), 2);
+
+        // let's also make sure we can fetch them by version
+        let su1_fetched = nexus
+            .system_update_fetch_by_version(&opctx, &su1.version)
+            .await
+            .unwrap();
+        assert_eq!(su1.identity.id, su1_fetched.identity.id);
+
+        let su2_fetched = nexus
+            .system_update_fetch_by_version(&opctx, &su2.version)
+            .await
+            .unwrap();
+        assert_eq!(su2.identity.id, su2_fetched.identity.id);
 
         // now create two component updates for update 1, one at root, and one
         // hanging off the first
@@ -531,16 +533,15 @@ mod tests {
 
         // now there should be two component updates
         let cus_for_su1 = nexus
-            .system_update_list_components(&opctx, &su1.identity.id)
+            .system_update_list_components(&opctx, &su1.version)
             .await
             .unwrap();
 
-        dbg!(cus_for_su1.clone());
         assert_eq!(cus_for_su1.len(), 2);
 
         // other system update should not be associated with any component updates
         let cus_for_su2 = nexus
-            .system_update_list_components(&opctx, &su2.identity.id)
+            .system_update_list_components(&opctx, &su2.version)
             .await
             .unwrap();
 

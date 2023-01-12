@@ -77,7 +77,7 @@ impl DataStore {
 
         diesel::insert_into(system_update)
             .values(update.clone())
-            .on_conflict(id) // TODO: should also conflict on version
+            .on_conflict(version)
             .do_nothing()
             .returning(SystemUpdate::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)

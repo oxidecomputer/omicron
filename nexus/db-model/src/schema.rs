@@ -634,7 +634,7 @@ table! {
 }
 
 table! {
-    system_update (id) {
+    system_update (version) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,

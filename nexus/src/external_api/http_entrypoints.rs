@@ -5178,16 +5178,13 @@ async fn system_update_list(
 /// Path parameters for SystemUpdate requests
 #[derive(Deserialize, JsonSchema)]
 struct SystemUpdatePathParam {
-    // TODO: do updates have names? Should this therefore be NameOrId? Do we
-    // allow access by some other string identifier (like version) which, like
-    // Name, is disjoint with the set of Uuids? NameOrVersion?
-    id: Uuid,
+    version: SemverVersion,
 }
 
 /// View system update
 #[endpoint {
      method = GET,
-     path = "/v1/system/update/updates/{id}",
+     path = "/v1/system/update/updates/{version}",
      tags = ["system"],
 }]
 async fn system_update_view(
@@ -5200,7 +5197,7 @@ async fn system_update_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let system_update =
-            nexus.system_update_fetch_by_id(&opctx, &path.id).await?;
+            nexus.system_update_fetch_by_version(&opctx, &path.version).await?;
         Ok(HttpResponseOk(system_update.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5209,7 +5206,7 @@ async fn system_update_view(
 /// View system update component tree
 #[endpoint {
     method = GET,
-    path = "/v1/system/update/updates/{id}/components",
+    path = "/v1/system/update/updates/{version}/components",
     tags = ["system"],
 }]
 async fn system_update_components_list(
@@ -5222,7 +5219,7 @@ async fn system_update_components_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let components = nexus
-            .system_update_list_components(&opctx, &path.id)
+            .system_update_list_components(&opctx, &path.version)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -5237,7 +5234,7 @@ async fn system_update_components_list(
 /// Start system update
 #[endpoint {
     method = POST,
-    path = "/v1/system/update/updates/{id}/start",
+    path = "/v1/system/update/updates/{version}/start",
     tags = ["system"],
 }]
 async fn system_update_start(
@@ -5262,7 +5259,7 @@ async fn system_update_start(
 /// Stop system update
 #[endpoint {
     method = POST,
-    path = "/v1/system/update/updates/{id}/stop",
+    path = "/v1/system/update/updates/{version}/stop",
     tags = ["system"],
 }]
 async fn system_update_stop(

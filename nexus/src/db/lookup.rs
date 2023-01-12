@@ -17,6 +17,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use nexus_db_model::Name;
+use nexus_db_model::SemverVersion;
 use nexus_db_model::UpdateArtifactKind;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -394,9 +395,12 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type SystemUpdate, identified by its id
-    pub fn system_update_id(self, id: Uuid) -> SystemUpdate<'a> {
-        SystemUpdate::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type SystemUpdate, identified by its version
+    pub fn system_update_version(
+        self,
+        version: SemverVersion,
+    ) -> SystemUpdate<'a> {
+        SystemUpdate::PrimaryKey(Root { lookup_root: self }, version)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -697,7 +701,7 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "version", rust_type = SemverVersion } ]
 }
 
 lookup_resource! {
