@@ -1590,7 +1590,6 @@
           "disks"
         ],
         "summary": "Fetch disk metrics",
-        "description": "Use `GET /v1/disks/{disk}/metrics/{metric_name}` instead",
         "operationId": "disk_metrics_list",
         "parameters": [
           {
@@ -1682,7 +1681,6 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -7344,8 +7342,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "List instances",
-        "operationId": "instance_list_v1",
+        "operationId": "disk_list_v1",
         "parameters": [
           {
             "in": "query",
@@ -7413,8 +7410,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Create an instance",
-        "operationId": "instance_create_v1",
+        "summary": "Create a disk",
+        "operationId": "disk_create_v1",
         "parameters": [
           {
             "in": "query",
@@ -7467,8 +7464,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Fetch an instance",
-        "operationId": "instance_view_v1",
+        "operationId": "disk_view_v1",
         "parameters": [
           {
             "in": "path",
@@ -7516,8 +7512,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Delete an instance",
-        "operationId": "instance_delete_v1",
+        "summary": "Delete a disk",
+        "operationId": "disk_delete_v1",
         "parameters": [
           {
             "in": "path",
@@ -7555,128 +7551,13 @@
         }
       }
     },
-    "/v1/disks/{disk}/metrics/{metric_name}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Migrate an instance",
-        "operationId": "instance_migrate_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "metric_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DiskMetricName"
-            }
-          },
-          {
-            "in": "query",
-            "name": "end_time",
-            "description": "An exclusive end time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/instances/{instance}/reboot": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Reboot an instance",
-        "operationId": "instance_reboot_v1",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "start_time",
-            "description": "An inclusive start time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
     "/v1/instances": {
       "get": {
         "tags": [
           "instances"
         ],
-        "summary": "Fetch an instance's serial console",
-        "operationId": "instance_serial_console_v1",
+        "summary": "List instances",
+        "operationId": "instance_list_v1",
         "parameters": [
           {
             "in": "query",
@@ -7708,7 +7589,6 @@
           {
             "in": "query",
             "name": "project",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7717,7 +7597,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -7745,8 +7625,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Stream an instance's serial console",
-        "operationId": "instance_serial_console_stream_v1",
+        "summary": "Create an instance",
+        "operationId": "instance_create_v1",
         "parameters": [
           {
             "in": "query",
@@ -7799,6 +7679,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Fetch an instance",
         "operationId": "instance_view_v1",
         "parameters": [
           {
@@ -7847,6 +7728,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Delete an instance",
         "operationId": "instance_delete_v1",
         "parameters": [
           {
@@ -7922,7 +7804,6 @@
           {
             "in": "query",
             "name": "project",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7931,7 +7812,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -8089,6 +7970,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Migrate an instance",
         "operationId": "instance_migrate_v1",
         "parameters": [
           {
@@ -8149,6 +8031,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Reboot an instance",
         "operationId": "instance_reboot_v1",
         "parameters": [
           {
@@ -8175,8 +8058,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "202": {
+            "description": "successfully enqueued operation",
             "content": {
               "application/json": {
                 "schema": {
@@ -8199,6 +8082,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Fetch an instance's serial console",
         "operationId": "instance_serial_console_v1",
         "parameters": [
           {
@@ -8282,6 +8166,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Stream an instance's serial console",
         "operationId": "instance_serial_console_stream_v1",
         "parameters": [
           {

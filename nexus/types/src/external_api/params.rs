@@ -34,7 +34,7 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskPath {
     pub disk: NameOrId,
 }
@@ -74,7 +74,7 @@ impl ProjectSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
@@ -99,61 +99,6 @@ impl DiskSelector {
             disk,
         }
     }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskList {
-    #[serde(flatten)]
-    pub project_selector: ProjectSelector,
-    #[serde(flatten)]
-    pub pagination: PaginatedByName,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskMetricsList {
-    #[serde(flatten)]
-    pub pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
-
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-    pub disk: NameOrId,
-}
-
-impl DiskSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        disk: NameOrId,
-    ) -> Self {
-        DiskSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
-            disk,
-        }
-    }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskList {
-    #[serde(flatten)]
-    pub project_selector: ProjectSelector,
-    #[serde(flatten)]
-    pub pagination: PaginatedByName,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskMetricsList {
-    #[serde(flatten)]
-    pub pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
-
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
 }
 
 #[derive(Deserialize, JsonSchema)]

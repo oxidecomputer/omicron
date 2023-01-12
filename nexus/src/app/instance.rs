@@ -478,7 +478,7 @@ impl super::Nexus {
         // Gather disk information and turn that into DiskRequests
         let disks = self
             .db_datastore
-            .instance_list_disks(
+            .instance_list_disks_by_name(
                 &opctx,
                 &authz_instance,
                 &DataPageParams {
@@ -699,8 +699,22 @@ impl super::Nexus {
         }
     }
 
-    /// Lists disks attached to the instance.
-    pub async fn instance_list_disks(
+    /// Lists disks attached to the instance by id.
+    pub async fn instance_list_disks_by_id(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Disk> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .instance_list_disks_by_id(opctx, &authz_instance, pagparams)
+            .await
+    }
+
+    /// Lists disks attached to the instance by name.
+    pub async fn instance_list_disks_by_name(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -709,7 +723,7 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .instance_list_disks(opctx, &authz_instance, pagparams)
+            .instance_list_disks_by_name(opctx, &authz_instance, pagparams)
             .await
     }
 

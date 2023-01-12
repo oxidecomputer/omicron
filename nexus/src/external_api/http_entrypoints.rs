@@ -150,7 +150,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_create_v1)?;
         api.register(disk_view_v1)?;
         api.register(disk_delete_v1)?;
-        api.register(disk_metrics_list_v1)?;
 
         api.register(instance_list)?;
         api.register(instance_create)?;
@@ -2311,30 +2310,43 @@ async fn ip_pool_service_range_remove(
 }]
 async fn disk_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::DiskList>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, &query.project_selector)?;
-        let disks = nexus
-            .project_list_disks(
-                &opctx,
-                &project_lookup,
-                &data_page_params_for(&rqctx, &query.pagination)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
-            .await?
-            .into_iter()
-            .map(|disk| disk.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query.pagination,
+        let disks = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_disks_by_id(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params,
+                    )
+                    .await?
+            }
+            PaginatedBy::Name(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_disks_by_name(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
+            }
+        }
+        .into_iter()
+        .map(|disk| disk.into())
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
             disks,
-            &marker_for_name,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2365,7 +2377,7 @@ async fn disk_list(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let authz_project = nexus.project_lookup(&opctx, &project_selector)?;
         let disks = nexus
-            .project_list_disks(
+            .project_list_disks_by_name(
                 &opctx,
                 &authz_project,
                 &data_page_params_for(&rqctx, &query)?
@@ -2598,56 +2610,11 @@ pub enum DiskMetricName {
     WriteBytes,
 }
 
-#[endpoint {
-    method = GET,
-    path = "/v1/disks/{disk}/metrics/{metric_name}",
-    tags = ["disks"],
-}]
-async fn disk_metrics_list_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<MetricsPathParam<params::DiskPath, DiskMetricName>>,
-    query_params: Query<params::DiskMetricsList>,
-) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let metric_name = path.metric_name;
-    let query = query_params.into_inner();
-    let limit = rqctx.page_limit(&query.pagination)?;
-
-    let disk_selector = params::DiskSelector {
-        disk: path.inner.disk,
-        project_selector: query.project_selector,
-    };
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let (.., authz_disk) = nexus
-            .disk_lookup(&opctx, &disk_selector)?
-            .lookup_for(authz::Action::Read)
-            .await?;
-
-        let result = nexus
-            .select_timeseries(
-                &format!("crucible_upstairs:{}", metric_name),
-                &[&format!("upstairs_uuid=={}", authz_disk.id())],
-                query.pagination,
-                limit,
-            )
-            .await?;
-
-        Ok(HttpResponseOk(result))
-    };
-
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch disk metrics
-/// Use `GET /v1/disks/{disk}/metrics/{metric_name}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
     tags = ["disks"],
-    deprecated = true
 }]
 async fn disk_metrics_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3389,36 +3356,55 @@ async fn instance_serial_console_stream(
 }]
 async fn instance_disk_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::DiskList>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instance_selector = params::InstanceSelector {
-            project_selector: Some(query.project_selector),
-            instance: path.instance,
-        };
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let disks = nexus
-            .instance_list_disks(
-                &opctx,
-                &instance_lookup,
-                &data_page_params_for(&rqctx, &query.pagination)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query.pagination,
+        let disks = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pag_params, selector) => {
+                let instance_selector = params::InstanceSelector {
+                    project_selector: selector.project_selector,
+                    instance: path.instance,
+                };
+                let instance_lookup =
+                    nexus.instance_lookup(&opctx, &instance_selector)?;
+                nexus
+                    .instance_list_disks_by_id(
+                        &opctx,
+                        &instance_lookup,
+                        &pag_params,
+                    )
+                    .await?
+            }
+            PaginatedBy::Name(pag_params, selector) => {
+                let instance_selector = params::InstanceSelector {
+                    project_selector: selector.project_selector,
+                    instance: path.instance,
+                };
+                let instance_lookup =
+                    nexus.instance_lookup(&opctx, &instance_selector)?;
+                nexus
+                    .instance_list_disks_by_name(
+                        &opctx,
+                        &instance_lookup,
+                        &pag_params.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
+            }
+        }
+        .into_iter()
+        .map(|d| d.into())
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
             disks,
-            &marker_for_name,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3451,7 +3437,7 @@ async fn instance_disk_list(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let disks = nexus
-            .instance_list_disks(
+            .instance_list_disks_by_name(
                 &opctx,
                 &instance_lookup,
                 &data_page_params_for(&rqctx, &query)?

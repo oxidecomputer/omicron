@@ -258,7 +258,20 @@ impl super::Nexus {
         Ok(disk_created)
     }
 
-    pub async fn project_list_disks(
+    pub async fn project_list_disks_by_id(
+        &self,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Disk> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .project_list_disks_by_id(opctx, &authz_project, pagparams)
+            .await
+    }
+
+    pub async fn project_list_disks_by_name(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -267,7 +280,7 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .project_list_disks(opctx, &authz_project, pagparams)
+            .project_list_disks_by_name(opctx, &authz_project, pagparams)
             .await
     }
 

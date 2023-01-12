@@ -7,7 +7,6 @@ disk_delete_v1                           /v1/disks/{disk}
 disk_list                                /organizations/{organization_name}/projects/{project_name}/disks
 disk_list_v1                             /v1/disks
 disk_metrics_list                        /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}
-disk_metrics_list_v1                     /v1/disks/{disk}/metrics/{metric_name}
 disk_view                                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 disk_view_by_id                          /by-id/disks/{id}
 disk_view_v1                             /v1/disks/{disk}
