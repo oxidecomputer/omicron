@@ -11,7 +11,8 @@ use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
-    ComponentUpdate, SystemUpdate, UpdateAvailableArtifact, UpdateableComponent,
+    ComponentUpdate, SemverVersion, SystemUpdate, UpdateAvailableArtifact,
+    UpdateableComponent,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -96,7 +97,7 @@ impl DataStore {
     pub async fn component_update_create(
         &self,
         opctx: &OpContext,
-        system_update_id: Uuid,
+        system_update_version: SemverVersion,
         update: ComponentUpdate,
     ) -> CreateResult<ComponentUpdate> {
         // TODO: what's the right permission here?
@@ -125,7 +126,7 @@ impl DataStore {
 
         diesel::insert_into(join_table::table)
             .values(SystemUpdateComponentUpdate {
-                system_update_id,
+                system_update_version,
                 component_update_id: update.id(),
             })
             .on_conflict(join_table::all_columns)
@@ -147,17 +148,17 @@ impl DataStore {
         result
     }
 
-    pub async fn system_updates_list_by_id(
+    pub async fn system_updates_list_by_version(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, SemverVersion>,
     ) -> ListResultVec<SystemUpdate> {
         // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::system_update::dsl::*;
 
-        paginated(system_update, id, pagparams)
+        paginated(system_update, version, pagparams)
             .select(SystemUpdate::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
@@ -167,7 +168,7 @@ impl DataStore {
     pub async fn system_update_components_list(
         &self,
         opctx: &OpContext,
-        authz_update: &authz::SystemUpdate,
+        update_version: SemverVersion,
     ) -> ListResultVec<ComponentUpdate> {
         // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
@@ -177,7 +178,9 @@ impl DataStore {
 
         component_update::table
             .inner_join(join_table::table)
-            .filter(join_table::columns::system_update_id.eq(authz_update.id()))
+            .filter(
+                join_table::columns::system_update_version.eq(update_version),
+            )
             .select(ComponentUpdate::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
             .await

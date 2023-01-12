@@ -673,8 +673,8 @@ table! {
 }
 
 table! {
-    system_update_component_update (system_update_id, component_update_id) {
-        system_update_id -> Uuid,
+    system_update_component_update (system_update_version, component_update_id) {
+        system_update_version -> Text,
         component_update_id -> Uuid,
     }
 }

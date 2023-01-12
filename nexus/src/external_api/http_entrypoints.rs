@@ -50,9 +50,11 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::PaginatedByVersion;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanByVersion;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
@@ -5151,8 +5153,7 @@ async fn system_component_version_list(
 }]
 async fn system_update_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    // TODO: pagination should probably be by most recent first, ID is nonsense
-    query_params: Query<PaginatedById>,
+    query_params: Query<PaginatedByVersion>,
 ) -> Result<HttpResponseOk<ResultsPage<SystemUpdate>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -5161,15 +5162,18 @@ async fn system_update_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let updates = nexus
-            .system_updates_list_by_id(&opctx, &pagparams)
+            .system_updates_list_by_version(
+                &opctx,
+                &pagparams.map_name(db::model::SemverVersion::ref_cast),
+            )
             .await?
             .into_iter()
             .map(|u| u.into())
             .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
+        Ok(HttpResponseOk(ScanByVersion::results_page(
             &query,
             updates,
-            &|_, u: &SystemUpdate| u.identity.id,
+            &|_, u: &SystemUpdate| u.version.clone(),
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

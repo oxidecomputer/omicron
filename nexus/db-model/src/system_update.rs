@@ -10,33 +10,34 @@ use crate::{
     },
     SemverVersion,
 };
+use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(
-    Queryable,
-    Insertable,
-    Selectable,
-    Clone,
-    Debug,
-    Asset,
-    Serialize,
-    Deserialize,
+    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
 )]
 #[diesel(table_name = system_update)]
 pub struct SystemUpdate {
-    #[diesel(embed)]
-    pub identity: SystemUpdateIdentity,
     pub version: SemverVersion,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl SystemUpdate {
+    pub fn id(&self) -> SemverVersion {
+        self.version.clone()
+    }
 }
 
 impl From<SystemUpdate> for views::SystemUpdate {
     fn from(system_update: SystemUpdate) -> Self {
         Self {
-            identity: system_update.identity(),
             version: system_update.version.into(),
+            time_created: system_update.time_created,
+            time_modified: system_update.time_modified,
         }
     }
 }
@@ -118,7 +119,7 @@ pub struct ComponentUpdate {
 #[diesel(table_name = system_update_component_update)]
 pub struct SystemUpdateComponentUpdate {
     pub component_update_id: Uuid,
-    pub system_update_id: Uuid,
+    pub system_update_version: SemverVersion,
 }
 
 impl From<ComponentUpdate> for views::ComponentUpdate {

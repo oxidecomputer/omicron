@@ -45,6 +45,7 @@ use crate::api::external::Name;
 use crate::api::external::NameOrId;
 use crate::api::external::ObjectIdentity;
 use crate::api::external::PaginationOrder;
+use crate::api::external::SemverVersion;
 use dropshot::HttpError;
 use dropshot::PaginationParams;
 use dropshot::RequestContext;
@@ -285,6 +286,45 @@ impl ScanParams for ScanById {
         PaginationOrder::Ascending
     }
     fn from_query(p: &PaginatedById) -> Result<&Self, HttpError> {
+        Ok(match p.page {
+            WhichPage::First(ref scan_params) => scan_params,
+            WhichPage::Next(PageSelector { ref scan, .. }) => scan,
+        })
+    }
+}
+
+/// Query parameters for pagination by semver version
+pub type PaginatedByVersion =
+    PaginationParams<ScanByVersion, PageSelectorByVersion>;
+/// Page selector for pagination by name only
+pub type PageSelectorByVersion = PageSelector<ScanByVersion, SemverVersion>;
+/// Scan parameters for resources that support scanning by id only
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ScanByVersion {
+    #[serde(default = "default_version_sort_mode")]
+    sort_by: VersionSortMode,
+}
+
+/// Supported set of sort modes for scanning by version only.
+///
+/// Currently, we only support scanning in ascending order.
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionSortMode {
+    /// sort in increasing order of "version"
+    VersionAscending,
+}
+
+fn default_version_sort_mode() -> VersionSortMode {
+    VersionSortMode::VersionAscending
+}
+
+impl ScanParams for ScanByVersion {
+    type MarkerValue = SemverVersion;
+    fn direction(&self) -> PaginationOrder {
+        PaginationOrder::Ascending
+    }
+    fn from_query(p: &PaginatedByVersion) -> Result<&Self, HttpError> {
         Ok(match p.page {
             WhichPage::First(ref scan_params) => scan_params,
             WhichPage::Next(PageSelector { ref scan, .. }) => scan,
