@@ -130,7 +130,7 @@ CREATE INDEX ON omicron.public.service (
 
 -- x509 certificates which may be used by services
 CREATE TABLE omicron.public.certificate (
-    -- Identity metadata (asset)
+    -- Identity metadata (resource)
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
