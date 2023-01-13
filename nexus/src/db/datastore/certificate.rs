@@ -58,16 +58,23 @@ impl DataStore {
     pub async fn certificate_list_for(
         &self,
         opctx: &OpContext,
-        kind: ServiceKind,
+        kind: Option<ServiceKind>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Certificate> {
         use db::schema::certificate::dsl;
 
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        paginated(dsl::certificate, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::service.eq(kind))
+        let query = paginated(dsl::certificate, dsl::name, &pagparams)
+            .filter(dsl::time_deleted.is_null());
+
+        let query = if let Some(kind) = kind {
+            query.filter(dsl::service.eq(kind))
+        } else {
+            query
+        };
+
+        query
             .select(Certificate::as_select())
             .load_async::<Certificate>(self.pool_authorized(opctx).await?)
             .await

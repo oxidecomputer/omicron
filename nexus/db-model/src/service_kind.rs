@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::internal_api;
+use nexus_types::{external_api, internal_api};
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
@@ -22,6 +22,15 @@ impl_enum_type!(
     Dendrite => b"dendrite"
     Tfport => b"tfport"
 );
+
+impl From<external_api::params::ServiceUsingCertificate> for ServiceKind {
+    fn from(k: external_api::params::ServiceUsingCertificate) -> Self {
+        use external_api::params::ServiceUsingCertificate::*;
+        match k {
+            Nexus => Self::Nexus,
+        }
+    }
+}
 
 impl From<internal_api::params::ServiceKind> for ServiceKind {
     fn from(k: internal_api::params::ServiceKind) -> Self {

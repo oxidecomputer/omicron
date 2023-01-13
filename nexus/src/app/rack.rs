@@ -9,6 +9,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
+use crate::external_api::params::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -110,6 +111,7 @@ impl super::Nexus {
                         },
                         cert: c.cert,
                         key: c.key,
+                        service: ServiceUsingCertificate::Nexus,
                     }
                 ).map_err(|e| Error::from(e))
             })

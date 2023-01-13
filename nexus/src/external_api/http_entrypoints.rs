@@ -3337,8 +3337,9 @@ async fn instance_disk_detach(
 
 /// List system-wide certificates
 ///
-/// Returns a list of all the system-wide certificates. System-wide certificates are returned sorted
-/// by creation date, with the most recent certificates appearing first.
+/// Returns a list of all the system-wide certificates. System-wide certificates
+/// are returned sorted by creation date, with the most recent certificates
+/// appearing first.
 #[endpoint {
     method = GET,
     path = "/system/certificates",

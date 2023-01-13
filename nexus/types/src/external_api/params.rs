@@ -584,6 +584,15 @@ pub struct NetworkInterfaceUpdate {
 
 // CERTIFICATES
 
+/// The service intended to use this certificate.
+#[derive(Clone, Copy, Deserialize, Serialize, JsonSchema)]
+pub enum ServiceUsingCertificate {
+    /// This certificate is intended for the "Nexus" service.
+    ///
+    /// This service acts as the main API point for accessing the Oxide rack.
+    Nexus,
+}
+
 /// Create-time parameters for a
 /// [`Certificate`](crate::external_api::views::Certificate)
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
@@ -595,6 +604,8 @@ pub struct CertificateCreate {
     pub cert: Vec<u8>,
     /// PEM file containing private key
     pub key: Vec<u8>,
+    /// The service using this certificate
+    pub service: ServiceUsingCertificate,
 }
 
 impl std::fmt::Debug for CertificateCreate {

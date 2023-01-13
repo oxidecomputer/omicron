@@ -9,6 +9,7 @@ use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
+use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -39,25 +40,27 @@ impl super::Nexus {
         opctx: &OpContext,
         params: params::CertificateCreate,
     ) -> CreateResult<db::model::Certificate> {
-        let new_certificate = db::model::Certificate::new(
-            Uuid::new_v4(),
-            db::model::ServiceKind::Nexus,
-            params,
-        )?;
-
-        // TODO: If we make this operation "add a certificate, and try to update
-        // nearby Nexus servers to use it", that means it'll be combining a DB
-        // operation with a service update request. If we want both to reliably
-        // complete together, we should consider making this a saga.
+        let kind = params.service;
+        let new_certificate =
+            db::model::Certificate::new(Uuid::new_v4(), kind.into(), params)?;
         info!(self.log, "Creating certificate");
         let cert = self
             .db_datastore
             .certificate_create(opctx, new_certificate)
             .await?;
-        // TODO: Refresh other nexus servers?
-        self.refresh_tls_config(&opctx).await?;
-        info!(self.log, "TLS refreshed successfully");
-        Ok(cert)
+
+        match kind {
+            params::ServiceUsingCertificate::Nexus => {
+                // TODO: If we make this operation "add a certificate, and try to update
+                // nearby Nexus servers to use it", that means it'll be combining a DB
+                // operation with a service update request. If we want both to reliably
+                // complete together, we should consider making this a saga.
+                // TODO: Refresh other nexus servers?
+                self.refresh_tls_config(&opctx).await?;
+                info!(self.log, "TLS refreshed successfully");
+                Ok(cert)
+            }
+        }
     }
 
     pub async fn certificates_list(
@@ -65,13 +68,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Certificate> {
-        self.db_datastore
-            .certificate_list_for(
-                opctx,
-                db::model::ServiceKind::Nexus,
-                pagparams,
-            )
-            .await
+        self.db_datastore.certificate_list_for(opctx, None, pagparams).await
     }
 
     pub async fn certificate_delete(
@@ -79,10 +76,15 @@ impl super::Nexus {
         opctx: &OpContext,
         certificate_lookup: lookup::Certificate<'_>,
     ) -> DeleteResult {
-        let (.., authz_cert, _db_cert) = certificate_lookup.fetch().await?;
+        let (.., authz_cert, db_cert) = certificate_lookup.fetch().await?;
         self.db_datastore.certificate_delete(opctx, &authz_cert).await?;
-        // TODO: Refresh other nexus servers?
-        self.refresh_tls_config(&opctx).await?;
+        match db_cert.service {
+            ServiceKind::Nexus => {
+                // TODO: Refresh other nexus servers?
+                self.refresh_tls_config(&opctx).await?;
+            }
+            _ => (),
+        };
         Ok(())
     }
 
@@ -103,7 +105,7 @@ impl super::Nexus {
             .datastore()
             .certificate_list_for(
                 &opctx,
-                db::model::ServiceKind::Nexus,
+                Some(db::model::ServiceKind::Nexus),
                 &DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,

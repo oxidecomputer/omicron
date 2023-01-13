@@ -221,6 +221,7 @@ async fn cert_create_expect_error(
         },
         cert,
         key,
+        service: params::ServiceUsingCertificate::Nexus,
     };
 
     NexusRequest::expect_failure_with_body(
