@@ -63,9 +63,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             .map(|addr| {
                 ClientTestContext::new(
                     addr,
-                    self.logctx
-                        .log
-                        .new(o!("component" => "external client test context")),
+                    self.logctx.log.new(
+                        o!("component" => "external http client test context"),
+                    ),
                 )
             })
             .unwrap()
@@ -78,9 +78,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             .map(|addr| {
                 ClientTestContext::new(
                     addr,
-                    self.logctx
-                        .log
-                        .new(o!("component" => "external client test context")),
+                    self.logctx.log.new(
+                        o!("component" => "external https client test context"),
+                    ),
                 )
             })
             .unwrap()
