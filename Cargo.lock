@@ -1283,6 +1283,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "debug-ignore"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b48b0b49e2f473c499ddcd133e78f0f2629aaa997ee61adadb2d1753e6af4cf"
+
+[[package]]
 name = "der"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2591,7 +2597,7 @@ name = "installinator-artifactd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytes",
+ "async-trait",
  "clap 4.0.32",
  "dropshot",
  "expectorate",
@@ -2605,6 +2611,7 @@ dependencies = [
  "serde_json",
  "slog",
  "subprocess",
+ "tokio",
 ]
 
 [[package]]
@@ -7122,13 +7129,17 @@ dependencies = [
 name = "wicketd"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "buf-list",
  "bytes",
  "clap 4.0.32",
+ "debug-ignore",
  "dropshot",
  "expectorate",
  "futures",
  "gateway-client",
  "http",
+ "hyper",
  "installinator-artifactd",
  "omicron-common",
  "omicron-test-utils",

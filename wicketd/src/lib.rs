@@ -2,12 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod artifacts;
 mod config;
 mod context;
 mod http_entrypoints;
 mod inventory;
 mod mgs;
 
+use artifacts::WicketdArtifactStore;
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use inventory::{RackV1Inventory, SpInventory};
@@ -55,7 +57,9 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
 
     let dropshot_config = ConfigDropshot {
         bind_address: SocketAddr::V6(args.address),
-        request_body_max_bytes: 8 << 20, // 8 MiB
+        // The maximum request size is set to 4 GB -- artifacts can be large and there's currently
+        // no way to set a larger request size for some endpoints.
+        request_body_max_bytes: 4 << 30,
         ..Default::default()
     };
 
@@ -65,16 +69,19 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         mgs_manager.run().await;
     });
 
+    let store = WicketdArtifactStore::new(&log);
+
     let wicketd_server_fut = dropshot::HttpServerStarter::new(
         &dropshot_config,
         http_entrypoints::api(),
-        ServerContext { mgs_handle },
+        ServerContext { mgs_handle, artifact_store: store.clone() },
         &log.new(o!("component" => "dropshot (wicketd)")),
     )
     .map_err(|err| format!("initializing http server: {}", err))?
     .start();
 
     let artifact_server_fut = installinator_artifactd::ArtifactServer::new(
+        store,
         args.artifact_address,
         &log,
     )

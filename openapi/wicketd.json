@@ -10,6 +10,54 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/artifacts/{name}/{version}": {
+      "put": {
+        "summary": "An endpoint used to upload artifacts to the server.",
+        "operationId": "put_artifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "description": "The artifact's name.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "description": "The version of the artifact.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "A status endpoint used to report high level information known to wicketd.",
