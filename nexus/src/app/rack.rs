@@ -111,9 +111,9 @@ impl super::Nexus {
                         cert: c.cert,
                         key: c.key,
                     }
-                )
+                ).map_err(|e| Error::from(e))
             })
-            .collect();
+            .collect::<Result<_, Error>>()?;
 
         self.db_datastore
             .rack_set_initialized(

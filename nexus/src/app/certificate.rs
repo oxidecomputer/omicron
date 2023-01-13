@@ -16,54 +16,8 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::NameOrId;
-use openssl::pkey::PKey;
-use openssl::x509::X509;
 use ref_cast::RefCast;
 use uuid::Uuid;
-
-#[derive(Debug, thiserror::Error)]
-pub enum CertificateError {
-    #[error("Failed to parse certificate: {0}")]
-    BadCertificate(openssl::error::ErrorStack),
-
-    #[error("Certificate exists, but is empty")]
-    CertificateEmpty,
-
-    #[error("Failed to parse private key")]
-    BadPrivateKey(openssl::error::ErrorStack),
-}
-
-impl From<CertificateError> for Error {
-    fn from(error: CertificateError) -> Self {
-        use CertificateError::*;
-        match error {
-            BadCertificate(_) | CertificateEmpty => Error::InvalidValue {
-                label: String::from("certificate"),
-                message: error.to_string(),
-            },
-            BadPrivateKey(_) => Error::InvalidValue {
-                label: String::from("private-key"),
-                message: error.to_string(),
-            },
-        }
-    }
-}
-
-fn validate_certs(input: Vec<u8>) -> Result<(), CertificateError> {
-    let certs = X509::stack_from_pem(&input.as_slice())
-        .map_err(CertificateError::BadCertificate)?;
-    if certs.is_empty() {
-        return Err(CertificateError::CertificateEmpty);
-    }
-    Ok(())
-}
-
-fn validate_private_key(key: Vec<u8>) -> Result<(), CertificateError> {
-    let _ = PKey::private_key_from_pem(&key.as_slice())
-        .map_err(CertificateError::BadPrivateKey)?;
-
-    Ok(())
-}
 
 impl super::Nexus {
     pub fn certificate_lookup<'a>(
@@ -85,14 +39,11 @@ impl super::Nexus {
         opctx: &OpContext,
         params: params::CertificateCreate,
     ) -> CreateResult<db::model::Certificate> {
-        validate_certs(params.cert.clone())?;
-        validate_private_key(params.key.clone())?;
-
         let new_certificate = db::model::Certificate::new(
             Uuid::new_v4(),
             db::model::ServiceKind::Nexus,
             params,
-        );
+        )?;
 
         // TODO: Saga?
         info!(self.log, "Creating certificate");

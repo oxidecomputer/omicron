@@ -3134,6 +3134,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-rpaths",
+ "openssl",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -3143,6 +3144,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
+ "thiserror",
  "uuid",
 ]
 
