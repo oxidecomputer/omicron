@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use bytes::Bytes;
+use installinator_artifact_client::ClientError;
 use progenitor_client::ResponseValue;
 use proptest::prelude::*;
 use reqwest::StatusCode;
@@ -300,25 +301,29 @@ impl MockPeer {
             MockResponse::NotFound { after } => {
                 tokio::time::sleep(after).await;
                 _ = sender
-                    .send(Err(progenitor_client::Error::ErrorResponse(
-                        ResponseValue::new(
-                            (),
-                            StatusCode::NOT_FOUND,
-                            Default::default(),
-                        ),
-                    )))
+                    .send(Err(ClientError::ErrorResponse(ResponseValue::new(
+                        installinator_artifact_client::types::Error {
+                            error_code: None,
+                            message: format!("not-found error after {after:?}"),
+                            request_id: "mock-request-id".to_owned(),
+                        },
+                        StatusCode::NOT_FOUND,
+                        Default::default(),
+                    ))))
                     .await;
             }
             MockResponse::Forbidden { after } => {
                 tokio::time::sleep(after).await;
                 _ = sender
-                    .send(Err(progenitor_client::Error::ErrorResponse(
-                        ResponseValue::new(
-                            (),
-                            StatusCode::FORBIDDEN,
-                            Default::default(),
-                        ),
-                    )))
+                    .send(Err(ClientError::ErrorResponse(ResponseValue::new(
+                        installinator_artifact_client::types::Error {
+                            error_code: None,
+                            message: format!("forbidden error after {after:?}"),
+                            request_id: "mock-request-id".to_owned(),
+                        },
+                        StatusCode::FORBIDDEN,
+                        Default::default(),
+                    ))))
                     .await;
             }
         }

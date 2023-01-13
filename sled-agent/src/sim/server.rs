@@ -10,14 +10,13 @@ use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::NexusClient;
 use crucible_agent_client::types::State as RegionState;
-use std::collections::HashMap;
-
 use internal_dns_client::names::{ServiceName, AAAA, SRV};
-
+use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
-use slog::{Drain, Logger};
+use slog::{info, Drain, Logger};
+use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 
@@ -44,7 +43,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: &Logger,
-    ) -> Result<Server, String> {
+    ) -> Result<(Server, NexusTypes::RackInitializationRequest), String> {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
@@ -107,6 +106,7 @@ impl Server {
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
 
+        let mut datasets = vec![];
         // Create all the Zpools requested by the config, and allocate a single
         // Crucible dataset for each. This emulates the setup we expect to have
         // on the physical rack.
@@ -114,7 +114,17 @@ impl Server {
             let zpool_id = uuid::Uuid::new_v4();
             sled_agent.create_zpool(zpool_id, zpool.size).await;
             let dataset_id = uuid::Uuid::new_v4();
-            sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
+            let address =
+                sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
+
+            datasets.push(NexusTypes::DatasetCreateRequest {
+                zpool_id,
+                dataset_id,
+                request: NexusTypes::DatasetPutRequest {
+                    address: address.to_string(),
+                    kind: NexusTypes::DatasetKind::Crucible,
+                },
+            });
 
             // Whenever Nexus tries to allocate a region, it should complete
             // immediately. What efficiency!
@@ -194,14 +204,22 @@ impl Server {
             .await
             .map_err(|e| e.to_string())?;
 
-        Ok(Server {
-            sled_agent,
-            http_server,
-            pantry_server,
-            dns_server_storage_dir,
-            dns_server,
-            dns_dropshot_server,
-        })
+        let rack_init_request = NexusTypes::RackInitializationRequest {
+            services: vec![],
+            datasets,
+        };
+
+        Ok((
+            Server {
+                sled_agent,
+                http_server,
+                pantry_server,
+                dns_server_storage_dir,
+                dns_server,
+                dns_dropshot_server,
+            },
+            rack_init_request
+        ))
     }
 
     /// Wait for the given server to shut down
@@ -212,6 +230,36 @@ impl Server {
     pub async fn wait_for_finish(self) -> Result<(), String> {
         self.http_server.await
     }
+}
+
+async fn handoff_to_nexus(
+    log: &Logger,
+    config: &Config,
+    request: &NexusTypes::RackInitializationRequest,
+) -> Result<(), String> {
+    let nexus_client = NexusClient::new(
+        &format!("http://{}", config.nexus_address),
+        log.new(o!("component" => "NexusClient")),
+    );
+    let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
+
+    let notify_nexus = || async {
+        nexus_client
+            .rack_initialization_complete(&rack_id, &request)
+            .await
+            .map_err(BackoffError::transient)
+    };
+    let log_failure = |err, _| {
+        info!(log, "Failed to handoff to nexus: {err}");
+    };
+    retry_notify(
+        retry_policy_internal_service_aggressive(),
+        notify_nexus,
+        log_failure,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Run an instance of the `Server`
@@ -231,7 +279,11 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     }
 
-    let server = Server::start(config, &log).await?;
+    let (server, rack_init_request) = Server::start(config, &log).await?;
     info!(log, "sled agent started successfully");
+
+    handoff_to_nexus(&log, &config, &rack_init_request).await?;
+    info!(log, "Handoff to Nexus is complete");
+
     server.wait_for_finish().await
 }

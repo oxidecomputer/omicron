@@ -4,16 +4,17 @@
 
 //! HTTP entrypoint functions for wicketd
 
-use crate::artifacts::ArtifactId;
 use crate::RackV1Inventory;
+use buf_list::BufList;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
-use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use hyper::Body;
+use dropshot::UntypedBody;
+use installinator_artifactd::ArtifactId;
 use std::sync::Arc;
 
 use crate::ServerContext;
@@ -26,7 +27,7 @@ pub fn api() -> WicketdApiDescription {
         api: &mut WicketdApiDescription,
     ) -> Result<(), String> {
         api.register(get_inventory)?;
-        api.register(get_artifact)?;
+        api.register(put_artifact)?;
         Ok(())
     }
 
@@ -59,21 +60,21 @@ async fn get_inventory(
     }
 }
 
-/// Fetch an artifact from the in-memory cache.
+/// An endpoint used to upload artifacts to the server.
 #[endpoint {
-    method = GET,
-    path = "/artifacts/{name}/{version}"
+    method = PUT,
+    path = "/artifacts/{name}/{version}",
 }]
-async fn get_artifact(
+async fn put_artifact(
     rqctx: Arc<RequestContext<ServerContext>>,
     path: Path<ArtifactId>,
-) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-    match rqctx.context().artifact_store.get_artifact(&path.into_inner()) {
-        Some(bytes) => Ok(HttpResponseOk(Body::from(bytes).into())),
-        None => {
-            Err(HttpError::for_not_found(None, "Artifact not found".into()))
-        }
-    }
-}
+    body: UntypedBody,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    // TODO: do we need to return more information with the response?
 
-// TODO: hash verification/fetch artifact by hash?
+    // TODO: `UntypedBody` is currently inefficient for large request bodies -- it does many copies
+    // and allocations. Replace this with a better solution once it's available in dropshot.
+    let buf_list = BufList::from_iter([body.as_bytes()]);
+    rqctx.context().artifact_store.add_artifact(path.into_inner(), buf_list);
+    Ok(HttpResponseUpdatedNoContent())
+}
