@@ -330,6 +330,23 @@ impl Nexus {
         Ok(())
     }
 
+    pub async fn wait_for_shutdown(&self) -> Result<(), String> {
+        // The internal server is the last server to be closed.
+        //
+        // We don't wait for the external servers to be closed; we just expect
+        // that they'll be closed before the internal server.
+        let server_fut = self
+            .internal_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.wait_for_shutdown());
+        if let Some(server_fut) = server_fut {
+            server_fut.await?;
+        }
+        Ok(())
+    }
+
     pub async fn get_http_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {

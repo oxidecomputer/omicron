@@ -174,7 +174,7 @@ impl Server {
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        self.apictx.nexus.close_servers().await
+        self.apictx.nexus.wait_for_shutdown().await
     }
 
     /// Register the Nexus server as a metric producer with `oximeter.
