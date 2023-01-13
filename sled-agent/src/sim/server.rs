@@ -218,7 +218,7 @@ impl Server {
                 dns_server,
                 dns_dropshot_server,
             },
-            rack_init_request
+            rack_init_request,
         ))
     }
 
