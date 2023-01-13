@@ -10,7 +10,7 @@ anyhow.workspace = true
 clap.workspace = true
 crossterm = { version = "0.25.0", features = ["event-stream"] }
 futures.workspace = true
-hex.workspace = true
+hex = { workspace = true, features = ["serde"] }
 reqwest.workspace = true
 semver = { version = "1.0.16", features = ["std", "serde"] }
 serde.workspace = true
