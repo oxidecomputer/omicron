@@ -26,8 +26,8 @@ pub enum CertificateError {
     #[error("Failed to parse certificate: {0}")]
     BadCertificate(openssl::error::ErrorStack),
 
-    #[error("Certificate not found")]
-    CertificateNotFound,
+    #[error("Certificate exists, but is empty")]
+    CertificateEmpty,
 
     #[error("Failed to parse private key")]
     BadPrivateKey(openssl::error::ErrorStack),
@@ -37,7 +37,7 @@ impl From<CertificateError> for Error {
     fn from(error: CertificateError) -> Self {
         use CertificateError::*;
         match error {
-            BadCertificate(_) | CertificateNotFound => Error::InvalidValue {
+            BadCertificate(_) | CertificateEmpty => Error::InvalidValue {
                 label: String::from("certificate"),
                 message: error.to_string(),
             },
@@ -53,7 +53,7 @@ fn validate_certs(input: Vec<u8>) -> Result<(), CertificateError> {
     let certs = X509::stack_from_pem(&input.as_slice())
         .map_err(CertificateError::BadCertificate)?;
     if certs.is_empty() {
-        return Err(CertificateError::CertificateNotFound);
+        return Err(CertificateError::CertificateEmpty);
     }
     Ok(())
 }
