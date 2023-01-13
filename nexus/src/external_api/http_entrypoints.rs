@@ -5181,7 +5181,7 @@ async fn system_update_list(
 }]
 async fn system_update_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<params::SystemUpdate>,
+    path_params: Path<params::SystemUpdatePath>,
 ) -> Result<HttpResponseOk<views::SystemUpdate>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -5203,7 +5203,7 @@ async fn system_update_view(
 }]
 async fn system_update_components_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<params::SystemUpdate>,
+    path_params: Path<params::SystemUpdatePath>,
 ) -> Result<HttpResponseOk<ResultsPage<views::ComponentUpdate>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -5234,7 +5234,7 @@ async fn system_update_start(
     // modifying the state of the system rather than the state of the resource
     // (instance there, system update here) identified by the param. This
     // approach also gives us symmetry with the /stop endpoint.
-    update: TypedBody<params::SystemUpdate>,
+    update: TypedBody<params::SystemUpdateStart>,
 ) -> Result<HttpResponseAccepted<views::SystemUpdateDeployment>, HttpError> {
     let apictx = rqctx.context();
     let _nexus = &apictx.nexus;

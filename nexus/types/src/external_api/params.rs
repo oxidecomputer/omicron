@@ -1076,6 +1076,11 @@ pub struct ResourceMetrics {
 // SYSTEM UPDATE
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdate {
+pub struct SystemUpdatePath {
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdateStart {
     pub version: SemverVersion,
 }

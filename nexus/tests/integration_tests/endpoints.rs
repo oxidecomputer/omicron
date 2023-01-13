@@ -390,7 +390,7 @@ lazy_static! {
 
     // System update
 
-    pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdate = params::SystemUpdate {
+    pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdatePath = params::SystemUpdatePath {
         version: SemverVersion::new(1,0,0),
     };
 }
