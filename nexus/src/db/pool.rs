@@ -74,7 +74,7 @@ const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
 #[cfg(test)]
 pub const ALLOW_FULL_TABLE_SCAN_SQL: &str =
-    "set disallow_full_table_scans = off; set large_full_scan_rows = 1000;";
+    "set local disallow_full_table_scans = off; set local large_full_scan_rows = 1000;";
 
 #[derive(Debug)]
 struct DisallowFullTableScans {}
