@@ -504,10 +504,9 @@ async fn verify_endpoint(
             if let Some(&AllowedMethod::GetWebsocket) = allowed {
                 request = request.websocket_handshake();
             }
-            let response = request
-                .execute()
-                .await
-                .expect(&format!("Failed making {method} request to {uri}"));
+            let response = request.execute().await.unwrap_or_else(|e| {
+                panic!("Failed making {method} request to {uri}: {e}")
+            });
             verify_response(&response);
             record_operation(WhichTest::Unprivileged(&expected_status));
         } else {
