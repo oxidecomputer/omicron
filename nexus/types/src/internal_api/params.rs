@@ -135,27 +135,6 @@ impl fmt::Display for ServiceKind {
     }
 }
 
-/*
-impl FromStr for ServiceKind {
-    type Err = omicron_common::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use ServiceKind::*;
-        match s {
-            "nexus" => Ok(Nexus),
-            "oximeter" => Ok(Oximeter),
-            "internal_dns" => Ok(InternalDNS),
-            "dendrite" => Ok(Dendrite),
-            "tfport" => Ok(Tfport),
-            "crucible_pantry" => Ok(CruciblePantry),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown service kind: {}", s),
-            }),
-        }
-    }
-}
-*/
-
 /// Describes a service on a sled
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ServicePutRequest {

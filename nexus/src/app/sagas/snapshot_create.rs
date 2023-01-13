@@ -261,7 +261,7 @@ impl NexusSaga for SagaSnapshotCreate {
             // (Pantry) Call the Pantry's /detach
             builder.append(call_pantry_detach_for_disk_action());
 
-            // (Pantry) Clear attach_instance_id ZZZ verify, maybe DB too?
+            // (Pantry) Clear attach_instance_id
             builder.append(detach_disk_from_pantry_action());
         }
 
