@@ -45,7 +45,10 @@ impl super::Nexus {
             params,
         )?;
 
-        // TODO: Saga?
+        // TODO: If we make this operation "add a certificate, and try to update
+        // nearby Nexus servers to use it", that means it'll be combining a DB
+        // operation with a service update request. If we want both to reliably
+        // complete together, we should consider making this a saga.
         info!(self.log, "Creating certificate");
         let cert = self
             .db_datastore
