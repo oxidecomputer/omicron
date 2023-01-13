@@ -99,8 +99,12 @@ impl Certificate {
     }
 }
 
-impl From<Certificate> for views::Certificate {
-    fn from(cert: Certificate) -> Self {
-        Self { identity: cert.identity() }
+impl TryFrom<Certificate> for views::Certificate {
+    type Error = Error;
+    fn try_from(cert: Certificate) -> Result<Self, Error> {
+        Ok(Self {
+            identity: cert.identity(),
+            service: cert.service.try_into()?,
+        })
     }
 }

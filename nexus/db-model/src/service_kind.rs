@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use external_api::shared::ServiceUsingCertificate;
 use nexus_types::{external_api, internal_api};
 use serde::{Deserialize, Serialize};
 
@@ -23,11 +24,20 @@ impl_enum_type!(
     Tfport => b"tfport"
 );
 
-impl From<external_api::params::ServiceUsingCertificate> for ServiceKind {
-    fn from(k: external_api::params::ServiceUsingCertificate) -> Self {
-        use external_api::params::ServiceUsingCertificate::*;
+impl TryFrom<ServiceKind> for ServiceUsingCertificate {
+    type Error = omicron_common::api::external::Error;
+    fn try_from(k: ServiceKind) -> Result<Self, Self::Error> {
         match k {
-            Nexus => Self::Nexus,
+            ServiceKind::Nexus => Ok(ServiceUsingCertificate::Nexus),
+            _ => Err(Self::Error::internal_error("Invalid service type")),
+        }
+    }
+}
+
+impl From<ServiceUsingCertificate> for ServiceKind {
+    fn from(k: ServiceUsingCertificate) -> Self {
+        match k {
+            ServiceUsingCertificate::Nexus => Self::Nexus,
         }
     }
 }

@@ -3362,8 +3362,8 @@ async fn certificate_list(
             )
             .await?
             .into_iter()
-            .map(|d| d.into())
-            .collect();
+            .map(|d| d.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(HttpResponseOk(ScanByName::results_page(
             &query,
             certs,
@@ -3392,7 +3392,7 @@ async fn certificate_create(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
-        Ok(HttpResponseCreated(cert.into()))
+        Ok(HttpResponseCreated(cert.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3422,16 +3422,14 @@ async fn certificate_view(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let (.., cert) =
             nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
-        Ok(HttpResponseOk(cert.into()))
+        Ok(HttpResponseOk(cert.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Delete a certificate
 ///
-/// Permanently delete a certificate. This operation cannot be undone. Any
-/// services using the certificate will continue to run, however new services
-/// cannot be created with this certificate.
+/// Permanently delete a certificate. This operation cannot be undone.
 #[endpoint {
     method = DELETE,
     path = "/system/certificates/{certificate}",

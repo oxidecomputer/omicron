@@ -5571,7 +5571,7 @@
           "system"
         ],
         "summary": "Delete a certificate",
-        "description": "Permanently delete a certificate. This operation cannot be undone. Any services using the certificate will continue to run, however new services cannot be created with this certificate.",
+        "description": "Permanently delete a certificate. This operation cannot be undone.",
         "operationId": "certificate_delete",
         "parameters": [
           {
@@ -8903,6 +8903,9 @@
               }
             ]
           },
+          "service": {
+            "$ref": "#/components/schemas/ServiceUsingCertificate"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -8918,6 +8921,7 @@
           "description",
           "id",
           "name",
+          "service",
           "time_created",
           "time_modified"
         ]

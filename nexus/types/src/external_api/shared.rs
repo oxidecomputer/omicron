@@ -151,6 +151,16 @@ pub enum UserProvisionType {
     Jit,
 }
 
+/// The service intended to use this certificate.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceUsingCertificate {
+    /// This certificate is intended for the "Nexus" service.
+    ///
+    /// This service acts as the main API point for accessing the Oxide rack.
+    Nexus,
+}
+
 /// An IP Range is a contiguous range of IP addresses, usually within an IP
 /// Pool.
 ///

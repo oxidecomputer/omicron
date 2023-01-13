@@ -11,6 +11,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::ServiceKind;
 use crate::external_api::params;
+use crate::external_api::shared;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -50,7 +51,7 @@ impl super::Nexus {
             .await?;
 
         match kind {
-            params::ServiceUsingCertificate::Nexus => {
+            shared::ServiceUsingCertificate::Nexus => {
                 // TODO: If we make this operation "add a certificate, and try to update
                 // nearby Nexus servers to use it", that means it'll be combining a DB
                 // operation with a service update request. If we want both to reliably

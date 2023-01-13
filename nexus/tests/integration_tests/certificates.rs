@@ -16,6 +16,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Certificate;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::shared;
 use std::io::Write;
 use std::sync::Arc;
 
@@ -221,7 +222,7 @@ async fn cert_create_expect_error(
         },
         cert,
         key,
-        service: params::ServiceUsingCertificate::Nexus,
+        service: shared::ServiceUsingCertificate::Nexus,
     };
 
     NexusRequest::expect_failure_with_body(
