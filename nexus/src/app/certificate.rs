@@ -133,7 +133,7 @@ impl super::Nexus {
 
     /// Refreshes the TLS configuration for the currently-running Nexus external
     /// server. This involves either:
-    /// - Creating a new HTTPS server if once does not exist
+    /// - Creating a new HTTPS server if one does not exist
     /// - Refreshing an existing HTTPS server if it already exists
     /// - Tearing down an HTTPS server if no certificates exist
     pub async fn refresh_tls_config(
