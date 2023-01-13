@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+use dropshot::HttpError;
 pub use error::*;
 
 use anyhow::anyhow;
@@ -107,6 +108,56 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
             marker: self.marker.map(f),
             direction: self.direction,
             limit: self.limit,
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Name> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Name(name)) => Ok(DataPageParams {
+                marker: Some(name),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Id(id)) => Ok(DataPageParams {
+                marker: Some(id),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
         }
     }
 }
@@ -268,7 +319,7 @@ impl Name {
     }
 }
 
-#[derive(Serialize, Deserialize, Display, Clone)]
+#[derive(Debug, Serialize, Deserialize, Display, Clone, PartialEq)]
 #[display("{0}")]
 #[serde(untagged)]
 pub enum NameOrId {

@@ -57,12 +57,18 @@ type ControlPlaneTestContext =
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
-fn get_project_url() -> String {
-    format!("/organizations/{}/projects/{}", ORGANIZATION_NAME, PROJECT_NAME)
+fn get_instances_url() -> String {
+    format!(
+        "/v1/instances?organization={}&project={}",
+        ORGANIZATION_NAME, PROJECT_NAME
+    )
 }
 
-fn get_instances_url() -> String {
-    format!("{}/instances", get_project_url())
+fn get_instance_url(instance_name: &str) -> String {
+    format!(
+        "/v1/instances/{}?organization={}&project={}",
+        instance_name, ORGANIZATION_NAME, PROJECT_NAME
+    )
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -80,10 +86,7 @@ async fn test_instances_access_before_create_returns_not_found(
 
     // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // List instances.  There aren't any yet.
@@ -91,7 +94,7 @@ async fn test_instances_access_before_create_returns_not_found(
     assert_eq!(instances.len(), 0);
 
     // Make sure we get a 404 if we fetch one.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance_url = get_instance_url("just-rainsticks");
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -194,24 +197,21 @@ async fn test_instances_create_reboot_halt(
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let instance_name = "just-rainsticks";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
 
     // Create an instance.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
-    let instance = create_instance(
-        client,
-        ORGANIZATION_NAME,
-        PROJECT_NAME,
-        "just-rainsticks",
-    )
-    .await;
-    assert_eq!(instance.identity.name, "just-rainsticks");
-    assert_eq!(instance.identity.description, "instance \"just-rainsticks\"");
+    let instance_url = get_instance_url(instance_name);
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
+    assert_eq!(instance.identity.name, instance_name);
+    assert_eq!(
+        instance.identity.description,
+        format!("instance \"{}\"", instance_name).as_str()
+    );
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
     // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
@@ -248,7 +248,10 @@ async fn test_instances_create_reboot_halt(
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
+    assert_eq!(
+        error.message,
+        format!("already exists: instance \"{}\"", instance_name).as_str()
+    );
 
     // List instances again and expect to find the one we just created.
     let instances = instances_list(&client, &url_instances).await;
@@ -290,7 +293,7 @@ async fn test_instances_create_reboot_halt(
     // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, instance_name, InstanceOp::Start).await;
     instances_eq(&instance, &instance_next);
     let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
@@ -298,7 +301,7 @@ async fn test_instances_create_reboot_halt(
     // Reboot the instance.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Reboot).await;
+        instance_post(&client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -326,7 +329,7 @@ async fn test_instances_create_reboot_halt(
     // Request a halt and verify both the immediate state and the finished state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -346,7 +349,7 @@ async fn test_instances_create_reboot_halt(
     // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     instances_eq(&instance, &instance_next);
     let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
@@ -357,7 +360,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::BAD_REQUEST,
         Method::POST,
-        &format!("{}/reboot", &instance_url),
+        get_instance_url(format!("{}/reboot", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -378,7 +381,7 @@ async fn test_instances_create_reboot_halt(
     // succeed, having stopped in between.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, instance_name, InstanceOp::Start).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -387,7 +390,7 @@ async fn test_instances_create_reboot_halt(
 
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Reboot).await;
+        instance_post(&client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -417,7 +420,7 @@ async fn test_instances_create_reboot_halt(
     // state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -428,7 +431,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::BAD_REQUEST,
         Method::POST,
-        &format!("{}/reboot", instance_url),
+        get_instance_url(format!("{}/reboot", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -480,7 +483,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        &format!("{}/reboot", instance_url),
+        get_instance_url(format!("{}/reboot", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -492,7 +495,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        &format!("{}/start", instance_url),
+        get_instance_url(format!("{}/start", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -502,7 +505,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        &format!("{}/stop", instance_url),
+        get_instance_url(format!("{}/stop", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -517,6 +520,7 @@ async fn test_instances_create_stopped_start(
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let instance_name = "just-rainsticks";
 
     create_org_and_project(&client).await;
     let url_instances = format!(
@@ -530,8 +534,8 @@ async fn test_instances_create_stopped_start(
         &url_instances,
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
-                name: "just-rainsticks".parse().unwrap(),
-                description: "instance just-rainsticks".to_string(),
+                name: instance_name.parse().unwrap(),
+                description: format!("instance {}", instance_name),
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
@@ -548,9 +552,9 @@ async fn test_instances_create_stopped_start(
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
 
     // Start the instance.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance_url = get_instance_url(instance_name);
     let instance =
-        instance_post(&client, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, instance_name, InstanceOp::Start).await;
 
     // Now, simulate completion of instance boot and check the state reported.
     instance_simulate(nexus, &instance.identity.id).await;
@@ -570,15 +574,12 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let instance_name = "just-rainsticks";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create an instance.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance_url = get_instance_url(instance_name);
     let instance = create_instance(
         client,
         ORGANIZATION_NAME,
@@ -613,7 +614,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 
     // Stop the instance
     let instance =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
@@ -1031,6 +1032,7 @@ async fn test_instance_create_delete_network_interface(
 ) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
+    let instance_name = "nic-attach-test-inst";
 
     create_org_and_project(&client).await;
     let url_instances = format!(
@@ -1061,7 +1063,7 @@ async fn test_instance_create_delete_network_interface(
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nic-attach-test-inst")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("instance to test attaching new nic"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -1080,8 +1082,6 @@ async fn test_instance_create_delete_network_interface(
             .await
             .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
-    let url_instance =
-        format!("{}/{}", url_instances, instance.identity.name.as_str());
 
     // Verify there are no interfaces
     let url_interfaces = format!(
@@ -1148,8 +1148,7 @@ async fn test_instance_create_delete_network_interface(
     );
 
     // Stop the instance
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Verify we can now make the requests again
@@ -1177,7 +1176,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Restart the instance, verify the interfaces are still correct.
     let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Get all interfaces in one request.
@@ -1219,8 +1218,7 @@ async fn test_instance_create_delete_network_interface(
     }
 
     // Stop the instance and verify we can delete the interface
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // We should not be able to delete the primary interface, while the
@@ -1279,12 +1277,10 @@ async fn test_instance_update_network_interfaces(
 ) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
+    let instance_name = "nic-update-test-inst";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1309,7 +1305,7 @@ async fn test_instance_update_network_interfaces(
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nic-update-test-inst")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("instance to test updatin nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -1328,8 +1324,6 @@ async fn test_instance_update_network_interfaces(
             .await
             .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
-    let url_instance =
-        format!("{}/{}", url_instances, instance.identity.name.as_str());
     let url_interfaces = format!(
         "/organizations/{}/projects/{}/instances/{}/network-interfaces",
         ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
@@ -1358,8 +1352,7 @@ async fn test_instance_update_network_interfaces(
     ];
 
     // Stop the instance
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Create the first interface on the instance.
@@ -1381,7 +1374,7 @@ async fn test_instance_update_network_interfaces(
     // Restart the instance, to ensure we can only modify things when it's
     // stopped.
     let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // We'll change the interface's name and description
@@ -1419,8 +1412,7 @@ async fn test_instance_update_network_interfaces(
     );
 
     // Stop the instance again, and now verify that the update works.
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let updated_primary_iface = NexusRequest::object_put(
         client,
@@ -1526,7 +1518,7 @@ async fn test_instance_update_network_interfaces(
 
     // Restart the instance, and verify that we can't update either interface.
     let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     for if_name in
@@ -1555,8 +1547,7 @@ async fn test_instance_update_network_interfaces(
     }
 
     // Stop the instance again.
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Verify that we can set the secondary as the new primary, and that nothing
@@ -1759,6 +1750,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 #[nexus_test]
 async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
+    let instance_name = "nifs";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
@@ -1787,7 +1779,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     // Create the instance
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nfs")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -1804,10 +1796,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
             .body(Some(&instance_params))
@@ -2482,6 +2471,7 @@ async fn test_disks_detached_when_instance_destroyed(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
+    let instance_name = "nfs";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
@@ -2521,7 +2511,7 @@ async fn test_disks_detached_when_instance_destroyed(
     // Boot the instance
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nfs")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -2545,10 +2535,7 @@ async fn test_disks_detached_when_instance_destroyed(
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
 
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
@@ -2588,7 +2575,7 @@ async fn test_disks_detached_when_instance_destroyed(
     );
 
     let instance =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     instance_simulate(nexus, &instance.identity.id).await;
@@ -2727,16 +2714,17 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let instance_name = "kris-picks";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let instance_url = get_instance_url(instance_name);
 
     // Make sure we get a 404 if we try to access the serial console before creation.
-    let instance_serial_url =
-        format!("{}/kris-picks/serial-console?from_start=0", url_instances);
+    let instance_serial_url = format!(
+        "{}&{}",
+        get_instance_url(format!("{}/serial-console", instance_name).as_str()),
+        "from_start=0"
+    );
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -2749,12 +2737,14 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "not found: instance with name \"kris-picks\"");
+    assert_eq!(
+        error.message,
+        format!("not found: instance with name \"{}\"", instance_name).as_str()
+    );
 
     // Create an instance.
-    let instance_url = format!("{}/kris-picks", url_instances);
     let instance =
-        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, "kris-picks")
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
             .await;
 
     // Now, simulate completion of instance boot and check the state reported.
@@ -2785,7 +2775,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     // Request a halt and verify both the immediate state and the finished state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -3018,17 +3008,20 @@ pub enum InstanceOp {
 
 pub async fn instance_post(
     client: &ClientTestContext,
-    instance_url: &str,
+    instance_name: &str,
     which: InstanceOp,
 ) -> Instance {
-    let url = format!(
-        "{}/{}",
-        instance_url,
-        match which {
-            InstanceOp::Start => "start",
-            InstanceOp::Stop => "stop",
-            InstanceOp::Reboot => "reboot",
-        }
+    let url = get_instance_url(
+        format!(
+            "{}/{}",
+            instance_name,
+            match which {
+                InstanceOp::Start => "start",
+                InstanceOp::Stop => "stop",
+                InstanceOp::Reboot => "reboot",
+            }
+        )
+        .as_str(),
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)

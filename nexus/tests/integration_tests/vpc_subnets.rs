@@ -38,6 +38,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     // Create a project that we'll use for testing.
     let org_name = "test-org";
     let project_name = "springfield-squidport";
+    let instance_name = "inst";
     create_organization(&client, &org_name).await;
     let _ = create_project(&client, org_name, project_name).await;
     populate_ip_pool(client, "default", None).await;
@@ -56,10 +57,10 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     // Create an instance in the default VPC and VPC Subnet. Verify that we
     // cannot delete the subnet until the instance is gone.
     let instance_url = format!(
-        "/organizations/{org_name}/projects/{project_name}/instances/inst"
+        "/organizations/{org_name}/projects/{project_name}/instances/{instance_name}"
     );
     let instance =
-        create_instance(client, &org_name, project_name, "inst").await;
+        create_instance(client, &org_name, project_name, instance_name).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let err: HttpErrorResponseBody = NexusRequest::expect_failure(
         &client,
@@ -80,7 +81,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     );
 
     // Stop and then delete the instance
-    instance_post(client, &instance_url, InstanceOp::Stop).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(&nexus, &instance.identity.id).await;
     NexusRequest::object_delete(&client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
