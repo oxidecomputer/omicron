@@ -88,6 +88,7 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
+assert_cmd = "2.0.8"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
 async-trait = "0.1.60"
 authz-macros = { path = "nexus/authz-macros" }
@@ -205,6 +206,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "2.2.0"
 serial_test = "0.10"
 sha3 = "0.10.6"
+shell-words = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sled = "0.34"

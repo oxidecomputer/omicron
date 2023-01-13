@@ -13,7 +13,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use futures::StreamExt;
-use slog::{error, info, Drain};
+use slog::{error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -91,10 +91,7 @@ pub struct Wizard {
 
 #[allow(clippy::new_without_default)]
 impl Wizard {
-    pub fn new() -> Wizard {
-        // TODO: make this configurable?
-        let wicketd_addr: SocketAddrV6 = "[::1]:8000".parse().unwrap();
-        let log = Self::setup_log("/tmp/wicket.log").unwrap();
+    pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Wizard {
         let screens = Screens::new(&log);
         let (events_tx, events_rx) = channel();
         let state = State::new();
@@ -118,20 +115,6 @@ impl Wizard {
             log,
             tokio_rt,
         }
-    }
-
-    pub fn setup_log(path: &str) -> anyhow::Result<slog::Logger> {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(path)?;
-
-        let decorator = slog_term::PlainDecorator::new(file);
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-
-        Ok(slog::Logger::root(drain, slog::o!()))
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
