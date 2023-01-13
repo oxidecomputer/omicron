@@ -586,8 +586,9 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an instance.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
-    create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, "just-rainsticks")
+    let instance_name = "just-rainsticks";
+    let instance_url = format!("{url_instances}/{instance_name}");
+    create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
         .await;
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id)
@@ -601,7 +602,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Stop the instance
     let instance =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
@@ -755,13 +756,9 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
-    let instance = create_instance(
-        client,
-        ORGANIZATION_NAME,
-        PROJECT_NAME,
-        "just-rainsticks",
-    )
-    .await;
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
 
     // Simulate the instance booting.
     instance_simulate(nexus, &instance.identity.id).await;
