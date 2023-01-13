@@ -517,4 +517,26 @@ impl super::Nexus {
         .await?;
         Ok(())
     }
+
+    /// Remove a read only parent from a disk.
+    /// This is just a wrapper around the volume operation of the same
+    /// name, but we provide this interface when all the caller has is
+    /// the disk UUID as the internal volume_id is not exposed.
+    pub async fn disk_remove_read_only_parent(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        disk_id: Uuid,
+    ) -> DeleteResult {
+        // First get the internal volume ID that is stored in the disk
+        // database entry, once we have that just call the volume method
+        // to remove the read only parent.
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .disk_id(disk_id)
+            .fetch()
+            .await?;
+
+        self.volume_remove_read_only_parent(db_disk.volume_id).await?;
+
+        Ok(())
+    }
 }
