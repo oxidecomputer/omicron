@@ -10,10 +10,8 @@ use super::{Screen, ScreenId};
 use crate::defaults::colors::*;
 use crate::defaults::dimensions::RectExt;
 use crate::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
-use crate::Action;
-use crate::Frame;
-use crate::ScreenEvent;
-use crate::TermEvent;
+use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
+use crossterm::event::Event as TermEvent;
 use tui::style::{Color, Style};
 use tui::widgets::Block;
 
@@ -61,11 +59,7 @@ impl SplashScreen {
 }
 
 impl Screen for SplashScreen {
-    fn draw(
-        &self,
-        _state: &crate::State,
-        terminal: &mut crate::Term,
-    ) -> anyhow::Result<()> {
+    fn draw(&self, _state: &State, terminal: &mut Term) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
             self.animate_logo(f);
@@ -73,11 +67,7 @@ impl Screen for SplashScreen {
         Ok(())
     }
 
-    fn on(
-        &mut self,
-        _state: &mut crate::State,
-        event: ScreenEvent,
-    ) -> Vec<Action> {
+    fn on(&mut self, _state: &mut State, event: ScreenEvent) -> Vec<Action> {
         match event {
             ScreenEvent::Tick => {
                 self.state.frame += 1;

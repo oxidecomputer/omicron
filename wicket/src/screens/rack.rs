@@ -12,10 +12,7 @@ use crate::widgets::Control;
 use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
 use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
-use crate::Action;
-use crate::Frame;
-use crate::ScreenEvent;
-use crate::State;
+use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -276,11 +273,7 @@ impl RackScreen {
 }
 
 impl Screen for RackScreen {
-    fn draw(
-        &self,
-        state: &State,
-        terminal: &mut crate::Term,
-    ) -> anyhow::Result<()> {
+    fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
             self.draw_rack(state, f);

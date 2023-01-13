@@ -4,13 +4,14 @@
 
 //! Code for talking to wicketd
 
-use crate::Event;
 use slog::{debug, o, warn, Logger};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::RackV1Inventory;
+
+use crate::wizard::Event;
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const WICKETD_TIMEOUT_MS: u32 = 1000;
