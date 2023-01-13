@@ -99,7 +99,9 @@ impl super::Nexus {
             .into_iter()
             .enumerate()
             .map(|(i, c)| {
-                // One-indexing for user-visible values.
+                // The indexes that appear in user-visible names for these
+                // certificates start from one (e.g., certificate names
+                // "default-1", "default-2", etc).
                 let i = i + 1;
                 db::model::Certificate::new(
                     Uuid::new_v4(),
