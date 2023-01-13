@@ -103,7 +103,7 @@ impl ComponentScreen {
         // TODO: Some sliding style animation?
         let title = Spans::from(vec![
             Span::styled(
-                state.rack_state.get_next_component_id().name(),
+                state.rack_state.get_prev_component_id().name(),
                 menu_bar_style,
             ),
             Span::raw("   "),
