@@ -130,7 +130,7 @@ pub struct Nexus {
     external_servers: Mutex<ExternalServers>,
 
     /// Internal dropshot server
-    internal_server: Mutex<Option<DropshotServer>>,
+    internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
@@ -233,7 +233,7 @@ impl Nexus {
                 config.deployment.dropshot_external.clone(),
                 config.pkg.nexus_https_port,
             )),
-            internal_server: Mutex::new(None),
+            internal_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
@@ -312,7 +312,7 @@ impl Nexus {
 
         // Insert the new servers.
         *self.external_servers.lock().await = external_servers;
-        self.internal_server.lock().await.replace(internal_server);
+        self.internal_server.lock().unwrap().replace(internal_server);
     }
 
     pub async fn close_servers(&self) -> Result<(), String> {
@@ -323,7 +323,8 @@ impl Nexus {
         if let Some(server) = external_servers.https.take() {
             server.close().await?;
         }
-        if let Some(server) = self.internal_server.lock().await.take() {
+        let internal_server = self.internal_server.lock().unwrap().take();
+        if let Some(server) = internal_server {
             server.close().await?;
         }
         Ok(())
@@ -348,7 +349,7 @@ impl Nexus {
     ) -> Option<std::net::SocketAddr> {
         self.internal_server
             .lock()
-            .await
+            .unwrap()
             .as_ref()
             .map(|server| server.local_addr())
     }
