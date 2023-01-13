@@ -8949,13 +8949,22 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "service": {
+            "description": "The service using this certificate",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceUsingCertificate"
+              }
+            ]
           }
         },
         "required": [
           "cert",
           "description",
           "key",
-          "name"
+          "name",
+          "service"
         ]
       },
       "CertificateResultsPage": {
@@ -12315,6 +12324,18 @@
           "slo_url",
           "sp_client_id",
           "technical_contact_email"
+        ]
+      },
+      "ServiceUsingCertificate": {
+        "description": "The service intended to use this certificate.",
+        "oneOf": [
+          {
+            "description": "This certificate is intended for the \"Nexus\" service.\n\nThis service acts as the main API point for accessing the Oxide rack.",
+            "type": "string",
+            "enum": [
+              "nexus"
+            ]
+          }
         ]
       },
       "Silo": {

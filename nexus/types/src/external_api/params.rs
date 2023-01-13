@@ -586,6 +586,7 @@ pub struct NetworkInterfaceUpdate {
 
 /// The service intended to use this certificate.
 #[derive(Clone, Copy, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ServiceUsingCertificate {
     /// This certificate is intended for the "Nexus" service.
     ///

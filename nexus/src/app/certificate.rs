@@ -180,9 +180,9 @@ impl super::Nexus {
                     "Refresh TLS: Refreshing HTTPS server at {}",
                     https.local_addr()
                 );
-                https.refresh_tls(&tls_config).await.map_err(|e| {
-                    Error::internal_error(&format!("Cannot refresh TLS: {e}"))
-                })?;
+                https.refresh_tls(&tls_config)
+                    .await
+                    .expect("HTTPS server should be using HTTPS already, to enable refresh");
                 external_servers.set_https(https);
             }
             // Tear down an existing server.
