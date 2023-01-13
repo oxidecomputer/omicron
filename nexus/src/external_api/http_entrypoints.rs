@@ -4,16 +4,12 @@
 
 //! Handler functions (entrypoints) for external HTTP APIs
 
-use super::views::IpPool;
-use super::views::IpPoolRange;
 use super::{
-    console_api, device_auth, params, views,
+    console_api, device_auth, params,
     views::{
-        ComponentUpdate, GlobalImage, Group, IdentityProvider, Image,
-        Organization, Project, Rack, Role, Silo, Sled, Snapshot, SshKey,
-        SystemUpdate, SystemVersion, UpdateableComponent, User, UserBuiltin,
-        VersionRange, VersionStatus, VersionSteadyReason, Vpc, VpcRouter,
-        VpcSubnet,
+        self, GlobalImage, Group, IdentityProvider, Image, IpPool, IpPoolRange,
+        Organization, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
+        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -22,6 +18,7 @@ use crate::db;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
+use chrono::Utc;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
@@ -42,6 +39,7 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_types::identity::AssetIdentityMetadata;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -5093,19 +5091,19 @@ async fn system_update_refresh(
 }]
 async fn system_version(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<SystemVersion>, HttpError> {
+) -> Result<HttpResponseOk<views::SystemVersion>, HttpError> {
     let apictx = rqctx.context();
     let _nexus = &apictx.nexus;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        Ok(HttpResponseOk(SystemVersion {
-            version_range: VersionRange {
+        Ok(HttpResponseOk(views::SystemVersion {
+            version_range: views::VersionRange {
                 low: SemverVersion::new(0, 0, 1),
                 high: SemverVersion::new(0, 0, 2),
             },
-            status: VersionStatus::Steady {
-                reason: VersionSteadyReason::Completed,
+            status: views::VersionStatus::Steady {
+                reason: views::VersionSteadyReason::Completed,
             },
         }))
     };
@@ -5121,7 +5119,8 @@ async fn system_version(
 async fn system_component_version_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<UpdateableComponent>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::UpdateableComponent>>, HttpError>
+{
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -5137,7 +5136,7 @@ async fn system_component_version_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             components,
-            &|_, u: &UpdateableComponent| u.identity.id,
+            &|_, u: &views::UpdateableComponent| u.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5151,9 +5150,8 @@ async fn system_component_version_list(
 }]
 async fn system_update_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    // TODO: pagination should probably be by most recent first, ID is nonsense
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<SystemUpdate>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::SystemUpdate>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -5169,16 +5167,10 @@ async fn system_update_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             updates,
-            &|_, u: &SystemUpdate| u.identity.id,
+            &|_, u: &views::SystemUpdate| u.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for SystemUpdate requests
-#[derive(Deserialize, JsonSchema)]
-struct SystemUpdatePathParam {
-    version: SemverVersion,
 }
 
 /// View system update
@@ -5189,8 +5181,8 @@ struct SystemUpdatePathParam {
 }]
 async fn system_update_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<SystemUpdatePathParam>,
-) -> Result<HttpResponseOk<SystemUpdate>, HttpError> {
+    path_params: Path<params::SystemUpdate>,
+) -> Result<HttpResponseOk<views::SystemUpdate>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -5211,8 +5203,8 @@ async fn system_update_view(
 }]
 async fn system_update_components_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<SystemUpdatePathParam>,
-) -> Result<HttpResponseOk<ResultsPage<ComponentUpdate>>, HttpError> {
+    path_params: Path<params::SystemUpdate>,
+) -> Result<HttpResponseOk<ResultsPage<views::ComponentUpdate>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -5229,46 +5221,51 @@ async fn system_update_components_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO: 204 isn't the right response
-
 /// Start system update
 #[endpoint {
     method = POST,
-    path = "/v1/system/update/updates/{version}/start",
+    path = "/v1/system/update/start",
     tags = ["system"],
 }]
 async fn system_update_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<SystemUpdatePathParam>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    // The use of the request body here instead of a path param is deliberate.
+    // Unlike instance start (which uses a path param), update start is about
+    // modifying the state of the system rather than the state of the resource
+    // (instance there, system update here) identified by the param. This
+    // approach also gives us symmetry with the /stop endpoint.
+    update: TypedBody<params::SystemUpdate>,
+) -> Result<HttpResponseAccepted<views::SystemUpdateDeployment>, HttpError> {
     let apictx = rqctx.context();
     let _nexus = &apictx.nexus;
-    let _path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseAccepted(views::SystemUpdateDeployment {
+            identity: AssetIdentityMetadata {
+                id: Uuid::new_v4(),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+            },
+            version: update.into_inner().version,
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO: since there can only be one system update going at a time, does /stop
-// even need to hang off the detail endpoint? `POST /system/update/stop` would
-// be sufficient, and if the system is currently steady, it would be a noop
-
 /// Stop system update
+///
+/// If there is no update in progress, do nothing.
 #[endpoint {
     method = POST,
-    path = "/v1/system/update/updates/{version}/stop",
+    path = "/v1/system/update/stop",
     tags = ["system"],
 }]
 async fn system_update_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<SystemUpdatePathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let _nexus = &apictx.nexus;
-    let _path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;

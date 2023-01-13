@@ -462,7 +462,7 @@ mod tests {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_list_updates(cptestctx: &ControlPlaneTestContext) {
+    async fn test_system_updates(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 

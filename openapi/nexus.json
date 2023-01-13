@@ -8558,6 +8558,64 @@
         }
       }
     },
+    "/v1/system/update/start": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Start system update",
+        "operationId": "system_update_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemUpdateDeployment"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/stop": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Stop system update",
+        "description": "If there is no update in progress, do nothing.",
+        "operationId": "system_update_stop",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/update/updates": {
       "get": {
         "tags": [
@@ -8679,66 +8737,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/updates/{version}/start": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Start system update",
-        "operationId": "system_update_start",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SemverVersion"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/updates/{version}/stop": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Stop system update",
-        "operationId": "system_update_stop",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SemverVersion"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -12834,6 +12832,17 @@
         ]
       },
       "SystemUpdate": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/SemverVersion"
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "SystemUpdateDeployment": {
         "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
         "type": "object",
         "properties": {

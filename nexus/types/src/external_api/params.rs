@@ -8,7 +8,7 @@ use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -1071,4 +1071,11 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
+}
+
+// SYSTEM UPDATE
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdate {
+    pub version: SemverVersion,
 }

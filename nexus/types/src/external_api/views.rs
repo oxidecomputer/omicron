@@ -469,3 +469,13 @@ pub struct UpdateableComponent {
     /// be `None` for top-level components whose "parent" is the rack.
     pub parent_id: Option<Uuid>,
 }
+
+// TODO: model, datastore, service functions for SystemUpdateDeployment
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdateDeployment {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    pub version: SemverVersion,
+}

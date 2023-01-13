@@ -8,7 +8,6 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::SemverVersion;
 use omicron_nexus::external_api::views;
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -40,6 +39,13 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
         }
     );
 }
+
+// TODO: Figure out how to create system updates, update components, and
+// updateable components for these tests in light of the fact that there are no
+// create endpoints for those resources. We can call the Nexus functions
+// directly here, but that requires nexus::app::update to be public so we can
+// import CreateSystemUpdate from it. A test-only helper function that lives in
+// a different file might let us avoid over-exporting.
 
 #[nexus_test]
 async fn test_list_updates(cptestctx: &ControlPlaneTestContext) {
@@ -73,13 +79,11 @@ async fn test_list_components(cptestctx: &ControlPlaneTestContext) {
 async fn test_get_update(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let update_id = Uuid::new_v4();
-
     NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        &format!("/v1/system/update/{update_id}"),
+        "/v1/system/update/updates/1.0.0",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -91,13 +95,11 @@ async fn test_get_update(cptestctx: &ControlPlaneTestContext) {
 async fn test_list_update_components(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let update_id = Uuid::new_v4();
-
     NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        &format!("/v1/system/update/{update_id}/components"),
+        "/v1/system/update/updates/1.0.0/components",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

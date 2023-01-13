@@ -24,6 +24,7 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authz;
@@ -386,6 +387,12 @@ lazy_static! {
 
     pub static ref DEMO_SPECIFIC_SSHKEY_URL: String =
         format!("{}/{}", *DEMO_SSHKEYS_URL, *DEMO_SSHKEY_NAME);
+
+    // System update
+
+    pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdate = params::SystemUpdate {
+        version: SemverVersion::new(1,0,0),
+    };
 }
 
 lazy_static! {
@@ -1484,7 +1491,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/v1/system/update/updates/{id}",
+            url: "/v1/system/update/updates/1.0.0",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             // TODO: should we figure out how to make this a regular working get?
@@ -1492,7 +1499,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/v1/system/update/updates/{id}/components",
+            url: "/v1/system/update/updates/1.0.0/components",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             // TODO: should we figure out how to make this a regular working get?
@@ -1500,17 +1507,17 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/v1/system/update/updates/{id}/start",
+            url: "/v1/system/update/start",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             // TODO: should we figure out how to make this a regular working get?
             allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
+                serde_json::to_value(&*DEMO_SYSTEM_UPDATE_PARAMS).unwrap()
             )],
         },
 
         VerifyEndpoint {
-            url: "/v1/system/update/updates/{id}/stop",
+            url: "/v1/system/update/stop",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             // TODO: should we figure out how to make this a regular working get?

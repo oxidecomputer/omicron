@@ -652,7 +652,6 @@ table! {
         version -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
         // parent component update ID
-        // TODO: spell out the whole horrible name?
         parent_id -> Nullable<Uuid>,
     }
 }
