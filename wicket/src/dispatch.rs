@@ -74,7 +74,8 @@ fn setup_log(
         .create(true)
         .write(true)
         .truncate(true)
-        .open(path)?;
+        .open(path)
+        .with_context(|| format!("error opening log file {path}"))?;
 
     let decorator = slog_term::PlainDecorator::new(file);
     let drain = slog_term::FullFormat::new(decorator).build().fuse();

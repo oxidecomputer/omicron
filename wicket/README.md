@@ -127,14 +127,14 @@ that will be implemented incrementally.
 
 Wicket is meant to be used as a login shell. To test the login shell on a local Unix machine:
 
-1. Create a symlink to `wicket` in a well-known location. From omicron's root, run: `sudo ln -s $(readlink -f target/debug/wicket) /usr/local/bin/wicket`
-2. Add `wicket` to the list of allowed shells: `echo /usr/local/bin/wicket | sudo tee -a /etc/shells`
-3. Add a new user to test against, for example `wicket-test`: `sudo useradd -m wicket-test`
-4. Change the shell for the new user to `/usr/local/bin/wicket`:
-    * On Linux: `sudo chsh -s /usr/local/bin/wicket wicket-test`
-    * On illumos: `pfexec passwd -e wicket-test`
+1. Make the `wicket` available globally, at e.g. `/usr/local/bin/wicket`:
+    * If your build directory is globally readable, create a symlink to `wicket` in a well-known location. From omicron's root, run: `sudo ln -s $(readlink -f target/debug/wicket) /usr/local/bin/wicket`
+    * If it isn't globally accessible, run `sudo cp target/debug/wicket /usr/local/bin`. (You'll have to copy `wicket` each time you build it.)
+2. Add a new user to test against, for example `wicket-test`:
+    1. Add a group for the new user: `groupadd wicket-test`.
+    2. Add the user: `sudo useradd -m -g wicket-test -s /usr/local/bin/wicket wicket-test`
 
-At this point, you can use `sudo -u wicket-test -i` to test wicket as a login shell.
+At this point, you can use `sudo -u wicket-test -i` (Linux) or `pfexec su - wicket-test` (illumos) to test wicket as a login shell.
 
 * A plain `sudo -u wicket-test -i` will show the TUI.
 * `sudo -u wicket-test -i upload ...` will let you upload an artifact over stdin.
