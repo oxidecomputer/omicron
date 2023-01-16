@@ -538,7 +538,8 @@ async fn test_saml_idp_metadata_data_valid(
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+                data: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_IDP_DESCRIPTOR.to_string()),
             },
 
             idp_entity_id: "entity_id".to_string(),
@@ -602,7 +603,7 @@ async fn test_saml_idp_metadata_data_truncated(
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode({
+                data: base64::engine::general_purpose::STANDARD.encode({
                     let mut saml_idp_descriptor =
                         SAML_IDP_DESCRIPTOR.to_string();
                     saml_idp_descriptor.truncate(100);
@@ -1856,7 +1857,8 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 
                 idp_metadata_source:
                     params::IdpMetadataSource::Base64EncodedXml {
-                        data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_IDP_DESCRIPTOR.to_string()),
                     },
 
                 idp_entity_id: "entity_id".to_string(),

@@ -11,6 +11,8 @@ use crate::db::{model, DataStore};
 use omicron_common::api::external::LookupResult;
 
 use anyhow::{anyhow, Result};
+use base64::Engine;
+use dropshot::HttpError;
 use samael::metadata::ContactPerson;
 use samael::metadata::ContactType;
 use samael::metadata::EntityDescriptor;
@@ -19,8 +21,6 @@ use samael::metadata::HTTP_REDIRECT_BINDING;
 use samael::schema::Response as SAMLResponse;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
-
-use dropshot::HttpError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -209,7 +209,10 @@ impl SamlIdentityProvider {
 
     fn public_cert_bytes(&self) -> Result<Option<Vec<u8>>> {
         if let Some(cert) = &self.public_cert {
-            Ok(Some(base64::decode(cert.as_bytes())?))
+            Ok(Some(
+                base64::engine::general_purpose::STANDARD
+                    .decode(cert.as_bytes())?,
+            ))
         } else {
             Ok(None)
         }
@@ -217,7 +220,10 @@ impl SamlIdentityProvider {
 
     fn private_key_bytes(&self) -> Result<Option<Vec<u8>>> {
         if let Some(key) = &self.private_key {
-            Ok(Some(base64::decode(key.as_bytes())?))
+            Ok(Some(
+                base64::engine::general_purpose::STANDARD
+                    .decode(key.as_bytes())?,
+            ))
         } else {
             Ok(None)
         }
@@ -240,15 +246,14 @@ impl SamlIdentityProvider {
             )
         })?;
 
-        let raw_response_bytes = base64::decode(
-            saml_post.saml_response.as_bytes(),
-        )
-        .map_err(|e| {
-            HttpError::for_bad_request(
-                None,
-                format!("error base64 decoding SAMLResponse! {}", e),
-            )
-        })?;
+        let raw_response_bytes = base64::engine::general_purpose::STANDARD
+            .decode(saml_post.saml_response.as_bytes())
+            .map_err(|e| {
+                HttpError::for_bad_request(
+                    None,
+                    format!("error base64 decoding SAMLResponse! {}", e),
+                )
+            })?;
 
         // This base64 decoded string is the SAMLResponse XML. Be aware that
         // parsing unauthenticated arbitrary XML is garbage and a source of

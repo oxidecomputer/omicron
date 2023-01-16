@@ -612,7 +612,8 @@ impl super::Nexus {
             external_ips,
             firewall_rules,
             disks: disk_reqs,
-            cloud_init_bytes: Some(base64::encode(
+            cloud_init_bytes: Some(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&public_keys)?,
             )),
         };
