@@ -9,7 +9,7 @@
 mod conversions;
 
 use self::conversions::component_from_str;
-use crate::error::http_err_from_comms_err;
+use crate::error::SpCommsError;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -17,19 +17,19 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
-use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use futures::FutureExt;
+use futures::TryFutureExt;
 use gateway_messages::IgnitionCommand;
-use gateway_sp_comms::error::Error as SpCommsError;
-use gateway_sp_comms::Timeout as SpTimeout;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use slog::warn;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use std::time::Duration;
+use tokio_stream::StreamExt;
+use tokio_util::either::Either;
 use uuid::Uuid;
 
 #[derive(
@@ -61,11 +61,12 @@ pub struct SpInfo {
 )]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SpState {
-    Disabled,
-    Unresponsive,
     Enabled {
         serial_number: String,
         // TODO more stuff
+    },
+    CommunicationFailed {
+        message: String,
     },
 }
 
@@ -85,6 +86,10 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
+/// State of an ignition target.
+///
+/// TODO: Ignition returns much more information than we're reporting here: do
+/// we want to expand this?
 #[derive(
     Debug,
     Clone,
@@ -97,13 +102,12 @@ pub struct SpIgnitionInfo {
     JsonSchema,
 )]
 #[serde(tag = "present")]
-#[allow(dead_code)] // TODO remove once `Absent` is used
 pub enum SpIgnition {
     #[serde(rename = "no")]
     Absent,
     #[serde(rename = "yes")]
     Present {
-        id: u16,
+        id: SpIgnitionSystemType,
         power: bool,
         ctrl_detect_0: bool,
         ctrl_detect_1: bool,
@@ -112,6 +116,29 @@ pub enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
+    #[serde(rename = "error")]
+    CommunicationFailed { message: String },
+}
+
+/// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "system_type", rename_all = "snake_case")]
+pub enum SpIgnitionSystemType {
+    Gimlet,
+    Sidecar,
+    Psc,
+    Unknown { id: u16 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -191,17 +218,6 @@ pub enum SpComponentPresence {
     Timeout,
     /// The SP's attempt to determine the presence of the component failed.
     Error,
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct Timeout {
-    timeout_millis: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct TimeoutSelector<T> {
-    last: T,
-    start_time: u64, // TODO
 }
 
 #[derive(
@@ -342,58 +358,89 @@ struct PathSpComponent {
 }]
 async fn sp_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query: Query<Timeout>,
 ) -> Result<HttpResponseOk<Vec<SpInfo>>, HttpError> {
     let apictx = rqctx.context();
-    let timeout = query.into_inner();
+    let mgmt_switch = &apictx.mgmt_switch;
 
-    let timeout = timeout
-        .timeout_millis
-        .map(|t| Duration::from_millis(u64::from(t)))
-        .unwrap_or(apictx.timeouts.bulk_request_default);
-    let timeout = SpTimeout::from_now(timeout);
-
-    // query ignition controller to find out which SPs are powered on
-    let all_sps = apictx
-        .sp_comms
-        .get_ignition_state_all()
-        .await
-        .map_err(http_err_from_comms_err)?;
-    let communicator = Arc::clone(&apictx.sp_comms);
-    let response_stream =
-        apictx.sp_comms.query_all_online_sps(&all_sps, timeout, move |sp| {
-            let communicator = Arc::clone(&communicator);
-            async move { communicator.get_state(sp).await }
-        });
-
-    // Convert the response tuple of (SpIdentifier, IgnitionState,
-    // Option<Result<Result<SpState, Error>, Elapsed>>) to Vec<SpInfo>;
-    let responses: Vec<_> = response_stream
-        .map(|(id, ignition_details, result)| {
-            // Unpack the nasty nested type:
-            // 1. None => ignition indicated power was off; treat that as
-            //    success (with state = disabled)
-            // 2. Outer err => timeout; treat that as "success"
-            //    (with state = unresponsive)
-            // 3. Inner success => true success
-            // 4. Inner error => Log it (with state = unresponsive)
-            let id = id.into();
-            let details = ignition_details.into();
-            let state = match result {
-                None => SpState::Disabled,
-                Some(Err(_)) => SpState::Unresponsive,
-                Some(Ok(result)) => match result {
-                    Ok(state) => SpState::from(state),
-                    Err(err) => {
-                        warn!(apictx.log, "SP {id}: {err}");
-                        SpState::Unresponsive
-                    }
-                },
-            };
-            SpInfo { info: SpIgnitionInfo { id, details }, details: state }
+    // Build a `FuturesUnordered` to query every SP for its state.
+    let all_sps_stream = mgmt_switch
+        .all_sps()?
+        .map(|(id, sp)| async move {
+            let result = sp.state().await.map_err(SpCommsError::from);
+            Either::Left((id, result))
         })
-        .collect()
-        .await;
+        .collect::<FuturesUnordered<_>>();
+
+    // Build a future to query our local ignition controller for the ignition
+    // state of all SPs.
+    let bulk_ignition_stream =
+        mgmt_switch.bulk_ignition_state().into_stream().map(Either::Right);
+
+    let combo_stream = all_sps_stream.merge(bulk_ignition_stream);
+    tokio::pin!(combo_stream);
+
+    // Wait for all our results to come back. As SP states return, we stash them
+    // in `sp_state`. When the one and only ignition result comes back, we put
+    // it into `bulk_ignition_state`.
+    let mut sp_state = HashMap::new();
+    let mut bulk_ignition_state = None;
+
+    while let Some(item) = combo_stream.next().await {
+        match item {
+            // Result from a single SP.
+            Either::Left((id, state)) => {
+                sp_state.insert(id, state);
+            }
+            // Result from our ignition controller.
+            Either::Right(ignition_state_result) => {
+                // If `bulk_ignition_state` succeeded, it returns an iterator
+                // of `(id, state)` pairs; convert that into a HashMap for quick
+                // lookups below.
+                bulk_ignition_state = Some(
+                    ignition_state_result
+                        .map(|iter| iter.collect::<HashMap<_, _>>()),
+                );
+            }
+        }
+    }
+
+    // We inserted exactly one future for the bulk ignition state into
+    // combo_stream; if combo_stream is exhausted, all our futures have
+    // completed, and we know we've populated `bulk_ignition_state`.
+    let bulk_ignition_state = bulk_ignition_state.unwrap();
+
+    // Build up a list of responses. For any given SP, we might or might not
+    // have its state, and we might or might not have what our ignition
+    // controller thinks its ignition state is.
+    let mut responses = Vec::with_capacity(sp_state.len());
+    for (id, state) in sp_state {
+        let ignition_details =
+            match bulk_ignition_state.as_ref().map(|m| m.get(&id)) {
+                // Happy path
+                Ok(Some(state)) => SpIgnition::from(*state),
+                // Confusing path - we got a response from our ignition
+                // controller, but it didn't include the state for SP `id`. If
+                // we're on a rev-b sidecar, this could be the 36th ignition
+                // target (i.e., the ignition controller does not return
+                // information about itself as a target). For now we'll just
+                // mark this as a failure; hopefully future sidecar revisions
+                // add the 36th target
+                // (https://github.com/oxidecomputer/hardware-sidecar/issues/735).
+                Ok(None) => SpIgnition::CommunicationFailed {
+                    message: format!(
+                        "ignition response missing info for SP {:?}",
+                        id
+                    ),
+                },
+                Err(err) => {
+                    SpIgnition::CommunicationFailed { message: err.to_string() }
+                }
+            };
+        responses.push(SpInfo {
+            info: SpIgnitionInfo { id: id.into(), details: ignition_details },
+            details: state.into(),
+        });
+    }
 
     Ok(HttpResponseOk(responses))
 }
@@ -408,30 +455,21 @@ async fn sp_get(
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpInfo>, HttpError> {
     let apictx = rqctx.context();
-    let comms = &apictx.sp_comms;
-    let sp = path.into_inner().sp;
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp_id = path.into_inner().sp;
+    let ignition_target = mgmt_switch.ignition_target(sp_id.into())?;
+    let sp = mgmt_switch.sp(sp_id.into())?;
 
-    // ping the ignition controller first; if it says the SP is off or otherwise
-    // unavailable, we're done.
-    let state = comms
-        .get_ignition_state(sp.into())
-        .await
-        .map_err(http_err_from_comms_err)?;
+    // Send concurrent requests to our ignition controller and the target SP.
+    let ignition_fut =
+        mgmt_switch.ignition_controller().ignition_state(ignition_target);
+    let sp_fut = sp.state();
 
-    let details = if state.is_powered_on() {
-        // ignition indicates the SP is on; ask it for its state
-        match comms.get_state(sp.into()).await {
-            Ok(state) => SpState::from(state),
-            Err(SpCommsError::Timeout { .. }) => SpState::Unresponsive,
-            Err(other) => return Err(http_err_from_comms_err(other)),
-        }
-    } else {
-        SpState::Disabled
-    };
+    let (ignition_state, sp_state) = tokio::join!(ignition_fut, sp_fut);
 
     let info = SpInfo {
-        info: SpIgnitionInfo { id: sp, details: state.into() },
-        details,
+        info: SpIgnitionInfo { id: sp_id, details: ignition_state.into() },
+        details: sp_state.into(),
     };
 
     Ok(HttpResponseOk(info))
@@ -450,11 +488,8 @@ async fn sp_component_list(
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
     let apictx = rqctx.context();
-    let comms = &apictx.sp_comms;
-    let sp = path.into_inner().sp;
-
-    let inventory =
-        comms.inventory(sp.into()).await.map_err(http_err_from_comms_err)?;
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+    let inventory = sp.inventory().await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseOk(inventory.into()))
 }
@@ -475,7 +510,6 @@ async fn sp_component_list(
 async fn sp_component_get(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path: Path<PathSpComponent>,
-    _query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
 }
@@ -498,7 +532,7 @@ async fn sp_component_serial_console_attach(
 
     let sp = sp.into();
     Ok(crate::serial_console::attach(
-        &apictx.sp_comms,
+        &apictx.mgmt_switch,
         sp,
         component,
         &mut request,
@@ -517,16 +551,14 @@ async fn sp_component_serial_console_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSpComponent>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let comms = &rqctx.context().sp_comms;
+    let apictx = rqctx.context();
 
     // TODO-cleanup: "component" support for the serial console is half baked;
     // we don't use it at all to detach.
     let PathSpComponent { sp, component: _ } = path.into_inner();
 
-    comms
-        .serial_console_detach(sp.into())
-        .await
-        .map_err(http_err_from_comms_err)?;
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    sp.serial_console_detach().await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -571,10 +603,13 @@ async fn sp_reset(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let comms = &rqctx.context().sp_comms;
-    let sp = path.into_inner().sp;
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
 
-    comms.reset(sp.into()).await.map_err(http_err_from_comms_err)?;
+    sp.reset_prepare()
+        .and_then(|()| sp.reset_trigger())
+        .await
+        .map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -601,15 +636,16 @@ async fn sp_component_update(
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let comms = Arc::clone(&rqctx.context().sp_comms);
-    let PathSpComponent { sp, component } = path.into_inner();
-    let component = component_from_str(&component)?;
-    let UpdateBody { id, image, slot } = body.into_inner();
+    let apictx = rqctx.context();
 
-    comms
-        .start_update(sp.into(), component, id, slot, image)
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let UpdateBody { id, image, slot } = body.into_inner();
+    sp.start_update(component, id, slot, image)
         .await
-        .map_err(http_err_from_comms_err)?;
+        .map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -626,14 +662,14 @@ async fn sp_component_update_status(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSpComponent>,
 ) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError> {
-    let comms = Arc::clone(&rqctx.context().sp_comms);
+    let apictx = rqctx.context();
+
     let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
     let component = component_from_str(&component)?;
 
-    let status = comms
-        .update_status(sp.into(), component)
-        .await
-        .map_err(http_err_from_comms_err)?;
+    let status =
+        sp.update_status(component).await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseOk(status.into()))
 }
@@ -653,15 +689,14 @@ async fn sp_component_update_abort(
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateAbortBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let comms = &rqctx.context().sp_comms;
-    let PathSpComponent { sp, component } = path.into_inner();
-    let component = component_from_str(&component)?;
-    let UpdateAbortBody { id } = body.into_inner();
+    let apictx = rqctx.context();
 
-    comms
-        .update_abort(sp.into(), component, id)
-        .await
-        .map_err(http_err_from_comms_err)?;
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let UpdateAbortBody { id } = body.into_inner();
+    sp.update_abort(component, id).await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -709,17 +744,17 @@ async fn ignition_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
     let apictx = rqctx.context();
-    let sp_comms = &apictx.sp_comms;
+    let mgmt_switch = &apictx.mgmt_switch;
 
-    let all_state = sp_comms
-        .get_ignition_state_all()
-        .await
-        .map_err(http_err_from_comms_err)?;
+    let out = mgmt_switch
+        .bulk_ignition_state()
+        .await?
+        .map(|(id, state)| SpIgnitionInfo {
+            id: id.into(),
+            details: state.into(),
+        })
+        .collect();
 
-    let mut out = Vec::with_capacity(all_state.len());
-    for (id, state) in all_state {
-        out.push(SpIgnitionInfo { id: id.into(), details: state.into() });
-    }
     Ok(HttpResponseOk(out))
 }
 
@@ -737,13 +772,16 @@ async fn ignition_get(
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     let apictx = rqctx.context();
-    let sp = path.into_inner().sp;
+    let mgmt_switch = &apictx.mgmt_switch;
 
-    let state = apictx
-        .sp_comms
-        .get_ignition_state(sp.into())
+    let sp = path.into_inner().sp;
+    let ignition_target = mgmt_switch.ignition_target(sp.into())?;
+
+    let state = mgmt_switch
+        .ignition_controller()
+        .ignition_state(ignition_target)
         .await
-        .map_err(http_err_from_comms_err)?;
+        .map_err(SpCommsError::from)?;
 
     let info = SpIgnitionInfo { id: sp, details: state.into() };
     Ok(HttpResponseOk(info))
@@ -761,13 +799,15 @@ async fn ignition_power_on(
     path: Path<PathSp>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let sp = path.into_inner().sp;
+    let mgmt_switch = &apictx.mgmt_switch;
+    let ignition_target =
+        mgmt_switch.ignition_target(path.into_inner().sp.into())?;
 
-    apictx
-        .sp_comms
-        .send_ignition_command(sp.into(), IgnitionCommand::PowerOn)
+    mgmt_switch
+        .ignition_controller()
+        .ignition_command(ignition_target, IgnitionCommand::PowerOn)
         .await
-        .map_err(http_err_from_comms_err)?;
+        .map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -784,13 +824,15 @@ async fn ignition_power_off(
     path: Path<PathSp>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let sp = path.into_inner().sp;
+    let mgmt_switch = &apictx.mgmt_switch;
+    let ignition_target =
+        mgmt_switch.ignition_target(path.into_inner().sp.into())?;
 
-    apictx
-        .sp_comms
-        .send_ignition_command(sp.into(), IgnitionCommand::PowerOff)
+    mgmt_switch
+        .ignition_controller()
+        .ignition_command(ignition_target, IgnitionCommand::PowerOff)
         .await
-        .map_err(http_err_from_comms_err)?;
+        .map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -808,13 +850,9 @@ async fn sp_power_state_get(
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<PowerState>, HttpError> {
     let apictx = rqctx.context();
-    let sp = path.into_inner().sp;
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
 
-    let power_state = apictx
-        .sp_comms
-        .power_state(sp.into())
-        .await
-        .map_err(http_err_from_comms_err)?;
+    let power_state = sp.power_state().await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseOk(power_state.into()))
 }
@@ -833,14 +871,10 @@ async fn sp_power_state_set(
     body: TypedBody<PowerState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let sp = path.into_inner().sp;
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
     let power_state = body.into_inner();
 
-    apictx
-        .sp_comms
-        .set_power_state(sp.into(), power_state.into())
-        .await
-        .map_err(http_err_from_comms_err)?;
+    sp.set_power_state(power_state.into()).await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }

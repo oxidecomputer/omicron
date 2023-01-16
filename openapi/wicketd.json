@@ -10,21 +10,11 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts/{name}/{version}/{hash}": {
-      "get": {
-        "summary": "Fetch an artifact from the in-memory cache.",
-        "operationId": "get_artifact",
+    "/artifacts/{name}/{version}": {
+      "put": {
+        "summary": "An endpoint used to upload artifacts to the server.",
+        "operationId": "put_artifact",
         "parameters": [
-          {
-            "in": "path",
-            "name": "hash",
-            "description": "A hash of the artifact. TODO: is there a hash type?",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "style": "simple"
-          },
           {
             "in": "path",
             "name": "name",
@@ -32,8 +22,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -42,18 +31,23 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -247,6 +241,7 @@
         ]
       },
       "SpIgnition": {
+        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?",
         "oneOf": [
           {
             "type": "object",
@@ -284,9 +279,7 @@
                 "type": "boolean"
               },
               "id": {
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0
+                "$ref": "#/components/schemas/SpIgnitionSystemType"
               },
               "power": {
                 "type": "boolean"
@@ -308,6 +301,91 @@
               "id",
               "power",
               "present"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "present"
+            ]
+          }
+        ]
+      },
+      "SpIgnitionSystemType": {
+        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "sidecar"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "psc"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "system_type"
             ]
           }
         ]
@@ -344,34 +422,6 @@
           {
             "type": "object",
             "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "disabled"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "unresponsive"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "serial_number": {
                 "type": "string"
               },
@@ -384,6 +434,24 @@
             },
             "required": [
               "serial_number",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
               "state"
             ]
           }

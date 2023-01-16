@@ -5,12 +5,14 @@
 mod config;
 mod context;
 mod error;
+mod management_switch;
 mod serial_console;
 
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
 
 pub use config::Config;
 pub use context::ServerContext;
+pub use management_switch::SpType;
 
 use dropshot::ConfigDropshot;
 use slog::debug;
@@ -66,9 +68,8 @@ impl Server {
             }
         }
 
-        let apictx = ServerContext::new(config.switch, config.timeouts, &log)
-            .await
-            .map_err(|error| {
+        let apictx =
+            ServerContext::new(config.switch, &log).await.map_err(|error| {
                 format!("initializing server context: {}", error)
             })?;
 

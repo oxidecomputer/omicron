@@ -92,10 +92,10 @@ service_name = "crucible"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "144d8dafa41715e00b08a5929cc62140ff0eb561"
+source.commit = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "2de086b0ba27efc638c88ff46a6d110236c2db92499266eccbd2a3ec28acc693"
+source.sha256 = "7f40883e3785cd50a042dabd8b02f87c72e2c2ae99ff8f137b9c8f39c2b87c97"
 output.type = "zone"
 
 # Refer to
@@ -105,10 +105,10 @@ output.type = "zone"
 service_name = "propolis-server"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "e58937fea67aca6bc2d37a3cc50a72291328ae0e"
+source.commit = "666ded451b13bba0895485c0b34515c0e59c2c6e"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "00d11a6f669e9f7caa03963c3bd345f2f3a2e6b4ec0e713f2e1dbf94177b4fa9"
+source.sha256 = "29b65817eaeb6e9e8f5ce9574f95385ea8f976f352091672a9cde2b2a5103dd3"
 output.type = "zone"
 
 [package.maghemite]
@@ -138,8 +138,8 @@ only_for_targets.switch_variant = "stub"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "77e1268141aab830966b18526cffab8f458a28f9"
-source.sha256 = "76bab69b6a712e3da11de4aba044c90d86b6d374c8ece9ddda98ef2087541276"
+source.commit = "10e305a52c45bee91ffb16f6d3ad7a5cc3100e73"
+source.sha256 = "3142e71f7eb61e258dab3f6bf02e37ccfc2a0b2eeb134aadfe62603092175430"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -156,8 +156,8 @@ only_for_targets.switch_variant = "asic"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "77e1268141aab830966b18526cffab8f458a28f9"
-source.sha256 = "a402001c2e531af4d8b2416a546d5daacb50c69fb81009c6c5cb74aaad7066ac"
+source.commit = "10e305a52c45bee91ffb16f6d3ad7a5cc3100e73"
+source.sha256 = "5bf81b8678fde53508d50cda973e2c8eacbe8b29a2e76e3809cdb1156c632702"
 output.type = "zone"
 output.intermediate_only = true
 

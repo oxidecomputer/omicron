@@ -120,9 +120,9 @@ impl Manifest {
     }
 }
 
-/// The user input description of a [`RackUpdate`]
+/// The user input description of a `RackUpdate`
 ///
-/// Files are read and processed into a [`RackUpdate`] according to the
+/// Files are read and processed into a `RackUpdate` according to the
 /// [`RackUpdateSpec`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateSpec {
@@ -152,8 +152,8 @@ impl RackUpdateSpec {
     ///
     /// Return the path of the created archive.
     ///
-    /// This archive file can be loaded into a [`RackUpdate`] via
-    /// [`RackUpdate::load`].
+    /// This archive file can be loaded into a `RackUpdate` via
+    /// `RackUpdate::load`.
     pub fn create_archive(
         self,
         output_dir: PathBuf,

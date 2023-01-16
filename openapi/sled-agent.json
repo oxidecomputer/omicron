@@ -21,8 +21,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -68,8 +67,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -139,8 +137,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -186,8 +183,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -196,8 +192,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -241,8 +236,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -253,8 +247,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -265,8 +258,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -277,8 +269,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -364,8 +355,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -613,11 +603,6 @@
           "device": {
             "type": "string"
           },
-          "gen": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
           "name": {
             "type": "string"
           },
@@ -633,7 +618,6 @@
         },
         "required": [
           "device",
-          "gen",
           "name",
           "read_only",
           "slot",
@@ -1724,6 +1708,16 @@
                 "format": "uint64",
                 "minimum": 0
               },
+              "blocks_per_extent": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "extent_count": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
               "gen": {
                 "type": "integer",
                 "format": "uint64",
@@ -1741,6 +1735,8 @@
             },
             "required": [
               "block_size",
+              "blocks_per_extent",
+              "extent_count",
               "gen",
               "opts",
               "type"

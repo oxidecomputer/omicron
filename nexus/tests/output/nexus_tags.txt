@@ -28,13 +28,17 @@ image_view_by_id                         /by-id/images/{id}
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
 instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
+instance_create_v1                       /v1/instances
 instance_delete                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
+instance_delete_v1                       /v1/instances/{instance}
 instance_disk_attach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
 instance_disk_detach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
 instance_external_ip_list                /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
+instance_list_v1                         /v1/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
+instance_migrate_v1                      /v1/instances/{instance}/migrate
 instance_network_interface_create        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interface_delete        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interface_list          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
@@ -42,12 +46,18 @@ instance_network_interface_update        /organizations/{organization_name}/proj
 instance_network_interface_view          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interface_view_by_id    /by-id/network-interfaces/{id}
 instance_reboot                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
+instance_reboot_v1                       /v1/instances/{instance}/reboot
 instance_serial_console                  /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console
 instance_serial_console_stream           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream
+instance_serial_console_stream_v1        /v1/instances/{instance}/serial-console/stream
+instance_serial_console_v1               /v1/instances/{instance}/serial-console
 instance_start                           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
+instance_start_v1                        /v1/instances/{instance}/start
 instance_stop                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
+instance_stop_v1                         /v1/instances/{instance}/stop
 instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 instance_view_by_id                      /by-id/instances/{id}
+instance_view_v1                         /v1/instances/{instance}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
@@ -62,13 +72,20 @@ timeseries_schema_get                    /timeseries/schema
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
 organization_create                      /organizations
+organization_create_v1                   /v1/organizations
 organization_delete                      /organizations/{organization_name}
+organization_delete_v1                   /v1/organizations/{organization}
 organization_list                        /organizations
+organization_list_v1                     /v1/organizations
 organization_policy_update               /organizations/{organization_name}/policy
+organization_policy_update_v1            /v1/organizations/{organization}/policy
 organization_policy_view                 /organizations/{organization_name}/policy
+organization_policy_view_v1              /v1/organizations/{organization}/policy
 organization_update                      /organizations/{organization_name}
+organization_update_v1                   /v1/organizations/{organization}
 organization_view                        /organizations/{organization_name}
 organization_view_by_id                  /by-id/organizations/{id}
+organization_view_v1                     /v1/organizations/{organization}
 
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
@@ -78,13 +95,20 @@ system_policy_view                       /system/policy
 API operations found with tag "projects"
 OPERATION ID                             URL PATH
 project_create                           /organizations/{organization_name}/projects
+project_create_v1                        /v1/projects
 project_delete                           /organizations/{organization_name}/projects/{project_name}
+project_delete_v1                        /v1/projects/{project}
 project_list                             /organizations/{organization_name}/projects
+project_list_v1                          /v1/projects
 project_policy_update                    /organizations/{organization_name}/projects/{project_name}/policy
+project_policy_update_v1                 /v1/projects/{project}/policy
 project_policy_view                      /organizations/{organization_name}/projects/{project_name}/policy
+project_policy_view_v1                   /v1/projects/{project}/policy
 project_update                           /organizations/{organization_name}/projects/{project_name}
+project_update_v1                        /v1/projects/{project}
 project_view                             /organizations/{organization_name}/projects/{project_name}
 project_view_by_id                       /by-id/projects/{id}
+project_view_v1                          /v1/projects/{project}
 
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
@@ -121,10 +145,10 @@ ip_pool_list                             /system/ip-pools
 ip_pool_range_add                        /system/ip-pools/{pool_name}/ranges/add
 ip_pool_range_list                       /system/ip-pools/{pool_name}/ranges
 ip_pool_range_remove                     /system/ip-pools/{pool_name}/ranges/remove
-ip_pool_service_range_add                /system/ip-pools-service/{rack_id}/ranges/add
-ip_pool_service_range_list               /system/ip-pools-service/{rack_id}/ranges
-ip_pool_service_range_remove             /system/ip-pools-service/{rack_id}/ranges/remove
-ip_pool_service_view                     /system/ip-pools-service/{rack_id}
+ip_pool_service_range_add                /system/ip-pools-service/ranges/add
+ip_pool_service_range_list               /system/ip-pools-service/ranges
+ip_pool_service_range_remove             /system/ip-pools-service/ranges/remove
+ip_pool_service_view                     /system/ip-pools-service
 ip_pool_update                           /system/ip-pools/{pool_name}
 ip_pool_view                             /system/ip-pools/{pool_name}
 ip_pool_view_by_id                       /system/by-id/ip-pools/{id}

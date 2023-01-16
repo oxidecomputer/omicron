@@ -11,8 +11,12 @@ use diesel::serialize;
 use diesel::serialize::ToSql;
 use diesel::sql_types;
 use omicron_common::api::external;
+use serde::Deserialize;
+use serde::Serialize;
 
-#[derive(Clone, Debug, Copy, AsExpression, FromSqlRow)]
+#[derive(
+    Clone, Debug, Copy, AsExpression, FromSqlRow, Serialize, Deserialize,
+)]
 #[diesel(sql_type = sql_types::Int4)]
 pub struct Vni(pub external::Vni);
 

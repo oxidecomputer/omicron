@@ -53,8 +53,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -62,8 +61,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -100,8 +98,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -109,8 +106,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -140,8 +136,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -149,8 +144,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -171,19 +165,6 @@
         "summary": "List SPs",
         "description": "Since communication with SPs may be unreliable, consumers may specify an optional timeout to override the default.\nThis interface makes use of Ignition as well as the management network. SPs that are powered off (and therefore cannot respond over the management network) are represented in the output set. SPs that Ignition reports as powered on, but that do not respond within the allotted timeout will similarly be represented in the output; these will only be included in the output when the allotted timeout has expired.\nNote that Ignition provides the full set of SPs that are plugged into the system so the gateway service knows prior to waiting for responses the expected cardinality.",
         "operationId": "sp_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "timeout_millis",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "style": "form"
-          }
-        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -221,8 +202,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -230,8 +210,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -268,8 +247,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -277,8 +255,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -314,8 +291,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -325,8 +301,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -334,19 +309,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "timeout_millis",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -382,8 +345,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -393,8 +355,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -402,8 +363,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -432,8 +392,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -443,8 +402,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -452,8 +410,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -482,8 +439,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -493,8 +449,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -502,8 +457,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -531,8 +485,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -542,8 +495,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -551,8 +503,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -581,8 +532,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -592,8 +542,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -601,8 +550,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -641,8 +589,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -652,8 +599,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -661,8 +607,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -701,8 +646,7 @@
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -712,8 +656,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -721,8 +664,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -759,8 +701,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -768,8 +709,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -804,8 +744,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -813,8 +752,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -853,8 +791,7 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 0
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -862,8 +799,7 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -1046,6 +982,7 @@
         ]
       },
       "SpIgnition": {
+        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?",
         "oneOf": [
           {
             "type": "object",
@@ -1083,9 +1020,7 @@
                 "type": "boolean"
               },
               "id": {
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0
+                "$ref": "#/components/schemas/SpIgnitionSystemType"
               },
               "power": {
                 "type": "boolean"
@@ -1108,6 +1043,24 @@
               "power",
               "present"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "present": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "present"
+            ]
           }
         ]
       },
@@ -1124,6 +1077,73 @@
         "required": [
           "details",
           "id"
+        ]
+      },
+      "SpIgnitionSystemType": {
+        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "sidecar"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "psc"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "system_type"
+            ]
+          }
         ]
       },
       "SpInfo": {
@@ -1146,34 +1166,6 @@
           {
             "type": "object",
             "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "disabled"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "unresponsive"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "serial_number": {
                 "type": "string"
               },
@@ -1186,6 +1178,24 @@
             },
             "required": [
               "serial_number",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
               "state"
             ]
           }

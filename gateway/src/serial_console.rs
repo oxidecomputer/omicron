@@ -5,6 +5,9 @@
 // Copyright 2022 Oxide Computer Company
 
 use crate::error::Error;
+use crate::error::SpCommsError;
+use crate::management_switch::ManagementSwitch;
+use crate::management_switch::SpIdentifier;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
 use futures::SinkExt;
@@ -12,8 +15,6 @@ use futures::StreamExt;
 use gateway_messages::SpComponent;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::AttachedSerialConsoleSend;
-use gateway_sp_comms::Communicator;
-use gateway_sp_comms::SpIdentifier;
 use http::header;
 use hyper::upgrade;
 use hyper::upgrade::Upgraded;
@@ -35,12 +36,14 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 pub(crate) async fn attach(
-    sp_comms: &Communicator,
+    mgmt_switch: &ManagementSwitch,
     sp: SpIdentifier,
     component: SpComponent,
     request: &mut http::Request<Body>,
     log: Logger,
 ) -> Result<http::Response<Body>, Error> {
+    let sp = mgmt_switch.sp(sp)?;
+
     if !request
         .headers()
         .get(header::CONNECTION)
@@ -86,7 +89,10 @@ pub(crate) async fn attach(
         .map(|key| handshake::derive_accept_key(key))
         .ok_or(Error::BadWebsocketConnection("missing websocket key"))?;
 
-    let console = sp_comms.serial_console_attach(sp, component).await?;
+    let console = sp
+        .serial_console_attach(component)
+        .await
+        .map_err(SpCommsError::from)?;
     let upgrade_fut = upgrade::on(request);
     tokio::spawn(async move {
         let upgraded = match upgrade_fut.await {
@@ -232,7 +238,7 @@ impl SerialConsoleTask {
                     console_tx
                         .write(data)
                         .await
-                        .map_err(gateway_sp_comms::error::Error::from)
+                        .map_err(SpCommsError::from)
                         .map_err(Error::from)?;
                 }
                 Ok(Message::Close(_)) => {

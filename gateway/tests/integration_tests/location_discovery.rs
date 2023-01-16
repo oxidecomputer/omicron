@@ -23,11 +23,11 @@ async fn discovery_both_locations() {
     // the two instances should've discovered that they were switch0 and
     // switch1, respectively
     assert_eq!(
-        testctx0.server.apictx.sp_comms.location_name().unwrap(),
+        testctx0.server.apictx.mgmt_switch.location_name().unwrap(),
         "switch0"
     );
     assert_eq!(
-        testctx1.server.apictx.sp_comms.location_name().unwrap(),
+        testctx1.server.apictx.mgmt_switch.location_name().unwrap(),
         "switch1"
     );
 

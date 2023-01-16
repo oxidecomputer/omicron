@@ -16,10 +16,9 @@ use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
-    DatasetKind, DendriteAsic, DiskStateRequested, InstanceHardware,
-    InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData, ServiceEnsureBody, ServiceType,
-    ServiceZoneRequest, VpcFirewallRule, ZoneType, Zpool,
+    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
+    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
+    ServiceEnsureBody, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -32,7 +31,9 @@ use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
 };
-use omicron_common::backoff::{retry_notify, retry_policy_short, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::process::Command;
@@ -154,9 +155,6 @@ struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
 
-    // The sled's initial configuration
-    config: Config,
-
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
@@ -186,7 +184,7 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    fn switch_ip(&self) -> Ipv6Addr {
+    fn switch_zone_ip(&self) -> Ipv6Addr {
         get_switch_zone_address(self.subnet)
     }
 }
@@ -203,6 +201,7 @@ impl SledAgent {
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
         request: SledAgentRequest,
+        services: ServiceManager,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -330,30 +329,27 @@ impl SledAgent {
             request.gateway.mac,
         );
 
-        let svc_config = services::Config {
-            gateway_address: request.gateway.address,
-            ..Default::default()
-        };
+        let svc_config = services::Config::new(
+            config.sidecar_revision.clone(),
+            request.gateway.address,
+        );
 
         let hardware =
             HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
                 .map_err(|e| Error::Hardware(e))?;
 
-        let services = ServiceManager::new(
-            parent_log.clone(),
-            etherstub.clone(),
-            etherstub_vnic.clone(),
-            *sled_address.ip(),
-            svc_config,
-            config.get_link()?,
-            request.rack_id,
-        )
-        .await?;
+        services
+            .sled_agent_started(
+                svc_config,
+                config.get_link()?,
+                *sled_address.ip(),
+                request.rack_id,
+            )
+            .await?;
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
-                config: config.clone(),
                 subnet: request.subnet,
                 storage,
                 instances,
@@ -378,7 +374,7 @@ impl SledAgent {
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
         tokio::spawn(async move {
-            sa.monitor(log).await;
+            sa.monitor_task(log).await;
         });
 
         Ok(sled_agent)
@@ -391,14 +387,22 @@ impl SledAgent {
     async fn full_hardware_scan(&self, log: &Logger) {
         info!(log, "Performing full hardware scan");
         self.notify_nexus_about_self(log);
+
         if self.inner.hardware.is_scrimlet_driver_loaded() {
-            self.ensure_scrimlet_services_active(&log).await;
+            let switch_zone_ip = Some(self.inner.switch_zone_ip());
+            if let Err(e) =
+                self.inner.services.activate_switch(switch_zone_ip).await
+            {
+                warn!(log, "Failed to activate switch: {e}");
+            }
         } else {
-            self.ensure_scrimlet_services_deactive(&log).await;
+            if let Err(e) = self.inner.services.deactivate_switch().await {
+                warn!(log, "Failed to deactivate switch: {e}");
+            }
         }
     }
 
-    async fn monitor(&self, log: Logger) {
+    async fn monitor_task(&self, log: Logger) {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.inner.hardware.monitor();
 
@@ -419,10 +423,22 @@ impl SledAgent {
                         self.notify_nexus_about_self(&log);
                     }
                     crate::hardware::HardwareUpdate::TofinoLoaded => {
-                        self.ensure_scrimlet_services_active(&log).await;
+                        let switch_zone_ip = Some(self.inner.switch_zone_ip());
+                        if let Err(e) = self
+                            .inner
+                            .services
+                            .activate_switch(switch_zone_ip)
+                            .await
+                        {
+                            warn!(log, "Failed to activate switch: {e}");
+                        }
                     }
                     crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                        self.ensure_scrimlet_services_deactive(&log).await;
+                        if let Err(e) =
+                            self.inner.services.deactivate_switch().await
+                        {
+                            warn!(log, "Failed to deactivate switch: {e}");
+                        }
                     }
                 },
                 Err(RecvError::Lagged(count)) => {
@@ -435,38 +451,6 @@ impl SledAgent {
                 }
             }
         }
-    }
-
-    async fn ensure_scrimlet_services_active(&self, log: &Logger) {
-        info!(log, "Ensuring scrimlet services (enabling services)");
-
-        let services = match self.inner.config.stub_scrimlet {
-            Some(_) => {
-                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
-            }
-            None => {
-                vec![
-                    ServiceType::ManagementGatewayService,
-                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
-                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
-                ]
-            }
-        };
-
-        let request = ServiceZoneRequest {
-            id: Uuid::new_v4(),
-            zone_type: ZoneType::Switch,
-            addresses: vec![self.inner.switch_ip()],
-            gz_addresses: vec![],
-            services,
-        };
-
-        self.inner.services.ensure_switch(Some(request)).await;
-    }
-
-    async fn ensure_scrimlet_services_deactive(&self, log: &Logger) {
-        info!(log, "Ensuring scrimlet services (disabling services)");
-        self.inner.services.ensure_switch(None).await;
     }
 
     pub fn id(&self) -> Uuid {
@@ -520,7 +504,7 @@ impl SledAgent {
                 );
             };
             retry_notify(
-                retry_policy_short(),
+                retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_notification_failure,
             )

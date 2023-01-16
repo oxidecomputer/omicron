@@ -9,7 +9,6 @@ use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpKindEnum;
-use crate::db::model::IpSource;
 use crate::db::model::Name;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
@@ -79,7 +78,6 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///         <now> AS time_created,
 ///         <now> AS time_modified,
 ///         NULL AS time_deleted,
-///         <project_id> AS project_id,
 ///         <instance_id> AS instance_id,
 ///         ip_pool_id,
 ///         ip_pool_range_id,
@@ -186,30 +184,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 /// Pool restriction
 /// ----------------
 ///
-/// Clients may optionally request an external address from a specific IP Pool.
-/// If they don't provide a pool, the query is restricted to all IP Pools
-/// available to their project (not reserved for a different project). In that
-/// case, the pool restriction looks like:
-///
-/// ```sql
-/// (project_id = <project_id> OR project_id IS NULL)
-/// ```
-///
-/// That is, we search for all pools that are unreserved for reserved for _this
-/// instance's_ project.
-///
-/// If the client does provide a pool, an additional filtering clause is added,
-/// so that the whole filter looks like:
-///
-/// ```sql
-/// pool_id = <pool_id> AND
-/// (project_id = <project_id> OR project_id IS NULL)
-/// ```
-///
-/// That filter on `project_id` is a bit redundant, as the caller should be
-/// looking up the pool's ID by name, among those available to the instance's
-/// project. However, it helps provides safety in the case that the caller
-/// violates that expectation.
+/// Clients must supply the UUID of an IP pool from which they are allocating.
 #[derive(Debug, Clone)]
 pub struct NextExternalIp {
     ip: IncompleteExternalIp,
@@ -292,20 +267,6 @@ impl NextExternalIp {
 
         // Pool Range ID
         out.push_identifier(dsl::ip_pool_range_id::NAME)?;
-        out.push_sql(", ");
-
-        // Project ID
-        match self.ip.source() {
-            IpSource::Instance { project_id, .. } => {
-                out.push_bind_param::<sql_types::Uuid, Uuid>(project_id)?;
-            }
-            IpSource::Service { .. } => {
-                out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&None)?;
-            }
-        };
-
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::project_id::NAME)?;
         out.push_sql(", ");
 
         // Instance ID
@@ -428,9 +389,7 @@ impl NextExternalIp {
     }
 
     // Push a subquery that selects the sequence of IP addresses, from each range in
-    // each IP Pool, along with the pool/range IDs. Note that we only allow
-    // allocation out of IP Pools that match the project_id of the instance, or
-    // which have no project ID (the pool is not restricted to a project)
+    // each IP Pool, along with the pool/range IDs.
     //
     // ```sql
     // SELECT
@@ -463,28 +422,9 @@ impl NextExternalIp {
         out.push_sql(") AS candidate_ip FROM ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
-        match self.ip.source() {
-            IpSource::Instance { project_id, pool_id } => {
-                if let Some(pool_id) = pool_id {
-                    out.push_identifier(dsl::ip_pool_id::NAME)?;
-                    out.push_sql(" = ");
-                    out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
-                } else {
-                    out.push_sql("(");
-                    out.push_identifier(dsl::project_id::NAME)?;
-                    out.push_sql(" = ");
-                    out.push_bind_param::<sql_types::Uuid, Uuid>(project_id)?;
-                    out.push_sql(" OR ");
-                    out.push_identifier(dsl::project_id::NAME)?;
-                    out.push_sql(" IS NULL)");
-                }
-            }
-            IpSource::Service { pool_id } => {
-                out.push_identifier(dsl::ip_pool_id::NAME)?;
-                out.push_sql(" = ");
-                out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
-            }
-        }
+        out.push_identifier(dsl::ip_pool_id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.pool_id())?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
@@ -653,7 +593,6 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
-    use nexus_test_utils::RACK_UUID;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -689,16 +628,14 @@ mod tests {
             &self,
             name: &str,
             range: IpRange,
-            project_id: Option<Uuid>,
-            rack_id: Option<Uuid>,
+            internal: bool,
         ) {
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                project_id,
-                rack_id,
+                internal,
             );
 
             diesel::insert_into(crate::db::schema::ip_pool::dsl::ip_pool)
@@ -712,7 +649,7 @@ mod tests {
                 .await
                 .expect("Failed to create IP Pool");
 
-            let pool_range = IpPoolRange::new(&range, pool.id(), project_id);
+            let pool_range = IpPoolRange::new(&range, pool.id());
             diesel::insert_into(
                 crate::db::schema::ip_pool_range::dsl::ip_pool_range,
             )
@@ -724,31 +661,25 @@ mod tests {
             .expect("Failed to create IP Pool range");
         }
 
-        async fn create_rack_ip_pool(
-            &self,
-            name: &str,
-            range: IpRange,
-            rack_id: Uuid,
-        ) {
-            self.create_ip_pool_internal(
-                name,
-                range,
-                /* project_id= */ None,
-                Some(rack_id),
-            )
-            .await;
+        async fn create_service_ip_pool(&self, name: &str, range: IpRange) {
+            self.create_ip_pool_internal(name, range, /*internal=*/ true).await;
         }
 
-        async fn create_ip_pool(
-            &self,
-            name: &str,
-            range: IpRange,
-            project_id: Option<Uuid>,
-        ) {
-            self.create_ip_pool_internal(
-                name, range, project_id, /* rack_id= */ None,
-            )
-            .await;
+        async fn create_ip_pool(&self, name: &str, range: IpRange) {
+            self.create_ip_pool_internal(name, range, /*internal=*/ false)
+                .await;
+        }
+
+        async fn default_pool_id(&self) -> Uuid {
+            let (.., pool) = self
+                .db_datastore
+                .ip_pools_fetch_default_for(
+                    &self.opctx,
+                    crate::authz::Action::ListChildren,
+                )
+                .await
+                .expect("Failed to lookup default ip pool");
+            pool.identity.id
         }
 
         async fn success(mut self) {
@@ -767,8 +698,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("p0", range, None).await;
-        let project_id = Uuid::new_v4();
+        context.create_ip_pool("default", range).await;
         for first_port in
             (0..super::MAX_PORT).step_by(super::NUM_SOURCE_NAT_PORTS)
         {
@@ -779,8 +709,8 @@ mod tests {
                 .allocate_instance_snat_ip(
                     &context.opctx,
                     id,
-                    project_id,
                     instance_id,
+                    context.default_pool_id().await,
                 )
                 .await
                 .expect("Failed to allocate instance external IP address");
@@ -799,8 +729,8 @@ mod tests {
             .allocate_instance_snat_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                project_id,
                 instance_id,
+                context.default_pool_id().await,
             )
             .await
             .expect_err(
@@ -825,8 +755,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("p0", range, None).await;
-        let project_id = Uuid::new_v4();
+        context.create_ip_pool("default", range).await;
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
@@ -836,7 +765,6 @@ mod tests {
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                project_id,
                 instance_id,
                 /* pool_name = */ None,
             )
@@ -857,8 +785,8 @@ mod tests {
             .allocate_instance_snat_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                project_id,
                 instance_id,
+                context.default_pool_id().await,
             )
             .await;
         assert!(
@@ -879,7 +807,6 @@ mod tests {
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                project_id,
                 instance_id,
                 /* pool_name = */ None,
             )
@@ -912,7 +839,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("p0", range, None).await;
+        context.create_ip_pool("default", range).await;
 
         // TODO-completess: Implementing Iterator for IpRange would be nice.
         let addresses = [
@@ -925,7 +852,6 @@ mod tests {
 
         // Allocate two addresses
         let mut ips = Vec::with_capacity(2);
-        let project_id = Uuid::new_v4();
         for (expected_ip, expected_first_port) in external_ips.clone().take(2) {
             let instance_id = Uuid::new_v4();
             let ip = context
@@ -933,8 +859,8 @@ mod tests {
                 .allocate_instance_snat_ip(
                     &context.opctx,
                     Uuid::new_v4(),
-                    project_id,
                     instance_id,
+                    context.default_pool_id().await,
                 )
                 .await
                 .expect("Failed to allocate instance external IP address");
@@ -962,8 +888,8 @@ mod tests {
             .allocate_instance_snat_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                project_id,
                 instance_id,
+                context.default_pool_id().await,
             )
             .await
             .expect("Failed to allocate instance external IP address");
@@ -989,8 +915,8 @@ mod tests {
             .allocate_instance_snat_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                project_id,
                 instance_id,
+                context.default_pool_id().await,
             )
             .await
             .expect("Failed to allocate instance external IP address");
@@ -1016,10 +942,9 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("p0", range, None).await;
+        context.create_ip_pool("default", range).await;
 
         let instance_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let pool_name = None;
 
@@ -1028,7 +953,6 @@ mod tests {
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 id,
-                project_id,
                 instance_id,
                 pool_name,
             )
@@ -1043,97 +967,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_next_external_ip_is_restricted_to_projects() {
-        let context =
-            TestContext::new("test_next_external_ip_is_restricted_to_projects")
-                .await;
-
-        // Create one pool restricted to a project, and one not.
-        let project_id = Uuid::new_v4();
-        let first_range = IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 1),
-            Ipv4Addr::new(10, 0, 0, 3),
-        ))
-        .unwrap();
-        context.create_ip_pool("p0", first_range, Some(project_id)).await;
-
-        let second_range = IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 4),
-            Ipv4Addr::new(10, 0, 0, 6),
-        ))
-        .unwrap();
-        context.create_ip_pool("p1", second_range, None).await;
-
-        // Allocating an address on an instance in a _different_ project should
-        // get an address from the second pool.
-        let instance_id = Uuid::new_v4();
-        let instance_project_id = Uuid::new_v4();
-        let id = Uuid::new_v4();
-        let pool_name = None;
-
-        let ip = context
-            .db_datastore
-            .allocate_instance_ephemeral_ip(
-                &context.opctx,
-                id,
-                instance_project_id,
-                instance_id,
-                pool_name,
-            )
-            .await
-            .expect("Failed to allocate instance ephemeral IP address");
-        assert_eq!(ip.kind, IpKind::Ephemeral);
-        assert_eq!(ip.ip.ip(), second_range.first_address());
-        assert_eq!(ip.first_port.0, 0);
-        assert_eq!(ip.last_port.0, u16::MAX);
-        assert_eq!(ip.project_id.unwrap(), instance_project_id);
-
-        // Allocating an address on an instance in the same project should get
-        // an address from the first pool.
-        let instance_id = Uuid::new_v4();
-        let id = Uuid::new_v4();
-        let pool_name = None;
-
-        let ip = context
-            .db_datastore
-            .allocate_instance_ephemeral_ip(
-                &context.opctx,
-                id,
-                project_id,
-                instance_id,
-                pool_name,
-            )
-            .await
-            .expect("Failed to allocate instance ephemeral IP address");
-        assert_eq!(ip.kind, IpKind::Ephemeral);
-        assert_eq!(ip.ip.ip(), first_range.first_address());
-        assert_eq!(ip.first_port.0, 0);
-        assert_eq!(ip.last_port.0, u16::MAX);
-        assert_eq!(ip.project_id.unwrap(), project_id);
-
-        context.success().await;
-    }
-
-    #[tokio::test]
     async fn test_next_external_ip_for_service() {
         let context =
             TestContext::new("test_next_external_ip_for_service").await;
 
-        // Create an IP pool without an associated project.
-        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.create_rack_ip_pool("p0", ip_range, rack_id).await;
+        context.create_service_ip_pool("for-nexus", ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
         let id1 = Uuid::new_v4();
         let ip1 = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id1, rack_id)
+            .allocate_service_ip(&context.opctx, id1)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip1.kind, IpKind::Service);
@@ -1141,13 +991,12 @@ mod tests {
         assert_eq!(ip1.first_port.0, 0);
         assert_eq!(ip1.last_port.0, u16::MAX);
         assert!(ip1.instance_id.is_none());
-        assert!(ip1.project_id.is_none());
 
         // Allocate the next (last) IP address
         let id2 = Uuid::new_v4();
         let ip2 = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id2, rack_id)
+            .allocate_service_ip(&context.opctx, id2)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip2.kind, IpKind::Service);
@@ -1155,13 +1004,12 @@ mod tests {
         assert_eq!(ip2.first_port.0, 0);
         assert_eq!(ip2.last_port.0, u16::MAX);
         assert!(ip2.instance_id.is_none());
-        assert!(ip2.project_id.is_none());
 
         // Once we're out of IP addresses, test that we see the right error.
         let id3 = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id3, rack_id)
+            .allocate_service_ip(&context.opctx, id3)
             .await
             .expect_err("Should have failed to allocate after pool exhausted");
         assert_eq!(
@@ -1181,21 +1029,19 @@ mod tests {
         )
         .await;
 
-        // Create an IP pool without an associated project.
-        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.create_rack_ip_pool("p0", ip_range, rack_id).await;
+        context.create_service_ip_pool("for-nexus", ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip.kind, IpKind::Service);
@@ -1203,11 +1049,10 @@ mod tests {
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
         assert!(ip.instance_id.is_none());
-        assert!(ip.project_id.is_none());
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
 
@@ -1228,21 +1073,19 @@ mod tests {
         )
         .await;
 
-        // Create an IP pool without an associated project.
-        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_rack_ip_pool("p0", ip_range, rack_id).await;
+        context.create_service_ip_pool("for-nexus", ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
         assert_eq!(ip.kind, IpKind::Service);
@@ -1250,11 +1093,10 @@ mod tests {
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
         assert!(ip.instance_id.is_none());
-        assert!(ip.project_id.is_none());
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id, rack_id)
+            .allocate_service_ip(&context.opctx, id)
             .await
             .expect("Failed to allocate service IP address");
 
@@ -1275,19 +1117,18 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("p0", range, None).await;
+        context.create_ip_pool("default", range).await;
 
         // Create one SNAT IP address.
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
         let ip = context
             .db_datastore
             .allocate_instance_snat_ip(
                 &context.opctx,
                 id,
-                project_id,
                 instance_id,
+                context.default_pool_id().await,
             )
             .await
             .expect("Failed to allocate instance SNAT IP address");
@@ -1298,7 +1139,6 @@ mod tests {
             usize::from(ip.last_port.0),
             super::NUM_SOURCE_NAT_PORTS - 1
         );
-        assert_eq!(ip.project_id.unwrap(), project_id);
 
         // Create a new IP, with the _same_ ID, and ensure we get back the same
         // value.
@@ -1307,8 +1147,8 @@ mod tests {
             .allocate_instance_snat_ip(
                 &context.opctx,
                 id,
-                project_id,
                 instance_id,
+                context.default_pool_id().await,
             )
             .await
             .expect("Failed to allocate instance SNAT IP address");
@@ -1336,24 +1176,23 @@ mod tests {
             TestContext::new("test_next_external_ip_is_restricted_to_pools")
                 .await;
 
-        // Create two pools, neither project-restricted.
+        // Create two pools
         let first_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("p0", first_range, None).await;
+        context.create_ip_pool("default", first_range).await;
         let second_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 4),
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range, None).await;
+        context.create_ip_pool("p1", second_range).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
         let instance_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let pool_name = Some(Name("p1".parse().unwrap()));
 
@@ -1362,7 +1201,6 @@ mod tests {
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 id,
-                project_id,
                 instance_id,
                 pool_name,
             )
@@ -1372,7 +1210,6 @@ mod tests {
         assert_eq!(ip.ip.ip(), second_range.first_address());
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert_eq!(ip.project_id.unwrap(), project_id);
 
         context.success().await;
     }
@@ -1384,22 +1221,20 @@ mod tests {
         )
         .await;
 
-        // Create two pools, neither project-restricted.
         let first_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("p0", first_range, None).await;
+        context.create_ip_pool("default", first_range).await;
         let first_address = Ipv4Addr::new(10, 0, 0, 4);
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range, None).await;
+        context.create_ip_pool("p1", second_range).await;
 
         // Allocate all available addresses in the second pool.
         let instance_id = Uuid::new_v4();
-        let project_id = Uuid::new_v4();
         let pool_name = Some(Name("p1".parse().unwrap()));
         let first_octet = first_address.octets()[3];
         let last_octet = last_address.octets()[3];
@@ -1409,7 +1244,6 @@ mod tests {
                 .allocate_instance_ephemeral_ip(
                     &context.opctx,
                     Uuid::new_v4(),
-                    project_id,
                     instance_id,
                     pool_name.clone(),
                 )
@@ -1429,7 +1263,6 @@ mod tests {
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                project_id,
                 instance_id,
                 pool_name,
             )

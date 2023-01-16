@@ -8,7 +8,7 @@ use crate::external_api::shared;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -17,6 +17,84 @@ use serde::{
 };
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OrganizationPath {
+    pub organization: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectPath {
+    pub project: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstancePath {
+    pub instance: NameOrId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OrganizationSelector {
+    pub organization: NameOrId,
+}
+
+impl From<Name> for OrganizationSelector {
+    fn from(name: Name) -> Self {
+        OrganizationSelector { organization: name.into() }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalOrganizationSelector {
+    #[serde(flatten)]
+    pub organization_selector: Option<OrganizationSelector>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ProjectSelector {
+    #[serde(flatten)]
+    pub organization_selector: Option<OrganizationSelector>,
+    pub project: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl ProjectSelector {
+    pub fn new(organization: Option<NameOrId>, project: NameOrId) -> Self {
+        ProjectSelector {
+            organization_selector: organization
+                .map(|o| OrganizationSelector { organization: o }),
+            project,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalProjectSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub instance: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl InstanceSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        instance: NameOrId,
+    ) -> Self {
+        InstanceSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            instance,
+        }
+    }
+}
 
 // Silos
 
@@ -480,14 +558,6 @@ pub struct NetworkInterfaceUpdate {
 
 // IP POOLS
 
-// Type used to identify a Project in request bodies, where one may not have
-// the path in the request URL.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct ProjectPath {
-    pub organization: Name,
-    pub project: Name,
-}
-
 /// Create-time parameters for an IP Pool.
 ///
 /// See [`IpPool`](crate::external_api::views::IpPool)
@@ -495,8 +565,6 @@ pub struct ProjectPath {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    #[serde(flatten)]
-    pub project: Option<ProjectPath>,
 }
 
 /// Parameters for updating an IP Pool

@@ -19,6 +19,8 @@ pub struct Config {
     /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
     /// if set to false).
     pub stub_scrimlet: Option<bool>,
+    // TODO: Remove once this can be auto-detected.
+    pub sidecar_revision: String,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".

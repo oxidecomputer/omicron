@@ -6,18 +6,15 @@ mod component;
 mod rack;
 mod splash;
 
-use crate::Action;
-use crate::ScreenEvent;
-use crate::State;
-use crate::Term;
-use crate::TermEvent;
+use crate::wizard::{Action, ScreenEvent, State, Term};
+use crossterm::event::Event as TermEvent;
 use slog::Logger;
 
 use component::ComponentScreen;
 use rack::RackScreen;
 use splash::SplashScreen;
 
-/// An identifier for a specific [`Screen`] in the [`Wizard`]
+/// An identifier for a specific [`Screen`] in the [`Wizard`](crate::Wizard).
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScreenId {
     Splash,
