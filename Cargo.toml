@@ -131,7 +131,7 @@ hex = "0.4.3"
 http = "0.2.7"
 httptest = "0.15.4"
 hyper = "0.14"
-indicatif = { version = "0.17.2", features = ["rayon"] }
+indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
 internal-dns = { path = "internal-dns" }
