@@ -1691,7 +1691,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.20.0",
+ "base64 0.21.0",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
@@ -3237,7 +3237,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
- "base64 0.20.0",
+ "base64 0.21.0",
  "chrono",
  "nexus-passwords",
  "omicron-common",
@@ -3497,7 +3497,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
- "base64 0.20.0",
+ "base64 0.21.0",
  "bb8",
  "chrono",
  "clap 4.1.1",
@@ -3886,7 +3886,7 @@ dependencies = [
 name = "oxide-client"
 version = "0.1.0"
 dependencies = [
- "base64 0.20.0",
+ "base64 0.21.0",
  "chrono",
  "futures",
  "progenitor",
