@@ -4561,7 +4561,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#634bf98b053cc494191365e2072b3580f4b03df6"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1ef131a244cf30b9c4213fdb31674fe071cb0043"
 dependencies = [
  "anyhow",
  "clap 4.0.32",
@@ -4571,12 +4571,13 @@ dependencies = [
  "progenitor-macro",
  "serde",
  "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]
 name = "progenitor-client"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#634bf98b053cc494191365e2072b3580f4b03df6"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1ef131a244cf30b9c4213fdb31674fe071cb0043"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4590,7 +4591,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#634bf98b053cc494191365e2072b3580f4b03df6"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1ef131a244cf30b9c4213fdb31674fe071cb0043"
 dependencies = [
  "getopts",
  "heck",
@@ -4612,7 +4613,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#634bf98b053cc494191365e2072b3580f4b03df6"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#1ef131a244cf30b9c4213fdb31674fe071cb0043"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -4622,6 +4623,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tokenstream",
+ "serde_yaml",
  "syn",
 ]
 
@@ -5552,6 +5554,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.9.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92b5b431e8907b50339b51223b97d102db8d987ced36f6e4d03621db9316c834"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -6831,6 +6846,12 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7ed8ba44ca06be78ea1ad2c3682a43349126c8818054231ee6f4748012aed2"
 
 [[package]]
 name = "untrusted"
