@@ -104,7 +104,7 @@ pub async fn test_setup_with_config(
 
     // Update discovery addrs of `server_config` to point to the SP ports that
     // will identify us as the expected location
-    for port_description in server_config.switch.port.values_mut() {
+    for port_description in &mut server_config.switch.port {
         // we need to know whether this port points to a switch or sled; for now
         // assume that matches whether we end up as `switch0` or `switch1`
         let target_sp =
@@ -116,8 +116,14 @@ pub async fn test_setup_with_config(
             SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
             SpType::Power => todo!(),
         };
-        port_description.config =
-            SwitchPortConfig::Simulated { addr: sp_addr.unwrap() };
+        match &mut port_description.config {
+            SwitchPortConfig::Simulated { addr, .. } => {
+                *addr = sp_addr.unwrap();
+            }
+            SwitchPortConfig::SwitchZoneInterface { .. } => {
+                panic!("test config using `switch-zone-interface` config")
+            }
+        }
     }
 
     // Start gateway server
@@ -138,7 +144,7 @@ pub async fn test_setup_with_config(
 
     // Build a list of all SPs defined in our config
     let mut all_sp_ids = Vec::new();
-    for port_config in server_config.switch.port.values() {
+    for port_config in &server_config.switch.port {
         all_sp_ids.push(
             port_config.location.get(&expected_location).copied().unwrap(),
         );
