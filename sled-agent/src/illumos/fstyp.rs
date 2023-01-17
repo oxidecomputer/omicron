@@ -4,8 +4,8 @@
 
 //! Helper for calling fstyp.
 
-use crate::illumos::execute;
 use crate::illumos::zpool::ZpoolName;
+use crate::illumos::{execute, PFEXEC};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -31,8 +31,8 @@ impl Fstyp {
     /// Executes the 'fstyp' command and parses the name of a zpool from it, if
     /// one exists.
     pub fn get_zpool(path: &Path) -> Result<ZpoolName, Error> {
-        let mut command = std::process::Command::new(FSTYP);
-        let cmd = command.arg("-a").arg(path);
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.arg(FSTYP).arg("-a").arg(path);
 
         let output = execute(cmd).map_err(Error::from)?;
         let stdout = String::from_utf8_lossy(&output.stdout);

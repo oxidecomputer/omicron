@@ -401,7 +401,14 @@ impl SledAgent {
             }
         }
 
-        // TODO: Handle disks?
+        for disk in self.inner.hardware.disks() {
+            if let Err(e) = self.inner.storage.upsert_disk(disk).await {
+                warn!(log, "Failed to add disk: {e}");
+            }
+        }
+        // TODO: What about disks which have been upserted, where we missed the notification to
+        // remove them? Should we be asking the storage manager for the set of known disks, and
+        // removing ones which don't appear in the set from hardware?
     }
 
     async fn hardware_monitor_task(&self, log: Logger) {

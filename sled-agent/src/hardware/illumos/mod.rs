@@ -323,6 +323,10 @@ impl HardwareManager {
         Ok(Self { log, inner, tx, _worker })
     }
 
+    pub fn disks(&self) -> HashSet<Disk> {
+        self.inner.lock().unwrap().disks.clone()
+    }
+
     pub fn is_scrimlet(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         match inner.tofino {
