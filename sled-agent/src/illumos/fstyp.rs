@@ -28,6 +28,8 @@ pub struct Fstyp {}
 
 #[cfg_attr(test, mockall::automock)]
 impl Fstyp {
+    /// Executes the 'fstyp' command and parses the name of a zpool from it, if
+    /// one exists.
     pub fn get_zpool(path: &Path) -> Result<ZpoolName, Error> {
         let mut command = std::process::Command::new(FSTYP);
         let cmd = command.arg("-a").arg(path);

@@ -7,7 +7,6 @@ use slog::Logger;
 use std::path::PathBuf;
 use tokio::sync::broadcast;
 
-
 /// An unimplemented, stub representation of the underlying hardware.
 ///
 /// This is intended for non-illumos systems to have roughly the same interface

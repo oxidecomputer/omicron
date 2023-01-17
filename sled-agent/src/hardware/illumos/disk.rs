@@ -2,9 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! illumos-specific mechanisms for parsing disk info.
+
 use crate::hardware::{DiskError, DiskVariant, Partition};
 use std::path::PathBuf;
 
+// The expected layout of an M.2 device within the Oxide rack.
+//
+// Partitions beyond this "expected partition" array are ignored.
 const M2_EXPECTED_PARTITION_COUNT: usize = 6;
 static M2_EXPECTED_PARTITIONS: [Partition; M2_EXPECTED_PARTITION_COUNT] = [
     Partition::BootImage,
@@ -15,6 +20,9 @@ static M2_EXPECTED_PARTITIONS: [Partition; M2_EXPECTED_PARTITION_COUNT] = [
     Partition::ZfsPool,
 ];
 
+// The expected layout of a U.2 device within the Oxide rack.
+//
+// Partitions beyond this "expected partition" array are ignored.
 const U2_EXPECTED_PARTITION_COUNT: usize = 1;
 static U2_EXPECTED_PARTITIONS: [Partition; U2_EXPECTED_PARTITION_COUNT] = [
     Partition::ZfsPool,
@@ -42,6 +50,15 @@ fn parse_partition_types<const N: usize>(
     Ok(expected_partitions.iter().map(|p| p.clone()).collect())
 }
 
+/// Parses and validates the partition layout within a disk.
+///
+/// Arguments:
+/// - `devfs_path` should be the path to the disk, within `/devices/...`.
+/// - `variant` should describe the expected class of disk (which matters,
+/// since different disk types have different expected layouts).
+///
+/// Returns a Vec of partitions on success. The index of the Vec is guaranteed
+/// to also be the index of the partition.
 pub fn parse_partition_layout(
     devfs_path: &PathBuf,
     variant: DiskVariant,

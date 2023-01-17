@@ -100,9 +100,6 @@ impl HardwareView {
         }
     }
 
-    // TODO: "new_stub_tofino" won't be enough; we may also want to stub out the
-    // disks...
-
     fn new_stub_tofino(active: bool) -> Self {
         Self { tofino: TofinoView::Stub { active }, disks: HashSet::new() }
     }
