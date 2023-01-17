@@ -8,8 +8,8 @@ use cfg_if::cfg_if;
 
 pub mod addrobj;
 pub mod dladm;
-pub mod link;
 pub mod fstyp;
+pub mod link;
 pub mod running_zone;
 pub mod svc;
 pub mod zfs;

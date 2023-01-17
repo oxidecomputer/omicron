@@ -24,9 +24,8 @@ static M2_EXPECTED_PARTITIONS: [Partition; M2_EXPECTED_PARTITION_COUNT] = [
 //
 // Partitions beyond this "expected partition" array are ignored.
 const U2_EXPECTED_PARTITION_COUNT: usize = 1;
-static U2_EXPECTED_PARTITIONS: [Partition; U2_EXPECTED_PARTITION_COUNT] = [
-    Partition::ZfsPool,
-];
+static U2_EXPECTED_PARTITIONS: [Partition; U2_EXPECTED_PARTITION_COUNT] =
+    [Partition::ZfsPool];
 
 fn parse_partition_types<const N: usize>(
     path: &PathBuf,
@@ -66,29 +65,22 @@ pub fn parse_partition_layout(
     // Open the "Whole Disk" (wd) as a raw device to be parsed by the
     // libefi-illumos library. This lets us peek at the GPT before
     // making too many assumptions about it.
-    let path = PathBuf::from(format!("{path}:wd,raw", path = devfs_path.display()));
-    let file = std::fs::File::open(&path).map_err(|error| {
-        DiskError::IoError {
-            path: path.clone(),
-            error,
-        }
-    })?;
-    let gpt = libefi_illumos::Gpt::new(file).map_err(|error| {
-        DiskError::Gpt {
-            path: path.clone(),
-            error,
-        }
-    })?;
+    let path =
+        PathBuf::from(format!("{path}:wd,raw", path = devfs_path.display()));
+    let file = std::fs::File::open(&path)
+        .map_err(|error| DiskError::IoError { path: path.clone(), error })?;
+    let gpt = libefi_illumos::Gpt::new(file)
+        .map_err(|error| DiskError::Gpt { path: path.clone(), error })?;
 
     let mut partitions: Vec<_> = gpt.partitions().collect();
     match variant {
         DiskVariant::U2 => {
             partitions.truncate(U2_EXPECTED_PARTITION_COUNT);
             parse_partition_types(&path, &partitions, &U2_EXPECTED_PARTITIONS)
-        },
+        }
         DiskVariant::M2 => {
             partitions.truncate(M2_EXPECTED_PARTITION_COUNT);
             parse_partition_types(&path, &partitions, &M2_EXPECTED_PARTITIONS)
-        },
+        }
     }
 }

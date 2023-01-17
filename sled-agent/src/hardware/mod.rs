@@ -33,24 +33,13 @@ pub enum HardwareUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum DiskError {
     #[error("Cannot open {path} due to {error}")]
-    IoError {
-        path: PathBuf,
-        error: std::io::Error,
-    },
+    IoError { path: PathBuf, error: std::io::Error },
     #[error("Failed to open partition at {path} due to {error}")]
-    Gpt {
-        path: PathBuf,
-        error: anyhow::Error,
-    },
+    Gpt { path: PathBuf, error: anyhow::Error },
     #[error("Unexpected partition layout at {path}")]
-    BadPartitionLayout {
-        path: PathBuf,
-    },
+    BadPartitionLayout { path: PathBuf },
     #[error("Requested partition {partition:?} not found on device {path}")]
-    NotFound {
-        path: PathBuf,
-        partition: Partition,
-    },
+    NotFound { path: PathBuf, partition: Partition },
 }
 
 /// A partition (or 'slice') of a disk.
@@ -78,14 +67,13 @@ pub struct Disk {
 
 impl Disk {
     #[allow(dead_code)]
-    pub fn new(devfs_path: PathBuf, slot: i64, variant: DiskVariant) -> Result<Self, DiskError> {
+    pub fn new(
+        devfs_path: PathBuf,
+        slot: i64,
+        variant: DiskVariant,
+    ) -> Result<Self, DiskError> {
         let partitions = parse_partition_layout(&devfs_path, variant)?;
-        Ok(Self {
-            devfs_path,
-            slot,
-            variant,
-            partitions,
-        })
+        Ok(Self { devfs_path, slot, variant, partitions })
     }
 
     // Returns the "illumos letter-indexed path" for a device.
@@ -99,10 +87,15 @@ impl Disk {
     }
 
     // Finds the first 'variant' partition, and returns the path to it.
-    fn partition_device_path(&self, expected_partition: Partition) -> Option<PathBuf> {
+    fn partition_device_path(
+        &self,
+        expected_partition: Partition,
+    ) -> Option<PathBuf> {
         self.partitions.iter().enumerate().find_map(|(index, partition)| {
             if &expected_partition == partition {
-                Some(self.partition_path(u8::try_from(index).expect("Index too large")))
+                Some(self.partition_path(
+                    u8::try_from(index).expect("Index too large"),
+                ))
             } else {
                 None
             }

@@ -34,10 +34,12 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-#[cfg(test)]
-use crate::illumos::{fstyp::MockFstyp as Fstyp, zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use crate::illumos::{fstyp::Fstyp, zfs::Zfs, zpool::Zpool};
+#[cfg(test)]
+use crate::illumos::{
+    fstyp::MockFstyp as Fstyp, zfs::MockZfs as Zfs, zpool::MockZpool as Zpool,
+};
 
 const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
 const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
@@ -885,7 +887,10 @@ impl StorageManager {
         }
     }
 
-    pub async fn upsert_disk(&self, disk: crate::hardware::Disk) -> Result<(), Error> {
+    pub async fn upsert_disk(
+        &self,
+        disk: crate::hardware::Disk,
+    ) -> Result<(), Error> {
         info!(self.log, "Upserting disk: {disk:?}");
 
         // If the disk contains a zpool, keep track of it.
@@ -901,7 +906,10 @@ impl StorageManager {
         Ok(())
     }
 
-    pub async fn delete_disk(&self, disk: crate::hardware::Disk) -> Result<(), Error> {
+    pub async fn delete_disk(
+        &self,
+        disk: crate::hardware::Disk,
+    ) -> Result<(), Error> {
         info!(self.log, "Deleting disk: {disk:?}");
 
         // If the disk contains a zpool, remove it too.

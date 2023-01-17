@@ -21,10 +21,7 @@ enum Error {
     DevInfo(anyhow::Error),
 
     #[error("Expected property {name} to have type {ty}")]
-    UnexpectedPropertyType {
-        name: String,
-        ty: String,
-    },
+    UnexpectedPropertyType { name: String, ty: String },
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -61,10 +58,7 @@ impl HardwareSnapshot {
             poll_blkdev_node(&log, &mut disks, &node)?;
         }
 
-        Ok(Self {
-            tofino,
-            disks,
-        })
+        Ok(Self { tofino, disks })
     }
 }
 
@@ -199,23 +193,27 @@ fn poll_blkdev_node(
                         }
                     })
                 {
-                    let slot = slot_prop
-                        .as_i64()
-                        .ok_or_else(|| {
-                            Error::UnexpectedPropertyType {
-                                name: slot_prop_name,
-                                ty: "i64".to_string(),
-                            }
-                        })?;
+                    let slot = slot_prop.as_i64().ok_or_else(|| {
+                        Error::UnexpectedPropertyType {
+                            name: slot_prop_name,
+                            ty: "i64".to_string(),
+                        }
+                    })?;
 
-                    let variant = if let Some(variant) = slot_to_disk_variant(slot) {
+                    let variant = if let Some(variant) =
+                        slot_to_disk_variant(slot)
+                    {
                         variant
                     } else {
                         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
                         break;
                     };
                     info!(log, "Found a {variant:?} device in slot# {slot}: {devfs_path}");
-                    let disk = match Disk::new(PathBuf::from(devfs_path), slot, variant) {
+                    let disk = match Disk::new(
+                        PathBuf::from(devfs_path),
+                        slot,
+                        variant,
+                    ) {
                         Ok(disk) => disk,
                         Err(err) => {
                             warn!(log, "Failed to load disk: {err}");

@@ -414,8 +414,8 @@ impl SledAgent {
 
         // Rely on monitoring for tracking all future updates.
         loop {
-            use tokio::sync::broadcast::error::RecvError;
             use crate::hardware::HardwareUpdate;
+            use tokio::sync::broadcast::error::RecvError;
             match hardware_updates.recv().await {
                 Ok(update) => match update {
                     HardwareUpdate::TofinoDeviceChange => {
@@ -444,12 +444,16 @@ impl SledAgent {
                         }
                     }
                     HardwareUpdate::DiskAdded(disk) => {
-                        if let Err(e) = self.inner.storage.upsert_disk(disk).await {
+                        if let Err(e) =
+                            self.inner.storage.upsert_disk(disk).await
+                        {
                             warn!(log, "Failed to add disk: {e}");
                         }
                     }
                     HardwareUpdate::DiskRemoved(disk) => {
-                        if let Err(e) = self.inner.storage.delete_disk(disk).await {
+                        if let Err(e) =
+                            self.inner.storage.delete_disk(disk).await
+                        {
                             warn!(log, "Failed to remove disk: {e}");
                         }
                     }

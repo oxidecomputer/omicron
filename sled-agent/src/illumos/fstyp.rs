@@ -6,8 +6,8 @@
 
 use crate::illumos::execute;
 use crate::illumos::zpool::ZpoolName;
-use std::str::FromStr;
 use std::path::Path;
+use std::str::FromStr;
 
 const FSTYP: &str = "/usr/sbin/fstyp";
 
@@ -47,10 +47,10 @@ impl Fstyp {
             if seen_zfs_marker {
                 if let Some(name) = line.strip_prefix("name: ") {
                     let name = name.trim_matches('\'');
-                    return ZpoolName::from_str(name).map_err(|e| Error::ZpoolName(e));
+                    return ZpoolName::from_str(name)
+                        .map_err(|e| Error::ZpoolName(e));
                 }
             }
-
         }
         return Err(Error::NotFound);
     }
