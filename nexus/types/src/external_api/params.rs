@@ -107,24 +107,7 @@ impl InstanceSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByName,
-    #[serde(flatten)]
-    pub project_selector: ProjectSelector,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceSerialConsole {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-
-    #[serde(flatten)]
-    pub console_params: InstanceSerialConsoleRequest,
-}
-
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct VpcSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
@@ -153,14 +136,6 @@ impl VpcSelector {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct VpcList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByName,
-    #[serde(flatten)]
-    pub project_selector: ProjectSelector,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
@@ -181,14 +156,6 @@ impl SubnetSelector {
             subnet,
         }
     }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SubnetList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByName,
-    #[serde(flatten)]
-    pub vpc_selector: VpcSelector,
 }
 
 // Silos

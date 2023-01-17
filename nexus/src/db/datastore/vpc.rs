@@ -53,7 +53,25 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn project_list_vpcs(
+    pub async fn project_list_vpcs_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Vpc> {
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+
+        use db::schema::vpc::dsl;
+        paginated(dsl::vpc, dsl::id, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .select(Vpc::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn project_list_vpcs_by_name(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
@@ -359,7 +377,25 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn vpc_list_subnets(
+    pub async fn vpc_list_subnets_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<VpcSubnet> {
+        opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
+
+        use db::schema::vpc_subnet::dsl;
+        paginated(dsl::vpc_subnet, dsl::id, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(authz_vpc.id()))
+            .select(VpcSubnet::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn vpc_list_subnets_by_name(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,

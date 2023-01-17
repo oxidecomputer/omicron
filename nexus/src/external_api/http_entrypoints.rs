@@ -4075,31 +4075,44 @@ async fn snapshot_delete(
 }]
 async fn vpc_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::VpcList>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, &query.project_selector)?;
-        let vpcs = nexus
-            .project_list_vpcs(
-                &opctx,
-                &project_lookup,
-                &data_page_params_for(&rqctx, &query.pagination)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
-            .await?
-            .into_iter()
-            .map(|p| p.into())
-            .collect();
+        let vpcs = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_vpcs_by_id(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params,
+                    )
+                    .await?
+            }
+            PaginatedBy::Name(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_vpcs_by_name(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
+            }
+        }
+        .into_iter()
+        .map(|p| p.into())
+        .collect();
 
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query.pagination,
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
             vpcs,
-            &marker_for_name,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4130,7 +4143,7 @@ async fn vpc_list(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let vpcs = nexus
-            .project_list_vpcs(
+            .project_list_vpcs_by_name(
                 &opctx,
                 &project_lookup,
                 &data_page_params_for(&rqctx, &query)?
@@ -4422,29 +4435,39 @@ async fn vpc_delete(
 }]
 async fn vpc_subnet_list_v1(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::SubnetList>,
+    query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &query.vpc_selector)?;
-        let vpcs = nexus
-            .vpc_list_subnets(
-                &opctx,
-                &vpc_lookup,
-                &data_page_params_for(&rqctx, &query.pagination)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
-            .await?
-            .into_iter()
-            .map(|vpc| vpc.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query.pagination,
+        let vpcs = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pag_params, selector) => {
+                let vpc_lookup = nexus.vpc_lookup(&opctx, &selector)?;
+                nexus
+                    .vpc_list_subnets_by_id(&opctx, &vpc_lookup, &pag_params)
+                    .await?
+            }
+            PaginatedBy::Name(pag_params, selector) => {
+                let vpc_lookup = nexus.vpc_lookup(&opctx, &selector)?;
+                nexus
+                    .vpc_list_subnets_by_name(
+                        &opctx,
+                        &vpc_lookup,
+                        &pag_params.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
+            }
+        }
+        .into_iter()
+        .map(|vpc| vpc.into())
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
             vpcs,
-            &marker_for_name,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4476,7 +4499,7 @@ async fn vpc_subnet_list(
         );
         let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let vpcs = nexus
-            .vpc_list_subnets(
+            .vpc_list_subnets_by_name(
                 &opctx,
                 &vpc_lookup,
                 &data_page_params_for(&rqctx, &query)?

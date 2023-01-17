@@ -26,10 +26,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::RouteDestination;
-use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteCreateParams;
-use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use ref_cast::RefCast;
@@ -110,7 +106,20 @@ impl super::Nexus {
         Ok(db_vpc)
     }
 
-    pub async fn project_list_vpcs(
+    pub async fn project_list_vpcs_by_id(
+        &self,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Vpc> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .project_list_vpcs_by_id(&opctx, &authz_project, pagparams)
+            .await
+    }
+
+    pub async fn project_list_vpcs_by_name(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -119,7 +128,7 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .project_list_vpcs(&opctx, &authz_project, pagparams)
+            .project_list_vpcs_by_name(&opctx, &authz_project, pagparams)
             .await
     }
 

@@ -214,7 +214,19 @@ impl super::Nexus {
         }
     }
 
-    pub async fn vpc_list_subnets(
+    pub async fn vpc_list_subnets_by_id(
+        &self,
+        opctx: &OpContext,
+        vpc_lookup: &lookup::Vpc<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::VpcSubnet> {
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .vpc_list_subnets_by_id(opctx, &authz_vpc, pagparams)
+            .await
+    }
+    pub async fn vpc_list_subnets_by_name(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -222,7 +234,9 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::VpcSubnet> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.vpc_list_subnets(opctx, &authz_vpc, pagparams).await
+        self.db_datastore
+            .vpc_list_subnets_by_name(opctx, &authz_vpc, pagparams)
+            .await
     }
 
     pub async fn vpc_update_subnet(
