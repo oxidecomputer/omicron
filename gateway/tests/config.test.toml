@@ -3,6 +3,11 @@
 #
 
 [switch]
+# For tests, bind to port 0 (i.e., OS chooses an open port) instead of MGS's
+# default port for SP communication. This option should be omitted in the real
+# config.
+udp_listen_port = 0
+
 # which vsc port is connected to our local sidecar SP (i.e., the SP that acts as
 # our contact to the ignition controller)
 local_ignition_controller_port = 0
@@ -50,29 +55,29 @@ sp_port_2 = ["switch1"]
 # three are configured on a per-port basis, which allows a single system to
 # simulate a full set of ports and SPs.
 [switch.port.0]
-data_link_addr = "[::1]:0"
-multicast_addr = "[::1]:0"
+kind = "simulated"
+addr = "[::1]:0"
 [switch.port.0.location]
 switch0 = ["switch", 0]
 switch1 = ["switch", 1]
 
 [switch.port.1]
-data_link_addr = "[::1]:0"
-multicast_addr = "[::1]:0"
+kind = "simulated"
+addr = "[::1]:0"
 [switch.port.1.location]
 switch0 = ["switch", 1]
 switch1 = ["switch", 0]
 
 [switch.port.2]
-data_link_addr = "[::1]:0"
-multicast_addr = "[::1]:0"
+kind = "simulated"
+addr = "[::1]:0"
 [switch.port.2.location]
 switch0 = ["sled", 0]
 switch1 = ["sled", 0]
 
 [switch.port.3]
-data_link_addr = "[::1]:0"
-multicast_addr = "[::1]:0"
+kind = "simulated"
+addr = "[::1]:0"
 [switch.port.3.location]
 switch0 = ["sled", 1]
 switch1 = ["sled", 1]

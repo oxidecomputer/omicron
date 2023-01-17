@@ -16,13 +16,16 @@ mod location_map;
 pub use self::location_map::LocationConfig;
 pub use self::location_map::LocationDeterminationConfig;
 use self::location_map::LocationMap;
+pub use self::location_map::SwitchPortConfig;
 pub use self::location_map::SwitchPortDescription;
 use self::location_map::ValidatedLocationConfig;
-
-use crate::error::ConfigError;
 use crate::error::SpCommsError;
+use crate::error::StartupError;
 use gateway_messages::IgnitionState;
+use gateway_sp_comms::default_discovery_addr;
+use gateway_sp_comms::BindError;
 use gateway_sp_comms::HostPhase2Provider;
+use gateway_sp_comms::SharedSocket;
 use gateway_sp_comms::SingleSp;
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
@@ -34,19 +37,29 @@ use slog::warn;
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SwitchConfig {
+    #[serde(default = "default_udp_listen_port")]
+    pub udp_listen_port: u16,
     pub local_ignition_controller_port: usize,
     pub rpc_max_attempts: usize,
     pub rpc_per_attempt_timeout_millis: u64,
     pub location: LocationConfig,
     #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     pub port: HashMap<usize, SwitchPortDescription>,
+}
+
+fn default_udp_listen_port() -> u16 {
+    gateway_sp_comms::MGS_PORT
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -91,6 +104,11 @@ impl SwitchPort {
 pub struct ManagementSwitch {
     local_ignition_controller_port: SwitchPort,
     sockets: Arc<HashMap<SwitchPort, SingleSp>>,
+    // We create a shared socket in real configs, but never use it after
+    // `new()`. We need to hold onto it to prevent it being dropped, though:
+    // When it's dropped, it cancels the background tokio task that loops on
+    // that socket receiving incoming packets.
+    _shared_socket: Option<SharedSocket>,
     location_map: Arc<OnceCell<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
     log: Logger,
@@ -105,38 +123,106 @@ impl Drop for ManagementSwitch {
 }
 
 impl ManagementSwitch {
-    pub(crate) async fn new<T: HostPhase2Provider + Clone>(
+    pub(crate) async fn new<T: HostPhase2Provider>(
         config: SwitchConfig,
-        host_phase2_provider: T,
+        host_phase2_provider: &Arc<T>,
         log: &Logger,
-    ) -> Result<Self, ConfigError> {
+    ) -> Result<Self, StartupError> {
         let log = log.new(o!("component" => "ManagementSwitch"));
 
-        // begin by binding to all our configured ports; insert them into a map
-        // keyed by the switch port they're listening on
+        // Skim over our port configs - either all should be simulated or all
+        // should be switch zone interfaces. Reject a mix.
+        let mut shared_socket = None;
+        for (i, port_desc) in config.port.values().enumerate() {
+            if i == 0 {
+                // First item: either create a shared socket (if we're going to
+                // share one socket among multiple switch zone VLAN interfaces)
+                // or leave it as `None` (if we're going to be connecting to
+                // simulated SPs by address).
+                if let SwitchPortConfig::SwitchZoneInterface { .. } =
+                    &port_desc.config
+                {
+                    shared_socket = Some(
+                        SharedSocket::bind(
+                            config.udp_listen_port,
+                            Arc::clone(&host_phase2_provider),
+                            log.clone(),
+                        )
+                        .await?,
+                    );
+                }
+            } else {
+                match (&shared_socket, &port_desc.config) {
+                    // OK - config is consistent
+                    (Some(_), SwitchPortConfig::SwitchZoneInterface { .. })
+                    | (None, SwitchPortConfig::Simulated { .. }) => (),
+
+                    // not OK - config is mixed
+                    (None, SwitchPortConfig::SwitchZoneInterface { .. })
+                    | (Some(_), SwitchPortConfig::Simulated { .. }) => {
+                        return Err(StartupError::InvalidConfig {
+                            reasons: vec![concat!(
+                                "switch port contains a mixture of `simulated`",
+                                " and `switch-zone-interface`"
+                            )
+                            .to_string()],
+                        });
+                    }
+                }
+            }
+        }
+
+        // Convert our config into actual SP handles and sockets, keyed by
+        // `SwitchPort` newtypes.
         let mut sockets = HashMap::with_capacity(config.port.len());
-        // while we're at it, rekey `config.port` to use `SwitchPort` keys
-        // instead of `usize`.
         let mut ports = HashMap::with_capacity(config.port.len());
-        for (port, port_config) in config.port {
-            let single_sp = SingleSp::new(
-                port_config.config.clone(),
-                config.rpc_max_attempts,
-                Duration::from_millis(config.rpc_per_attempt_timeout_millis),
-                host_phase2_provider.clone(),
-                log.new(o!("switch_port" => port)),
-            );
+        for (port, port_desc) in config.port {
+            let per_attempt_timeout =
+                Duration::from_millis(config.rpc_per_attempt_timeout_millis);
+            let single_sp = match &port_desc.config {
+                SwitchPortConfig::SwitchZoneInterface { interface } => {
+                    SingleSp::new(
+                        shared_socket.as_ref().unwrap(),
+                        gateway_sp_comms::SwitchPortConfig {
+                            discovery_addr: default_discovery_addr(),
+                            interface: interface.clone(),
+                        },
+                        config.rpc_max_attempts,
+                        per_attempt_timeout,
+                    )
+                    .await
+                }
+                SwitchPortConfig::Simulated { addr } => {
+                    // Bind a new socket for each simulated switch port.
+                    let bind_addr: SocketAddrV6 =
+                        SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
+                    let socket =
+                        UdpSocket::bind(bind_addr).await.map_err(|err| {
+                            StartupError::BindError(BindError {
+                                addr: bind_addr,
+                                err,
+                            })
+                        })?;
+                    SingleSp::new_direct_socket_for_testing(
+                        socket,
+                        *addr,
+                        config.rpc_max_attempts,
+                        per_attempt_timeout,
+                        log.clone(),
+                    )
+                }
+            };
             let port = SwitchPort(port);
 
             sockets.insert(port, single_sp);
-            ports.insert(port, port_config);
+            ports.insert(port, port_desc);
         }
 
         // sanity check the local ignition controller port is bound
         let local_ignition_controller_port =
             SwitchPort(config.local_ignition_controller_port);
         if !ports.contains_key(&local_ignition_controller_port) {
-            return Err(ConfigError::InvalidConfig {
+            return Err(StartupError::InvalidConfig {
                 reasons: vec![format!(
                     "missing local ignition controller port {}",
                     local_ignition_controller_port.0
@@ -176,6 +262,7 @@ impl ManagementSwitch {
         Ok(Self {
             local_ignition_controller_port,
             location_map,
+            _shared_socket: shared_socket,
             sockets,
             discovery_task,
             log,

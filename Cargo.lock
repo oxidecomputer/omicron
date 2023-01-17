@@ -2067,10 +2067,10 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1a27a661d7824712aeb4d1b9801938888139eaa7#1a27a661d7824712aeb4d1b9801938888139eaa7"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2220180907345c4a0430503a30955aa38ce19a4a#2220180907345c4a0430503a30955aa38ce19a4a"
 dependencies = [
  "bitflags",
- "hubpack",
+ "hubpack 0.1.1",
  "serde",
  "serde_repr",
  "smoltcp",
@@ -2082,16 +2082,23 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1a27a661d7824712aeb4d1b9801938888139eaa7#1a27a661d7824712aeb4d1b9801938888139eaa7"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2220180907345c4a0430503a30955aa38ce19a4a#2220180907345c4a0430503a30955aa38ce19a4a"
 dependencies = [
  "async-trait",
  "backoff",
  "futures",
+ "fxhash",
  "gateway-messages",
+ "hex",
+ "hubpack 0.1.1",
+ "lru-cache",
  "nix",
  "once_cell",
  "serde",
+ "serde-big-array 0.4.1",
  "slog",
+ "socket2",
+ "string_cache",
  "thiserror",
  "tlvc",
  "tokio",
@@ -2415,7 +2422,17 @@ name = "hubpack"
 version = "0.1.0"
 source = "git+https://github.com/cbiffle/hubpack?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
 dependencies = [
- "hubpack_derive",
+ "hubpack_derive 0.1.0",
+ "serde",
+]
+
+[[package]]
+name = "hubpack"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf8f3c0e51b49dd73e277f8d157f7248e91b3597e3487884181b259682b715d3"
+dependencies = [
+ "hubpack_derive 0.1.1",
  "serde",
 ]
 
@@ -2423,6 +2440,17 @@ dependencies = [
 name = "hubpack_derive"
 version = "0.1.0"
 source = "git+https://github.com/cbiffle/hubpack?rev=df08cc3a6e1f97381cd0472ae348e310f0119e25#df08cc3a6e1f97381cd0472ae348e310f0119e25"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "hubpack_derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f928320aff16ee8818ef7309180f8b5897057fd79d9dcb8de3ed1ba6dcc125a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3307,14 +3335,14 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46a58d1d356c6597d08cde02c2f09d785b09e28711837b1ed667dc652c08a694"
+version = "0.26.2"
+source = "git+https://github.com/jgallagher/nix?branch=r0.26-illumos#c1a3636db0524f194b714cfd117cd9b637b8b10e"
 dependencies = [
  "bitflags",
  "cfg-if 1.0.0",
  "libc",
  "memoffset 0.7.1",
+ "pin-utils",
  "static_assertions",
 ]
 
@@ -6081,7 +6109,7 @@ version = "0.1.0"
 source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
 dependencies = [
  "derive_more",
- "hubpack",
+ "hubpack 0.1.0",
  "rand 0.8.5",
  "salty",
  "serde",
@@ -6114,7 +6142,7 @@ source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ff
 dependencies = [
  "corncobs",
  "derive_more",
- "hubpack",
+ "hubpack 0.1.0",
  "rand 0.8.5",
  "salty",
  "serde",
@@ -6133,7 +6161,7 @@ dependencies = [
  "ed25519-dalek",
  "hkdf",
  "hmac 0.12.1",
- "hubpack",
+ "hubpack 0.1.0",
  "rand_core 0.6.4",
  "serde",
  "sha3",
@@ -6187,6 +6215,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "phf_shared 0.10.0",
  "precomputed-hash",
+ "serde",
 ]
 
 [[package]]
