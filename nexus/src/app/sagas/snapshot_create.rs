@@ -337,14 +337,17 @@ async fn ssc_regions_ensure(
                 flush_timeout: None,
 
                 // all downstairs will expect encrypted blocks
-                key: Some(base64::encode({
-                    // TODO the current encryption key
-                    // requirement is 32 bytes, what if that
-                    // changes?
-                    let mut random_bytes: [u8; 32] = [0; 32];
-                    rng.fill_bytes(&mut random_bytes);
-                    random_bytes
-                })),
+                key: Some(base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    {
+                        // TODO the current encryption key
+                        // requirement is 32 bytes, what if that
+                        // changes?
+                        let mut random_bytes: [u8; 32] = [0; 32];
+                        rng.fill_bytes(&mut random_bytes);
+                        random_bytes
+                    },
+                )),
 
                 // TODO TLS, which requires sending X509 stuff during
                 // downstairs region allocation too.
