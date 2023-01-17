@@ -128,6 +128,35 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+-- A physical disk which exists inside the rack.
+-- For v1, this is an M.2 form-factor.
+CREATE TABLE omicron.public.internal_physical_disk (
+    device_id STRING(63) PRIMARY KEY,
+    -- FK into the Sled table
+    sled_id UUID NOT NULL,
+    total_size INT NOT NULL
+);
+
+-- A partition within an internal physical disk.
+CREATE TABLE omicron.public.internal_physical_disk_partition (
+    slice INT NOT NULL,
+    device_id STRING(63) NOT NULL,
+
+    PRIMARY KEY (device_id, slice)
+);
+
+-- A physical disk which exists in the rack, but is externally removable.
+-- For v1, this is a U.2 form-factor.
+CREATE TABLE omicron.public.external_physical_disk (
+    device_id STRING(63) PRIMARY KEY,
+    -- FK into the Sled table
+    sled_id UUID NOT NULL,
+    total_size INT NOT NULL
+);
+
+-- TODO: Do we want internal / external disks to be in the same table?
+-- TODO: how about their partitions?
+
 /*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
