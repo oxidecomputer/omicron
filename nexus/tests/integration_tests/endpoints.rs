@@ -115,7 +115,7 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
         format!("/organizations/{}/projects/{}/snapshots", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
-        format!("/organizations/{}/projects/{}/vpcs", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/vpcs?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -127,13 +127,13 @@ lazy_static! {
     // VPC used for testing
     pub static ref DEMO_VPC_NAME: Name = "demo-vpc".parse().unwrap();
     pub static ref DEMO_VPC_URL: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpcs/{}?organization={}&project={}", *DEMO_VPC_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_VPC_URL_FIREWALL_RULES: String =
         format!("/organizations/{}/projects/{}/vpcs/{}/firewall/rules", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_ROUTERS: String =
         format!("/organizations/{}/projects/{}/vpcs/{}/routers", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_SUBNETS: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}/subnets", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-subnets?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_CREATE: params::VpcCreate =
         params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -148,9 +148,9 @@ lazy_static! {
     pub static ref DEMO_VPC_SUBNET_NAME: Name =
         "demo-vpc-subnet".parse().unwrap();
     pub static ref DEMO_VPC_SUBNET_URL: String =
-        format!("{}/{}", *DEMO_VPC_URL_SUBNETS, *DEMO_VPC_SUBNET_NAME);
+        format!("/v1/vpc-subnets/{}?organization={}&project={}&vpc={}", *DEMO_VPC_SUBNET_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_SUBNET_INTERFACES_URL: String =
-        format!("{}/network-interfaces", *DEMO_VPC_SUBNET_URL);
+        format!("/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_SUBNET_NAME);
     pub static ref DEMO_VPC_SUBNET_CREATE: params::VpcSubnetCreate =
         params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
