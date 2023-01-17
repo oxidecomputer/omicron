@@ -4,10 +4,10 @@
 
 //! User provided dropshot server context
 
-use crate::{artifacts::ArtifactStore, MgsHandle};
+use crate::{artifacts::WicketdArtifactStore, MgsHandle};
 
 /// Shared state used by API handlers
 pub struct ServerContext {
-    pub artifact_store: ArtifactStore,
     pub mgs_handle: MgsHandle,
+    pub(crate) artifact_store: WicketdArtifactStore,
 }

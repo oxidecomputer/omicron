@@ -5,9 +5,9 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::external_api::shared;
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    http_pagination::{PaginatedByName, PaginatedByNameOrId},
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
 };
@@ -44,7 +44,7 @@ pub struct SubnetPath {
     pub subnet: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -61,7 +61,7 @@ pub struct OptionalOrganizationSelector {
     pub organization_selector: Option<OrganizationSelector>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
     #[serde(flatten)]
     pub organization_selector: Option<OrganizationSelector>,
@@ -77,14 +77,6 @@ impl ProjectSelector {
             project,
         }
     }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByNameOrId,
-    #[serde(flatten)]
-    pub organization: OrganizationSelector,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -400,12 +392,14 @@ impl<'de> Visitor<'de> for X509CertVisitor {
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value.as_bytes()).map_err(|e| {
-            de::Error::custom(format!(
-                "could not base64 decode public_cert: {}",
-                e
-            ))
-        })?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&value.as_bytes())
+            .map_err(|e| {
+                de::Error::custom(format!(
+                    "could not base64 decode public_cert: {}",
+                    e
+                ))
+            })?;
         let _parsed =
             openssl::x509::X509::from_der(&raw_bytes).map_err(|e| {
                 de::Error::custom(format!(
@@ -445,12 +439,14 @@ impl<'de> Visitor<'de> for KeyVisitor {
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value).map_err(|e| {
-            de::Error::custom(format!(
-                "could not base64 decode private_key: {}",
-                e
-            ))
-        })?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&value)
+            .map_err(|e| {
+                de::Error::custom(format!(
+                    "could not base64 decode private_key: {}",
+                    e
+                ))
+            })?;
 
         // TODO: samael does not support ECDSA, update to generic PKey type when it does
         //let _parsed = openssl::pkey::PKey::private_key_from_der(&raw_bytes)
@@ -526,7 +522,8 @@ pub struct SamlIdentityProviderCreate {
 /// sign some junk data and validate it with the key pair
 fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     let private_key = {
-        let raw_bytes = base64::decode(&key_pair.private_key)?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&key_pair.private_key)?;
         // TODO: samael does not support ECDSA, update to generic PKey type when it does
         //let parsed = openssl::pkey::PKey::private_key_from_der(&raw_bytes)?;
         let parsed = openssl::rsa::Rsa::private_key_from_der(&raw_bytes)?;
@@ -535,7 +532,8 @@ fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     };
 
     let public_key = {
-        let raw_bytes = base64::decode(&key_pair.public_cert)?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&key_pair.public_cert)?;
         let parsed = openssl::x509::X509::from_der(&raw_bytes)?;
         parsed.public_key()?
     };
@@ -811,14 +809,18 @@ impl UserData {
     where
         S: Serializer,
     {
-        base64::encode(data).serialize(serializer)
+        base64::engine::general_purpose::STANDARD
+            .encode(data)
+            .serialize(serializer)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        match base64::decode(<String>::deserialize(deserializer)?) {
+        match base64::engine::general_purpose::STANDARD
+            .decode(<String>::deserialize(deserializer)?)
+        {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
                 if buf.len() > MAX_USER_DATA_BYTES {

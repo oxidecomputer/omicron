@@ -148,6 +148,13 @@ impl LocationMap {
     pub(super) fn id_to_port(&self, id: SpIdentifier) -> Option<SwitchPort> {
         self.id_to_port.get(&id).copied()
     }
+
+    /// Get an iterator of all identifier/port pairs.
+    pub(super) fn all_sp_ids(
+        &self,
+    ) -> impl Iterator<Item = (SwitchPort, SpIdentifier)> + '_ {
+        self.port_to_id.iter().map(|(&k, &v)| (k, v))
+    }
 }
 
 // This repeats the fields of `LocationConfig` but

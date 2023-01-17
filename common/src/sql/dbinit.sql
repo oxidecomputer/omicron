@@ -792,7 +792,7 @@ CREATE TABLE omicron.public.snapshot (
     volume_id UUID NOT NULL,
 
     /* Where will the scrubbed blocks eventually land? */
-    destination_volume_id UUID,
+    destination_volume_id UUID NOT NULL,
 
     gen INT NOT NULL,
     state omicron.public.snapshot_state NOT NULL,

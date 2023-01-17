@@ -10,9 +10,20 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use serde::Deserialize;
+use serde::Serialize;
 use std::net::Ipv4Addr;
 
-#[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+)]
 #[diesel(sql_type = sql_types::Inet)]
 pub struct Ipv4Net(pub external::Ipv4Net);
 

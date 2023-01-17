@@ -4,10 +4,11 @@
 
 //! A help button that brings up a help menu when selected
 
+use crate::screens::ScreenId;
+
 use super::get_control_id;
 use super::Control;
 use super::ControlId;
-use crate::ScreenId;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
 use tui::style::Style;

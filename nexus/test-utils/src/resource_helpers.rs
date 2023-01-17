@@ -68,6 +68,14 @@ where
         .unwrap()
 }
 
+pub async fn object_delete(client: &ClientTestContext, path: &str) {
+    NexusRequest::object_delete(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect(&format!("failed to make \"delete\" request to {path}"));
+}
+
 pub async fn populate_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
@@ -160,7 +168,7 @@ pub async fn create_organization(
 ) -> Organization {
     object_create(
         client,
-        "/organizations",
+        "/v1/organizations",
         &params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: organization_name.parse().unwrap(),
@@ -176,7 +184,7 @@ pub async fn create_project(
     organization_name: &str,
     project_name: &str,
 ) -> Project {
-    let url = format!("/organizations/{}/projects", &organization_name);
+    let url = format!("/v1/projects?organization={}", &organization_name);
     object_create(
         client,
         &url,
@@ -217,6 +225,19 @@ pub async fn create_disk(
     .await
 }
 
+pub async fn delete_disk(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    disk_name: &str,
+) {
+    let url = format!(
+        "/organizations/{}/projects/{}/disks/{}",
+        organization_name, project_name, disk_name
+    );
+    object_delete(client, &url).await
+}
+
 /// Creates an instance with a default NIC and no disks.
 ///
 /// Wrapper around [`create_instance_with`].
@@ -248,7 +269,7 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
 ) -> Instance {
     let url = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         organization_name, project_name
     );
     object_create(
