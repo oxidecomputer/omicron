@@ -8570,13 +8570,12 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
             "in": "query",
             "name": "vpc",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8869,7 +8868,6 @@
           {
             "in": "query",
             "name": "project",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8878,7 +8876,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
