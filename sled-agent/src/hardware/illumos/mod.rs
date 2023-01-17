@@ -181,6 +181,8 @@ fn poll_blkdev_node(
         if driver_name == "blkdev" {
             let devfs_path =
                 original_node.devfs_path().map_err(|e| Error::DevInfo(e))?;
+            assert!(devfs_path.starts_with('/'));
+            let devfs_path = format!("/devices{devfs_path}");
             let node = original_node;
             while let Some(ref node) = node.parent() {
                 let slot_prop_name = "physical-slot#".to_string();
