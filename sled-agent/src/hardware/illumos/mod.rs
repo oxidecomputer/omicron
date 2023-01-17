@@ -12,6 +12,21 @@ use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+mod disk;
+pub use disk::parse_partition_layout;
+
+#[derive(thiserror::Error, Debug)]
+enum Error {
+    #[error("Failed to access devinfo: {0}")]
+    DevInfo(anyhow::Error),
+
+    #[error("Expected property {name} to have type {ty}")]
+    UnexpectedPropertyType {
+        name: String,
+        ty: String,
+    },
+}
+
 // A snapshot of information about the underlying Tofino device
 #[derive(Copy, Clone)]
 struct TofinoSnapshot {
@@ -32,8 +47,24 @@ struct HardwareSnapshot {
 }
 
 impl HardwareSnapshot {
-    fn new() -> Self {
-        Self { tofino: TofinoSnapshot::new(), disks: HashSet::new() }
+    // Walk the device tree to capture a view of the current hardware.
+    fn new(log: &Logger) -> Result<Self, Error> {
+        let mut device_info = DevInfo::new().map_err(|e| Error::DevInfo(e))?;
+        let mut node_walker = device_info.walk_node();
+
+        let mut tofino = TofinoSnapshot::new();
+        let mut disks = HashSet::new();
+        while let Some(node) =
+            node_walker.next().transpose().map_err(|e| Error::DevInfo(e))?
+        {
+            poll_tofino_node(&mut tofino, &node);
+            poll_blkdev_node(&log, &mut disks, &node)?;
+        }
+
+        Ok(Self {
+            tofino,
+            disks,
+        })
     }
 }
 
@@ -68,6 +99,9 @@ impl HardwareView {
             disks: HashSet::new(),
         }
     }
+
+    // TODO: "new_stub_tofino" won't be enough; we may also want to stub out the
+    // disks...
 
     fn new_stub_tofino(active: bool) -> Self {
         Self { tofino: TofinoView::Stub { active }, disks: HashSet::new() }
@@ -139,29 +173,30 @@ fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
     }
 }
 
-fn poll_tofino_node(polled_hw: &mut HardwareSnapshot, node: &Node<'_>) {
+fn poll_tofino_node(tofino: &mut TofinoSnapshot, node: &Node<'_>) {
     if node.node_name() == node_name(TOFINO_SUBSYSTEM_VID, TOFINO_SUBSYSTEM_ID)
     {
-        polled_hw.tofino.exists = true;
-        polled_hw.tofino.driver_loaded =
-            node.driver_name().as_deref() == Some("tofino");
+        tofino.exists = true;
+        tofino.driver_loaded = node.driver_name().as_deref() == Some("tofino");
     }
 }
 
 fn poll_blkdev_node(
-    polled_hw: &mut HardwareSnapshot,
+    log: &Logger,
+    disks: &mut HashSet<Disk>,
     original_node: &Node<'_>,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     if let Some(driver_name) = original_node.driver_name() {
         if driver_name == "blkdev" {
             let devfs_path =
-                original_node.devfs_path().map_err(|e| e.to_string())?;
+                original_node.devfs_path().map_err(|e| Error::DevInfo(e))?;
             let node = original_node;
             while let Some(ref node) = node.parent() {
+                let slot_prop_name = "physical-slot#".to_string();
                 if let Some(Ok(slot_prop)) =
                     node.props().into_iter().find(|prop| {
                         if let Ok(prop) = prop {
-                            prop.name() == "physical-slot#".to_string()
+                            prop.name() == slot_prop_name
                         } else {
                             false
                         }
@@ -169,15 +204,28 @@ fn poll_blkdev_node(
                 {
                     let slot = slot_prop
                         .as_i64()
-                        .ok_or("Expected i64 slot".to_string())?;
-                    let variant = slot_to_disk_variant(slot)
-                        .ok_or("Device not found".to_string())?;
+                        .ok_or_else(|| {
+                            Error::UnexpectedPropertyType {
+                                name: slot_prop_name,
+                                ty: "i64".to_string(),
+                            }
+                        })?;
 
-                    polled_hw.disks.insert(Disk {
-                        devfs_path: PathBuf::from(devfs_path),
-                        slot,
-                        variant,
-                    });
+                    let variant = if let Some(variant) = slot_to_disk_variant(slot) {
+                        variant
+                    } else {
+                        warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
+                        break;
+                    };
+                    info!(log, "Found a {variant:?} device in slot# {slot}: {devfs_path}");
+                    let disk = match Disk::new(PathBuf::from(devfs_path), slot, variant) {
+                        Ok(disk) => disk,
+                        Err(err) => {
+                            warn!(log, "Failed to load disk: {err}");
+                            break;
+                        }
+                    };
+                    disks.insert(disk);
                     break;
                 }
             }
@@ -194,15 +242,7 @@ fn poll_device_tree(
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), String> {
     // Construct a view of hardware by walking the device tree.
-    let mut device_info = DevInfo::new().map_err(|e| e.to_string())?;
-    let mut node_walker = device_info.walk_node();
-    let mut polled_hw = HardwareSnapshot::new();
-    while let Some(node) =
-        node_walker.next().transpose().map_err(|e| e.to_string())?
-    {
-        poll_tofino_node(&mut polled_hw, &node);
-        poll_blkdev_node(&mut polled_hw, &node)?;
-    }
+    let polled_hw = HardwareSnapshot::new(log).map_err(|e| e.to_string())?;
 
     // After inspecting the device tree, diff with the old view, and provide
     // necessary updates.

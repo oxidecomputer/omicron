@@ -4,6 +4,7 @@
 
 //! Management of sled-local storage.
 
+use crate::hardware::Disk;
 use crate::illumos::dladm::Etherstub;
 use crate::illumos::link::VnicAllocator;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
@@ -21,7 +22,7 @@ use omicron_common::backoff;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
@@ -34,9 +35,9 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
+use crate::illumos::{fstyp::MockFstyp as Fstyp, zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
-use crate::illumos::{zfs::Zfs, zpool::Zpool};
+use crate::illumos::{fstyp::Fstyp, zfs::Zfs, zpool::Zpool};
 
 const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
 const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
@@ -49,6 +50,9 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error(transparent)]
+    DiskError(#[from] crate::hardware::DiskError),
+
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]
     ZfsListDataset(#[from] crate::illumos::zfs::ListDatasetsError),
@@ -64,6 +68,9 @@ pub enum Error {
 
     #[error(transparent)]
     GetZpoolInfo(#[from] crate::illumos::zpool::GetInfoError),
+
+    #[error(transparent)]
+    Fstyp(#[from] crate::illumos::fstyp::Error),
 
     #[error(transparent)]
     ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
@@ -830,6 +837,11 @@ impl StorageWorker {
 
 /// A sled-local view of all attached storage.
 pub struct StorageManager {
+    log: Logger,
+
+    // All disks attached to this sled.
+    disks: Arc<Mutex<HashSet<Disk>>>,
+
     // A map of "zpool name" to "pool".
     pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
     new_pools_tx: mpsc::Sender<ZpoolName>,
@@ -849,11 +861,12 @@ impl StorageManager {
         underlay_address: Ipv6Addr,
     ) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
+        let disks = Arc::new(Mutex::new(HashSet::new()));
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
         let (new_filesystems_tx, new_filesystems_rx) = mpsc::channel(10);
         let mut worker = StorageWorker {
-            log,
+            log: log.clone(),
             sled_id,
             lazy_nexus_client,
             pools: pools.clone(),
@@ -863,11 +876,44 @@ impl StorageManager {
             underlay_address,
         };
         StorageManager {
+            log,
+            disks,
             pools,
             new_pools_tx,
             new_filesystems_tx,
             task: tokio::task::spawn(async move { worker.do_work().await }),
         }
+    }
+
+    pub async fn upsert_disk(&self, disk: crate::hardware::Disk) -> Result<(), Error> {
+        info!(self.log, "Upserting disk: {disk:?}");
+
+        // If the disk contains a zpool, keep track of it.
+        let zpool_path = disk.zpool_path().await?;
+        let zpool_name = Fstyp::get_zpool(&zpool_path)?;
+
+        self.disks.lock().await.insert(disk);
+        self.upsert_zpool(&zpool_name).await?;
+
+        // TODO:
+        // - Identify + Upsert contained zpools
+        // - Notify Nexus
+        Ok(())
+    }
+
+    pub async fn delete_disk(&self, disk: crate::hardware::Disk) -> Result<(), Error> {
+        info!(self.log, "Deleting disk: {disk:?}");
+
+        // If the disk contains a zpool, remove it too.
+        let zpool_path = disk.zpool_path().await?;
+        let zpool_name = Fstyp::get_zpool(&zpool_path)?;
+
+        self.disks.lock().await.remove(&disk);
+
+        // TODO:
+        // - Remove corresponding zpools
+        // - Notify Nexus
+        todo!();
     }
 
     /// Adds a zpool to the storage manager.

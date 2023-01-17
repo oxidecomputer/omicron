@@ -2515,7 +2515,7 @@ dependencies = [
 [[package]]
 name = "illumos-devinfo"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/illumos-devinfo?rev=8fca0709e5137a3758374cb41ab1bfc60b03e6a9#8fca0709e5137a3758374cb41ab1bfc60b03e6a9"
+source = "git+https://github.com/oxidecomputer/illumos-devinfo?rev=9281773a2353a94160a8d5ab1e9f1f6f127db1b0#9281773a2353a94160a8d5ab1e9f1f6f127db1b0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2836,6 +2836,22 @@ name = "libc"
 version = "0.2.139"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
+
+[[package]]
+name = "libefi-illumos"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/libefi-illumos?branch=master#641e8e1eabb848c05f8e2d7350dd19ced96bb43a"
+dependencies = [
+ "anyhow",
+ "libefi-sys",
+ "uuid",
+]
+
+[[package]]
+name = "libefi-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b024e211b1b371da58cd69e4fb8fa4ed16915edcc0e2e1fb04ac4bad61959f25"
 
 [[package]]
 name = "libloading"
@@ -3636,6 +3652,7 @@ dependencies = [
  "internal-dns-client",
  "ipnetwork",
  "libc",
+ "libefi-illumos",
  "macaddr",
  "mockall",
  "nexus-client",

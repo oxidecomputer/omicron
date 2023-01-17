@@ -374,7 +374,7 @@ impl SledAgent {
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
         tokio::spawn(async move {
-            sa.monitor_task(log).await;
+            sa.hardware_monitor_task(log).await;
         });
 
         Ok(sled_agent)
@@ -400,9 +400,11 @@ impl SledAgent {
                 warn!(log, "Failed to deactivate switch: {e}");
             }
         }
+
+        // TODO: Handle disks?
     }
 
-    async fn monitor_task(&self, log: Logger) {
+    async fn hardware_monitor_task(&self, log: Logger) {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.inner.hardware.monitor();
 
@@ -413,16 +415,17 @@ impl SledAgent {
         // Rely on monitoring for tracking all future updates.
         loop {
             use tokio::sync::broadcast::error::RecvError;
+            use crate::hardware::HardwareUpdate;
             match hardware_updates.recv().await {
                 Ok(update) => match update {
-                    crate::hardware::HardwareUpdate::TofinoDeviceChange => {
+                    HardwareUpdate::TofinoDeviceChange => {
                         // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
                         //
                         // This won't block on Nexus responding; it may take while before
                         // Nexus actually comes online.
                         self.notify_nexus_about_self(&log);
                     }
-                    crate::hardware::HardwareUpdate::TofinoLoaded => {
+                    HardwareUpdate::TofinoLoaded => {
                         let switch_zone_ip = Some(self.inner.switch_zone_ip());
                         if let Err(e) = self
                             .inner
@@ -433,11 +436,21 @@ impl SledAgent {
                             warn!(log, "Failed to activate switch: {e}");
                         }
                     }
-                    crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                    HardwareUpdate::TofinoUnloaded => {
                         if let Err(e) =
                             self.inner.services.deactivate_switch().await
                         {
                             warn!(log, "Failed to deactivate switch: {e}");
+                        }
+                    }
+                    HardwareUpdate::DiskAdded(disk) => {
+                        if let Err(e) = self.inner.storage.upsert_disk(disk).await {
+                            warn!(log, "Failed to add disk: {e}");
+                        }
+                    }
+                    HardwareUpdate::DiskRemoved(disk) => {
+                        if let Err(e) = self.inner.storage.delete_disk(disk).await {
+                            warn!(log, "Failed to remove disk: {e}");
                         }
                     }
                 },

@@ -2,8 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::hardware::{DiskError, DiskVariant, Partition};
 use slog::Logger;
+use std::path::PathBuf;
 use tokio::sync::broadcast;
+
 
 /// An unimplemented, stub representation of the underlying hardware.
 ///
@@ -34,4 +37,11 @@ impl HardwareManager {
     pub fn monitor(&self) -> broadcast::Receiver<super::HardwareUpdate> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
+}
+
+pub fn parse_partition_layout(
+    _devfs_path: &PathBuf,
+    _variant: DiskVariant,
+) -> Result<Vec<Partition>, DiskError> {
+    unimplemented!("Accessing hardware unsupported on non-illumos");
 }
