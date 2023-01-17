@@ -901,7 +901,6 @@ impl StorageManager {
         self.upsert_zpool(&zpool_name).await?;
 
         // TODO:
-        // - Identify + Upsert contained zpools
         // - Notify Nexus
         Ok(())
     }
@@ -917,9 +916,9 @@ impl StorageManager {
         let zpool_name = Fstyp::get_zpool(&zpool_path)?;
 
         self.disks.lock().await.remove(&disk);
+        self.pools.lock().await.remove(&zpool_name);
 
         // TODO:
-        // - Remove corresponding zpools
         // - Notify Nexus
         todo!();
     }

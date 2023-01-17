@@ -77,47 +77,46 @@ impl Disk {
     }
 
     // Returns the "illumos letter-indexed path" for a device.
-    fn partition_path(&self, index: u8) -> PathBuf {
+    fn partition_path(&self, index: usize) -> Option<PathBuf> {
+        let index = u8::try_from(index).ok()?;
+
         let path = self.devfs_path.display();
         let character = match index {
-            0..=5 => ('a' as u8 + index) as char,
-            _ => unimplemented!("Partition path at index {index} unsupported"),
+            0..=5 => (b'a' + index) as char,
+            _ => return None,
         };
-        PathBuf::from(format!("{path}:{character}"))
+        Some(PathBuf::from(format!("{path}:{character}")))
     }
 
     // Finds the first 'variant' partition, and returns the path to it.
     fn partition_device_path(
         &self,
         expected_partition: Partition,
-    ) -> Option<PathBuf> {
-        self.partitions.iter().enumerate().find_map(|(index, partition)| {
+    ) -> Result<PathBuf, DiskError> {
+        for (index, partition) in self.partitions.iter().enumerate() {
             if &expected_partition == partition {
-                Some(self.partition_path(
-                    u8::try_from(index).expect("Index too large"),
-                ))
-            } else {
-                None
+                let path = self.partition_path(index).ok_or_else(|| {
+                    DiskError::NotFound {
+                        path: self.devfs_path.clone(),
+                        partition: expected_partition,
+                    }
+                })?;
+                return Ok(path);
             }
-        })
+        }
+        return Err(DiskError::NotFound {
+            path: self.devfs_path.clone(),
+            partition: expected_partition,
+        });
     }
 
     pub async fn zpool_path(&self) -> Result<PathBuf, DiskError> {
-        self.partition_device_path(Partition::ZfsPool).ok_or_else(|| {
-            DiskError::NotFound {
-                path: self.devfs_path.clone(),
-                partition: Partition::ZfsPool,
-            }
-        })
+        self.partition_device_path(Partition::ZfsPool)
     }
 
+    #[allow(dead_code)]
     pub async fn boot_path(&self) -> Result<PathBuf, DiskError> {
-        self.partition_device_path(Partition::BootImage).ok_or_else(|| {
-            DiskError::NotFound {
-                path: self.devfs_path.clone(),
-                partition: Partition::BootImage,
-            }
-        })
+        self.partition_device_path(Partition::BootImage)
     }
 }
 
