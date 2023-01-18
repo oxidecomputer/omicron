@@ -146,6 +146,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
 
+        api.register(disk_list_v1)?;
+        api.register(disk_create_v1)?;
+        api.register(disk_view_v1)?;
+        api.register(disk_delete_v1)?;
+
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
@@ -155,6 +160,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
+        api.register(instance_disk_list)?;
+        api.register(instance_disk_attach)?;
+        api.register(instance_disk_detach)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
 
@@ -166,6 +174,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_reboot_v1)?;
         api.register(instance_start_v1)?;
         api.register(instance_stop_v1)?;
+        api.register(instance_disk_list_v1)?;
+        api.register(instance_disk_attach_v1)?;
+        api.register(instance_disk_detach_v1)?;
         api.register(instance_serial_console_v1)?;
         api.register(instance_serial_console_stream_v1)?;
 
@@ -175,10 +186,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_view)?;
         api.register(image_view_by_id)?;
         api.register(image_delete)?;
-
-        api.register(instance_disk_list)?;
-        api.register(instance_disk_attach)?;
-        api.register(instance_disk_detach)?;
 
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
@@ -2309,11 +2316,62 @@ async fn ip_pool_service_range_remove(
 
 // Disks
 
+#[endpoint {
+    method = GET,
+    path = "/v1/disks",
+    tags = ["disks"],
+}]
+async fn disk_list_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_disks_by_id(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params,
+                    )
+                    .await?
+            }
+            PaginatedBy::Name(pag_params, selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                nexus
+                    .project_list_disks_by_name(
+                        &opctx,
+                        &project_lookup,
+                        &pag_params.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
+            }
+        }
+        .into_iter()
+        .map(|disk| disk.into())
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            disks,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List disks
+/// Use `GET /v1/disks` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"]
+    tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2324,15 +2382,17 @@ async fn disk_list(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
+    let project_selector = params::ProjectSelector::new(
+        Some(path.organization_name.into()),
+        path.project_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_project = nexus.project_lookup(&opctx, &project_selector)?;
         let disks = nexus
-            .project_list_disks(
+            .project_list_disks_by_name(
                 &opctx,
-                organization_name,
-                project_name,
+                &authz_project,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -2350,11 +2410,37 @@ async fn disk_list(
 }
 
 /// Create a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks",
+    tags = ["disks"]
+}]
+async fn disk_create_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<params::ProjectSelector>,
+    new_disk: TypedBody<params::DiskCreate>,
+) -> Result<HttpResponseCreated<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let params = new_disk.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
+        let disk =
+            nexus.project_create_disk(&opctx, &project_lookup, &params).await?;
+        Ok(HttpResponseCreated(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // TODO-correctness See note about instance create.  This should be async.
+/// Use `POST /v1/disks` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"]
+    tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2364,20 +2450,45 @@ async fn disk_create(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let new_disk_params = &new_disk.into_inner();
+    let project_selector = params::ProjectSelector::new(
+        Some(path.organization_name.into()),
+        path.project_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let disk = nexus
-            .project_create_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &new_disk_params,
-            )
+            .project_create_disk(&opctx, &project_lookup, &new_disk_params)
             .await?;
         Ok(HttpResponseCreated(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/disks/{disk}",
+    tags = ["disks"]
+}]
+async fn disk_view_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
+        Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2391,10 +2502,12 @@ struct DiskPathParam {
 }
 
 /// Fetch a disk
+/// Use `GET /v1/disks/{disk}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
     tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2403,24 +2516,27 @@ async fn disk_view(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
+    let disk_selector = params::DiskSelector::new(
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.disk_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus
-            .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
-            .await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch a disk by id
+/// Use `GET /v1/disks/{disk}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/disks/{id}",
     tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2429,10 +2545,11 @@ async fn disk_view_by_id(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
+    let disk_selector = params::DiskSelector::new(None, None, path.id.into());
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus.disk_fetch_by_id(&opctx, id).await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2441,8 +2558,37 @@ async fn disk_view_by_id(
 /// Delete a disk
 #[endpoint {
     method = DELETE,
+    path = "/v1/disks/{disk}",
+    tags = ["disks"],
+}]
+async fn disk_delete_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
+        nexus.project_delete_disk(&disk_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Use `DELETE /v1/disks/{disk}` instead
+#[endpoint {
+    method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
     tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2451,19 +2597,15 @@ async fn disk_delete(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
+    let disk_selector = params::DiskSelector::new(
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.disk_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &disk_name,
-            )
-            .await?;
+        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
+        nexus.project_delete_disk(&disk_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2496,28 +2638,25 @@ async fn disk_metrics_list(
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-
     let path = path_params.into_inner();
-    let organization_name = &path.inner.organization_name;
-    let project_name = &path.inner.project_name;
-    let disk_name = &path.inner.disk_name;
-    let metric_name = path.metric_name;
-
     let query = query_params.into_inner();
     let limit = rqctx.page_limit(&query)?;
-
+    let disk_selector = params::DiskSelector::new(
+        Some(path.inner.organization_name.into()),
+        Some(path.inner.project_name.into()),
+        path.inner.disk_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-
-        // This ensures the user is authorized on Action::Read for this disk
-        let disk = nexus
-            .disk_fetch(&opctx, organization_name, project_name, disk_name)
+        let (.., authz_disk) = nexus
+            .disk_lookup(&opctx, &disk_selector)?
+            .lookup_for(authz::Action::Read)
             .await?;
-        let upstairs_uuid = disk.id();
+
         let result = nexus
             .select_timeseries(
-                &format!("crucible_upstairs:{}", metric_name),
-                &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                &format!("crucible_upstairs:{}", path.metric_name),
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
             )
@@ -3223,12 +3362,74 @@ async fn instance_serial_console_stream(
     Ok(())
 }
 
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/disks",
+    tags = ["instances"],
+}]
+async fn instance_disk_list_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+    path_params: Path<params::InstancePath>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = match name_or_id_pagination(&query, &pag_params)? {
+            PaginatedBy::Id(pag_params, selector) => {
+                let instance_selector = params::InstanceSelector {
+                    project_selector: selector.project_selector,
+                    instance: path.instance,
+                };
+                let instance_lookup =
+                    nexus.instance_lookup(&opctx, &instance_selector)?;
+                nexus
+                    .instance_list_disks_by_id(
+                        &opctx,
+                        &instance_lookup,
+                        &pag_params,
+                    )
+                    .await?
+            }
+            PaginatedBy::Name(pag_params, selector) => {
+                let instance_selector = params::InstanceSelector {
+                    project_selector: selector.project_selector,
+                    instance: path.instance,
+                };
+                let instance_lookup =
+                    nexus.instance_lookup(&opctx, &instance_selector)?;
+                nexus
+                    .instance_list_disks_by_name(
+                        &opctx,
+                        &instance_lookup,
+                        &pag_params.map_name(|n| Name::ref_cast(n)),
+                    )
+                    .await?
+            }
+        }
+        .into_iter()
+        .map(|d| d.into())
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            disks,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List an instance's disks
-// TODO-scalability needs to be paginated
+/// Use `GET /v1/instances/{instance}/disks` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_disk_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3239,17 +3440,19 @@ async fn instance_disk_list(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let instance_selector = params::InstanceSelector::new(
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.instance_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disks = nexus
-            .instance_list_disks(
+            .instance_list_disks_by_name(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
+                &instance_lookup,
                 &data_page_params_for(&rqctx, &query)?
                     .map_name(|n| Name::ref_cast(n)),
             )
@@ -3266,11 +3469,44 @@ async fn instance_disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/disks/attach",
+    tags = ["instances"],
+}]
+async fn instance_disk_attach_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    disk_to_attach: TypedBody<params::DiskPath>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk = disk_to_attach.into_inner().disk;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disk =
+            nexus.instance_attach_disk(&opctx, &instance_lookup, disk).await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Attach a disk to an instance
+/// Use `POST /v1/instances/{instance}/disks/attach` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_disk_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3280,30 +3516,62 @@ async fn instance_disk_attach(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let disk = disk_to_attach.into_inner();
+    let instance_selector = params::InstanceSelector::new(
+        Some(path.organization_name.clone().into()),
+        Some(path.project_name.clone().into()),
+        path.instance_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disk = nexus
-            .instance_attach_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_attach.into_inner().name.into(),
-            )
+            .instance_attach_disk(&opctx, &instance_lookup, disk.name.into())
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/disks/detach",
+    tags = ["instances"],
+}]
+async fn instance_disk_detach_v1(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    disk_to_detach: TypedBody<params::DiskPath>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk = disk_to_detach.into_inner().disk;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disk =
+            nexus.instance_detach_disk(&opctx, &instance_lookup, disk).await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Detach a disk from an instance
+/// Use `POST /v1/disks/{disk}/detach` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_disk_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3313,19 +3581,18 @@ async fn instance_disk_detach(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let disk = disk_to_detach.into_inner();
+    let instance_selector = params::InstanceSelector::new(
+        Some(path.organization_name.clone().into()),
+        Some(path.project_name.clone().into()),
+        path.instance_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disk = nexus
-            .instance_detach_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_detach.into_inner().name.into(),
-            )
+            .instance_detach_disk(&opctx, &instance_lookup, disk.name.into())
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };

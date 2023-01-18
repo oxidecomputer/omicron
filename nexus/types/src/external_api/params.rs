@@ -19,6 +19,7 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
+// TODO-v1: Post migration rename `*Path` to `*Identifier`
 #[derive(Deserialize, JsonSchema)]
 pub struct OrganizationPath {
     pub organization: NameOrId,
@@ -44,7 +45,12 @@ pub struct SubnetPath {
     pub subnet: NameOrId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DiskPath {
+    pub disk: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -79,10 +85,31 @@ impl ProjectSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub disk: NameOrId,
+}
+
+impl DiskSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        disk: NameOrId,
+    ) -> Self {
+        DiskSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            disk,
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1017,6 +1044,7 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
+/// TODO-v1: Delete this
 /// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1024,6 +1052,7 @@ pub struct DiskIdentifier {
     pub name: Name,
 }
 
+/// TODO-v1: Delete this
 /// Parameters for the
 /// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
 /// attached or detached to an instance.
