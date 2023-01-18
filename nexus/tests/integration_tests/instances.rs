@@ -4,6 +4,9 @@
 
 //! Tests basic instance support in the API
 
+use super::metrics::query_for_latest_metric;
+
+use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -30,6 +33,7 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
+use omicron_nexus::context::OpContext;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
@@ -514,6 +518,178 @@ async fn test_instances_create_reboot_halt(
 }
 
 #[nexus_test]
+async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
+    // Normally, Nexus is not registered as a producer for tests.
+    // Turn this bit on so we can also test some metrics from Nexus itself.
+    cptestctx.server.register_as_producer().await;
+
+    let client = &cptestctx.external_client;
+    let oximeter = &cptestctx.oximeter;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+
+    // Create an IP pool and project that we'll use for testing.
+    populate_ip_pool(&client, "default", None).await;
+    let organization_id =
+        create_organization(&client, ORGANIZATION_NAME).await.identity.id;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
+        .await
+        .identity
+        .id;
+
+    // Query the view of these metrics stored within CRDB
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
+    assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
+
+    // Query the view of these metrics stored within Clickhouse
+    let metric_url = |metric_type: &str, id: Uuid| {
+        format!(
+            "/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
+            Utc::now() - chrono::Duration::seconds(30),
+            Utc::now() + chrono::Duration::seconds(30),
+        )
+    };
+    oximeter.force_collect().await;
+    for id in vec![organization_id, project_id] {
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(query_for_latest_metric(
+            client,
+            &metric_url("ram_provisioned", id),
+        )
+        .await, 0);
+    }
+
+    // Create an instance.
+    let instance_name = "just-rainsticks";
+    let instance_url = format!("{url_instances}/{instance_name}");
+    create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+        .await;
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, 4);
+    assert_eq!(
+        virtual_provisioning_collection.ram_provisioned.0,
+        ByteCount::from_gibibytes_u32(1),
+    );
+
+    // Stop the instance
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    // NOTE: I think it's arguably "more correct" to identify that the
+    // number of CPUs being used by guests at this point is actually "0",
+    // not "4", because the instance is stopped (same re: RAM usage).
+    //
+    // However, for implementation reasons, this is complicated (we have a
+    // tendency to update the runtime without checking the prior state, which
+    // makes edge-triggered behavior trickier to notice).
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    let expected_cpus = 4;
+    let expected_ram =
+        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, expected_cpus);
+    assert_eq!(
+        i64::from(virtual_provisioning_collection.ram_provisioned.0),
+        expected_ram
+    );
+    oximeter.force_collect().await;
+    for id in vec![organization_id, project_id] {
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", id),
+            )
+            .await,
+            expected_cpus
+        );
+        assert_eq!(query_for_latest_metric(
+            client,
+            &metric_url("ram_provisioned", id),
+        )
+        .await, expected_ram);
+    }
+
+    // Stop the instance
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
+    assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
+    oximeter.force_collect().await;
+    for id in vec![organization_id, project_id] {
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(query_for_latest_metric(
+            client,
+            &metric_url("ram_provisioned", id),
+        )
+        .await, 0);
+    }
+}
+
+#[nexus_test]
 async fn test_instances_create_stopped_start(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -580,13 +756,9 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
-    let instance = create_instance(
-        client,
-        ORGANIZATION_NAME,
-        PROJECT_NAME,
-        "just-rainsticks",
-    )
-    .await;
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
 
     // Simulate the instance booting.
     instance_simulate(nexus, &instance.identity.id).await;
