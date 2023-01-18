@@ -539,7 +539,7 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.volume_remove_read_only_parent(db_disk.volume_id).await?;
+        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
 
         Ok(())
     }
