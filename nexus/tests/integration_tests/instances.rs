@@ -4,7 +4,9 @@
 
 //! Tests basic instance support in the API
 
-use super::metrics::query_for_latest_metric;
+use super::metrics::{
+    query_for_latest_metric, query_for_metrics_until_they_exist,
+};
 
 use chrono::Utc;
 use http::method::Method;
@@ -562,6 +564,12 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     };
     oximeter.force_collect().await;
     for id in vec![organization_id, project_id] {
+        query_for_metrics_until_they_exist(
+            client,
+            &metric_url("virtual_disk_space_provisioned", id),
+        )
+        .await;
+
         assert_eq!(
             query_for_latest_metric(
                 client,
