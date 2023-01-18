@@ -151,8 +151,8 @@ CREATE TABLE omicron.public.certificate (
 -- Add an index which lets us look up certificates for a particular service
 -- class.
 CREATE INDEX ON omicron.public.certificate (
-    id,
-    service
+    service,
+    id
 ) WHERE
     time_deleted IS NULL;
 
