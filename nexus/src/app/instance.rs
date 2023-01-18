@@ -478,7 +478,7 @@ impl super::Nexus {
         // Gather disk information and turn that into DiskRequests
         let disks = self
             .db_datastore
-            .instance_list_disks(
+            .instance_list_disks_by_name(
                 &opctx,
                 &authz_instance,
                 &DataPageParams {
@@ -612,7 +612,8 @@ impl super::Nexus {
             external_ips,
             firewall_rules,
             disks: disk_reqs,
-            cloud_init_bytes: Some(base64::encode(
+            cloud_init_bytes: Some(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&public_keys)?,
             )),
         };
@@ -699,23 +700,31 @@ impl super::Nexus {
         }
     }
 
-    /// Lists disks attached to the instance.
-    pub async fn instance_list_disks(
+    /// Lists disks attached to the instance by id.
+    pub async fn instance_list_disks_by_id(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Disk> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .instance_list_disks_by_id(opctx, &authz_instance, pagparams)
+            .await
+    }
+
+    /// Lists disks attached to the instance by name.
+    pub async fn instance_list_disks_by_name(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .instance_list_disks(opctx, &authz_instance, pagparams)
+            .instance_list_disks_by_name(opctx, &authz_instance, pagparams)
             .await
     }
 
@@ -723,24 +732,34 @@ impl super::Nexus {
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_project_disk, authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        // TODO-v1: Write test to verify this case
+        // Because both instance and disk can be provided by ID it's possible for someone
+        // to specify resources from different projects. The lookups would resolve the resources
+        // (assuming the user had sufficient permissions on both) without verifying the shared hierarchy.
+        // To mitigate that we verify that their parent projects have the same ID.
+        if authz_project.id() != authz_project_disk.id() {
+            return Err(Error::InvalidRequest {
+                message: "disk must be in the same project as the instance"
+                    .to_string(),
+            });
+        }
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
@@ -771,25 +790,22 @@ impl super::Nexus {
     pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
-
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk detach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively

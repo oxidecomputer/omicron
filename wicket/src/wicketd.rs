@@ -4,13 +4,14 @@
 
 //! Code for talking to wicketd
 
-use crate::Event;
 use slog::{debug, o, warn, Logger};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::RackV1Inventory;
+
+use crate::wizard::Event;
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const WICKETD_TIMEOUT_MS: u32 = 1000;
@@ -49,22 +50,7 @@ impl WicketdManager {
     ) -> (WicketdHandle, WicketdManager) {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
-        let endpoint =
-            format!("http://[{}]:{}", wicketd_addr.ip(), wicketd_addr.port());
-
-        let timeout =
-            std::time::Duration::from_millis(WICKETD_TIMEOUT_MS.into());
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(timeout)
-            .timeout(timeout)
-            .build()
-            .unwrap();
-
-        let inventory_client = wicketd_client::Client::new_with_client(
-            &endpoint,
-            client,
-            log.clone(),
-        );
+        let inventory_client = create_wicketd_client(&log, wicketd_addr);
         let inventory = RackV1Inventory { sps: vec![] };
         let handle = WicketdHandle { tx };
         let manager =
@@ -92,6 +78,22 @@ impl WicketdManager {
             let _ = self.wizard_tx.send(Event::Inventory(inventory));
         }
     }
+}
+
+pub(crate) fn create_wicketd_client(
+    log: &Logger,
+    wicketd_addr: SocketAddrV6,
+) -> wicketd_client::Client {
+    let endpoint =
+        format!("http://[{}]:{}", wicketd_addr.ip(), wicketd_addr.port());
+    let timeout = std::time::Duration::from_millis(WICKETD_TIMEOUT_MS.into());
+    let client = reqwest::ClientBuilder::new()
+        .connect_timeout(timeout)
+        .timeout(timeout)
+        .build()
+        .unwrap();
+
+    wicketd_client::Client::new_with_client(&endpoint, client, log.clone())
 }
 
 async fn poll_inventory(

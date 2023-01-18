@@ -227,7 +227,8 @@ pub struct RelayState {
 
 impl RelayState {
     pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
-        Ok(base64::encode(
+        Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
             serde_json::to_string(&self).context("encoding relay state")?,
         ))
     }
@@ -235,8 +236,11 @@ impl RelayState {
     pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
         serde_json::from_str(
             &String::from_utf8(
-                base64::decode(encoded)
-                    .context("base64 decoding relay state")?,
+                base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    encoded,
+                )
+                .context("base64 decoding relay state")?,
             )
             .context("creating relay state string")?,
         )

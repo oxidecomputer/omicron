@@ -156,8 +156,13 @@ async fn instance_launch() -> Result<()> {
         .and_then(|line| line.split_whitespace().nth(1))
         .context("failed to get SSH host key from serial console")?;
     eprintln!("host key: ssh-ed25519 {}", host_key);
-    let host_key =
-        PublicKey::parse(b"ssh-ed25519", &base64::decode(host_key)?)?;
+    let host_key = PublicKey::parse(
+        b"ssh-ed25519",
+        &base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            host_key,
+        )?,
+    )?;
 
     eprintln!("connecting ssh");
     let mut session = russh::client::connect(

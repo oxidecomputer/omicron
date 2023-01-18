@@ -400,14 +400,17 @@ async fn sdc_regions_ensure(
                 flush_timeout: None,
 
                 // all downstairs will expect encrypted blocks
-                key: Some(base64::encode({
-                    // TODO the current encryption key
-                    // requirement is 32 bytes, what if that
-                    // changes?
-                    let mut random_bytes: [u8; 32] = [0; 32];
-                    rng.fill_bytes(&mut random_bytes);
-                    random_bytes
-                })),
+                key: Some(base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    {
+                        // TODO the current encryption key
+                        // requirement is 32 bytes, what if that
+                        // changes?
+                        let mut random_bytes: [u8; 32] = [0; 32];
+                        rng.fill_bytes(&mut random_bytes);
+                        random_bytes
+                    },
+                )),
 
                 // TODO TLS, which requires sending X509 stuff during
                 // downstairs region allocation too.
@@ -585,7 +588,7 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
-        context::OpContext, db, db::datastore::DataStore, external_api::params,
+        context::OpContext, db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -599,7 +602,6 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
-    use ref_cast::RefCast;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -863,20 +865,15 @@ pub(crate) mod test {
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
+        let disk_selector = params::DiskSelector::new(
+            Some(Name::try_from(ORG_NAME.to_string()).unwrap().into()),
+            Some(Name::try_from(PROJECT_NAME.to_string()).unwrap().into()),
+            Name::try_from(DISK_NAME.to_string()).unwrap().into(),
+        );
+        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector).unwrap();
 
         nexus
-            .project_delete_disk(
-                &opctx,
-                db::model::Name::ref_cast(
-                    &Name::try_from(ORG_NAME.to_string()).unwrap(),
-                ),
-                db::model::Name::ref_cast(
-                    &Name::try_from(PROJECT_NAME.to_string()).unwrap(),
-                ),
-                db::model::Name::ref_cast(
-                    &Name::try_from(DISK_NAME.to_string()).unwrap(),
-                ),
-            )
+            .project_delete_disk(&disk_lookup)
             .await
             .expect("Failed to delete disk");
     }

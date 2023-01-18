@@ -143,6 +143,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert_cmd"
+version = "2.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9834fcc22e0874394a010230586367d4a3e9f11b560f469262678547e1d2575e"
+dependencies = [
+ "bstr 1.1.0",
+ "doc-comment",
+ "predicates",
+ "predicates-core",
+ "predicates-tree",
+ "wait-timeout",
+]
+
+[[package]]
 name = "assert_matches"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -504,6 +518,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b45ea9b00a7b3f2988e9a65ad3917e62123c38dba709b666506207be96d1790b"
+dependencies = [
+ "memchr",
+ "once_cell",
+ "regex-automata",
+ "serde",
+]
+
+[[package]]
 name = "buf-list"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -739,12 +765,12 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.32"
+version = "4.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7db700bc935f9e43e88d00b0850dae18a63773cfbec6d8e070fccf7fef89a39"
+checksum = "4ec7a4128863c188deefe750ac1d1dfe66c236909f845af04beed823638dc1b2"
 dependencies = [
  "bitflags",
- "clap_derive 4.0.21",
+ "clap_derive 4.1.0",
  "clap_lex 0.3.0",
  "is-terminal",
  "once_cell",
@@ -767,9 +793,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.0.21"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0177313f9f02afc995627906bbd8967e2be069f5261954222dac78290c2b9014"
+checksum = "684a277d672e91966334af371f1a7b5833f9aa00b07c84e92fbce95e00208ce8"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -1294,9 +1320,9 @@ dependencies = [
 
 [[package]]
 name = "debug-ignore"
-version = "1.0.3"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b48b0b49e2f473c499ddcd133e78f0f2629aaa997ee61adadb2d1753e6af4cf"
+checksum = "ffe7ed1d93f4553003e20b629abe9085e1e81b1429520f897f8f8860bc6dfc21"
 
 [[package]]
 name = "der"
@@ -1675,7 +1701,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.20.0",
+ "base64 0.21.0",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
@@ -2011,7 +2037,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.32",
+ "clap 4.1.1",
  "futures",
  "gateway-client",
  "libc",
@@ -2143,7 +2169,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a1e17342619edbc21a964c2afbeb6c820c6a2560032872f397bb97ea127bd0a"
 dependencies = [
  "aho-corasick",
- "bstr",
+ "bstr 0.2.17",
  "fnv",
  "log",
  "regex",
@@ -2367,7 +2393,7 @@ version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6f25cfb6def593d43fae1ead24861f217e93bc70768a45cc149a69b5f049df4"
 dependencies = [
- "bstr",
+ "bstr 0.2.17",
  "bytes",
  "crossbeam-channel",
  "form_urlencoded",
@@ -2445,6 +2471,19 @@ dependencies = [
  "rustls-native-certs",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "hyper-tls"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
+dependencies = [
+ "bytes",
+ "hyper",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
 ]
 
 [[package]]
@@ -2537,9 +2576,9 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.17.2"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4295cbb7573c16d310e99e713cf9e75101eb190ab31fccd35f2d2691b4352b19"
+checksum = "cef509aa9bc73864d6756f0d34d35504af3cf0844373afe9b8669a5b8005a729"
 dependencies = [
  "console",
  "number_prefix",
@@ -2572,7 +2611,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.0.32",
+ "clap 4.1.1",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -2610,7 +2649,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.0.32",
+ "clap 4.1.1",
  "dropshot",
  "expectorate",
  "hyper",
@@ -2640,7 +2679,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.32",
+ "clap 4.1.1",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3064,6 +3103,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "native-tls"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07226173c32f2926027b63cce4bcd8076c3552846cbe7925f3aaffeac0a3b92e"
+dependencies = [
+ "lazy_static",
+ "libc",
+ "log",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "schannel",
+ "security-framework",
+ "security-framework-sys",
+ "tempfile",
+]
+
+[[package]]
 name = "nb"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3225,7 +3282,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
- "base64 0.20.0",
+ "base64 0.21.0",
  "chrono",
  "nexus-passwords",
  "omicron-common",
@@ -3429,7 +3486,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.32",
+ "clap 4.1.1",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -3446,7 +3503,7 @@ name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "clap 4.0.32",
+ "clap 4.1.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -3485,10 +3542,10 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
- "base64 0.20.0",
+ "base64 0.21.0",
  "bb8",
  "chrono",
- "clap 4.0.32",
+ "clap 4.1.1",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3578,7 +3635,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.32",
+ "clap 4.1.1",
  "futures",
  "hex",
  "indicatif",
@@ -3616,7 +3673,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.0.32",
+ "clap 4.1.1",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -3676,7 +3733,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.32",
+ "clap 4.1.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -3878,7 +3935,7 @@ dependencies = [
 name = "oxide-client"
 version = "0.1.0"
 dependencies = [
- "base64 0.20.0",
+ "base64 0.21.0",
  "chrono",
  "futures",
  "progenitor",
@@ -3936,7 +3993,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.32",
+ "clap 4.1.1",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3967,7 +4024,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.0.32",
+ "clap 4.1.1",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4556,7 +4613,7 @@ version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#634bf98b053cc494191365e2072b3580f4b03df6"
 dependencies = [
  "anyhow",
- "clap 4.0.32",
+ "clap 4.1.1",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -4620,9 +4677,9 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=666ded451b13bba0895485c0b34515c0e59c2c6e#666ded451b13bba0895485c0b34515c0e59c2c6e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=92508d573529a1ee50a9422fbca045a5e980a2b5#92508d573529a1ee50a9422fbca045a5e980a2b5"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.0",
  "crucible-client-types",
  "progenitor",
  "propolis_types",
@@ -4641,7 +4698,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=666ded451b13bba0895485c0b34515c0e59c2c6e#666ded451b13bba0895485c0b34515c0e59c2c6e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=92508d573529a1ee50a9422fbca045a5e980a2b5#92508d573529a1ee50a9422fbca045a5e980a2b5"
 dependencies = [
  "schemars",
  "serde",
@@ -4973,10 +5030,12 @@ dependencies = [
  "http-body",
  "hyper",
  "hyper-rustls",
+ "hyper-tls",
  "ipnet",
  "js-sys",
  "log",
  "mime",
+ "native-tls",
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
@@ -4986,6 +5045,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tokio-util",
  "tower-service",
@@ -5674,6 +5734,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell-words"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
+
+[[package]]
 name = "shlex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5954,7 +6020,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.0.32",
+ "clap 4.1.1",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -6454,6 +6520,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-native-tls"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7d995660bd2b7f8c1568414c1126076c13fbb725c40112dc0120b78eb9b717b"
+dependencies = [
+ "native-tls",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-postgres"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6708,9 +6784,9 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "trybuild"
-version = "1.0.75"
+version = "1.0.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1212c215a87a183687a7cc7065901b1a98da6b37277d51a1b5faedbb4efd4f3"
+checksum = "6ed2c57956f91546d4d33614265a85d55c8e1ab91484853a10335894786d7db6"
 dependencies = [
  "glob",
  "once_cell",
@@ -7179,7 +7255,9 @@ name = "wicket"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.32",
+ "assert_cmd",
+ "camino",
+ "clap 4.1.1",
  "crossterm",
  "futures",
  "hex",
@@ -7188,8 +7266,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha3",
+ "shell-words",
  "slog",
  "slog-async",
+ "slog-envlogger",
  "slog-term",
  "snafu",
  "tar",
@@ -7207,7 +7287,7 @@ dependencies = [
  "async-trait",
  "buf-list",
  "bytes",
- "clap 4.0.32",
+ "clap 4.1.1",
  "debug-ignore",
  "dropshot",
  "expectorate",

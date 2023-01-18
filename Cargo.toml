@@ -88,11 +88,12 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
+assert_cmd = "2.0.8"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
 async-trait = "0.1.60"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
-base64 = "0.20.0"
+base64 = "0.21.0"
 bb8 = "0.8.0"
 bcs = "0.1.4"
 bincode = "1.3.3"
@@ -101,7 +102,7 @@ bytes = "1.3.0"
 camino = "1.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.1", features = ["derive"] }
 cookie = "0.16"
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
@@ -110,7 +111,7 @@ crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev
 display-error-chain = "0.1.1"
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
-debug-ignore = "1.0.3"
+debug-ignore = "1.0.5"
 derive_more = "0.99.17"
 diesel = { version = "2.0.2" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
@@ -131,7 +132,7 @@ http = "0.2.7"
 httptest = "0.15.4"
 hyper-rustls = "0.23.2"
 hyper = "0.14"
-indicatif = { version = "0.17.2", features = ["rayon"] }
+indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
 internal-dns = { path = "internal-dns" }
@@ -188,7 +189,7 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "666ded451b13bba0895485c0b34515c0e59c2c6e", features = [ "generated-migration" ] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "92508d573529a1ee50a9422fbca045a5e980a2b5", features = [ "generated-migration" ] }
 proptest = "1.0.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -211,6 +212,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "2.2.0"
 serial_test = "0.10"
 sha3 = "0.10.6"
+shell-words = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sled = "0.34"
@@ -251,7 +253,7 @@ trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.75"
+trybuild = "1.0.76"
 uuid = { version = "1.2.2", features = ["serde", "v4"] }
 usdt = "0.3"
 vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }

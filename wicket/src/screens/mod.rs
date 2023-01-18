@@ -6,11 +6,8 @@ mod component;
 mod rack;
 mod splash;
 
-use crate::Action;
-use crate::ScreenEvent;
-use crate::State;
-use crate::Term;
-use crate::TermEvent;
+use crate::wizard::{Action, ScreenEvent, State, Term};
+use crossterm::event::Event as TermEvent;
 use slog::Logger;
 
 use component::ComponentScreen;

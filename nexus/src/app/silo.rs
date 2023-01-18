@@ -746,14 +746,17 @@ impl super::Nexus {
             }
 
             params::IdpMetadataSource::Base64EncodedXml { data } => {
-                let bytes =
-                    base64::decode(data).map_err(|e| Error::InvalidValue {
-                        label: String::from("data"),
-                        message: format!(
-                            "error getting decoding base64 data: {}",
-                            e
-                        ),
-                    })?;
+                let bytes = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    data,
+                )
+                .map_err(|e| Error::InvalidValue {
+                    label: String::from("data"),
+                    message: format!(
+                        "error getting decoding base64 data: {}",
+                        e
+                    ),
+                })?;
                 String::from_utf8_lossy(&bytes).into_owned()
             }
         };

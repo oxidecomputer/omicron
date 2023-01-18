@@ -88,7 +88,7 @@ async fn sdd_delete_volume(
 pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
-        app::sagas::disk_delete::SagaDiskDelete, context::OpContext, db,
+        app::sagas::disk_delete::SagaDiskDelete, context::OpContext,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
@@ -96,8 +96,8 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::params;
     use omicron_common::api::external::Name;
-    use ref_cast::RefCast;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -125,15 +125,17 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
+        let project_selector = params::ProjectSelector::new(
+            Some(Name::try_from(ORG_NAME.to_string()).unwrap().into()),
+            Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
+        );
+        let project_lookup =
+            nexus.project_lookup(&opctx, &project_selector).unwrap();
+
         nexus
             .project_create_disk(
                 &opctx,
-                db::model::Name::ref_cast(
-                    &Name::try_from(ORG_NAME.to_string()).unwrap(),
-                ),
-                db::model::Name::ref_cast(
-                    &Name::try_from(PROJECT_NAME.to_string()).unwrap(),
-                ),
+                &project_lookup,
                 &crate::app::sagas::disk_create::test::new_disk_create_params(),
             )
             .await
