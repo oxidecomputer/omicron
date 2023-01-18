@@ -253,6 +253,31 @@ async fn cpapi_disk_remove_read_only_parent(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Request removal of a read_only_parent from a disk
+/// This is a thin wrapper around the volume_remove_read_only_parent saga.
+/// All we are doing here is, given a disk UUID, figure out what the
+/// volume_id is for that disk, then use that to call the
+/// volume_remove_read_only_parent saga on it.
+#[endpoint {
+     method = POST,
+     path = "/disk/{disk_id}/remove-read-only-parent",
+ }]
+async fn cpapi_disk_remove_read_only_parent(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.disk_remove_read_only_parent(&opctx, path.disk_id).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Accept a registration from a new metric producer
 #[endpoint {
      method = POST,
