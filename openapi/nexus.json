@@ -12790,10 +12790,10 @@
         "description": "The service intended to use this certificate.",
         "oneOf": [
           {
-            "description": "This certificate is intended for the \"Nexus\" service.\n\nThis service acts as the main API point for accessing the Oxide rack.",
+            "description": "This certificate is intended for access to the external API.",
             "type": "string",
             "enum": [
-              "nexus"
+              "external_api"
             ]
           }
         ]
