@@ -147,15 +147,6 @@ impl DataStore {
             .await?
             .transaction_async(|conn| async move {
                 let silo = silo_create_query.get_result_async(&conn).await?;
-                use db::schema::virtual_provisioning_collection::dsl;
-                diesel::insert_into(dsl::virtual_provisioning_collection)
-                    .values(VirtualProvisioningCollection::new(
-                        silo.id(),
-                        CollectionTypeProvisioned::Silo,
-                    ))
-                    .execute_async(&conn)
-                    .await?;
-
                 self.virtual_provisioning_collection_create_on_connection(
                     &conn,
                     VirtualProvisioningCollection::new(

@@ -407,6 +407,11 @@ table! {
 table! {
     virtual_provisioning_collection {
         id -> Uuid,
+        // This type isn't actually "Nullable" - it's just handy to use the
+        // same type for insertion and querying, and doing so requires this
+        // field to appear optional so we can let this (default) field appear
+        // optional.
+        time_modified -> Nullable<Timestamptz>,
         collection_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -417,6 +422,11 @@ table! {
 table! {
     virtual_provisioning_resource {
         id -> Uuid,
+        // This type isn't actually "Nullable" - it's just handy to use the
+        // same type for insertion and querying, and doing so requires this
+        // field to appear optional so we can let this (default) field appear
+        // optional.
+        time_modified -> Nullable<Timestamptz>,
         resource_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,

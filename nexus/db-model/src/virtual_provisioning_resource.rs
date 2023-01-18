@@ -4,6 +4,7 @@
 
 use crate::schema::virtual_provisioning_resource;
 use crate::ByteCount;
+use chrono::{DateTime, Utc};
 use omicron_common::api::external;
 use uuid::Uuid;
 
@@ -27,8 +28,10 @@ impl std::fmt::Display for ResourceTypeProvisioned {
 /// Describes virtual_provisioning_resource for a resource.
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = virtual_provisioning_resource)]
+#[diesel(treat_none_as_default_value = true)]
 pub struct VirtualProvisioningResource {
     pub id: Uuid,
+    pub time_modified: Option<DateTime<Utc>>,
     pub resource_type: String,
 
     pub virtual_disk_bytes_provisioned: ByteCount,
@@ -40,6 +43,7 @@ impl VirtualProvisioningResource {
     pub fn new(id: Uuid, resource_type: ResourceTypeProvisioned) -> Self {
         Self {
             id,
+            time_modified: None,
             resource_type: resource_type.to_string(),
             virtual_disk_bytes_provisioned: ByteCount(
                 external::ByteCount::from(0),

@@ -137,6 +137,8 @@ CREATE INDEX ON omicron.public.service (
 CREATE TABLE omicron.public.virtual_provisioning_collection (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
     -- Identifies the type of the collection.
     collection_type STRING(63) NOT NULL,
 
@@ -168,6 +170,8 @@ CREATE TABLE omicron.public.virtual_provisioning_collection (
 CREATE TABLE omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
     -- Identifies the type of the resource.
     resource_type STRING(63) NOT NULL,
 

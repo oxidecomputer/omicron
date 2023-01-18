@@ -322,9 +322,12 @@ impl VirtualProvisioningCollectionUpdate {
             // Within this project, org, silo, fleet...
             project_id,
             // ... We add the disk usage.
-            collection_dsl::virtual_disk_bytes_provisioned
-                .eq(collection_dsl::virtual_disk_bytes_provisioned
-                    + disk_byte_diff),
+            (
+                collection_dsl::time_modified.eq(diesel::dsl::now),
+                collection_dsl::virtual_disk_bytes_provisioned
+                    .eq(collection_dsl::virtual_disk_bytes_provisioned
+                        + disk_byte_diff),
+            ),
         )
     }
 
@@ -348,9 +351,12 @@ impl VirtualProvisioningCollectionUpdate {
             // Within this project, org, silo, fleet...
             project_id,
             // ... We subtract the disk usage.
-            collection_dsl::virtual_disk_bytes_provisioned
-                .eq(collection_dsl::virtual_disk_bytes_provisioned
-                    - disk_byte_diff),
+            (
+                collection_dsl::time_modified.eq(diesel::dsl::now),
+                collection_dsl::virtual_disk_bytes_provisioned
+                    .eq(collection_dsl::virtual_disk_bytes_provisioned
+                        - disk_byte_diff),
+            ),
         )
     }
 
@@ -386,6 +392,7 @@ impl VirtualProvisioningCollectionUpdate {
             project_id,
             // ... We update the resource usage.
             (
+                collection_dsl::time_modified.eq(diesel::dsl::now),
                 collection_dsl::cpus_provisioned
                     .eq(collection_dsl::cpus_provisioned + cpus_diff),
                 collection_dsl::ram_provisioned
@@ -416,6 +423,7 @@ impl VirtualProvisioningCollectionUpdate {
             project_id,
             // ... We update the resource usage.
             (
+                collection_dsl::time_modified.eq(diesel::dsl::now),
                 collection_dsl::cpus_provisioned
                     .eq(collection_dsl::cpus_provisioned - cpus_diff),
                 collection_dsl::ram_provisioned
