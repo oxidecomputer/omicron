@@ -318,7 +318,7 @@ lazy_static! {
             },
             cert: DEMO_CERTIFICATE.cert_chain_as_pem(),
             key: DEMO_CERTIFICATE.end_cert_private_key_as_pem(),
-            service: shared::ServiceUsingCertificate::Nexus,
+            service: shared::ServiceUsingCertificate::ExternalApi,
         };
 }
 

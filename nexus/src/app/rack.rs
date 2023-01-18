@@ -113,7 +113,7 @@ impl super::Nexus {
                         },
                         cert: c.cert,
                         key: c.key,
-                        service: ServiceUsingCertificate::Nexus,
+                        service: ServiceUsingCertificate::ExternalApi,
                     }
                 ).map_err(|e| Error::from(e))
             })

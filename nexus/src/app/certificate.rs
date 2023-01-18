@@ -52,7 +52,7 @@ impl super::Nexus {
             .await?;
 
         match kind {
-            shared::ServiceUsingCertificate::Nexus => {
+            shared::ServiceUsingCertificate::ExternalApi => {
                 // TODO: If we make this operation "add a certificate, and try to update
                 // nearby Nexus servers to use it", that means it'll be combining a DB
                 // operation with a service update request. If we want both to reliably

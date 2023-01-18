@@ -141,7 +141,7 @@ pub async fn create_certificate(
             },
             cert,
             key,
-            service: shared::ServiceUsingCertificate::Nexus,
+            service: shared::ServiceUsingCertificate::ExternalApi,
         },
     )
     .await

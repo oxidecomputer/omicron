@@ -222,7 +222,7 @@ async fn cert_create_expect_error(
         },
         cert,
         key,
-        service: shared::ServiceUsingCertificate::Nexus,
+        service: shared::ServiceUsingCertificate::ExternalApi,
     };
 
     NexusRequest::expect_failure_with_body(

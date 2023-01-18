@@ -28,7 +28,7 @@ impl TryFrom<ServiceKind> for ServiceUsingCertificate {
     type Error = omicron_common::api::external::Error;
     fn try_from(k: ServiceKind) -> Result<Self, Self::Error> {
         match k {
-            ServiceKind::Nexus => Ok(ServiceUsingCertificate::Nexus),
+            ServiceKind::Nexus => Ok(ServiceUsingCertificate::ExternalApi),
             _ => Err(Self::Error::internal_error("Invalid service type")),
         }
     }
@@ -37,7 +37,7 @@ impl TryFrom<ServiceKind> for ServiceUsingCertificate {
 impl From<ServiceUsingCertificate> for ServiceKind {
     fn from(k: ServiceUsingCertificate) -> Self {
         match k {
-            ServiceUsingCertificate::Nexus => Self::Nexus,
+            ServiceUsingCertificate::ExternalApi => Self::Nexus,
         }
     }
 }
