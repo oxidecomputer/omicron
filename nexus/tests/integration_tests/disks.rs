@@ -907,7 +907,7 @@ async fn test_disk_virtual_provisioning_collection(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let _test = DiskTest::new(&cptestctx).await;

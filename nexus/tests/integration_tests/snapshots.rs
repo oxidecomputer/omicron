@@ -288,7 +288,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     DiskTest::new(&cptestctx).await;
     populate_ip_pool(&client, "default", None).await;

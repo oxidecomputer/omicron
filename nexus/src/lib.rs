@@ -177,8 +177,8 @@ impl Server {
         self.apictx.nexus.wait_for_shutdown().await
     }
 
-    /// Register the Nexus server as a metric producer with `oximeter.
-    async fn register_as_producer(&self) {
+    /// Register the Nexus server as a metric producer with oximeter.
+    pub async fn register_as_producer(&self) {
         let nexus = &self.apictx.nexus;
 
         nexus

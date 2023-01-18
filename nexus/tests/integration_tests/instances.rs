@@ -525,7 +525,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     let client = &cptestctx.external_client;
     let oximeter = &cptestctx.oximeter;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
 
