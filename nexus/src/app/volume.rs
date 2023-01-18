@@ -5,6 +5,8 @@
 //! Volumes
 
 use crate::app::sagas;
+use crate::authn;
+use crate::context::OpContext;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use std::sync::Arc;
@@ -24,9 +26,13 @@ impl super::Nexus {
     /// and the user's query shouldn't wait on those DELETE calls.
     pub async fn volume_delete(
         self: &Arc<Self>,
+        opctx: &OpContext,
         volume_id: Uuid,
     ) -> DeleteResult {
-        let saga_params = sagas::volume_delete::Params { volume_id };
+        let saga_params = sagas::volume_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            volume_id,
+        };
 
         // TODO execute this in the background instead, not using the usual SEC
         let saga_outputs = self
@@ -44,9 +50,13 @@ impl super::Nexus {
     /// Start a saga to remove a read only parent from a volume.
     pub async fn volume_remove_read_only_parent(
         self: &Arc<Self>,
+        opctx: &OpContext,
         volume_id: Uuid,
     ) -> DeleteResult {
-        let saga_params = sagas::volume_remove_rop::Params { volume_id };
+        let saga_params = sagas::volume_remove_rop::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            volume_id,
+        };
 
         self.execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
             saga_params,

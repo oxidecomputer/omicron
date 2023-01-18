@@ -53,6 +53,7 @@ impl Pool {
         Pool { pool }
     }
 
+    #[cfg(test)]
     pub fn new_failfast(db_config: &DbConfig) -> Self {
         let manager =
             ConnectionManager::<DbConnection>::new(&db_config.url.url());
@@ -69,6 +70,25 @@ impl Pool {
     }
 }
 
+const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
+    "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
+
+/// SQL used to enable full table scans for the duration of the current
+/// transaction.
+///
+/// We normally disallow table scans in effort to identify scalability issues
+/// during development. But it's preferable for some ad hoc test-only queries to
+/// do table scans (rather than add indexes that are only used for the test
+/// suite).
+///
+/// This SQL appears to have no effect when used outside of a transaction.
+/// That's intentional.  We do not want to use `SET` (rather than `SET LOCAL`)
+/// here because that would change the behavior for any code that happens to use
+/// the same pooled connection after this SQL gets run.
+#[cfg(test)]
+pub const ALLOW_FULL_TABLE_SCAN_SQL: &str =
+    "set local disallow_full_table_scans = off; set local large_full_scan_rows = 1000;";
+
 #[derive(Debug)]
 struct DisallowFullTableScans {}
 #[async_trait]
@@ -79,10 +99,6 @@ impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
         &self,
         conn: &mut Connection<DbConnection>,
     ) -> Result<(), ConnectionError> {
-        conn.batch_execute_async(
-            "set disallow_full_table_scans = on;\
-            set large_full_scan_rows = 0;",
-        )
-        .await
+        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL).await
     }
 }

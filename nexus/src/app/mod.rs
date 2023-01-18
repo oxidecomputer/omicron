@@ -15,6 +15,7 @@ use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
+use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use omicron_common::api::external::Error;
 use slog::Logger;
@@ -32,9 +33,11 @@ mod iam;
 mod image;
 mod instance;
 mod ip_pool;
+mod metrics;
 mod organization;
 mod oximeter;
 mod project;
+pub mod provisioning;
 mod rack;
 pub mod saga;
 mod session;
@@ -174,12 +177,15 @@ impl Nexus {
         log: Logger,
         resolver: internal_dns_client::multiclient::Resolver,
         pool: db::Pool,
+        producer_registry: &ProducerRegistry,
         config: &config::Config,
         authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(config.deployment.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
+        db_datastore.register_producers(&producer_registry);
+
+        let my_sec_id = db::SecId::from(config.deployment.id);
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
             Arc::clone(&db_datastore),

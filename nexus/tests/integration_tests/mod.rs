@@ -14,6 +14,7 @@ mod disks;
 mod images;
 mod instances;
 mod ip_pools;
+mod metrics;
 mod organizations;
 mod oximeter;
 mod password_login;

@@ -21,8 +21,11 @@ pub struct Params {
 
 declare_saga_actions! {
     snapshot_delete;
-    DELETE_SNAPSHOT_RECORD -> "no_result" {
+    DELETE_SNAPSHOT_RECORD -> "no_result1" {
         + ssd_delete_snapshot_record
+    }
+    SPACE_ACCOUNT -> "no_result2" {
+        + ssd_account_space
     }
 }
 
@@ -41,12 +44,14 @@ impl NexusSaga for SagaSnapshotDelete {
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(delete_snapshot_record_action());
+        builder.append(space_account_action());
 
         const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
         const DELETE_VOLUME_DESTINATION_PARAMS: &'static str =
             "delete_volume_destination_params";
 
         let volume_delete_params = sagas::volume_delete::Params {
+            serialized_authn: params.serialized_authn.clone(),
             volume_id: params.snapshot.volume_id,
         };
         builder.append(Node::constant(
@@ -60,6 +65,7 @@ impl NexusSaga for SagaSnapshotDelete {
         ));
 
         let volume_delete_params = sagas::volume_delete::Params {
+            serialized_authn: params.serialized_authn.clone(),
             volume_id: params.snapshot.destination_volume_id,
         };
         builder.append(Node::constant(
@@ -93,6 +99,8 @@ impl NexusSaga for SagaSnapshotDelete {
     }
 }
 
+// snapshot delete saga: action implementations
+
 async fn ssd_delete_snapshot_record(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -106,6 +114,25 @@ async fn ssd_delete_snapshot_record(
             &opctx,
             &params.authz_snapshot,
             &params.snapshot,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn ssd_account_space(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_snapshot(
+            &opctx,
+            params.authz_snapshot.id(),
+            params.snapshot.project_id,
+            params.snapshot.size,
         )
         .await
         .map_err(ActionError::action_failed)?;

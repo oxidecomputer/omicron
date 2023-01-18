@@ -151,7 +151,10 @@ mod test {
         authz, context::OpContext, db::datastore::DataStore,
         external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        OptionalExtension,
+    };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_organization;
@@ -216,6 +219,10 @@ mod test {
 
     async fn verify_clean_slate(datastore: &DataStore) {
         assert!(no_projects_exist(datastore).await);
+        assert!(
+            no_virtual_provisioning_collection_records_for_projects(datastore)
+                .await
+        );
         crate::app::sagas::vpc_create::test::verify_clean_slate(datastore)
             .await;
     }
@@ -235,6 +242,33 @@ mod test {
                 eprintln!("Project exists: {project:?}");
             })
             .is_none()
+    }
+
+    async fn no_virtual_provisioning_collection_records_for_projects(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningCollection;
+        use crate::db::schema::virtual_provisioning_collection::dsl;
+
+        datastore.pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn
+                    .batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_collection
+                        .filter(dsl::collection_type.eq(crate::db::model::CollectionTypeProvisioned::Project.to_string()))
+
+                        .select(VirtualProvisioningCollection::as_select())
+                        .get_results_async::<VirtualProvisioningCollection>(&conn)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                )
+            }).await.unwrap()
     }
 
     #[nexus_test(server = crate::Server)]
