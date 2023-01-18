@@ -920,7 +920,7 @@ impl StorageManager {
 
         // TODO:
         // - Notify Nexus
-        todo!();
+        Ok(())
     }
 
     /// Adds a zpool to the storage manager.
