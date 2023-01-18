@@ -939,8 +939,7 @@ async fn local_idp_user_set_password(
 /// List organizations
 #[endpoint {
     method = GET,
-    path = "/
-    /organizations",
+    path = "/v1/organizations",
     tags = ["organizations"]
 }]
 async fn organization_list_v1(
