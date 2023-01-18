@@ -52,28 +52,36 @@ const PROJECT_NAME_2: &str = "bouncymeadow-octopusharbor-disks";
 const DISK_NAME: &str = "just-rainsticks";
 const INSTANCE_NAME: &str = "just-rainsticks";
 
-fn get_project_url() -> String {
-    format!("/organizations/{}/projects/{}", ORG_NAME, PROJECT_NAME)
-}
-
 fn get_disks_url() -> String {
-    format!("{}/disks", get_project_url())
+    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
 }
 
-fn get_instances_url() -> String {
-    format!("{}/instances", get_project_url())
+fn get_disk_url(disk_name: &str) -> String {
+    format!(
+        "/v1/disks/{disk_name}?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    )
 }
 
 fn get_instance_disks_url(instance_name: &str) -> String {
-    format!("{}/{}/disks", get_instances_url(), instance_name)
+    format!(
+        "/v1/instances/{instance_name}/disks?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    )
 }
 
 fn get_disk_attach_url(instance_name: &str) -> String {
-    format!("{}/attach", get_instance_disks_url(instance_name))
+    format!(
+        "/v1/instances/{instance_name}/disks/attach?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    )
 }
 
 fn get_disk_detach_url(instance_name: &str) -> String {
-    format!("{}/detach", get_instance_disks_url(instance_name))
+    format!(
+        "/v1/instances/{instance_name}/disks/detach?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    )
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -97,7 +105,7 @@ async fn test_disk_not_found_before_creation(
     assert_eq!(disks.len(), 0);
 
     // Make sure we get a 404 if we fetch one.
-    let disk_url = format!("{}/{}", disks_url, DISK_NAME);
+    let disk_url = get_disk_url(DISK_NAME);
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, &disk_url)
             .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -132,10 +140,14 @@ async fn test_disk_not_found_before_creation(
 
 async fn set_instance_state(
     client: &ClientTestContext,
-    instance_url: &str,
+    instance_name: &str,
     state: &str,
 ) -> Instance {
-    let url = format!("{}/{}", instance_url, state);
+    let url = format!(
+        "/v1/instances/{instance_name}/{state}?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    );
+
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(None as Option<&serde_json::Value>)
@@ -165,7 +177,7 @@ async fn test_disk_create_attach_detach_delete(
     let disks_url = get_disks_url();
 
     // Create a disk.
-    let disk_url = format!("{}/{}", disks_url, DISK_NAME);
+    let disk_url = get_disk_url(DISK_NAME);
     let disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     assert_eq!(disk.identity.name, DISK_NAME);
     assert_eq!(disk.identity.description, "sells rainsticks");
@@ -202,12 +214,8 @@ async fn test_disk_create_attach_detach_delete(
     //
     // Instances must be stopped before disks can be attached - this
     // is an artificial limitation without hotplug support.
-    let instance1_url = format!(
-        "/organizations/{}/projects/{}/instances/{}",
-        ORG_NAME, PROJECT_NAME, INSTANCE_NAME
-    );
     let instance_next =
-        set_instance_state(&client, &instance1_url, "stop").await;
+        set_instance_state(&client, INSTANCE_NAME, "stop").await;
     instance_simulate(nexus, &instance_next.identity.id).await;
 
     // Verify that there are no disks attached to the instance, and specifically
@@ -309,7 +317,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
         size: ByteCount::from_gibibytes_u32(1),
     };
     let _ = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
-    let disk_url = format!("{}/{}", disks_url, DISK_NAME);
+    let disk_url = get_disk_url(DISK_NAME);
     let disk = disk_get(&client, &disk_url).await;
 
     // Attempt to create a second disk with a conflicting name.
@@ -344,7 +352,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Create a disk.
-    let disk_url = format!("{}/{}", disks_url, DISK_NAME);
+    let disk_url = get_disk_url(DISK_NAME);
     let disk = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 
     // Create an instance to attach the disk.
@@ -354,12 +362,8 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     //
     // Instances must be stopped before disks can be attached - this
     // is an artificial limitation without hotplug support.
-    let instance_url = format!(
-        "/organizations/{}/projects/{}/instances/{}",
-        ORG_NAME, PROJECT_NAME, INSTANCE_NAME
-    );
     let instance_next =
-        set_instance_state(&client, &instance_url, "stop").await;
+        set_instance_state(&client, INSTANCE_NAME, "stop").await;
     instance_simulate(nexus, &instance_next.identity.id).await;
 
     // Verify that there are no disks attached to the instance, and specifically
@@ -396,12 +400,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // fail and the disk should remain attached to the first instance.
     let instance2 =
         create_instance(&client, ORG_NAME, PROJECT_NAME, "instance2").await;
-    let instance2_url = format!(
-        "/organizations/{}/projects/{}/instances/{}",
-        ORG_NAME, PROJECT_NAME, "instance2"
-    );
-    let instance_next =
-        set_instance_state(&client, &instance2_url, "stop").await;
+    let instance_next = set_instance_state(&client, "instance2", "stop").await;
     instance_simulate(nexus, &instance_next.identity.id).await;
 
     let url_instance2_attach_disk =
@@ -411,8 +410,8 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
-            .body(Some(&params::DiskIdentifier {
-                name: disk.identity.name.clone(),
+            .body(Some(&params::DiskPath {
+                disk: disk.identity.name.clone().into(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -467,8 +466,8 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // instance (the first one).
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
-            .body(Some(&params::DiskIdentifier {
-                name: disk.identity.name.clone(),
+            .body(Some(&params::DiskPath {
+                disk: disk.identity.name.clone().into(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -1239,7 +1238,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Delete the first disk, freeing up 7 gibibytes.
-    let disk_url = format!("{}/{}", disks_url, "disk-one");
+    let disk_url = get_disk_url("disk-one");
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &disk_url)
             .expect_status(Some(StatusCode::NO_CONTENT)),
@@ -1399,7 +1398,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Whenever we grab this URL, get the surrounding few seconds of metrics.
     let metric_url = |metric_type: &str| {
-        let disk_url = format!("{}/{}", get_disks_url(), DISK_NAME);
+        let disk_url = format!("/organizations/{ORG_NAME}/projects/{PROJECT_NAME}/disks/{DISK_NAME}");
         format!(
             "{disk_url}/metrics/{metric_type}?start_time={:?}&end_time={:?}",
             Utc::now() - chrono::Duration::seconds(10),
@@ -1467,12 +1466,14 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     create_org_and_project(client).await;
     create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
+    let disk_url = format!(
+        "/organizations/{ORG_NAME}/projects/{PROJECT_NAME}/disks/{DISK_NAME}"
+    );
 
     let oximeter = &cptestctx.oximeter;
     oximeter.force_collect().await;
     for metric in &ALL_METRICS {
-        let collection_url =
-            format!("{}/{DISK_NAME}/metrics/{metric}", get_disks_url());
+        let collection_url = format!("{}/metrics/{metric}", disk_url);
         let initial_params = format!(
             "start_time={:?}&end_time={:?}",
             Utc::now() - chrono::Duration::seconds(2),
@@ -1544,7 +1545,7 @@ async fn disk_post(
 ) -> Disk {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, url)
-            .body(Some(&params::DiskIdentifier { name: disk_name }))
+            .body(Some(&params::DiskPath { disk: disk_name.into() }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
