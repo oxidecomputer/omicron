@@ -7342,6 +7342,7 @@
         "tags": [
           "disks"
         ],
+        "summary": "List disks",
         "operationId": "disk_list_v1",
         "parameters": [
           {
@@ -7464,6 +7465,7 @@
         "tags": [
           "disks"
         ],
+        "summary": "Fetch a disk",
         "operationId": "disk_view_v1",
         "parameters": [
           {
