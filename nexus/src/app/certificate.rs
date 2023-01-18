@@ -12,6 +12,7 @@ use crate::db::model::Name;
 use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use crate::external_api::shared;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -110,7 +111,7 @@ impl super::Nexus {
                 &DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(1).unwrap(),
+                    limit: std::num::NonZeroU32::new(2).unwrap(),
                 },
             )
             .await
@@ -125,6 +126,14 @@ impl super::Nexus {
         } else {
             return Ok(None);
         };
+
+        if certs.len() > 1 {
+            warn!(
+                self.log,
+                "Multiple x.509 certificates available for nexus, but choosing: {}",
+                certificate.name()
+            );
+        }
 
         Ok(Some(dropshot::ConfigTls::AsBytes {
             certs: certificate.cert.clone(),
