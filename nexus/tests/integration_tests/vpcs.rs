@@ -23,20 +23,34 @@ use omicron_nexus::external_api::{params, views::Vpc};
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+static ORG_NAME: &str = "test-org";
+static PROJECT_NAME: &str = "springfield-squidport";
+static PROJECT_NAME_2: &str = "peeky-park";
+
+fn get_vpc_url(vpc_name: &str) -> String {
+    format!(
+        "/v1/vpcs/{vpc_name}?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    )
+}
+
+fn get_subnet_url(vpc_name: &str, subnet_name: &str) -> String {
+    format!(
+        "/v1/vpc-subnets/{subnet_name}?organization={}&project={}&vpc={}",
+        ORG_NAME, PROJECT_NAME, vpc_name
+    )
+}
+
 #[nexus_test]
 async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
-    let project_name = "springfield-squidport";
+    create_organization(&client, &ORG_NAME).await;
     let vpcs_url =
-        format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);
-    let _ = create_project(&client, &org_name, &project_name).await;
-
-    let project_name2 = "pokemon";
-    let _ = create_project(&client, &org_name, &project_name2).await;
+        format!("/v1/vpcs?organization={}&project={}", ORG_NAME, PROJECT_NAME);
+    let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME).await;
+    let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME_2).await;
 
     // List vpcs.  We see the default VPC, and nothing else.
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
@@ -46,7 +60,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let default_vpc = vpcs.remove(0);
 
     // Make sure we get a 404 if we fetch or delete one.
-    let vpc_url = format!("{}/just-rainsticks", vpcs_url);
+    let vpc_url = get_vpc_url("just-rainsticks");
     for method in &[Method::GET, Method::DELETE] {
         let error: HttpErrorResponseBody = NexusRequest::expect_failure(
             client,
@@ -88,7 +102,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Create a VPC.
     let vpc_name = "just-rainsticks";
-    let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
+    let vpc = create_vpc(&client, ORG_NAME, PROJECT_NAME, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
@@ -105,8 +119,8 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     // Attempt to create a second VPC with a conflicting name.
     let error = create_vpc_with_error(
         &client,
-        org_name,
-        project_name,
+        ORG_NAME,
+        PROJECT_NAME,
         vpc_name,
         StatusCode::BAD_REQUEST,
     )
@@ -115,7 +129,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // creating a VPC with the same name in another project works, though
     let vpc2: Vpc =
-        create_vpc(&client, org_name, project_name2, vpc_name).await;
+        create_vpc(&client, ORG_NAME, PROJECT_NAME_2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
     // List VPCs again and expect to find the one we just created.
@@ -157,7 +171,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc with name \"just-rainsticks\"");
 
     // new url with new name
-    let vpc_url = format!("{}/new-name", vpcs_url);
+    let vpc_url = get_vpc_url("new-name");
 
     // Fetch the VPC again. It should have the updated properties.
     let vpc = vpc_get(&client, &vpc_url).await;
@@ -181,7 +195,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "VPC cannot be deleted while VPC Subnets exist",);
 
     // Delete the default VPC Subnet and VPC.
-    let default_subnet_url = format!("{vpc_url}/subnets/default");
+    let default_subnet_url = get_subnet_url("new-name", "default");
     NexusRequest::object_delete(client, &default_subnet_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
