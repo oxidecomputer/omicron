@@ -46,6 +46,10 @@ declare_saga_actions! {
         + sdc_alloc_regions
         - sdc_alloc_regions_undo
     }
+    SPACE_ACCOUNT -> "no_result" {
+        + sdc_account_space
+        - sdc_account_space_undo
+    }
     REGIONS_ENSURE -> "regions_ensure" {
         + sdc_regions_ensure
         - sdc_regions_ensure_undo
@@ -89,6 +93,7 @@ impl NexusSaga for SagaDiskCreate {
 
         builder.append(create_disk_record_action());
         builder.append(regions_alloc_action());
+        builder.append(space_account_action());
         builder.append(regions_ensure_action());
         builder.append(create_volume_record_action());
         builder.append(finalize_disk_record_action());
@@ -236,6 +241,48 @@ async fn sdc_alloc_regions_undo(
         .collect::<Vec<Uuid>>();
 
     osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
+}
+
+async fn sdc_account_space(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_insert_disk(
+            &opctx,
+            disk_created.id(),
+            params.project_id,
+            disk_created.size,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sdc_account_space_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_disk(
+            &opctx,
+            disk_created.id(),
+            params.project_id,
+            disk_created.size,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
@@ -472,9 +519,11 @@ async fn sdc_create_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
 
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.nexus().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
     Ok(())
 }
 
@@ -590,7 +639,10 @@ pub(crate) mod test {
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
         context::OpContext, db::datastore::DataStore, external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        OptionalExtension,
+    };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
@@ -701,6 +753,53 @@ pub(crate) mod test {
             .is_none()
     }
 
+    async fn no_virtual_provisioning_resource_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningResource;
+        use crate::db::schema::virtual_provisioning_resource::dsl;
+
+        dsl::virtual_provisioning_resource
+            .select(VirtualProvisioningResource::as_select())
+            .first_async::<VirtualProvisioningResource>(
+                datastore.pool_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn no_virtual_provisioning_collection_records_using_storage(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningCollection;
+        use crate::db::schema::virtual_provisioning_collection::dsl;
+
+        datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_collection
+                        .filter(dsl::virtual_disk_bytes_provisioned.ne(0))
+                        .select(VirtualProvisioningCollection::as_select())
+                        .get_results_async::<VirtualProvisioningCollection>(
+                            &conn,
+                        )
+                        .await
+                        .unwrap()
+                        .is_empty(),
+                )
+            })
+            .await
+            .unwrap()
+    }
+
     async fn no_region_allocations_exist(
         datastore: &DataStore,
         test: &DiskTest,
@@ -745,6 +844,13 @@ pub(crate) mod test {
 
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
+        assert!(
+            no_virtual_provisioning_resource_records_exist(datastore).await
+        );
+        assert!(
+            no_virtual_provisioning_collection_records_using_storage(datastore)
+                .await
+        );
         assert!(no_region_allocations_exist(datastore, &test).await);
         assert!(no_regions_ensured(&sled_agent, &test).await);
     }
@@ -873,7 +979,7 @@ pub(crate) mod test {
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector).unwrap();
 
         nexus
-            .project_delete_disk(&disk_lookup)
+            .project_delete_disk(&opctx, &disk_lookup)
             .await
             .expect("Failed to delete disk");
     }

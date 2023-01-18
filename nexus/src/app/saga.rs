@@ -101,6 +101,15 @@ impl super::Nexus {
     ) -> Result<RunnableSaga, Error> {
         // Construct the context necessary to execute this saga.
         let saga_id = SagaId(Uuid::new_v4());
+
+        self.create_runnable_saga_with_id(dag, saga_id).await
+    }
+
+    pub async fn create_runnable_saga_with_id(
+        self: &Arc<Self>,
+        dag: SagaDag,
+        saga_id: SagaId,
+    ) -> Result<RunnableSaga, Error> {
         let saga_logger = self.log.new(o!(
             "saga_name" => dag.saga_name().to_string(),
             "saga_id" => saga_id.to_string()

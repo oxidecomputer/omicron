@@ -278,6 +278,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
+        api.register(system_metric)?;
         api.register(updates_refresh)?;
 
         api.register(user_list)?;
@@ -2564,7 +2565,7 @@ async fn disk_delete_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
-        nexus.project_delete_disk(&disk_lookup).await?;
+        nexus.project_delete_disk(&opctx, &disk_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2592,7 +2593,7 @@ async fn disk_delete(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
-        nexus.project_delete_disk(&disk_lookup).await?;
+        nexus.project_delete_disk(&opctx, &disk_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5338,6 +5339,64 @@ async fn updates_refresh(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus.updates_refresh_metadata(&opctx).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Metrics
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SystemMetricParams {
+    #[serde(flatten)]
+    pub pagination: dropshot::PaginationParams<
+        params::ResourceMetrics,
+        params::ResourceMetrics,
+    >,
+
+    /// The UUID of the container being queried
+    // TODO: I might want to force the caller to specify type here?
+    pub id: Uuid,
+}
+
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMetricName {
+    VirtualDiskSpaceProvisioned,
+    CpusProvisioned,
+    RamProvisioned,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SystemMetricsPathParam {
+    metric_name: SystemMetricName,
+}
+
+/// Access metrics data
+#[endpoint {
+     method = GET,
+     path = "/system/metrics/{metric_name}",
+     tags = ["system"],
+}]
+async fn system_metric(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SystemMetricsPathParam>,
+    query_params: Query<SystemMetricParams>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let metric_name = path_params.into_inner().metric_name;
+
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query.pagination)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let result = nexus
+            .system_metric_lookup(&opctx, metric_name, query, limit)
+            .await?;
+
+        Ok(HttpResponseOk(result))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

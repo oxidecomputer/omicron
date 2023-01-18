@@ -207,8 +207,11 @@ fn build_metric_trait_impl(
                 &mut self.#datum_field_ident
             }
 
-            fn measure(&self) -> ::oximeter::Measurement {
-                ::oximeter::Measurement::new(::oximeter::Datum::from(&self.#datum_field_ident))
+            fn measure(&self, timestamp: ::chrono::DateTime<chrono::Utc>) -> ::oximeter::Measurement {
+                ::oximeter::Measurement::new(
+                    timestamp,
+                    ::oximeter::Datum::from(&self.#datum_field_ident)
+                )
             }
 
             fn start_time(&self) -> Option<::chrono::DateTime<::chrono::Utc>> {

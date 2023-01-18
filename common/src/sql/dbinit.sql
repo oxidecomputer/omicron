@@ -128,6 +128,64 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+-- A table describing virtual resource provisioning which may be associated
+-- with a collection of objects, including:
+-- - Projects
+-- - Organizations
+-- - Silos
+-- - Fleet
+CREATE TABLE omicron.public.virtual_provisioning_collection (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the collection.
+    collection_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the collection.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned by VMs.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned by VMs.
+    ram_provisioned INT8 NOT NULL
+);
+
+-- A table describing a single virtual resource which has been provisioned.
+-- This may include:
+-- - Disks
+-- - Instances
+-- - Snapshots
+--
+-- NOTE: You might think to yourself: "This table looks an awful lot like
+-- the 'virtual_provisioning_collection' table, could they be condensed into
+-- a single table?"
+-- The answer to this question is unfortunately: "No". We use CTEs to both
+-- UPDATE the collection table while INSERTing rows in the resource table, and
+-- this would not be allowed if they came from the same table due to:
+-- https://www.cockroachlabs.com/docs/v22.2/known-limitations#statements-containing-multiple-modification-subqueries-of-the-same-table-are-disallowed
+-- However, by using separate tables, the CTE is able to function correctly.
+CREATE TABLE omicron.public.virtual_provisioning_resource (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the resource.
+    resource_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the resource.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned.
+    ram_provisioned INT8 NOT NULL
+);
+
 -- A physical disk which exists inside the rack.
 -- For v1, this is an M.2 form-factor.
 CREATE TABLE omicron.public.internal_physical_disk (

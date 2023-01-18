@@ -423,6 +423,14 @@ lazy_static! {
             group_attribute_name: None,
         };
 
+    pub static ref DEMO_SYSTEM_METRICS_URL: String =
+        format!(
+            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
+            Utc::now(),
+            Utc::now(),
+            "3aaf22ae-5691-4f6d-b62c-aa532512fa78",
+        );
+
     // Users
     pub static ref DEMO_USER_CREATE: params::UserCreate = params::UserCreate {
         external_id: params::UserId::from_str("dummy-user").unwrap(),
@@ -1460,6 +1468,17 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
+        },
+
+        /* Metrics */
+
+        VerifyEndpoint {
+            url: &*DEMO_SYSTEM_METRICS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
         },
 
         /* Global Images */

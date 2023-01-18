@@ -265,12 +265,13 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Delete).await?;
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(authz::Action::Delete).await?;
 
         let saga_params = sagas::instance_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             authz_instance,
+            instance,
         };
         self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
             saga_params,

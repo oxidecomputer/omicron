@@ -523,7 +523,7 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<db::model::Disk, Error> {
         use db::schema::disk::dsl;
         let pool = self.pool();
         let now = Utc::now();
@@ -558,7 +558,7 @@ impl DataStore {
             })?;
 
         match result.status {
-            UpdateStatus::Updated => Ok(result.found.volume_id),
+            UpdateStatus::Updated => Ok(result.found),
             UpdateStatus::NotUpdatedButExists => {
                 let disk = result.found;
                 let disk_state = disk.state();
@@ -568,7 +568,7 @@ impl DataStore {
                 {
                     // To maintain idempotency, if the disk has already been
                     // destroyed, don't throw an error.
-                    return Ok(disk.volume_id);
+                    return Ok(disk);
                 } else if !ok_to_delete_states.contains(disk_state.state()) {
                     return Err(Error::InvalidRequest {
                         message: format!(
