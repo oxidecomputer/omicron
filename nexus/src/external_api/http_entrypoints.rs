@@ -939,7 +939,8 @@ async fn local_idp_user_set_password(
 /// List organizations
 #[endpoint {
     method = GET,
-    path = "/v1/organizations",
+    path = "/
+    /organizations",
     tags = ["organizations"]
 }]
 async fn organization_list_v1(
@@ -2303,6 +2304,7 @@ async fn ip_pool_service_range_remove(
 
 // Disks
 
+/// List disks
 #[endpoint {
     method = GET,
     path = "/v1/disks",
@@ -2453,6 +2455,7 @@ async fn disk_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a disk
 #[endpoint {
     method = GET,
     path = "/v1/disks/{disk}",
