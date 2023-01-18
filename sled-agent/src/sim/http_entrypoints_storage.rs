@@ -59,7 +59,7 @@ struct RegionPath {
     path = "/crucible/0/regions",
 }]
 async fn region_list(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
 ) -> Result<HttpResponseOk<Vec<Region>>, HttpError> {
     let crucible = rc.context();
     Ok(HttpResponseOk(crucible.list().await))
@@ -70,7 +70,7 @@ async fn region_list(
     path = "/crucible/0/regions",
 }]
 async fn region_create(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     body: TypedBody<CreateRegion>,
 ) -> Result<HttpResponseOk<Region>, HttpError> {
     let params = body.into_inner();
@@ -84,7 +84,7 @@ async fn region_create(
     path = "/crucible/0/regions/{id}",
 }]
 async fn region_get(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     path: TypedPath<RegionPath>,
 ) -> Result<HttpResponseOk<Region>, HttpError> {
     let id = path.into_inner().id;
@@ -103,7 +103,7 @@ async fn region_get(
     path = "/crucible/0/regions/{id}",
 }]
 async fn region_delete(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     path: TypedPath<RegionPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let id = path.into_inner().id;
@@ -126,7 +126,7 @@ async fn region_delete(
     path = "/crucible/0/regions/{id}/snapshots",
 }]
 async fn region_get_snapshots(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     path: TypedPath<RegionPath>,
 ) -> Result<HttpResponseOk<GetSnapshotResponse>, HttpError> {
     let id = path.into_inner().id;
@@ -158,7 +158,7 @@ struct GetSnapshotPath {
     path = "/crucible/0/regions/{id}/snapshots/{name}",
 }]
 async fn region_get_snapshot(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     path: TypedPath<GetSnapshotPath>,
 ) -> Result<HttpResponseOk<Snapshot>, HttpError> {
     let p = path.into_inner();
@@ -194,7 +194,7 @@ struct DeleteSnapshotPath {
     path = "/crucible/0/regions/{id}/snapshots/{name}",
 }]
 async fn region_delete_snapshot(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     path: TypedPath<DeleteSnapshotPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let p = path.into_inner();
@@ -226,7 +226,7 @@ struct RunSnapshotPath {
     path = "/crucible/0/regions/{id}/snapshots/{name}/run",
 }]
 async fn region_run_snapshot(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     path: TypedPath<RunSnapshotPath>,
 ) -> Result<HttpResponseOk<RunningSnapshot>, HttpError> {
     let p = path.into_inner();
@@ -266,7 +266,7 @@ async fn region_run_snapshot(
     path = "/crucible/0/regions/{id}/snapshots/{name}/run",
 }]
 async fn region_delete_running_snapshot(
-    rc: Arc<RequestContext<Arc<CrucibleData>>>,
+    rc: RequestContext<Arc<CrucibleData>>,
     path: TypedPath<RunSnapshotPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let p = path.into_inner();

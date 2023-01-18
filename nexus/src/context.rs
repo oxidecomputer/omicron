@@ -335,7 +335,7 @@ impl OpContext {
         rqctx: &dropshot::RequestContext<T>,
         metadata: &mut BTreeMap<String, String>,
     ) {
-        let request = rqctx.request.lock().await;
+        let request = &rqctx.request;
         metadata.insert(String::from("request_id"), rqctx.request_id.clone());
         metadata
             .insert(String::from("http_method"), request.method().to_string());

@@ -539,7 +539,7 @@ pub fn oximeter_api() -> ApiDescription<Arc<OximeterAgent>> {
     path = "/producers",
 }]
 async fn producers_post(
-    request_context: Arc<RequestContext<Arc<OximeterAgent>>>,
+    request_context: RequestContext<Arc<OximeterAgent>>,
     body: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let agent = request_context.context();
