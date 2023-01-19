@@ -5,6 +5,7 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::external_api::shared;
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
@@ -18,6 +19,7 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
+// TODO-v1: Post migration rename `*Path` to `*Identifier`
 #[derive(Deserialize, JsonSchema)]
 pub struct OrganizationPath {
     pub organization: NameOrId,
@@ -33,7 +35,12 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DiskPath {
+    pub disk: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -68,10 +75,31 @@ impl ProjectSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub disk: NameOrId,
+}
+
+impl DiskSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        disk: NameOrId,
+    ) -> Self {
+        DiskSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            disk,
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -297,12 +325,14 @@ impl<'de> Visitor<'de> for X509CertVisitor {
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value.as_bytes()).map_err(|e| {
-            de::Error::custom(format!(
-                "could not base64 decode public_cert: {}",
-                e
-            ))
-        })?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&value.as_bytes())
+            .map_err(|e| {
+                de::Error::custom(format!(
+                    "could not base64 decode public_cert: {}",
+                    e
+                ))
+            })?;
         let _parsed =
             openssl::x509::X509::from_der(&raw_bytes).map_err(|e| {
                 de::Error::custom(format!(
@@ -342,12 +372,14 @@ impl<'de> Visitor<'de> for KeyVisitor {
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value).map_err(|e| {
-            de::Error::custom(format!(
-                "could not base64 decode private_key: {}",
-                e
-            ))
-        })?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&value)
+            .map_err(|e| {
+                de::Error::custom(format!(
+                    "could not base64 decode private_key: {}",
+                    e
+                ))
+            })?;
 
         // TODO: samael does not support ECDSA, update to generic PKey type when it does
         //let _parsed = openssl::pkey::PKey::private_key_from_der(&raw_bytes)
@@ -423,7 +455,8 @@ pub struct SamlIdentityProviderCreate {
 /// sign some junk data and validate it with the key pair
 fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     let private_key = {
-        let raw_bytes = base64::decode(&key_pair.private_key)?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&key_pair.private_key)?;
         // TODO: samael does not support ECDSA, update to generic PKey type when it does
         //let parsed = openssl::pkey::PKey::private_key_from_der(&raw_bytes)?;
         let parsed = openssl::rsa::Rsa::private_key_from_der(&raw_bytes)?;
@@ -432,7 +465,8 @@ fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     };
 
     let public_key = {
-        let raw_bytes = base64::decode(&key_pair.public_cert)?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&key_pair.public_cert)?;
         let parsed = openssl::x509::X509::from_der(&raw_bytes)?;
         parsed.public_key()?
     };
@@ -708,14 +742,18 @@ impl UserData {
     where
         S: Serializer,
     {
-        base64::encode(data).serialize(serializer)
+        base64::engine::general_purpose::STANDARD
+            .encode(data)
+            .serialize(serializer)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        match base64::decode(<String>::deserialize(deserializer)?) {
+        match base64::engine::general_purpose::STANDARD
+            .decode(<String>::deserialize(deserializer)?)
+        {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
                 if buf.len() > MAX_USER_DATA_BYTES {
@@ -945,6 +983,7 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
+/// TODO-v1: Delete this
 /// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -952,6 +991,7 @@ pub struct DiskIdentifier {
     pub name: Name,
 }
 
+/// TODO-v1: Delete this
 /// Parameters for the
 /// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
 /// attached or detached to an instance.

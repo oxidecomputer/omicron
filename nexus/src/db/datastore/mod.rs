@@ -26,6 +26,7 @@ use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler},
 };
+use ::oximeter::types::ProducerRegistry;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -66,10 +67,12 @@ mod sled;
 mod snapshot;
 mod ssh_key;
 mod update;
+mod virtual_provisioning_collection;
 mod volume;
 mod vpc;
 mod zpool;
 
+pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
 
 // Number of unique datasets required to back a region.
@@ -103,6 +106,8 @@ impl<U, T> RunnableQuery<U> for T where
 
 pub struct DataStore {
     pool: Arc<Pool>,
+    virtual_provisioning_collection_producer:
+        crate::app::provisioning::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -110,7 +115,19 @@ pub struct DataStore {
 // recompilation of that query's module instead of all queries on `DataStore`.
 impl DataStore {
     pub fn new(pool: Arc<Pool>) -> Self {
-        DataStore { pool }
+        DataStore {
+            pool,
+            virtual_provisioning_collection_producer:
+                crate::app::provisioning::Producer::new(),
+        }
+    }
+
+    pub fn register_producers(&self, registry: &ProducerRegistry) {
+        registry
+            .register_producer(
+                self.virtual_provisioning_collection_producer.clone(),
+            )
+            .unwrap();
     }
 
     // TODO-security This should be deprecated in favor of pool_authorized(),

@@ -2,39 +2,39 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::{
+    create_local_user, create_organization, create_silo, grant_iam,
+    object_create, objects_list_page_authz,
+};
+use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, LookupType, Name,
 };
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
+use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use omicron_nexus::authz::{self, SiloRole};
 use omicron_nexus::context::OpContext;
 use omicron_nexus::db;
+use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
+use omicron_nexus::db::identity::Asset;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::views::{
     self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
 };
 use omicron_nexus::external_api::{params, shared};
+
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 use std::str::FromStr;
 
+use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
-use nexus_test_utils::resource_helpers::{
-    create_local_user, create_organization, create_silo, grant_iam,
-    object_create, objects_list_page_authz,
-};
-
-use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::authz::{self, SiloRole};
-use uuid::Uuid;
-
 use httptest::{matchers::*, responders::*, Expectation, Server};
-use omicron_common::api::external::ObjectIdentity;
-use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
-use omicron_nexus::db::identity::Asset;
+use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -538,7 +538,8 @@ async fn test_saml_idp_metadata_data_valid(
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+                data: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_IDP_DESCRIPTOR.to_string()),
             },
 
             idp_entity_id: "entity_id".to_string(),
@@ -602,7 +603,7 @@ async fn test_saml_idp_metadata_data_truncated(
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode({
+                data: base64::engine::general_purpose::STANDARD.encode({
                     let mut saml_idp_descriptor =
                         SAML_IDP_DESCRIPTOR.to_string();
                     saml_idp_descriptor.truncate(100);
@@ -1856,7 +1857,8 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 
                 idp_metadata_source:
                     params::IdpMetadataSource::Base64EncodedXml {
-                        data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_IDP_DESCRIPTOR.to_string()),
                     },
 
                 idp_entity_id: "entity_id".to_string(),

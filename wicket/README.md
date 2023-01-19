@@ -122,3 +122,21 @@ functionality implemented. All the inventory and power data shown in the
 and RSS. Lastly, we don't have a way to take rack updates and install them, or
 initialize the rack (including trust quorum). This is a lot of functionality
 that will be implemented incrementally.
+
+# Testing wicket as a login shell
+
+Wicket is meant to be used as a login shell. To test the login shell on a local Unix machine:
+
+1. Make the `wicket` available globally, at e.g. `/usr/local/bin/wicket`:
+    * If your build directory is globally readable, create a symlink to `wicket` in a well-known location. From omicron's root, run: `sudo ln -s $(readlink -f target/debug/wicket) /usr/local/bin/wicket`
+    * If it isn't globally accessible, run `sudo cp target/debug/wicket /usr/local/bin`. (You'll have to copy `wicket` each time you build it.)
+2. Add a new user to test against, for example `wicket-test`:
+    1. Add a group for the new user: `groupadd wicket-test`.
+    2. Add the user: `sudo useradd -m -g wicket-test -s /usr/local/bin/wicket wicket-test`
+
+At this point, you can use `sudo -u wicket-test -i` (Linux) or `pfexec su - wicket-test` (illumos) to test wicket as a login shell.
+
+* A plain `sudo -u wicket-test -i` will show the TUI.
+* `sudo -u wicket-test -i upload ...` will let you upload an artifact over stdin.
+
+If you'd like to test connections over ssh, add your ssh key to the new user's `.ssh/authorized_keys`, then run `ssh wicket-test@localhost [upload ...]`.

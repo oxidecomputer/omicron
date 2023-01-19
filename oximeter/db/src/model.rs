@@ -661,7 +661,7 @@ where
 {
     fn from(sample: DbTimeseriesScalarGaugeSample<T>) -> Measurement {
         let datum = Datum::from(sample.datum);
-        Measurement::with_timestamp(sample.timestamp, datum)
+        Measurement::new(sample.timestamp, datum)
     }
 }
 
@@ -674,7 +674,7 @@ where
         let cumulative =
             Cumulative::with_start_time(sample.start_time, sample.datum);
         let datum = Datum::from(cumulative);
-        Measurement::with_timestamp(sample.timestamp, datum)
+        Measurement::new(sample.timestamp, datum)
     }
 }
 
@@ -692,7 +692,7 @@ where
             )
             .unwrap(),
         );
-        Measurement::with_timestamp(sample.timestamp, datum)
+        Measurement::new(sample.timestamp, datum)
     }
 }
 

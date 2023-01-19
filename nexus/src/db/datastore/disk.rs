@@ -42,8 +42,27 @@ use omicron_common::bail_unless;
 use uuid::Uuid;
 
 impl DataStore {
-    /// List disks associated with a given instance.
-    pub async fn instance_list_disks(
+    /// List disks associated with a given instance by id.
+    pub async fn instance_list_disks_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Disk> {
+        use db::schema::disk::dsl;
+
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        paginated(dsl::disk, dsl::id, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_instance_id.eq(authz_instance.id()))
+            .select(Disk::as_select())
+            .load_async::<Disk>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+    /// List disks associated with a given instance by name.
+    pub async fn instance_list_disks_by_name(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -110,7 +129,24 @@ impl DataStore {
         Ok(disk)
     }
 
-    pub async fn project_list_disks(
+    pub async fn project_list_disks_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Disk> {
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+
+        use db::schema::disk::dsl;
+        paginated(dsl::disk, dsl::id, &pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .select(Disk::as_select())
+            .load_async::<Disk>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+    pub async fn project_list_disks_by_name(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
@@ -487,7 +523,7 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<db::model::Disk, Error> {
         use db::schema::disk::dsl;
         let pool = self.pool();
         let now = Utc::now();
@@ -522,7 +558,7 @@ impl DataStore {
             })?;
 
         match result.status {
-            UpdateStatus::Updated => Ok(result.found.volume_id),
+            UpdateStatus::Updated => Ok(result.found),
             UpdateStatus::NotUpdatedButExists => {
                 let disk = result.found;
                 let disk_state = disk.state();
@@ -532,7 +568,7 @@ impl DataStore {
                 {
                     // To maintain idempotency, if the disk has already been
                     // destroyed, don't throw an error.
-                    return Ok(disk.volume_id);
+                    return Ok(disk);
                 } else if !ok_to_delete_states.contains(disk_state.state()) {
                     return Err(Error::InvalidRequest {
                         message: format!(
