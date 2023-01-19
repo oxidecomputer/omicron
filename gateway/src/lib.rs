@@ -12,10 +12,10 @@ pub mod http_entrypoints; // TODO pub only for testing - is this right?
 
 pub use config::Config;
 pub use context::ServerContext;
-use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use futures::Future;
 use futures::FutureExt;
+use futures::StreamExt;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::SpType;
@@ -30,6 +30,7 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::collections::HashMap;
+use std::mem;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::pin::Pin;
@@ -66,6 +67,51 @@ pub struct Server {
     /// collection of `wait_for_shutdown` futures for each server inserted into
     /// `http_servers`
     all_servers_shutdown: FuturesUnordered<HttpServerShutdownFut>,
+    request_body_max_bytes: usize,
+    log: Logger,
+}
+
+// Helper function to:
+//
+// 1. start a dropshot server on a particular address
+// 2. insert it into an `http_servers` hash map
+// 3. insert a shutdown handle into a an `all_servers_shutdown` collection
+//
+// which is used by both `start()` (on initial startup) and
+// `adjust_dropshot_addresses` (which may need to start new servers if we're
+// given new addresses).
+fn start_dropshot_server(
+    apictx: &Arc<ServerContext>,
+    addr: SocketAddrV6,
+    request_body_max_bytes: usize,
+    http_servers: &mut HashMap<SocketAddrV6, HttpServer>,
+    all_servers_shutdown: &FuturesUnordered<HttpServerShutdownFut>,
+    log: &Logger,
+) -> Result<(), String> {
+    let dropshot = ConfigDropshot {
+        bind_address: SocketAddr::V6(addr),
+        request_body_max_bytes,
+        ..Default::default()
+    };
+    let http_server_starter = dropshot::HttpServerStarter::new(
+        &dropshot,
+        http_entrypoints::api(),
+        Arc::clone(&apictx),
+        &log.new(o!("component" => "dropshot")),
+    )
+    .map_err(|error| format!("initializing http server: {}", error))?;
+
+    let http_server = http_server_starter.start();
+
+    // TODO Remove boxed() after
+    // https://github.com/oxidecomputer/dropshot/pull/569 is merged.
+    all_servers_shutdown.push(http_server.wait_for_shutdown().boxed());
+
+    if http_servers.insert(addr, http_server).is_some() {
+        return Err(format!("duplicate listening address: {addr}"));
+    }
+
+    Ok(())
 }
 
 impl Server {
@@ -79,7 +125,7 @@ impl Server {
         config: Config,
         args: MgsArguments,
         _rack_id: Uuid,
-        log: &Logger,
+        log: Logger,
     ) -> Result<Server, String> {
         assert!(
             !args.addresses.is_empty(),
@@ -105,30 +151,23 @@ impl Server {
         let all_servers_shutdown = FuturesUnordered::new();
 
         for addr in args.addresses {
-            let dropshot = ConfigDropshot {
-                bind_address: SocketAddr::V6(addr),
-                request_body_max_bytes: config.dropshot.request_body_max_bytes,
-                ..Default::default()
-            };
-            let http_server_starter = dropshot::HttpServerStarter::new(
-                &dropshot,
-                http_entrypoints::api(),
-                Arc::clone(&apictx),
-                &log.new(o!("component" => "dropshot")),
-            )
-            .map_err(|error| format!("initializing http server: {}", error))?;
-
-            let http_server = http_server_starter.start();
-
-            // TODO Remove boxed() via dropshot PR?
-            all_servers_shutdown.push(http_server.wait_for_shutdown().boxed());
-
-            if http_servers.insert(addr, http_server).is_some() {
-                return Err(format!("duplicate listening address: {addr}"));
-            }
+            start_dropshot_server(
+                &apictx,
+                addr,
+                config.dropshot.request_body_max_bytes,
+                &mut http_servers,
+                &all_servers_shutdown,
+                &log,
+            )?;
         }
 
-        Ok(Server { apictx, http_servers, all_servers_shutdown })
+        Ok(Server {
+            apictx,
+            http_servers,
+            all_servers_shutdown,
+            request_body_max_bytes: config.dropshot.request_body_max_bytes,
+            log,
+        })
     }
 
     /// Wait for the server to shut down
@@ -143,6 +182,74 @@ impl Server {
         Ok(())
     }
 
+    /// Adjust dropshot bind addresses on which this server is listening.
+    ///
+    /// Addresses fall into three categories:
+    ///
+    /// 1. Present in `addresses` and we're already listening on the address:
+    ///    the running dropshot server is left unchanged.
+    /// 2. Present in `addresses` but we're not already listening on the
+    ///    address: we start a new dropshot server (sharing the same server
+    ///    context) on the address.
+    /// 3. We're listening on it but it's not present in `addresses`: we shut
+    ///    the server down. This method blocks waiting for these shutdowns to
+    ///    complete.
+    ///
+    /// This method fails if any operation required for 2 or 3 fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `addresses` is empty.
+    pub async fn adjust_dropshot_addresses(
+        &mut self,
+        addresses: &[SocketAddrV6],
+    ) -> Result<(), String> {
+        let mut http_servers = HashMap::with_capacity(addresses.len());
+
+        // For each address in `addresses`, either start a new server or move
+        // the existing one from `self.http_servers` into `http_servers`.
+        for &addr in addresses {
+            if let Some(existing) = self.http_servers.remove(&addr) {
+                info!(
+                    self.apictx.log,
+                    "adjusting dropshot addresses; keeping existing addr";
+                    "addr" => %addr,
+                );
+                http_servers.insert(addr, existing);
+            } else {
+                info!(
+                    self.apictx.log,
+                    "adjusting dropshot addresses; starting new server";
+                    "addr" => %addr,
+                );
+                start_dropshot_server(
+                    &self.apictx,
+                    addr,
+                    self.request_body_max_bytes,
+                    &mut http_servers,
+                    &self.all_servers_shutdown,
+                    &self.log,
+                )?;
+            }
+        }
+
+        // `http_servers` now contains all the servers we want for `addresses`.
+        // Swap it into `self.http_servers`, and shut down any servers that
+        // remain.
+        mem::swap(&mut http_servers, &mut self.http_servers);
+
+        for (addr, server) in http_servers {
+            info!(
+                self.apictx.log,
+                "adjusting dropshot addresses; stopping old server";
+                "addr" => %addr,
+            );
+            server.close().await?;
+        }
+
+        Ok(())
+    }
+
     // TODO does MGS register itself with oximeter?
     // Register the Nexus server as a metric producer with `oximeter.
     // pub async fn register_as_producer(&self) {
@@ -153,11 +260,11 @@ impl Server {
     // }
 }
 
-/// Run an instance of the [Server].
-pub async fn run_server(
+/// Start an instance of the [Server].
+pub async fn start_server(
     config: Config,
     args: MgsArguments,
-) -> Result<(), String> {
+) -> Result<Server, String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
         config
@@ -174,7 +281,7 @@ pub async fn run_server(
         debug!(log, "registered DTrace probes");
     }
     let rack_id = Uuid::new_v4();
-    let mut server = Server::start(config, args, rack_id, &log).await?;
+    let server = Server::start(config, args, rack_id, log).await?;
     // server.register_as_producer().await;
-    server.wait_for_finish().await
+    Ok(server)
 }

@@ -7,7 +7,7 @@
 use clap::Parser;
 use futures::StreamExt;
 use omicron_common::cmd::{fatal, CmdError};
-use omicron_gateway::{run_openapi, run_server, Config, MgsArguments};
+use omicron_gateway::{run_openapi, start_server, Config, MgsArguments};
 use signal_hook::consts::signal;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddrV6;
@@ -100,23 +100,33 @@ async fn do_run() -> Result<(), CmdError> {
                 (id.unwrap(), vec![address.unwrap()])
             };
             let args = MgsArguments { id, addresses };
-            let server_fut = run_server(config, args);
-            tokio::pin!(server_fut);
+            let mut server =
+                start_server(config, args).await.map_err(CmdError::Failure)?;
 
             loop {
                 tokio::select! {
                     signal = signals.next() => match signal {
                         Some(signal::SIGUSR1) => {
-                            println!("caught SIGUSR1; reading config");
-                            let result = read_smf_config();
-                            println!("new config = {result:?}");
+                            let new_config = read_smf_config()?;
+                            if new_config.id != id {
+                                return Err(CmdError::Failure(
+                                    "cannot change server ID on refresh"
+                                        .to_string()
+                                ));
+                            }
+                            server
+                                .adjust_dropshot_addresses(&new_config.addresses)
+                                .await
+                                .map_err(|err| CmdError::Failure(
+                                    format!("config refresh failed: {err}")
+                                ))?;
                         }
                         // We only register `SIGUSR1` and never close the
                         // handle, so we never expect `None` or any other
                         // signal.
                         _ => unreachable!("invalid signal: {signal:?}"),
                     },
-                    result = &mut server_fut => {
+                    result = server.wait_for_finish() => {
                         return result.map_err(CmdError::Failure)
                     }
                 }
@@ -204,6 +214,7 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
         .get_property(PROP_ADDR)
         .map_err(|err| Error::GetProperty { prop: PROP_ADDR, err })?
         .ok_or_else(|| Error::MissingProperty { prop: PROP_ADDR })?;
+
     let mut addresses = Vec::new();
 
     for value in prop_addr
@@ -220,7 +231,13 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
         )))?);
     }
 
-    Ok(ConfigProperties { id: prop_id, addresses })
+    if addresses.is_empty() {
+        Err(CmdError::Failure(format!(
+            "no addresses specified by `{CONFIG_PG}/{PROP_ADDR}`"
+        )))
+    } else {
+        Ok(ConfigProperties { id: prop_id, addresses })
+    }
 }
 
 //#[cfg(not(target_os = "illumos"))]
