@@ -135,7 +135,7 @@ async fn do_run() -> Result<(), CmdError> {
     }
 }
 
-//#[cfg(target_os = "illumos")]
+#[cfg(target_os = "illumos")]
 fn read_smf_config() -> Result<ConfigProperties, CmdError> {
     use crucible_smf::{Scf, ScfError};
 
@@ -240,7 +240,9 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
     }
 }
 
-//#[cfg(not(target_os = "illumos"))]
-//fn read_smf_config() -> Result<ConfigProperties, CmdError> {
-//    CmdError::Failure("SMF configuration only available on illumos".to_string())
-//}
+#[cfg(not(target_os = "illumos"))]
+fn read_smf_config() -> Result<ConfigProperties, CmdError> {
+    Err(CmdError::Failure(
+        "SMF configuration only available on illumos".to_string(),
+    ))
+}
