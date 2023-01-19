@@ -12,6 +12,10 @@ pub mod http_entrypoints; // TODO pub only for testing - is this right?
 
 pub use config::Config;
 pub use context::ServerContext;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use futures::Future;
+use futures::FutureExt;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::SpType;
@@ -25,8 +29,10 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -44,24 +50,42 @@ pub fn run_openapi() -> Result<(), String> {
 
 pub struct MgsArguments {
     pub id: Uuid,
-    pub address: SocketAddrV6,
+    pub addresses: Vec<SocketAddrV6>,
 }
+
+type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;
+type HttpServerShutdownFut =
+    Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
 
 pub struct Server {
     /// shared state used by API request handlers
-    pub apictx: Arc<ServerContext>,
-    /// dropshot server for requests from nexus
-    pub http_server: dropshot::HttpServer<Arc<ServerContext>>,
+    apictx: Arc<ServerContext>,
+    /// dropshot servers for requests from nexus or wicketd, keyed by their bind
+    /// address
+    http_servers: HashMap<SocketAddrV6, HttpServer>,
+    /// collection of `wait_for_shutdown` futures for each server inserted into
+    /// `http_servers`
+    all_servers_shutdown: FuturesUnordered<HttpServerShutdownFut>,
 }
 
 impl Server {
     /// Start a gateway server.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `args.addresses` is empty (i.e., we are not given any
+    /// addresses on which to bind dropshot servers).
     pub async fn start(
         config: Config,
         args: MgsArguments,
         _rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
+        assert!(
+            !args.addresses.is_empty(),
+            "Cannot start server with no addresses"
+        );
+
         let log = log.new(o!("name" => args.id.to_string()));
         info!(log, "setting up gateway server");
 
@@ -77,25 +101,34 @@ impl Server {
                 format!("initializing server context: {}", error)
             })?;
 
-        let dropshot = ConfigDropshot {
-            bind_address: SocketAddr::V6(args.address),
-            // We need to be able to accept the largest single update blob we
-            // expect to be given, which at the moment is probably a host phase
-            // 1 image? (32 MiB raw, plus overhead for HTTP encoding)
-            request_body_max_bytes: 128 << 20,
-            ..Default::default()
-        };
-        let http_server_starter = dropshot::HttpServerStarter::new(
-            &dropshot,
-            http_entrypoints::api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot")),
-        )
-        .map_err(|error| format!("initializing http server: {}", error))?;
+        let mut http_servers = HashMap::with_capacity(args.addresses.len());
+        let all_servers_shutdown = FuturesUnordered::new();
 
-        let http_server = http_server_starter.start();
+        for addr in args.addresses {
+            let dropshot = ConfigDropshot {
+                bind_address: SocketAddr::V6(addr),
+                request_body_max_bytes: config.dropshot.request_body_max_bytes,
+                ..Default::default()
+            };
+            let http_server_starter = dropshot::HttpServerStarter::new(
+                &dropshot,
+                http_entrypoints::api(),
+                Arc::clone(&apictx),
+                &log.new(o!("component" => "dropshot")),
+            )
+            .map_err(|error| format!("initializing http server: {}", error))?;
 
-        Ok(Server { apictx, http_server })
+            let http_server = http_server_starter.start();
+
+            // TODO Remove boxed() via dropshot PR?
+            all_servers_shutdown.push(http_server.wait_for_shutdown().boxed());
+
+            if http_servers.insert(addr, http_server).is_some() {
+                return Err(format!("duplicate listening address: {addr}"));
+            }
+        }
+
+        Ok(Server { apictx, http_servers, all_servers_shutdown })
     }
 
     /// Wait for the server to shut down
@@ -103,8 +136,11 @@ impl Server {
     /// Note that this doesn't initiate a graceful shutdown, so if you call this
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
-    pub async fn wait_for_finish(self) -> Result<(), String> {
-        self.http_server.await
+    pub async fn wait_for_finish(&mut self) -> Result<(), String> {
+        while let Some(result) = self.all_servers_shutdown.next().await {
+            result?;
+        }
+        Ok(())
     }
 
     // TODO does MGS register itself with oximeter?
@@ -138,7 +174,7 @@ pub async fn run_server(
         debug!(log, "registered DTrace probes");
     }
     let rack_id = Uuid::new_v4();
-    let server = Server::start(config, args, rack_id, &log).await?;
+    let mut server = Server::start(config, args, rack_id, &log).await?;
     // server.register_as_producer().await;
     server.wait_for_finish().await
 }

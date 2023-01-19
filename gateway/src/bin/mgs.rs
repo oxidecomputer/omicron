@@ -91,16 +91,15 @@ async fn do_run() -> Result<(), CmdError> {
                     ))
                 })?;
 
-            let (id, address) = if id_and_address_from_smf {
+            let (id, addresses) = if id_and_address_from_smf {
                 let config = read_smf_config()?;
-                // TODO not addresses[0]
-                (config.id, config.addresses[0])
+                (config.id, config.addresses)
             } else {
                 // Clap ensures these are present if `id_and_address_from_smf`
                 // is false, so we can safely unwrap.
-                (id.unwrap(), address.unwrap())
+                (id.unwrap(), vec![address.unwrap()])
             };
-            let args = MgsArguments { id, address };
+            let args = MgsArguments { id, addresses };
             let server_fut = run_server(config, args);
             tokio::pin!(server_fut);
 
