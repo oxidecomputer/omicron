@@ -30,7 +30,7 @@ pub enum Responsiveness {
 
 #[async_trait]
 pub trait SimulatedSp {
-    /// Hexlified serial number.
+    /// Serial number.
     fn serial_number(&self) -> String;
 
     /// Public key for the manufacturing cert used to sign this SP's RoT certs.
@@ -51,14 +51,14 @@ pub trait SimulatedSp {
     ) -> Result<RotResponseV1, RotSprocketError>;
 }
 
-// Helper function to pad a simulated serial number (stored as a `Vec<u8>`) to
+// Helper function to pad a simulated serial number (stored as a `String`) to
 // the appropriate size for returning in the SpState message.
-fn serial_number_padded(serial_number: &[u8]) -> [u8; 32] {
+fn serial_number_padded(serial_number: &str) -> [u8; 32] {
     let mut padded = [0; 32];
     padded
         .get_mut(0..serial_number.len())
         .expect("simulated serial number too long")
-        .copy_from_slice(&serial_number);
+        .copy_from_slice(serial_number.as_bytes());
     padded
 }
 
