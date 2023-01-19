@@ -115,8 +115,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.17"
 diesel = { version = "2.0.2" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
-# XXX-dap update before landing to point back to main
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "remove-arc-rqctx", features = [ "usdt-probes" ] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 expectorate = "1.0.6"
 # TODO(luqman): Update once merged & new release is cut
 # https://github.com/rafalh/rust-fatfs/pull/76
