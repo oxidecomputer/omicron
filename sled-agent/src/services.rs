@@ -958,9 +958,6 @@ impl ServiceManager {
                                 &format!("[{}]:{}", address, MGS_PORT),
                             )?;
                             smfh.refresh()?;
-                            // TODO: For this restart to be optional, MGS must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
                         }
                         ServiceType::Dendrite { .. } => {
                             smfh.setprop(
