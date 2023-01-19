@@ -796,7 +796,7 @@ mod test {
                 panic!("Expected Name pagination, got Id pagination")
             }
         };
-        assert_eq!(data_page.marker, Some(&thinglast_name.into()));
+        assert_eq!(data_page.marker, Some(&thinglast_name));
         assert_eq!(data_page.direction, PaginationOrder::Descending);
         assert_eq!(data_page.limit, limit);
     }
@@ -847,7 +847,7 @@ mod test {
                 panic!("Expected id pagination, got name pagination")
             }
         };
-        assert_eq!(data_page.marker, Some(&thinglast_id.into()));
+        assert_eq!(data_page.marker, Some(&thinglast_id));
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
     }

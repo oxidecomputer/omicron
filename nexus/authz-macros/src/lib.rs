@@ -376,8 +376,7 @@ fn test_authz_dump() {
             primary_key = Uuid,
             roles_allowed = false,
             polar_snippet = Custom,
-        }
-        .into(),
+        },
     )
     .unwrap();
     println!("{}", output);

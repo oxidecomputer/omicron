@@ -62,12 +62,12 @@ pub async fn make_resources<'a>(
     main_silo_id: Uuid,
 ) -> ResourceSet {
     // Global resources
-    builder.new_resource(authz::DATABASE.clone());
-    builder.new_resource_with_users(authz::FLEET.clone()).await;
-    builder.new_resource(authz::CONSOLE_SESSION_LIST.clone());
-    builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST.clone());
-    builder.new_resource(authz::GLOBAL_IMAGE_LIST.clone());
-    builder.new_resource(authz::IP_POOL_LIST.clone());
+    builder.new_resource(authz::DATABASE);
+    builder.new_resource_with_users(authz::FLEET).await;
+    builder.new_resource(authz::CONSOLE_SESSION_LIST);
+    builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
+    builder.new_resource(authz::GLOBAL_IMAGE_LIST);
+    builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -76,14 +76,14 @@ pub async fn make_resources<'a>(
     // Various other resources
     let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
     builder.new_resource(authz::Rack::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         rack_id,
         LookupType::ById(rack_id),
     ));
 
     let sled_id = "8a785566-adaf-c8d8-e886-bee7f9b73ca7".parse().unwrap();
     builder.new_resource(authz::Sled::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         sled_id,
         LookupType::ById(sled_id),
     ));
@@ -91,21 +91,21 @@ pub async fn make_resources<'a>(
     let global_image_id =
         "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
     builder.new_resource(authz::GlobalImage::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         global_image_id,
         LookupType::ById(global_image_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
     builder.new_resource(authz::DeviceAuthRequest::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         device_user_code.clone(),
         LookupType::ByName(device_user_code),
     ));
 
     let device_access_token = String::from("a-device-access-token");
     builder.new_resource(authz::DeviceAccessToken::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         device_access_token.clone(),
         LookupType::ByName(device_access_token),
     ));
@@ -308,6 +308,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::UserBuiltin::get_polar_class(),
     ]
     .into_iter()
-    .map(|c| c.name.clone())
+    .map(|c| c.name)
     .collect()
 }

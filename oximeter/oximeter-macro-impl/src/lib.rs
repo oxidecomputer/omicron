@@ -265,8 +265,7 @@ mod tests {
                     is_cool: bool,
                     addr: std::net::IpAddr,
                 }
-            }
-            .into(),
+            },
         );
         assert!(out.is_ok());
     }
@@ -277,8 +276,7 @@ mod tests {
             quote! {
                 #[derive(Target)]
                 struct MyTarget;
-            }
-            .into(),
+            },
         );
         assert!(out.is_ok());
     }
@@ -289,8 +287,7 @@ mod tests {
             quote! {
                 #[derive(Target)]
                 struct MyTarget {}
-            }
-            .into(),
+            },
         );
         assert!(out.is_ok());
     }
@@ -304,8 +301,7 @@ mod tests {
                     Bad,
                     NoGood,
                 };
-            }
-            .into(),
+            },
         );
         assert!(out.is_err());
     }
