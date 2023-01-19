@@ -539,7 +539,7 @@ async fn test_saml_idp_metadata_data_valid(
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
                 data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_IDP_DESCRIPTOR.to_string()),
+                    .encode(SAML_IDP_DESCRIPTOR),
             },
 
             idp_entity_id: "entity_id".to_string(),
@@ -820,7 +820,7 @@ async fn test_silo_user_fetch_by_external_id(
         .silo_user_fetch_by_external_id(
             &opctx_external_authn,
             &authz_silo,
-            "123".into(),
+            "123",
         )
         .await;
     assert!(result.is_ok());
@@ -832,7 +832,7 @@ async fn test_silo_user_fetch_by_external_id(
         .silo_user_fetch_by_external_id(
             &opctx_external_authn,
             &authz_silo,
-            "f5513e049dac9468de5bdff36ab17d04f".into(),
+            "f5513e049dac9468de5bdff36ab17d04f",
         )
         .await;
     assert!(result.is_ok());
@@ -1515,9 +1515,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
         users_by_id
     };
 
-    let users_by_name = users_by_id
-        .iter()
-        .map(|(_, user)| (user.display_name.to_owned(), *user))
+    let users_by_name = users_by_id.values().map(|user| (user.display_name.to_owned(), *user))
         .collect::<BTreeMap<_, _>>();
 
     // We'll run through a battery of tests:
@@ -1858,7 +1856,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 idp_metadata_source:
                     params::IdpMetadataSource::Base64EncodedXml {
                         data: base64::engine::general_purpose::STANDARD
-                            .encode(SAML_IDP_DESCRIPTOR.to_string()),
+                            .encode(SAML_IDP_DESCRIPTOR),
                     },
 
                 idp_entity_id: "entity_id".to_string(),
@@ -1968,7 +1966,7 @@ async fn run_user_tests(
         "/system/silos/{}/identity-providers/local/users",
         silo.identity.name
     );
-    let url_user_create = format!("{}", url_local_idp_users);
+    let url_user_create = url_local_idp_users.to_string();
 
     // Fetch users and verify it matches what the caller expects.
     println!("run_user_tests: as {:?}: fetch all users", authn_mode);

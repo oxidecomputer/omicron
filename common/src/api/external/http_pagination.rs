@@ -583,6 +583,7 @@ mod test {
     }
 
     /// Function for running a bunch of tests on a ScanParams type.
+    #[allow(clippy::type_complexity)]
     fn test_scan_param_common<F, S>(
         list: &Vec<MyThing>,
         scan: &S,

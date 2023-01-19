@@ -453,7 +453,7 @@ async fn expect_login_success(
     assert!(token_cookie.starts_with("session="));
     assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
     let (_, session_token) = token_cookie
-        .split_once("=")
+        .split_once('=')
         .expect("session cookie: bad cookie header value (missing 'session=')");
 
     // It's not clear how a successful login could ever take less than the

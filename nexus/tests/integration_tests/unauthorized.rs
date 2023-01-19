@@ -69,7 +69,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .expect(&format!("Failed to GET from URL: {url}")),
+                    .unwrap_or_else(|_| panic!("Failed to GET from URL: {url}")),
                 id_routes,
             ),
             SetupReq::Post { url, body, id_routes } => (
@@ -78,7 +78,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .expect(&format!("Failed to POST to URL: {url}")),
+                    .unwrap_or_else(|_| panic!("Failed to POST to URL: {url}")),
                 id_routes,
             ),
         };
@@ -192,7 +192,7 @@ lazy_static! {
         },
         // Create a local User
         SetupReq::Post {
-            url: &*DEMO_SILO_USERS_CREATE_URL,
+            url: &DEMO_SILO_USERS_CREATE_URL,
             body: serde_json::to_value(&*DEMO_USER_CREATE).unwrap(),
             id_routes: vec![
                 &*DEMO_SILO_USER_ID_GET_URL,
@@ -202,12 +202,12 @@ lazy_static! {
         },
         // Get the default IP pool
         SetupReq::Get {
-            url: &*DEMO_IP_POOL_URL,
+            url: &DEMO_IP_POOL_URL,
             id_routes: vec!["/system/by-id/ip-pools/{id}"],
         },
         // Create an IP pool range
         SetupReq::Post {
-            url: &*DEMO_IP_POOL_RANGES_ADD_URL,
+            url: &DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
             id_routes: vec![],
         },
@@ -219,54 +219,54 @@ lazy_static! {
         },
         // Create a Project in the Organization
         SetupReq::Post {
-            url: &*DEMO_ORG_PROJECTS_URL,
+            url: &DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
             id_routes: vec![],
         },
         // Create a VPC in the Project
         SetupReq::Post {
-            url: &*DEMO_PROJECT_URL_VPCS,
+            url: &DEMO_PROJECT_URL_VPCS,
             body: serde_json::to_value(&*DEMO_VPC_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpcs/{id}"],
         },
         // Create a VPC Subnet in the Vpc
         SetupReq::Post {
-            url: &*DEMO_VPC_URL_SUBNETS,
+            url: &DEMO_VPC_URL_SUBNETS,
             body: serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpc-subnets/{id}"],
         },
         // Create a VPC Router in the Vpc
         SetupReq::Post {
-            url: &*DEMO_VPC_URL_ROUTERS,
+            url: &DEMO_VPC_URL_ROUTERS,
             body: serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpc-routers/{id}"],
         },
         // Create a VPC Router in the Vpc
         SetupReq::Post {
-            url: &*DEMO_VPC_ROUTER_URL_ROUTES,
+            url: &DEMO_VPC_ROUTER_URL_ROUTES,
             body: serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpc-router-routes/{id}"],
         },
         // Create a Disk in the Project
         SetupReq::Post {
-            url: &*DEMO_DISKS_URL,
+            url: &DEMO_DISKS_URL,
             body: serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
             id_routes: vec!["/v1/disks/{id}"],
         },
         // Create an Instance in the Project
         SetupReq::Post {
-            url: &*DEMO_PROJECT_URL_INSTANCES,
+            url: &DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
         },
         // Lookup the previously created NIC
         SetupReq::Get {
-            url: &*DEMO_INSTANCE_NIC_URL,
+            url: &DEMO_INSTANCE_NIC_URL,
             id_routes: vec!["/by-id/network-interfaces/{id}"],
         },
         // Create a Snapshot in the Project
         SetupReq::Post {
-            url: &*DEMO_PROJECT_URL_SNAPSHOTS,
+            url: &DEMO_PROJECT_URL_SNAPSHOTS,
             body: serde_json::to_value(&*DEMO_SNAPSHOT_CREATE).unwrap(),
             id_routes: vec!["/by-id/snapshots/{id}"],
         },
@@ -278,13 +278,13 @@ lazy_static! {
         },
         // Create a SAML identity provider
         SetupReq::Post {
-            url: &*SAML_IDENTITY_PROVIDERS_URL,
+            url: &SAML_IDENTITY_PROVIDERS_URL,
             body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             id_routes: vec![],
         },
         // Create a SSH key
         SetupReq::Post {
-            url: &*DEMO_SSHKEYS_URL,
+            url: &DEMO_SSHKEYS_URL,
             body: serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
             id_routes: vec![],
         },
@@ -380,7 +380,7 @@ async fn verify_endpoint(
                     .parsed_body::<IdMetadata>()
                     .unwrap()
                     .id
-                    .to_string()
+                    
                     .as_str(),
             ),
             None => endpoint
@@ -414,7 +414,7 @@ async fn verify_endpoint(
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .expect(&format!("Failed to GET: {uri}"))
+                    .unwrap_or_else(|_| panic!("Failed to GET: {uri}"))
                     .parsed_body::<serde_json::Value>()
                     .unwrap(),
             )
@@ -636,7 +636,7 @@ fn verify_response(response: &TestResponse) {
                 error.message.contains(" with name \"")
                     || error.message.contains(" with id \"")
             );
-            assert!(error.message.ends_with("\""));
+            assert!(error.message.ends_with('\"'));
         }
         StatusCode::METHOD_NOT_ALLOWED => {
             assert!(error.error_code.is_none());

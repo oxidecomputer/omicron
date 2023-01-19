@@ -561,11 +561,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         )
     };
     oximeter.force_collect().await;
-    for id in vec![organization_id, project_id] {
+    for id in &[organization_id, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("virtual_disk_space_provisioned", id),
+                &metric_url("virtual_disk_space_provisioned", *id),
             )
             .await,
             0
@@ -573,14 +573,14 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("cpus_provisioned", id),
+                &metric_url("cpus_provisioned", *id),
             )
             .await,
             0
         );
         assert_eq!(query_for_latest_metric(
             client,
-            &metric_url("ram_provisioned", id),
+            &metric_url("ram_provisioned", *id),
         )
         .await, 0);
     }
@@ -626,11 +626,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         expected_ram
     );
     oximeter.force_collect().await;
-    for id in vec![organization_id, project_id] {
+    for id in &[organization_id, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("virtual_disk_space_provisioned", id),
+                &metric_url("virtual_disk_space_provisioned", *id),
             )
             .await,
             0
@@ -638,14 +638,14 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("cpus_provisioned", id),
+                &metric_url("cpus_provisioned", *id),
             )
             .await,
             expected_cpus
         );
         assert_eq!(query_for_latest_metric(
             client,
-            &metric_url("ram_provisioned", id),
+            &metric_url("ram_provisioned", *id),
         )
         .await, expected_ram);
     }
@@ -664,11 +664,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
     oximeter.force_collect().await;
-    for id in vec![organization_id, project_id] {
+    for id in &[organization_id, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("virtual_disk_space_provisioned", id),
+                &metric_url("virtual_disk_space_provisioned", *id),
             )
             .await,
             0
@@ -676,14 +676,14 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("cpus_provisioned", id),
+                &metric_url("cpus_provisioned", *id),
             )
             .await,
             0
         );
         assert_eq!(query_for_latest_metric(
             client,
-            &metric_url("ram_provisioned", id),
+            &metric_url("ram_provisioned", *id),
         )
         .await, 0);
     }
@@ -2354,7 +2354,7 @@ async fn test_attach_eight_disks_to_instance(
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
                         name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
+                            format!("probablydata{}", i),
                         )
                         .unwrap(),
                     },
@@ -2462,7 +2462,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
                         name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
+                            format!("probablydata{}", i),
                         )
                         .unwrap(),
                     },
@@ -2586,7 +2586,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
                         name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
+                            format!("probablydata{}", i),
                         )
                         .unwrap(),
                     },
@@ -2697,7 +2697,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
                         name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
+                            format!("probablydata{}", i),
                         )
                         .unwrap(),
                     },
@@ -3231,5 +3231,5 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 /// going on.
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
-    sa.instance_finish_transition(id.clone()).await;
+    sa.instance_finish_transition(*id).await;
 }
