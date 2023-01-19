@@ -1,0 +1,17 @@
+[package]
+name = "tufaceous"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true, features = ["backtrace"] }
+chrono.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+console = { version = "0.15.5", default-features = false }
+fs-err = "2.9.0"
+hex.workspace = true
+humantime = "2.1.0"
+rand.workspace = true
+ring = { workspace = true, features = ["std"] }
+tough.workspace = true
