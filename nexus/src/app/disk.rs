@@ -386,13 +386,17 @@ impl super::Nexus {
 
     pub async fn project_delete_disk(
         self: &Arc<Self>,
+        opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
     ) -> DeleteResult {
-        let (.., authz_disk) =
+        let (.., project, authz_disk) =
             disk_lookup.lookup_for(authz::Action::Delete).await?;
 
-        let saga_params =
-            sagas::disk_delete::Params { disk_id: authz_disk.id() };
+        let saga_params = sagas::disk_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: project.id(),
+            disk_id: authz_disk.id(),
+        };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
         Ok(())
@@ -542,7 +546,7 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.volume_remove_read_only_parent(db_disk.volume_id).await?;
+        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
 
         Ok(())
     }

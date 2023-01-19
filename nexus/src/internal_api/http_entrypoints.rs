@@ -221,7 +221,8 @@ async fn cpapi_volume_remove_read_only_parent(
     let path = path_params.into_inner();
 
     let handler = async {
-        nexus.volume_remove_read_only_parent(path.volume_id).await?;
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.volume_remove_read_only_parent(&opctx, path.volume_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

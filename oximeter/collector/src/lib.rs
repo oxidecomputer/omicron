@@ -51,7 +51,6 @@ pub enum Error {
 #[derive(Debug, Clone)]
 enum CollectionMessage {
     // Explicit request that the task collect data from its producer
-    #[allow(dead_code)]
     Collect,
     // Request that the task update its interval and the socket address on which it collects data
     // from its producer.
@@ -59,6 +58,59 @@ enum CollectionMessage {
     // Request that the task exit
     #[allow(dead_code)]
     Shutdown,
+}
+
+async fn perform_collection(
+    log: &Logger,
+    client: &reqwest::Client,
+    producer: &ProducerEndpoint,
+    outbox: &mpsc::Sender<ProducerResults>,
+) {
+    info!(log, "collecting from producer");
+    let res = client
+        .get(format!(
+            "http://{}{}",
+            producer.address,
+            producer.collection_route()
+        ))
+        .send()
+        .await;
+    match res {
+        Ok(res) => {
+            if res.status().is_success() {
+                match res.json::<ProducerResults>().await {
+                    Ok(results) => {
+                        debug!(
+                            log,
+                            "collected {} total results",
+                            results.len();
+                        );
+                        outbox.send(results).await.unwrap();
+                    }
+                    Err(e) => {
+                        warn!(
+                            log,
+                            "failed to collect results from producer: {}",
+                            e.to_string();
+                        );
+                    }
+                }
+            } else {
+                warn!(
+                    log,
+                    "failed to receive metric results from producer";
+                    "status_code" => res.status().as_u16(),
+                );
+            }
+        }
+        Err(e) => {
+            warn!(
+                log,
+                "failed to send collection request to producer: {}",
+                e.to_string();
+            );
+        }
+    }
 }
 
 // Background task used to collect metrics from one producer on an interval.
@@ -81,6 +133,7 @@ async fn collection_task(
         "starting oximeter collection task";
         "interval" => ?producer.interval,
     );
+
     loop {
         tokio::select! {
             message = inbox.recv() => {
@@ -91,9 +144,11 @@ async fn collection_task(
                     }
                     Some(CollectionMessage::Shutdown) => {
                         debug!(log, "collection task received shutdown request");
+                        return;
                     },
                     Some(CollectionMessage::Collect) => {
-                        debug!(log, "collection task received request to collect");
+                        debug!(log, "collection task received explicit request to collect");
+                        perform_collection(&log, &client, &producer, &outbox).await;
                     },
                     Some(CollectionMessage::Update(new_info)) => {
                         producer = new_info;
@@ -109,46 +164,7 @@ async fn collection_task(
                 }
             }
             _ = collection_timer.tick() => {
-                info!(log, "collecting from producer");
-                let res = client.get(format!("http://{}{}", producer.address, producer.collection_route()))
-                    .send()
-                    .await;
-                match res {
-                    Ok(res) => {
-                        if res.status().is_success() {
-                            match res.json::<ProducerResults>().await {
-                                Ok(results) => {
-                                    debug!(
-                                        log,
-                                        "collected {} total results",
-                                        results.len();
-                                    );
-                                    outbox.send(results).await.unwrap();
-                                },
-                                Err(e) => {
-                                    warn!(
-                                        log,
-                                        "failed to collect results from producer: {}",
-                                        e.to_string();
-                                    );
-                                }
-                            }
-                        } else {
-                            warn!(
-                                log,
-                                "failed to receive metric results from producer";
-                                "status_code" => res.status().as_u16(),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        warn!(
-                            log,
-                            "failed to send collection request to producer: {}",
-                            e.to_string();
-                        );
-                    }
-                }
+                perform_collection(&log, &client, &producer, &outbox).await;
             }
         }
     }
@@ -351,6 +367,13 @@ impl OximeterAgent {
         }
         Ok(())
     }
+
+    pub async fn force_collection(&self) {
+        let collection_tasks = self.collection_tasks.lock().await;
+        for task in collection_tasks.iter() {
+            task.1.inbox.send(CollectionMessage::Collect).await.unwrap();
+        }
+    }
 }
 
 /// Configuration used to initialize an oximeter server
@@ -522,6 +545,14 @@ impl Oximeter {
     /// Shutdown the Oximeter server
     pub async fn close(self) -> Result<(), Error> {
         self.server.close().await.map_err(Error::Server)
+    }
+
+    /// Forces Oximeter to perform a collection immediately.
+    ///
+    /// This is particularly useful during tests, which would prefer to
+    /// avoid waiting until a collection interval completes.
+    pub async fn force_collect(&self) {
+        self.server.app_private().force_collection().await
     }
 }
 

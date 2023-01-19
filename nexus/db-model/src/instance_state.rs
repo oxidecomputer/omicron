@@ -4,6 +4,8 @@
 
 use super::impl_enum_wrapper;
 use omicron_common::api::external;
+use serde::Deserialize;
+use serde::Serialize;
 use std::io::Write;
 
 impl_enum_wrapper!(
@@ -11,7 +13,7 @@ impl_enum_wrapper!(
     #[diesel(postgres_type(name = "instance_state"))]
     pub struct InstanceStateEnum;
 
-    #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
     #[diesel(sql_type = InstanceStateEnum)]
     pub struct InstanceState(pub external::InstanceState);
 

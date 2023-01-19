@@ -173,6 +173,7 @@ impl ServerContext {
             log.new(o!("component" => "nexus")),
             resolver,
             pool,
+            &producer_registry,
             config,
             Arc::clone(&authz),
         )

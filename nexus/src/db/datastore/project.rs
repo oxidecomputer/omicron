@@ -13,13 +13,16 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::identity::Resource;
+use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
+use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -101,24 +104,52 @@ impl DataStore {
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
-        let db_project = Organization::insert_resource(
-            organization_id,
-            diesel::insert_into(dsl::project).values(project),
-        )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Organization,
-                lookup_type: LookupType::ById(organization_id),
-            },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::Project, &name),
+        let db_project = self
+            .pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                let project = Organization::insert_resource(
+                    organization_id,
+                    diesel::insert_into(dsl::project).values(project),
                 )
-            }
-        })?;
+                .insert_and_get_result_async(&conn)
+                .await
+                .map_err(|e| match e {
+                    AsyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::Organization,
+                            lookup_type: LookupType::ById(organization_id),
+                        }
+                    }
+                    AsyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::Project,
+                                &name,
+                            ),
+                        )
+                    }
+                })?;
+
+                // Create resource provisioning for the project.
+                self.virtual_provisioning_collection_create_on_connection(
+                    &conn,
+                    VirtualProvisioningCollection::new(
+                        project.id(),
+                        CollectionTypeProvisioned::Project,
+                    ),
+                )
+                .await?;
+                Ok(project)
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })?;
 
         Ok((
             authz::Project::new(
@@ -154,28 +185,48 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
-        let now = Utc::now();
-        let updated_rows = diesel::update(dsl::project)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_project.id()))
-            .filter(dsl::rcgen.eq(db_project.rcgen))
-            .set(dsl::time_deleted.eq(now))
-            .returning(Project::as_returning())
-            .execute_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_project),
-                )
-            })?;
+        type TxnError = TransactionError<Error>;
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                let now = Utc::now();
+                let updated_rows = diesel::update(dsl::project)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(authz_project.id()))
+                    .filter(dsl::rcgen.eq(db_project.rcgen))
+                    .set(dsl::time_deleted.eq(now))
+                    .returning(Project::as_returning())
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            PoolError::from(e),
+                            ErrorHandler::NotFoundByResource(authz_project),
+                        )
+                    })?;
 
-        if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: "deletion failed due to concurrent modification"
-                    .to_string(),
-            });
-        }
+                if updated_rows == 0 {
+                    return Err(TxnError::CustomError(Error::InvalidRequest {
+                        message:
+                            "deletion failed due to concurrent modification"
+                                .to_string(),
+                    }));
+                }
+
+                self.virtual_provisioning_collection_delete_on_connection(
+                    &conn,
+                    db_project.id(),
+                )
+                .await?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(e) => e,
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })?;
         Ok(())
     }
 
