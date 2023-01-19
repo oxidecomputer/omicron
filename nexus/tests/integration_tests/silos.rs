@@ -1794,7 +1794,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .await;
 }
 
-async fn verify_local_idp_404<'a>(request: NexusRequest<'a>) {
+async fn verify_local_idp_404(request: NexusRequest<'_>) {
     let error = request
         .execute()
         .await

@@ -57,8 +57,8 @@ use uuid::Uuid;
 //   `make_organization()`, etc.)  You'll likely need the `first_branch`
 //   argument that says whether to create users and how many child hierarchies
 //   to create.
-pub async fn make_resources<'a>(
-    mut builder: ResourceBuilder<'a>,
+pub async fn make_resources(
+    mut builder: ResourceBuilder<'_>,
     main_silo_id: Uuid,
 ) -> ResourceSet {
     // Global resources
