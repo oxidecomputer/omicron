@@ -87,7 +87,7 @@ where
         &self,
         ctx: &T,
         log: &slog::Logger,
-        request: &http::Request<hyper::Body>,
+        request: &dropshot::RequestInfo,
     ) -> SchemeResult {
         let headers = request.headers();
         match authn_spoof_parse_id(headers.typed_get().as_ref()) {
