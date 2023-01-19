@@ -69,7 +69,9 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap_or_else(|_| panic!("Failed to GET from URL: {url}")),
+                    .unwrap_or_else(|_| {
+                        panic!("Failed to GET from URL: {url}")
+                    }),
                 id_routes,
             ),
             SetupReq::Post { url, body, id_routes } => (
@@ -376,12 +378,7 @@ async fn verify_endpoint(
         match setup_response {
             Some(response) => endpoint.url.replace(
                 "{id}",
-                response
-                    .parsed_body::<IdMetadata>()
-                    .unwrap()
-                    .id
-                    
-                    .as_str(),
+                response.parsed_body::<IdMetadata>().unwrap().id.as_str(),
             ),
             None => endpoint
                 .url

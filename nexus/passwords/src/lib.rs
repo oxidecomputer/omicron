@@ -301,8 +301,7 @@ mod test {
             hasher.create_password(&password).unwrap()
         };
         let hash2 = {
-            let mut hasher =
-                Hasher::new(external_password_argon(), known_rng);
+            let mut hasher = Hasher::new(external_password_argon(), known_rng);
             hasher.create_password(&password).unwrap()
         };
         assert_eq!(hash1, hash2);

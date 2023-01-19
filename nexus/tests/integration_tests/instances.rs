@@ -578,11 +578,14 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
             .await,
             0
         );
-        assert_eq!(query_for_latest_metric(
-            client,
-            &metric_url("ram_provisioned", *id),
-        )
-        .await, 0);
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            0
+        );
     }
 
     // Create an instance.
@@ -643,11 +646,14 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
             .await,
             expected_cpus
         );
-        assert_eq!(query_for_latest_metric(
-            client,
-            &metric_url("ram_provisioned", *id),
-        )
-        .await, expected_ram);
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            expected_ram
+        );
     }
 
     // Stop the instance
@@ -681,11 +687,14 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
             .await,
             0
         );
-        assert_eq!(query_for_latest_metric(
-            client,
-            &metric_url("ram_provisioned", *id),
-        )
-        .await, 0);
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            0
+        );
     }
 }
 
@@ -2353,10 +2362,8 @@ async fn test_attach_eight_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2461,10 +2468,8 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2585,10 +2590,8 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2696,10 +2699,8 @@ async fn test_disks_detached_when_instance_destroyed(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })

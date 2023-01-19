@@ -1515,7 +1515,9 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
         users_by_id
     };
 
-    let users_by_name = users_by_id.values().map(|user| (user.display_name.to_owned(), *user))
+    let users_by_name = users_by_id
+        .values()
+        .map(|user| (user.display_name.to_owned(), *user))
         .collect::<BTreeMap<_, _>>();
 
     // We'll run through a battery of tests:

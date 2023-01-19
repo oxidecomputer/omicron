@@ -548,8 +548,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     snapshot_id: snapshot.id(),
                 },
 
-                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES)
-                    .unwrap(),
+                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES).unwrap(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
