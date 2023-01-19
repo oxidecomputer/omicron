@@ -6,10 +6,9 @@ use anyhow::Context;
 use async_trait::async_trait;
 use cookie::{Cookie, CookieJar, ParseError};
 use dropshot::{
-    ApiEndpointBodyContentType, ExtensionMode, Extractor, ExtractorMetadata,
-    HttpError, RequestContext, ServerContext,
+    ApiEndpointBodyContentType, ExtensionMode, ExtractorMetadata, HttpError,
+    RequestContext, ServerContext, SharedExtractor,
 };
-use std::sync::Arc;
 
 pub fn parse_cookies(
     headers: &http::HeaderMap<http::HeaderValue>,
@@ -35,12 +34,11 @@ NewtypeFrom! { () pub struct Cookies(pub CookieJar); }
 NewtypeDeref! { () pub struct Cookies(pub CookieJar); }
 
 #[async_trait]
-impl Extractor for Cookies {
+impl SharedExtractor for Cookies {
     async fn from_request<Context: ServerContext>(
-        rqctx: Arc<RequestContext<Context>>,
+        rqctx: &RequestContext<Context>,
     ) -> Result<Self, HttpError> {
-        let request = &rqctx.request.lock().await;
-        let cookies = parse_cookies(request.headers())
+        let cookies = parse_cookies(rqctx.request.headers())
             .unwrap_or_else(|_| CookieJar::new());
         Ok(cookies.into())
     }

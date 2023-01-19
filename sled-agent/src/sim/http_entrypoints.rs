@@ -66,7 +66,7 @@ struct InstancePathParam {
     path = "/instances/{instance_id}",
 }]
 async fn instance_put(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
 ) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
@@ -84,7 +84,7 @@ async fn instance_put(
     path = "/instances/{instance_id}/poke",
 }]
 async fn instance_poke_post(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
@@ -104,7 +104,7 @@ struct DiskPathParam {
     path = "/disks/{disk_id}",
 }]
 async fn disk_put(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<DiskPathParam>,
     body: TypedBody<DiskEnsureBody>,
 ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
@@ -126,7 +126,7 @@ async fn disk_put(
     path = "/disks/{disk_id}/poke",
 }]
 async fn disk_poke_post(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
@@ -140,7 +140,7 @@ async fn disk_poke_post(
     path = "/update"
 }]
 async fn update_artifact(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     artifact: TypedBody<UpdateArtifact>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     crate::updates::download_artifact(
@@ -157,7 +157,7 @@ async fn update_artifact(
     path = "/instances/{instance_id}/serial",
 }]
 async fn instance_serial_get(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstancePathParam>,
     query: Query<InstanceSerialConsoleRequest>,
 ) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
@@ -219,7 +219,7 @@ pub struct InstanceIssueDiskSnapshotRequestResponse {
     path = "/instances/{instance_id}/disks/{disk_id}/snapshot",
 }]
 async fn instance_issue_disk_snapshot_request(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstanceIssueDiskSnapshotRequestPathParam>,
     body: TypedBody<InstanceIssueDiskSnapshotRequestBody>,
 ) -> Result<HttpResponseOk<InstanceIssueDiskSnapshotRequestResponse>, HttpError>
@@ -266,7 +266,7 @@ pub struct DiskSnapshotRequestResponse {
     path = "/disks/{disk_id}/snapshot",
 }]
 async fn issue_disk_snapshot_request(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<IssueDiskSnapshotRequestPathParam>,
     body: TypedBody<DiskSnapshotRequestBody>,
 ) -> Result<HttpResponseOk<DiskSnapshotRequestResponse>, HttpError> {
@@ -297,7 +297,7 @@ struct VpcPathParam {
     path = "/vpc/{vpc_id}/firewall/rules",
 }]
 async fn vpc_firewall_rules_put(
-    rqctx: Arc<RequestContext<Arc<SledAgent>>>,
+    rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<VpcPathParam>,
     body: TypedBody<VpcFirewallRulesEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

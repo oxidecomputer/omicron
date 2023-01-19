@@ -61,7 +61,7 @@ pub struct SpoofLoginBody {
    tags = ["hidden"],
 }]
 pub async fn login_spoof(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<SpoofLoginBody>,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
@@ -258,14 +258,14 @@ impl RelayState {
    tags = ["login"],
 }]
 pub async fn login_saml_begin(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
-        let request = &rqctx.request.lock().await;
+        let request = &rqctx.request;
 
         // Use opctx_external_authn because this request will be
         // unauthenticated.
@@ -335,7 +335,7 @@ pub async fn login_saml_begin(
    tags = ["login"],
 }]
 pub async fn login_saml(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
 ) -> Result<HttpResponseSeeOther, HttpError> {
@@ -405,7 +405,7 @@ pub struct LoginPathParam {
    tags = ["login"],
 }]
 pub async fn login_local(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
 ) -> Result<HttpResponseSeeOther, HttpError> {
@@ -478,7 +478,7 @@ async fn login_finish(
    tags = ["hidden"],
 }]
 pub async fn logout(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     cookies: Cookies,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
@@ -542,7 +542,7 @@ pub struct RestPathParam {
    unpublished = true,
 }]
 pub async fn login_spoof_begin(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx.context()).await
 }
@@ -602,7 +602,7 @@ fn get_login_url(redirect_url: Option<String>) -> String {
    unpublished = true,
 }]
 pub async fn login_begin(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<StateParam>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
@@ -622,7 +622,7 @@ pub async fn login_begin(
    tags = ["hidden"],
 }]
 pub async fn session_me(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::User>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -644,7 +644,7 @@ pub async fn session_me(
     tags = ["hidden"],
  }]
 pub async fn session_me_groups(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
     let apictx = rqctx.context();
@@ -674,7 +674,7 @@ pub async fn session_me_groups(
 }
 
 pub async fn console_index_or_login_redirect(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     let opctx = OpContext::for_external_api(&rqctx).await;
 
@@ -692,13 +692,8 @@ pub async fn console_index_or_login_redirect(
     // using the spoof login page, which is hosted by Nexus. Once we start
     // sending users to a real external IdP login page, this will need to be a
     // full URL.
-    let redirect_url = rqctx
-        .request
-        .lock()
-        .await
-        .uri()
-        .path_and_query()
-        .map(|p| p.to_string());
+    let redirect_url =
+        rqctx.request.uri().path_and_query().map(|p| p.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
@@ -720,7 +715,7 @@ pub async fn console_index_or_login_redirect(
    unpublished = true,
 }]
 pub async fn console_page(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -732,7 +727,7 @@ pub async fn console_page(
    unpublished = true,
 }]
 pub async fn console_settings_page(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -744,7 +739,7 @@ pub async fn console_settings_page(
    unpublished = true,
 }]
 pub async fn console_system_page(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -756,7 +751,7 @@ pub async fn console_system_page(
    unpublished = true,
 }]
 pub async fn console_root(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -782,7 +777,7 @@ fn with_gz_ext(path: &PathBuf) -> PathBuf {
    unpublished = true,
 }]
 pub async fn asset(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
@@ -804,7 +799,7 @@ pub async fn asset(
         .ok_or_else(|| not_found("static_dir undefined"))?
         .join("assets");
 
-    let request = &rqctx.request.lock().await;
+    let request = &rqctx.request;
     let accept_encoding = request.headers().get(http::header::ACCEPT_ENCODING);
     let accept_gz = accept_encoding.map_or(false, |val| {
         val.to_str().map_or(false, |s| s.contains("gzip"))

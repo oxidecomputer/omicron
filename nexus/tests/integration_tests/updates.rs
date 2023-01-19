@@ -32,7 +32,6 @@ use std::fs::File;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tempfile::{NamedTempFile, TempDir};
 use tough::editor::signed::{PathExists, SignedRole};
 use tough::editor::RepositoryEditor;
@@ -118,7 +117,7 @@ struct AllPath {
 
 #[endpoint(method = GET, path = "/{path:.*}", unpublished = true)]
 async fn static_content(
-    rqctx: Arc<RequestContext<FileServerContext>>,
+    rqctx: RequestContext<FileServerContext>,
     path: Path<AllPath>,
 ) -> Result<Response<Body>, HttpError> {
     // NOTE: this is a particularly brief and bad implementation of this to keep the test shorter.

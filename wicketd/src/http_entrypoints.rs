@@ -15,7 +15,6 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::UntypedBody;
 use installinator_artifactd::ArtifactId;
-use std::sync::Arc;
 
 use crate::ServerContext;
 
@@ -50,7 +49,7 @@ pub fn api() -> WicketdApiDescription {
     path = "/inventory"
 }]
 async fn get_inventory(
-    rqctx: Arc<RequestContext<ServerContext>>,
+    rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<RackV1Inventory>, HttpError> {
     match rqctx.context().mgs_handle.get_inventory().await {
         Ok(inventory) => Ok(HttpResponseOk(inventory)),
@@ -66,7 +65,7 @@ async fn get_inventory(
     path = "/artifacts/{name}/{version}",
 }]
 async fn put_artifact(
-    rqctx: Arc<RequestContext<ServerContext>>,
+    rqctx: RequestContext<ServerContext>,
     path: Path<ArtifactId>,
     body: UntypedBody,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
