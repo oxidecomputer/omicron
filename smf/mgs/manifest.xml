@@ -21,7 +21,7 @@
     below.
   -->
   <exec_method type='method' name='start'
-    exec='/opt/oxide/mgs/bin/mgs run /var/svc/manifest/site/mgs/config.toml --address %{config/address} --id %{config/id} &amp;'
+    exec='/opt/oxide/mgs/bin/mgs run --id-and-address-from-smf /var/svc/manifest/site/mgs/config.toml &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='refresh' exec=':kill -USR1' timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />

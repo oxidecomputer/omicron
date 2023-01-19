@@ -25,11 +25,30 @@ enum Args {
         #[clap(name = "CONFIG_FILE_PATH", action)]
         config_file_path: PathBuf,
 
-        #[clap(short, long, action)]
-        id: Uuid,
+        /// Read server ID and address(es) for dropshot server from our SMF
+        /// properties (only valid when running as a service on illumos)
+        #[clap(long)]
+        id_and_address_from_smf: bool,
 
-        #[clap(short, long, action)]
-        address: SocketAddrV6,
+        /// Server ID
+        #[clap(
+            short,
+            long,
+            action,
+            conflicts_with = "id_and_address_from_smf",
+            required_unless_present = "id_and_address_from_smf"
+        )]
+        id: Option<Uuid>,
+
+        /// Address for dropshot server
+        #[clap(
+            short,
+            long,
+            action,
+            conflicts_with = "id_and_address_from_smf",
+            required_unless_present = "id_and_address_from_smf"
+        )]
+        address: Option<SocketAddrV6>,
     },
 }
 
@@ -51,7 +70,12 @@ async fn do_run() -> Result<(), CmdError> {
 
     match args {
         Args::Openapi => run_openapi().map_err(CmdError::Failure),
-        Args::Run { config_file_path, id, address } => {
+        Args::Run {
+            config_file_path,
+            id_and_address_from_smf,
+            id,
+            address,
+        } => {
             let config = Config::from_file(&config_file_path).map_err(|e| {
                 CmdError::Failure(format!(
                     "failed to parse {}: {}",
@@ -67,6 +91,15 @@ async fn do_run() -> Result<(), CmdError> {
                     ))
                 })?;
 
+            let (id, address) = if id_and_address_from_smf {
+                let config = read_smf_config()?;
+                // TODO not addresses[0]
+                (config.id, config.addresses[0])
+            } else {
+                // Clap ensures these are present if `id_and_address_from_smf`
+                // is false, so we can safely unwrap.
+                (id.unwrap(), address.unwrap())
+            };
             let args = MgsArguments { id, address };
             let server_fut = run_server(config, args);
             tokio::pin!(server_fut);
