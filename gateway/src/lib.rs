@@ -60,10 +60,10 @@ type HttpServerShutdownFut =
 
 pub struct Server {
     /// shared state used by API request handlers
-    apictx: Arc<ServerContext>,
+    pub apictx: Arc<ServerContext>,
     /// dropshot servers for requests from nexus or wicketd, keyed by their bind
     /// address
-    http_servers: HashMap<SocketAddrV6, HttpServer>,
+    pub http_servers: HashMap<SocketAddrV6, HttpServer>,
     /// collection of `wait_for_shutdown` futures for each server inserted into
     /// `http_servers`
     all_servers_shutdown: FuturesUnordered<HttpServerShutdownFut>,
