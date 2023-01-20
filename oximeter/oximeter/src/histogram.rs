@@ -511,9 +511,7 @@ where
     {
         let edges = [
             vec![<T as num_traits::Zero>::zero()],
-            (start_decade..end_decade)
-                .flat_map(|x| x.span_decade())
-                .collect(),
+            (start_decade..end_decade).flat_map(|x| x.span_decade()).collect(),
         ]
         .concat();
         Histogram::new(&edges)
