@@ -238,7 +238,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
     let artifacts = ArtifactsDocument {
         artifacts: vec![UpdateArtifact {
             name: "omicron-test-component".into(),
-            version: 1,
+            version: "0.0.0".into(),
             kind: Some(UpdateArtifactKind::Zone),
             target: "omicron-test-component-1".into(),
         }],

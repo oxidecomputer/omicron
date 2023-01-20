@@ -16,7 +16,7 @@ pub struct ArtifactsDocument {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct UpdateArtifact {
     pub name: String,
-    pub version: i64,
+    pub version: String,
     // Future versions of artifacts.json might contain artifact kinds we're not aware of yet. This
     // shouldn't stop us from updating, say, Nexus or the ramdisk that contains sled-agent. When
     // adding artifacts to the database, we skip any unknown kinds.
@@ -112,13 +112,13 @@ mod tests {
                 "artifacts": [
                     {
                         "name": "fksdfjslkfjlsj",
-                        "version": 1u8,
+                        "version": "0.0.0",
                         "kind": "sdkfslfjadkfjasl",
                         "target": "ksdjdslfjljk",
                     },
                     {
                         "name": "kdsfjdljfdlkj",
-                        "version": 1u8,
+                        "version": "0.0.0",
                         "kind": "zone",
                         "target": "sldkfjasldfj",
                     },
