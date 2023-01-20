@@ -100,7 +100,7 @@ impl BufferData {
             ))
         } else if from_end < self.rolling.len() {
             // (apologies to Takenobu Mitsuyoshi)
-            let rolling_start = self.rolling.len() - from_end as usize;
+            let rolling_start = self.rolling.len() - from_end;
             Ok((
                 Box::new(self.rolling.iter().copied().skip(rolling_start)),
                 from_start,

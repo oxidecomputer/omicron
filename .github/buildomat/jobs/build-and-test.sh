@@ -3,7 +3,7 @@
 #: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "nightly-2022-09-27"
+#: rust_toolchain = "nightly-2023-01-19"
 #: output_rules = [
 #:	"/var/tmp/omicron_tmp/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
@@ -53,7 +53,7 @@ banner build
 export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
-ptime -m cargo +'nightly-2022-09-27' build --locked --all-targets --verbose
+ptime -m cargo +'nightly-2023-01-19' build --locked --all-targets --verbose
 
 #
 # NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
@@ -63,7 +63,7 @@ ptime -m cargo +'nightly-2022-09-27' build --locked --all-targets --verbose
 # from end-to-end-tests.
 #
 banner test
-ptime -m cargo +'nightly-2022-09-27' test --locked --verbose \
+ptime -m cargo +'nightly-2023-01-19' test --locked --verbose \
     --no-fail-fast
 
 #

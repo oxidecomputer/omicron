@@ -3,7 +3,7 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "nightly-2022-09-27"
+#: rust_toolchain = "nightly-2023-01-19"
 #: output_rules = [
 #:	"=/work/package.tar.gz",
 #:	"=/work/zones/*.tar.gz",
