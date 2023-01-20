@@ -42,7 +42,7 @@ mock! {
             &self,
             kind: UpdateArtifactKind,
             name: &str,
-            version: i64,
+            version: &str,
         ) -> Result<progenitor::progenitor_client::ByteStream>;
         pub async fn zpool_put(
             &self,

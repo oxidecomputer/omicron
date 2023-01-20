@@ -1454,8 +1454,8 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
 );
 
 CREATE TABLE omicron.public.update_available_artifact (
-    name STRING(40) NOT NULL,
-    version INT NOT NULL,
+    name STRING(63) NOT NULL,
+    version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
 
     /* the version of the targets.json role this came from */
