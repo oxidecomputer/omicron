@@ -3997,6 +3997,7 @@ dependencies = [
  "clap 4.1.1",
  "dropshot",
  "expectorate",
+ "futures",
  "internal-dns-client",
  "nexus-client",
  "omicron-common",

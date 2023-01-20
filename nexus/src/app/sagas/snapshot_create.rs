@@ -1351,7 +1351,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
+            Name::from_str(DISK_NAME).unwrap(),
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1446,7 +1446,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
+            Name::from_str(DISK_NAME).unwrap(),
         );
         let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
 
@@ -1505,7 +1505,7 @@ mod test {
                 silo_id,
                 project_id,
                 disk_id,
-                Name::from_str(DISK_NAME).unwrap().into(),
+                Name::from_str(DISK_NAME).unwrap(),
             );
             dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         }

@@ -64,7 +64,9 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect(&format!("failed to make \"create\" request to {path}"))
+        .unwrap_or_else(|_| {
+            panic!("failed to make \"create\" request to {path}")
+        })
         .parsed_body()
         .unwrap()
 }
@@ -74,7 +76,9 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect(&format!("failed to make \"delete\" request to {path}"));
+        .unwrap_or_else(|_| {
+            panic!("failed to make \"delete\" request to {path}")
+        });
 }
 
 pub async fn populate_ip_pool(

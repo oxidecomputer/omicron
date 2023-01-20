@@ -158,7 +158,7 @@ fn new_tuf_repo(rng: &dyn SecureRandom) -> TempDir {
         roles: HashMap::new(),
         _extra: HashMap::new(),
     };
-    root.keys.insert(key_id.clone(), tuf_key.clone());
+    root.keys.insert(key_id.clone(), tuf_key);
     for role in [
         RoleType::Root,
         RoleType::Snapshot,

@@ -612,7 +612,7 @@ mod test {
                     .to_string()
                     .starts_with("unsupported authn scheme: \"trust-me\""),
                 "error = {}",
-                error.to_string()
+                error
             );
         } else {
             panic!(

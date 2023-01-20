@@ -184,9 +184,10 @@ mod test {
             assert!(
                 user_code.chars().nth(USER_CODE_WORD_LENGTH).unwrap() == '-'
             );
-            assert!(user_code.chars().filter(|x| *x != '-').all(|x| {
-                USER_CODE_ALPHABET.iter().find(|y| **y == x).is_some()
-            }));
+            assert!(user_code
+                .chars()
+                .filter(|x| *x != '-')
+                .all(|x| { USER_CODE_ALPHABET.iter().any(|y| *y == x) }));
             assert!(!codes_seen.contains(&user_code));
             codes_seen.insert(user_code);
         }
