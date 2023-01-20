@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let repo_path = match args.repo {
         Some(repo) => repo,
-        None => std::env::current_dir()?.try_into()?,
+        None => std::env::current_dir()?,
     };
 
     match args.command {

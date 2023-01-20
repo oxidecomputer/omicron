@@ -74,7 +74,7 @@ impl FromStr for Key {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Key> {
-        match s.split_once(":") {
+        match s.split_once(':') {
             Some(("ed25519", hex)) => Ok(Key::Ed25519(FromHex::from_hex(hex)?)),
             Some((kind, _)) => bail!("Invalid key source kind: {}", kind),
             None => bail!("Invalid key source (format is `kind:data`)"),
