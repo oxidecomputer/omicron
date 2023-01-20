@@ -6797,8 +6797,12 @@ dependencies = [
  "fs-err",
  "hex",
  "humantime",
+ "omicron-common",
  "rand 0.8.5",
  "ring",
+ "serde_json",
+ "sha2 0.10.6",
+ "tempfile",
  "tough",
 ]
 

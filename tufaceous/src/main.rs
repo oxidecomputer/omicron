@@ -2,12 +2,15 @@ mod date;
 mod hint;
 mod key;
 mod root;
+mod target;
 
 use crate::key::Key;
+use crate::target::TargetWriter;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use fs_err as fs;
+use omicron_common::update::ArtifactsDocument;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 use tough::editor::RepositoryEditor;
@@ -76,7 +79,10 @@ fn main() -> Result<()> {
             editor.targets_expires(args.expiry)?;
             editor.timestamp_expires(args.expiry);
 
-            // todo: add empty artifacts.json target
+            let artifacts = ArtifactsDocument::default();
+            let mut file = TargetWriter::new(&targets_dir, "artifacts.json")?;
+            serde_json::to_writer_pretty(&mut file, &artifacts)?;
+            file.finish(&mut editor)?;
 
             let signed = editor.sign(&crate::key::boxed_keys(keys))?;
             signed.write(&metadata_dir)?;

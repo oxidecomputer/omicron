@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Currently, this has a single top-level field; this gives us an escape hatch
 /// in the future if we need to change the schema in a non-backwards-compatible
 /// way.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ArtifactsDocument {
     pub artifacts: Vec<Artifact>,
 }
