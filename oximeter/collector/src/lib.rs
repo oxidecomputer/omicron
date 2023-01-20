@@ -57,7 +57,7 @@ enum CollectionMessage {
     // Explicit request that the task collect data from its producer
     //
     // Also sends a oneshot that is signalled once the task scrapes
-    // data from the Producer, and places it in the Oximeter server.
+    // data from the Producer, and places it in the Clickhouse server.
     Collect(CollectionToken),
     // Request that the task update its interval and the socket address on which it collects data
     // from its producer.
@@ -407,7 +407,7 @@ impl OximeterAgent {
         // Only return once all producers finish processing the token we
         // provided.
         //
-        // NOTE: This can either mean that the colleciton completed
+        // NOTE: This can either mean that the collection completed
         // successfully, or an error occurred in the collection pathway.
         futures::future::join_all(collection_oneshots).await;
     }
