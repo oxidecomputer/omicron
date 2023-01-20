@@ -3608,7 +3608,7 @@ async fn instance_disk_detach(
     tags = ["system"],
 }]
 async fn certificate_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
     let apictx = rqctx.context();
@@ -3645,7 +3645,7 @@ async fn certificate_list(
     tags = ["system"]
 }]
 async fn certificate_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_cert: TypedBody<params::CertificateCreate>,
 ) -> Result<HttpResponseCreated<Certificate>, HttpError> {
     let apictx = rqctx.context();
@@ -3674,7 +3674,7 @@ struct CertificatePathParam {
     tags = ["system"],
 }]
 async fn certificate_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<CertificatePathParam>,
 ) -> Result<HttpResponseOk<Certificate>, HttpError> {
     let apictx = rqctx.context();
@@ -3698,7 +3698,7 @@ async fn certificate_view(
     tags = ["system"],
 }]
 async fn certificate_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<CertificatePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
