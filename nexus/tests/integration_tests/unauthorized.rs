@@ -292,7 +292,7 @@ lazy_static! {
         },
         // Create a Certificate
         SetupReq::Post {
-            url: &*DEMO_CERTIFICATES_URL,
+            url: &DEMO_CERTIFICATES_URL,
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },

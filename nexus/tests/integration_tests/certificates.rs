@@ -147,7 +147,7 @@ fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
             contents: cert.0.clone(),
         });
         cert_writer
-            .write(encoded_cert.as_bytes())
+            .write_all(encoded_cert.as_bytes())
             .expect("failed to serialize cert");
     }
     drop(cert_writer);
@@ -161,7 +161,9 @@ fn tls_key_to_pem(key: &rustls::PrivateKey) -> Vec<u8> {
         tag: "PRIVATE KEY".to_string(),
         contents: key.0.clone(),
     });
-    key_writer.write(encoded_key.as_bytes()).expect("failed to serialize key");
+    key_writer
+        .write_all(encoded_key.as_bytes())
+        .expect("failed to serialize key");
     drop(key_writer);
     serialized_key
 }

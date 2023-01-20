@@ -1621,7 +1621,7 @@ lazy_static! {
 
         /* Certificates */
         VerifyEndpoint {
-            url: &*DEMO_CERTIFICATES_URL,
+            url: &DEMO_CERTIFICATES_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -1632,7 +1632,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: &*DEMO_CERTIFICATE_URL,
+            url: &DEMO_CERTIFICATE_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![

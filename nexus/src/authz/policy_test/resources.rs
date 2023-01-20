@@ -99,7 +99,7 @@ pub async fn make_resources(
     let certificate_id =
         "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
     builder.new_resource(authz::Certificate::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         certificate_id,
         LookupType::ById(certificate_id),
     ));
