@@ -136,7 +136,7 @@ async fn instance_launch() -> Result<()> {
                     .data,
             )
             .into_owned();
-            if data.contains("localshark login:") {
+            if data.contains("-----END SSH HOST KEY KEYS-----") {
                 Ok(data)
             } else {
                 Err(Error::NotYet)
