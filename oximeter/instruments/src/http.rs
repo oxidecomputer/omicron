@@ -6,9 +6,11 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use dropshot::{HttpError, HttpResponse, RequestContext, ServerContext};
+use dropshot::{
+    HttpError, HttpResponse, RequestContext, RequestInfo, ServerContext,
+};
 use futures::Future;
-use http::{Request, StatusCode};
+use http::StatusCode;
 use oximeter::histogram::Histogram;
 use oximeter::{Metric, MetricsError, Producer, Sample, Target};
 use std::collections::BTreeMap;
@@ -38,8 +40,8 @@ impl RequestLatencyHistogram {
     /// Build a new `RequestLatencyHistogram` with a specified histogram.
     ///
     /// Latencies are expressed in seconds.
-    pub fn new<T>(
-        request: &Request<T>,
+    pub fn new(
+        request: &RequestInfo,
         status_code: StatusCode,
         histogram: Histogram<f64>,
     ) -> Self {
@@ -59,8 +61,8 @@ impl RequestLatencyHistogram {
     /// [`Histogram::span_decades`] method for more details.
     ///
     /// Latencies are expressed as seconds.
-    pub fn with_latency_decades<T>(
-        request: &Request<T>,
+    pub fn with_latency_decades(
+        request: &RequestInfo,
         status_code: StatusCode,
         start_decade: i8,
         end_decade: i8,
@@ -72,7 +74,7 @@ impl RequestLatencyHistogram {
         ))
     }
 
-    fn key_for<T>(request: &Request<T>, status_code: StatusCode) -> String {
+    fn key_for(request: &RequestInfo, status_code: StatusCode) -> String {
         format!(
             "{}:{}:{}",
             request.uri().path(),
@@ -128,9 +130,9 @@ impl LatencyTracker {
     ///
     /// This method adds the given `latency` to the internal histogram for tracking the timeseries
     /// to which the other arguments belong. (One is created if it does not exist.)
-    pub fn update<T>(
+    pub fn update(
         &self,
-        request: &Request<T>,
+        request: &RequestInfo,
         status_code: StatusCode,
         latency: Duration,
     ) -> Result<(), MetricsError> {
@@ -171,8 +173,7 @@ impl LatencyTracker {
             Ok(_) => R::response_metadata().success.unwrap(),
             Err(ref e) => e.status_code,
         };
-        let request = context.request.lock().await;
-        self.update(&request, status_code, latency).map_err(|e| {
+        self.update(&context.request, status_code, latency).map_err(|e| {
             HttpError::for_internal_error(format!(
                 "error instrumenting dropshot request handler: {}",
                 e
@@ -225,7 +226,11 @@ mod tests {
             .unwrap();
         let status_code = StatusCode::OK;
         tracker
-            .update(&request, status_code, Duration::from_secs_f64(0.5))
+            .update(
+                &(request.into()),
+                status_code,
+                Duration::from_secs_f64(0.5),
+            )
             .unwrap();
 
         let key = "/some/uri:GET:200";

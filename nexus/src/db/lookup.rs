@@ -383,13 +383,13 @@ impl<'a> LookupPath<'a> {
     pub fn update_available_artifact_tuple(
         self,
         name: &str,
-        version: i64,
+        version: &str,
         kind: UpdateArtifactKind,
     ) -> UpdateAvailableArtifact<'a> {
         UpdateAvailableArtifact::PrimaryKey(
             Root { lookup_root: self },
             name.to_string(),
-            version,
+            version.to_string(),
             kind,
         )
     }
@@ -698,7 +698,7 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "name", rust_type = String },
-        { column_name = "version", rust_type = i64 },
+        { column_name = "version", rust_type = String },
         { column_name = "kind", rust_type = UpdateArtifactKind }
     ]
 }

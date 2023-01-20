@@ -56,7 +56,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
-use std::sync::Arc;
 use uuid::Uuid;
 
 // General pagination infrastructure
@@ -180,7 +179,7 @@ where
 /// Given a request and pagination parameters, return a [`DataPageParams`]
 /// describing the current page of results to return
 pub fn data_page_params_for<'a, S, C>(
-    rqctx: &'a Arc<RequestContext<C>>,
+    rqctx: &'a RequestContext<C>,
     pag_params: &'a PaginationParams<S, PageSelector<S, S::MarkerValue>>,
 ) -> Result<DataPageParams<'a, S::MarkerValue>, HttpError>
 where

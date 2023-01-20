@@ -1536,8 +1536,8 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
 name = "dropshot"
-version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#120e168525018dca4c9c3bed47d398c55fdd4d6b"
+version = "0.9.0-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#af0f37c96b304dd255fbd4d6ab857021577f5f68"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1577,8 +1577,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#120e168525018dca4c9c3bed47d398c55fdd4d6b"
+version = "0.9.0-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#af0f37c96b304dd255fbd4d6ab857021577f5f68"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5108,9 +5108,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.35.0-beta.8"
+version = "0.35.0-beta.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "704448b526df0f4b98b4ed0fa18a06f9f09b787078360b881bde881f8f911b7f"
+checksum = "1bd075593e0e0880877d9d9c67abf6dbb8bea6cbecc13d2d444d3ca5b20dceea"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -5267,9 +5267,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.20.7"
+version = "0.20.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "539a2bfe908f471bfa933876bd1eb6a19cf2176d375f82ef7f99530a40e48c2c"
+checksum = "fff78fc74d175294f4e83b28343315ffcfb114b156f0185e9741cb5570f50e2f"
 dependencies = [
  "log",
  "ring",
@@ -5291,11 +5291,11 @@ dependencies = [
 
 [[package]]
 name = "rustls-pemfile"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0864aeff53f8c05aa08d86e5ef839d3dfcf07aeba2db32f12db0ef716e87bd55"
+checksum = "d194b56d58803a43635bdc398cd17e383d6f71f9182b9a192c127ca42494a59b"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.0",
 ]
 
 [[package]]

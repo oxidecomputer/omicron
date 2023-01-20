@@ -668,7 +668,7 @@ table! {
 table! {
     update_available_artifact (name, version, kind) {
         name -> Text,
-        version -> Int8,
+        version -> Text,
         kind -> crate::UpdateArtifactKindEnum,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,
