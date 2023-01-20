@@ -6791,6 +6791,7 @@ name = "tufaceous"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "chrono",
  "clap 4.1.1",
  "console",
@@ -6804,6 +6805,7 @@ dependencies = [
  "sha2 0.10.6",
  "tempfile",
  "tough",
+ "url",
 ]
 
 [[package]]
