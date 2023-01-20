@@ -19,16 +19,11 @@ source.paths = [
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
   { from = "smf/nexus", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
-  # Note, we could just map the whole "out/certs" directory, but this ensures
-  # both files exist.
-  { from = "out/certs/cert.pem", to = "/var/nexus/certs/cert.pem" },
-  { from = "out/certs/key.pem", to = "/var/nexus/certs/key.pem" }
 ]
 output.type = "zone"
 setup_hint = """
 - Run `./tools/ci_download_console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
-- Run `./tools/create_self_signed_cert.sh` to generate a certificate
 """
 
 [package.oximeter-collector]

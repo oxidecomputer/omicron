@@ -419,6 +419,23 @@ impl<'a> LookupPath<'a> {
     {
         GlobalImage::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    /// Select a resource of type Certificate, identified by its name
+    pub fn certificate_name<'b, 'c>(self, name: &'b Name) -> Certificate<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Certificate::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type Certificate, identified by its id
+    pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
+    where
+        'a: 'b,
+    {
+        Certificate::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -697,6 +714,15 @@ lookup_resource! {
 
 lookup_resource! {
     name = "GlobalImage",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Certificate",
     ancestors = [],
     children = [],
     lookup_by_name = true,

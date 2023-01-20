@@ -24,6 +24,7 @@ use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::views;
+use omicron_nexus::external_api::views::Certificate;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
 use omicron_nexus::external_api::views::User;
@@ -125,6 +126,34 @@ pub async fn create_ip_pool(
     .await;
     let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
+}
+
+pub async fn create_certificate(
+    client: &ClientTestContext,
+    cert_name: &str,
+    cert: Vec<u8>,
+    key: Vec<u8>,
+) -> Certificate {
+    let url = "/system/certificates".to_string();
+    object_create(
+        client,
+        &url,
+        &params::CertificateCreate {
+            identity: IdentityMetadataCreateParams {
+                name: cert_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            cert,
+            key,
+            service: shared::ServiceUsingCertificate::ExternalApi,
+        },
+    )
+    .await
+}
+
+pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
+    let url = format!("/system/certificates/{}", cert_name);
+    object_delete(client, &url).await
 }
 
 pub async fn create_silo(

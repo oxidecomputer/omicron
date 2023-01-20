@@ -42,7 +42,7 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     // Create two silos: one discoverable, one not
     create_silo(
@@ -222,7 +222,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let silo: Silo = object_create(
         client,
@@ -465,7 +465,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
     .expect("failed to make request");
 
     // Expect that the silo is gone
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let response = IdentityProviderType::lookup(
         &nexus.datastore(),
@@ -686,7 +686,7 @@ struct TestSiloUserProvisionTypes {
 #[nexus_test]
 async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let test_cases: Vec<TestSiloUserProvisionTypes> = vec![
@@ -783,7 +783,7 @@ async fn test_silo_user_fetch_by_external_id(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let silo = create_silo(
         &client,
@@ -965,7 +965,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1034,7 +1034,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let silo = create_silo(
         &client,
@@ -1095,7 +1095,7 @@ async fn test_silo_groups_remove_from_one_group(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1208,7 +1208,7 @@ async fn test_silo_groups_remove_from_both_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1320,7 +1320,7 @@ async fn test_silo_groups_remove_from_both_groups(
 #[nexus_test]
 async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     // Create a silo
     let silo = create_silo(
@@ -1402,7 +1402,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     // Create a silo
     let silo = create_silo(
@@ -1464,7 +1464,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let datastore = cptestctx.server.apictx.nexus.datastore();
+    let datastore = cptestctx.server.apictx().nexus.datastore();
 
     // Create the two Silos.
     let silo1 =
@@ -1682,7 +1682,7 @@ async fn create_jit_user(
 #[nexus_test]
 async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let silo =
         create_silo(&client, "jit", true, shared::SiloIdentityMode::SamlJit)

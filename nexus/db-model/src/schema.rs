@@ -405,6 +405,21 @@ table! {
 }
 
 table! {
+    certificate (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        service -> crate::ServiceKindEnum,
+        cert -> Binary,
+        key -> Binary,
+    }
+}
+
+table! {
     virtual_provisioning_collection {
         id -> Uuid,
         // This type isn't actually "Nullable" - it's just handy to use the

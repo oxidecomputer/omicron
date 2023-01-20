@@ -153,6 +153,21 @@ pub struct DatasetCreateRequest {
     pub request: DatasetPutRequest,
 }
 
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Certificate {
+    pub cert: Vec<u8>,
+    pub key: Vec<u8>,
+}
+
+impl std::fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Certificate")
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
     pub services: Vec<ServicePutRequest>,
@@ -164,6 +179,7 @@ pub struct RackInitializationRequest {
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/1528):
     // Support passing x509 cert info.
+    pub certs: Vec<Certificate>,
 }
 
 /// Message used to notify Nexus that this oximeter instance is up and running.

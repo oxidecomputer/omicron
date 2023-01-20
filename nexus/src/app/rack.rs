@@ -8,11 +8,15 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
+use crate::external_api::params::CertificateCreate;
+use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::Name;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -90,8 +94,39 @@ impl super::Nexus {
             })
             .collect();
 
+        let certificates: Vec<_> = request
+            .certs
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| {
+                // The indexes that appear in user-visible names for these
+                // certificates start from one (e.g., certificate names
+                // "default-1", "default-2", etc).
+                let i = i + 1;
+                db::model::Certificate::new(
+                    Uuid::new_v4(),
+                    db::model::ServiceKind::Nexus,
+                    CertificateCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: Name::try_from(format!("default-{i}")).unwrap(),
+                            description: format!("x.509 certificate #{i} initialized at rack install"),
+                        },
+                        cert: c.cert,
+                        key: c.key,
+                        service: ServiceUsingCertificate::ExternalApi,
+                    }
+                ).map_err(|e| Error::from(e))
+            })
+            .collect::<Result<_, Error>>()?;
+
         self.db_datastore
-            .rack_set_initialized(opctx, rack_id, services, datasets)
+            .rack_set_initialized(
+                opctx,
+                rack_id,
+                services,
+                datasets,
+                certificates,
+            )
             .await?;
 
         Ok(())

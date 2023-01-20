@@ -696,7 +696,7 @@ pub(crate) mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.apictx().nexus.datastore().clone(),
         )
     }
 
@@ -707,7 +707,7 @@ pub(crate) mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_and_project(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -840,7 +840,7 @@ pub(crate) mod test {
         test: &DiskTest,
     ) {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
-        let datastore = cptestctx.server.apictx.nexus.datastore();
+        let datastore = cptestctx.server.apictx().nexus.datastore();
 
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
@@ -863,7 +863,7 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_and_project(&client).await;
 
         // Build the saga DAG with the provided test parameters

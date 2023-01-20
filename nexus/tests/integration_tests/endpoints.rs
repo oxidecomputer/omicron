@@ -7,6 +7,7 @@
 //! This is used for various authz-related tests.
 //! THERE ARE NO TESTS IN THIS FILE.
 
+use crate::integration_tests::certificates::CertificateChain;
 use crate::integration_tests::unauthorized::HTTP_SERVER;
 use chrono::Utc;
 use http::method::Method;
@@ -299,6 +300,26 @@ lazy_static! {
             primary: false,
         }
     };
+}
+
+lazy_static! {
+    pub static ref DEMO_CERTIFICATE_NAME: Name =
+        "demo-certificate".parse().unwrap();
+    pub static ref DEMO_CERTIFICATES_URL: String =
+        format!("/system/certificates");
+    pub static ref DEMO_CERTIFICATE_URL: String =
+        format!("/system/certificates/demo-certificate");
+    pub static ref DEMO_CERTIFICATE: CertificateChain = CertificateChain::new();
+    pub static ref DEMO_CERTIFICATE_CREATE: params::CertificateCreate =
+        params::CertificateCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_CERTIFICATE_NAME.clone(),
+                description: String::from(""),
+            },
+            cert: DEMO_CERTIFICATE.cert_chain_as_pem(),
+            key: DEMO_CERTIFICATE.end_cert_private_key_as_pem(),
+            service: shared::ServiceUsingCertificate::ExternalApi,
+        };
 }
 
 lazy_static! {
@@ -1597,5 +1618,28 @@ lazy_static! {
                 AllowedMethod::Delete,
             ],
         },
+
+        /* Certificates */
+        VerifyEndpoint {
+            url: &DEMO_CERTIFICATES_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_CERTIFICATE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
     ];
 }

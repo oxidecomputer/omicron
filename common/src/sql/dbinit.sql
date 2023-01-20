@@ -128,6 +128,41 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+-- x509 certificates which may be used by services
+CREATE TABLE omicron.public.certificate (
+    -- Identity metadata (resource)
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The service type which should use this certificate
+    service omicron.public.service_kind NOT NULL,
+
+    -- cert.pem file as a binary blob
+    cert BYTES NOT NULL,
+
+    -- key.pem file as a binary blob
+    key BYTES NOT NULL
+);
+
+-- Add an index which lets us look up certificates for a particular service
+-- class.
+CREATE INDEX ON omicron.public.certificate (
+    service,
+    id
+) WHERE
+    time_deleted IS NULL;
+
+-- Add an index which enforces that certificates have unique names, and which
+-- allows pagination-by-name.
+CREATE UNIQUE INDEX ON omicron.public.certificate (
+    name
+) WHERE
+    time_deleted IS NULL;
+
 -- A table describing virtual resource provisioning which may be associated
 -- with a collection of objects, including:
 -- - Projects

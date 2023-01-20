@@ -625,6 +625,31 @@
         "format": "uint64",
         "minimum": 0
       },
+      "Certificate": {
+        "type": "object",
+        "properties": {
+          "cert": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ]
+      },
       "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
         "type": "object",
@@ -1757,6 +1782,12 @@
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
+          "certs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Certificate"
+            }
+          },
           "datasets": {
             "type": "array",
             "items": {
@@ -1771,6 +1802,7 @@
           }
         },
         "required": [
+          "certs",
           "datasets",
           "services"
         ]

@@ -96,6 +96,14 @@ pub async fn make_resources(
         LookupType::ById(global_image_id),
     ));
 
+    let certificate_id =
+        "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
+    builder.new_resource(authz::Certificate::new(
+        authz::FLEET,
+        certificate_id,
+        LookupType::ById(certificate_id),
+    ));
+
     let device_user_code = String::from("a-device-user-code");
     builder.new_resource(authz::DeviceAuthRequest::new(
         authz::FLEET,
