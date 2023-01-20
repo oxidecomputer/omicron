@@ -472,7 +472,7 @@ mod test {
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
         let is_scrimlet = false;
-        let sled = Sled::new(sled_id, bogus_addr.clone(), is_scrimlet, rack_id);
+        let sled = Sled::new(sled_id, bogus_addr, is_scrimlet, rack_id);
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }

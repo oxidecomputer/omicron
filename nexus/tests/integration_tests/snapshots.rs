@@ -496,8 +496,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 )
                 .unwrap()
                 .into(),
-            }
-            .into(),
+            },
         )
         .await
         .unwrap();
@@ -549,8 +548,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     snapshot_id: snapshot.id(),
                 },
 
-                size: ByteCount::try_from(1 * params::MIN_DISK_SIZE_BYTES)
-                    .unwrap(),
+                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES).unwrap(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -564,7 +562,7 @@ async fn test_reject_creating_disk_from_snapshot(
         error.message,
         format!(
             "disk size {} must be greater than or equal to snapshot size {}",
-            1 * params::MIN_DISK_SIZE_BYTES,
+            params::MIN_DISK_SIZE_BYTES,
             2 * params::MIN_DISK_SIZE_BYTES,
         )
     );
@@ -653,8 +651,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 )
                 .unwrap()
                 .into(),
-            }
-            .into(),
+            },
         )
         .await
         .unwrap();

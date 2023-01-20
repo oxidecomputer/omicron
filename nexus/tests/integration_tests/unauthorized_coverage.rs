@@ -68,7 +68,7 @@ fn test_unauthorized_coverage() {
             let label = op
                 .operation_id
                 .clone()
-                .unwrap_or(String::from("unknown operation-id"));
+                .unwrap_or_else(|| String::from("unknown operation-id"));
             (Operation { method, path, label }, regex)
         })
         .collect();
