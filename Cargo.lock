@@ -2864,7 +2864,7 @@ checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 [[package]]
 name = "libefi-illumos"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/libefi-illumos?branch=master#ac44e7764e73f8ced692dfc32d0b06ba1a3f9264"
+source = "git+https://github.com/oxidecomputer/libefi-illumos?branch=master#54c398c139f0e65252c2c0f9565d2eec7116bf02"
 dependencies = [
  "libc",
  "libefi-sys",
