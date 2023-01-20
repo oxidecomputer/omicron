@@ -54,6 +54,16 @@ impl DnsAddressLookup for Ipv6Subnet<AZ_PREFIX> {
     }
 }
 
+impl DnsAddressLookup for SocketAddr {
+    fn dropshot_server_addrs(&self) -> Vec<SocketAddr> {
+        vec![*self]
+    }
+
+    fn dns_server_addrs(&self) -> Vec<SocketAddr> {
+        vec![*self]
+    }
+}
+
 /// A connection used to update multiple DNS servers.
 pub struct Updater {
     log: Logger,
@@ -66,7 +76,7 @@ impl Updater {
         Self::new_from_addrs(addrs, log)
     }
 
-    pub fn new_from_addrs(addrs: Vec<SocketAddr>, log: Logger) -> Self {
+    fn new_from_addrs(addrs: Vec<SocketAddr>, log: Logger) -> Self {
         let clients = addrs
             .into_iter()
             .map(|addr| {
@@ -190,7 +200,7 @@ impl Resolver {
         Self::new_from_addrs(dns_addrs)
     }
 
-    pub fn new_from_addrs(
+    fn new_from_addrs(
         dns_addrs: Vec<SocketAddr>,
     ) -> Result<Self, ResolveError> {
         let mut rc = ResolverConfig::new();
