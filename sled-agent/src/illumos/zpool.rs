@@ -26,6 +26,14 @@ enum Error {
 }
 
 #[derive(thiserror::Error, Debug)]
+#[error("Failed to create zpool: {err}")]
+pub struct CreateError {
+    #[from]
+    #[source]
+    err: Error,
+}
+
+#[derive(thiserror::Error, Debug)]
 #[error("Failed to list zpools: {err}")]
 pub struct ListError {
     #[from]
@@ -154,6 +162,20 @@ pub struct Zpool {}
 
 #[cfg_attr(test, mockall::automock)]
 impl Zpool {
+    pub fn create(
+        name: ZpoolName,
+        path: &std::path::PathBuf,
+    ) -> Result<(), CreateError> {
+        let mut command = std::process::Command::new(ZPOOL);
+        let cmd = command.args(&[
+            "create",
+            &name.to_string(),
+            &path.to_string_lossy(),
+        ]);
+        execute(cmd).map_err(Error::from)?;
+        Ok(())
+    }
+
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&["list", "-Hpo", "name"]);

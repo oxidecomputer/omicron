@@ -40,6 +40,10 @@ pub enum DiskError {
     BadPartitionLayout { path: PathBuf },
     #[error("Requested partition {partition:?} not found on device {path}")]
     NotFound { path: PathBuf, partition: Partition },
+    #[error(transparent)]
+    ZpoolCreate(#[from] crate::illumos::zpool::CreateError),
+    #[error("Cannot format {path}: missing a '/dev/ path")]
+    CannotFormatMissingDevPath { path: PathBuf },
 }
 
 /// A partition (or 'slice') of a disk.
@@ -57,25 +61,15 @@ pub enum Partition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Disk {
+pub struct DiskPaths {
+    // Full path to the disk under "/devices".
+    // Should NOT end with a ":partition_letter".
     devfs_path: PathBuf,
-    slot: i64,
-    variant: DiskVariant,
-    partitions: Vec<Partition>,
-    // TODO: Device ID?
+    // Optional path to the disk under "/dev/dsk".
+    dev_path: Option<PathBuf>,
 }
 
-impl Disk {
-    #[allow(dead_code)]
-    pub fn new(
-        devfs_path: PathBuf,
-        slot: i64,
-        variant: DiskVariant,
-    ) -> Result<Self, DiskError> {
-        let partitions = parse_partition_layout(&devfs_path, variant)?;
-        Ok(Self { devfs_path, slot, variant, partitions })
-    }
-
+impl DiskPaths {
     // Returns the "illumos letter-indexed path" for a device.
     fn partition_path(&self, index: usize) -> Option<PathBuf> {
         let index = u8::try_from(index).ok()?;
@@ -88,6 +82,39 @@ impl Disk {
         Some(PathBuf::from(format!("{path}:{character}")))
     }
 
+    /// Returns the path to the whole disk
+    #[allow(dead_code)]
+    pub(crate) fn whole_disk(&self, raw: bool) -> PathBuf {
+        PathBuf::from(format!(
+            "{path}:wd{raw}",
+            path = self.devfs_path.display(),
+            raw = if raw { ",raw" } else { "" },
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Disk {
+    paths: DiskPaths,
+    slot: i64,
+    variant: DiskVariant,
+    partitions: Vec<Partition>,
+    // TODO: Device ID?
+}
+
+impl Disk {
+    #[allow(dead_code)]
+    pub fn new(
+        devfs_path: PathBuf,
+        dev_path: Option<PathBuf>,
+        slot: i64,
+        variant: DiskVariant,
+    ) -> Result<Self, DiskError> {
+        let paths = DiskPaths { devfs_path, dev_path };
+        let partitions = ensure_partition_layout(&paths, variant)?;
+        Ok(Self { paths, slot, variant, partitions })
+    }
+
     // Finds the first 'variant' partition, and returns the path to it.
     fn partition_device_path(
         &self,
@@ -95,17 +122,18 @@ impl Disk {
     ) -> Result<PathBuf, DiskError> {
         for (index, partition) in self.partitions.iter().enumerate() {
             if &expected_partition == partition {
-                let path = self.partition_path(index).ok_or_else(|| {
-                    DiskError::NotFound {
-                        path: self.devfs_path.clone(),
-                        partition: expected_partition,
-                    }
-                })?;
+                let path =
+                    self.paths.partition_path(index).ok_or_else(|| {
+                        DiskError::NotFound {
+                            path: self.paths.devfs_path.clone(),
+                            partition: expected_partition,
+                        }
+                    })?;
                 return Ok(path);
             }
         }
         return Err(DiskError::NotFound {
-            path: self.devfs_path.clone(),
+            path: self.paths.devfs_path.clone(),
             partition: expected_partition,
         });
     }

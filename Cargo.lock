@@ -2539,7 +2539,7 @@ dependencies = [
 [[package]]
 name = "illumos-devinfo"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/illumos-devinfo?rev=9281773a2353a94160a8d5ab1e9f1f6f127db1b0#9281773a2353a94160a8d5ab1e9f1f6f127db1b0"
+source = "git+https://github.com/oxidecomputer/illumos-devinfo?branch=main#4323b17bfdd0c94d2875ac64b47f0e60fac1d640"
 dependencies = [
  "anyhow",
  "libc",
@@ -2864,10 +2864,11 @@ checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 [[package]]
 name = "libefi-illumos"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/libefi-illumos?branch=master#641e8e1eabb848c05f8e2d7350dd19ced96bb43a"
+source = "git+https://github.com/oxidecomputer/libefi-illumos?branch=master#ac44e7764e73f8ced692dfc32d0b06ba1a3f9264"
 dependencies = [
- "anyhow",
+ "libc",
  "libefi-sys",
+ "thiserror",
  "uuid",
 ]
 

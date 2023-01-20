@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::hardware::{Disk, DiskVariant, HardwareUpdate};
-use illumos_devinfo::{DevInfo, Node};
+use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node};
 use slog::Logger;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 mod disk;
-pub use disk::parse_partition_layout;
+pub use disk::ensure_partition_layout;
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -22,6 +22,9 @@ enum Error {
 
     #[error("Expected property {name} to have type {ty}")]
     UnexpectedPropertyType { name: String, ty: String },
+
+    #[error("Could not translate {0} to '/dev' path: no links")]
+    NoDevLinks(PathBuf),
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -46,13 +49,13 @@ struct HardwareSnapshot {
 impl HardwareSnapshot {
     // Walk the device tree to capture a view of the current hardware.
     fn new(log: &Logger) -> Result<Self, Error> {
-        let mut device_info = DevInfo::new().map_err(|e| Error::DevInfo(e))?;
+        let mut device_info = DevInfo::new().map_err(Error::DevInfo)?;
         let mut node_walker = device_info.walk_node();
 
         let mut tofino = TofinoSnapshot::new();
         let mut disks = HashSet::new();
         while let Some(node) =
-            node_walker.next().transpose().map_err(|e| Error::DevInfo(e))?
+            node_walker.next().transpose().map_err(Error::DevInfo)?
         {
             poll_tofino_node(&mut tofino, &node);
             poll_blkdev_node(&log, &mut disks, &node)?;
@@ -172,6 +175,43 @@ fn poll_tofino_node(tofino: &mut TofinoSnapshot, node: &Node<'_>) {
     }
 }
 
+fn get_dev_path_of_whole_disk(
+    node: &Node<'_>,
+) -> Result<Option<PathBuf>, Error> {
+    let mut wm = node.minors();
+    while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
+        if m.name() != "wd" {
+            continue;
+        }
+        let links = {
+            match DevLinks::new(true) {
+                Ok(links) => links,
+                Err(_) => DevLinks::new(false).map_err(Error::DevInfo)?,
+            }
+        };
+        let devfs_path = m.devfs_path().map_err(Error::DevInfo)?;
+
+        let paths = links
+            .links_for_path(&devfs_path)
+            .map_err(Error::DevInfo)?
+            .into_iter()
+            .filter(|l| {
+                l.linktype() == DevLinkType::Primary
+                    && l.path()
+                        .file_name()
+                        .map(|f| f.to_string_lossy().ends_with("d0"))
+                        .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+
+        if paths.is_empty() {
+            return Err(Error::NoDevLinks(PathBuf::from(devfs_path)));
+        }
+        return Ok(Some(paths[0].path().to_path_buf()));
+    }
+    Ok(None)
+}
+
 fn poll_blkdev_node(
     log: &Logger,
     disks: &mut HashSet<Disk>,
@@ -180,11 +220,12 @@ fn poll_blkdev_node(
     if let Some(driver_name) = original_node.driver_name() {
         if driver_name == "blkdev" {
             let devfs_path =
-                original_node.devfs_path().map_err(|e| Error::DevInfo(e))?;
+                original_node.devfs_path().map_err(Error::DevInfo)?;
             assert!(devfs_path.starts_with('/'));
+            let dev_path = get_dev_path_of_whole_disk(&original_node)?;
             let devfs_path = format!("/devices{devfs_path}");
             let node = original_node;
-            while let Some(ref node) = node.parent() {
+            while let Some(ref node) = node.parent().map_err(Error::DevInfo)? {
                 let slot_prop_name = "physical-slot#".to_string();
                 if let Some(Ok(slot_prop)) =
                     node.props().into_iter().find(|prop| {
@@ -213,6 +254,7 @@ fn poll_blkdev_node(
                     info!(log, "Found a {variant:?} device in slot# {slot}: {devfs_path}");
                     let disk = match Disk::new(
                         PathBuf::from(devfs_path),
+                        dev_path,
                         slot,
                         variant,
                     ) {

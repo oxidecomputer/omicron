@@ -4,8 +4,10 @@
 
 //! illumos-specific mechanisms for parsing disk info.
 
-use crate::hardware::{DiskError, DiskVariant, Partition};
+use crate::hardware::{DiskError, DiskPaths, DiskVariant, Partition};
+use crate::illumos::zpool::{Zpool, ZpoolName};
 use std::path::PathBuf;
+use uuid::Uuid;
 
 // The expected layout of an M.2 device within the Oxide rack.
 //
@@ -49,7 +51,7 @@ fn parse_partition_types<const N: usize>(
     Ok(expected_partitions.iter().map(|p| p.clone()).collect())
 }
 
-/// Parses and validates the partition layout within a disk.
+/// Parses validates, and ensures the partition layout within a disk.
 ///
 /// Arguments:
 /// - `devfs_path` should be the path to the disk, within `/devices/...`.
@@ -58,20 +60,45 @@ fn parse_partition_types<const N: usize>(
 ///
 /// Returns a Vec of partitions on success. The index of the Vec is guaranteed
 /// to also be the index of the partition.
-pub fn parse_partition_layout(
-    devfs_path: &PathBuf,
+pub fn ensure_partition_layout(
+    paths: &DiskPaths,
     variant: DiskVariant,
 ) -> Result<Vec<Partition>, DiskError> {
-    // Open the "Whole Disk" (wd) as a raw device to be parsed by the
+    // Open the "Whole Disk" as a raw device to be parsed by the
     // libefi-illumos library. This lets us peek at the GPT before
     // making too many assumptions about it.
-    let path =
-        PathBuf::from(format!("{path}:wd,raw", path = devfs_path.display()));
-    let file = std::fs::File::open(&path)
-        .map_err(|error| DiskError::IoError { path: path.clone(), error })?;
-    let gpt = libefi_illumos::Gpt::new(file)
-        .map_err(|error| DiskError::Gpt { path: path.clone(), error })?;
+    let raw = true;
+    let path = paths.whole_disk(raw);
 
+    let gpt = match libefi_illumos::Gpt::read(&path) {
+        Ok(gpt) => gpt,
+        Err(libefi_illumos::Error::LabelNotFound) => {
+            let dev_path = if let Some(dev_path) = &paths.dev_path {
+                dev_path
+            } else {
+                return Err(DiskError::CannotFormatMissingDevPath {
+                    path: path.clone(),
+                });
+            };
+            match variant {
+                DiskVariant::U2 => {
+                    // If a zpool does not already exist, create one.
+                    let zpool_name = ZpoolName::new(Uuid::new_v4());
+                    Zpool::create(zpool_name, dev_path)?;
+                    return Ok(vec![Partition::ZfsPool]);
+                }
+                DiskVariant::M2 => {
+                    todo!("Provisioning M.2 devices not yet supported");
+                }
+            }
+        }
+        Err(err) => {
+            return Err(DiskError::Gpt {
+                path: path.clone(),
+                error: anyhow::Error::new(err),
+            });
+        }
+    };
     let mut partitions: Vec<_> = gpt.partitions().collect();
     match variant {
         DiskVariant::U2 => {
