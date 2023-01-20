@@ -28,7 +28,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::{sync::mpsc, sync::oneshot, sync::Mutex, task::JoinHandle, time::interval};
+use tokio::{
+    sync::mpsc, sync::oneshot, sync::Mutex, task::JoinHandle, time::interval,
+};
 use uuid::Uuid;
 
 /// Errors collecting metric data
