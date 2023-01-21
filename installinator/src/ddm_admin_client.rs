@@ -67,7 +67,7 @@ impl DdmAdminClient {
             // authenticated via sprockets, which only needs one address.
             prefixes.into_iter().find_map(|prefix| {
                 let mut segments = prefix.addr.segments();
-                if prefix.mask == BOOTSTRAP_MASK
+                if prefix.len == BOOTSTRAP_MASK
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
                     // Bootstrap agent IPs always end in ::1; convert the
