@@ -39,7 +39,7 @@ impl LivenessState {
                 ComputedLiveness::Live(elapsed.as_secs())
             }
         } else {
-            ComputedLiveness::Never
+            ComputedLiveness::NoResponse
         }
     }
 }
@@ -53,7 +53,7 @@ pub enum ComputedLiveness {
     /// The data is the number of seconds.
     Delayed(u64),
 
-    Never,
+    NoResponse,
 }
 
 impl ComputedLiveness {
@@ -69,8 +69,8 @@ impl ComputedLiveness {
                 Span::raw(" "),
                 Self::secs_span(*secs),
             ]),
-            ComputedLiveness::Never => Spans::from(Span::styled(
-                "never",
+            ComputedLiveness::NoResponse => Spans::from(Span::styled(
+                "no response",
                 Style::default().fg(OX_YELLOW),
             )),
         }

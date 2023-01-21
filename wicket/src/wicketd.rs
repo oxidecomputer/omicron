@@ -8,7 +8,7 @@ use slog::{o, warn, Logger};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 use wicketd_client::types::RackV1Inventory;
 use wicketd_client::GetInventoryResponse;
 
@@ -158,7 +158,7 @@ impl InventoryState {
                     .tx
                     .send(InventoryEvent::Inventory {
                         changed_inventory,
-                        wicketd_received: libsw::Stopwatch::new_started(),
+                        wicketd_received: Instant::now(),
                         mgs_received: libsw::Stopwatch::with_elapsed_started(
                             mgs_received_ago,
                         ),
@@ -178,7 +178,7 @@ impl InventoryState {
                 let _ = self
                     .tx
                     .send(InventoryEvent::Unavailable {
-                        wicketd_received: libsw::Stopwatch::new_started(),
+                        wicketd_received: Instant::now(),
                     })
                     .await;
             }

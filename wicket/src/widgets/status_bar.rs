@@ -100,29 +100,38 @@ impl<'a> Widget for StatusBarWidget<'a> {
         // "delayed (30s)" is 13 characters
         const LIVENESS_CELL_WIDTH: u16 = 13;
 
+        let wicketd_spans = center_pad(
+            self.bar.wicketd_liveness.compute().to_spans(),
+            LIVENESS_CELL_WIDTH,
+        );
+        let wicketd_spans_width = wicketd_spans.width() as u16;
+        let mgs_spans = center_pad(
+            self.bar.mgs_liveness.compute().to_spans(),
+            LIVENESS_CELL_WIDTH,
+        );
+        let mgs_spans_width = mgs_spans.width() as u16;
+
         // Render the status bar as a table, using a single row.
         let row = Row::new(vec![
             "wicketd".into(),
-            center_pad(
-                self.bar.wicketd_liveness.compute().to_spans(),
-                LIVENESS_CELL_WIDTH,
-            ),
+            wicketd_spans,
+            // A bit of spacing between wicketd and MGS.
+            " ".into(),
             "MGS".into(),
-            center_pad(
-                self.bar.mgs_liveness.compute().to_spans(),
-                LIVENESS_CELL_WIDTH,
-            ),
+            mgs_spans,
         ]);
 
         let table_style = Style::default().fg(OX_GRAY).bg(OX_GREEN_DARKEST);
+        let table_widths = [
+            Constraint::Min(7),
+            Constraint::Min(wicketd_spans_width),
+            Constraint::Min(1),
+            Constraint::Min(3),
+            Constraint::Min(mgs_spans_width),
+        ];
 
         let table = Table::new(std::iter::once(row))
-            .widths(&[
-                Constraint::Min(7),
-                Constraint::Min(LIVENESS_CELL_WIDTH),
-                Constraint::Min(3),
-                Constraint::Min(LIVENESS_CELL_WIDTH),
-            ])
+            .widths(&table_widths)
             .style(table_style)
             .column_spacing(1);
 

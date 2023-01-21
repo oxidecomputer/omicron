@@ -17,6 +17,7 @@ use slog::{error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use tokio::time::Instant;
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
@@ -412,7 +413,7 @@ pub enum InventoryEvent {
         changed_inventory: Option<RackV1Inventory>,
 
         /// The time at which at which information was received from wicketd.
-        wicketd_received: libsw::Stopwatch,
+        wicketd_received: Instant,
 
         /// The time at which information was received from MGS.
         mgs_received: libsw::Stopwatch,
@@ -420,6 +421,6 @@ pub enum InventoryEvent {
     /// The inventory is unavailable.
     Unavailable {
         /// The time at which at which information was received from wicketd.
-        wicketd_received: libsw::Stopwatch,
+        wicketd_received: Instant,
     },
 }
