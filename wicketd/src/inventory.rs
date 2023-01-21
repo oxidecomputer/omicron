@@ -34,7 +34,7 @@ impl SpInventory {
 }
 
 /// The current state of the v1 Rack as known to wicketd
-#[derive(Default, Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(tag = "inventory", rename_all = "snake_case")]
 pub struct RackV1Inventory {
     pub sps: Vec<SpInventory>,
