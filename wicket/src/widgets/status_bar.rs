@@ -100,16 +100,14 @@ impl<'a> Widget for StatusBarWidget<'a> {
         // "delayed (30s)" is 13 characters
         const LIVENESS_CELL_WIDTH: u16 = 13;
 
-        let wicketd_spans = center_pad(
+        let (wicketd_spans, wicketd_spans_width) = center_pad(
             self.bar.wicketd_liveness.compute().to_spans(),
             LIVENESS_CELL_WIDTH,
         );
-        let wicketd_spans_width = wicketd_spans.width() as u16;
-        let mgs_spans = center_pad(
+        let (mgs_spans, mgs_spans_width) = center_pad(
             self.bar.mgs_liveness.compute().to_spans(),
             LIVENESS_CELL_WIDTH,
         );
-        let mgs_spans_width = mgs_spans.width() as u16;
 
         // Render the status bar as a table, using a single row.
         let row = Row::new(vec![
@@ -139,14 +137,54 @@ impl<'a> Widget for StatusBarWidget<'a> {
     }
 }
 
-fn center_pad(mut spans: Spans<'_>, total_width: u16) -> Spans<'_> {
-    let total_width = total_width as usize;
-    if total_width > spans.width() {
+fn center_pad(mut spans: Spans<'_>, min_width: u16) -> (Spans<'_>, u16) {
+    let cur_width = spans.width() as u16;
+    if min_width > cur_width {
         // Add left and right padding.
-        let left_width = (total_width - spans.width()) / 2;
-        let right_width = (total_width + 1 - spans.width()) / 2;
-        spans.0.insert(0, Span::raw(format!("{:left_width$}", "")));
-        spans.0.push(Span::raw(format!("{:right_width$}", "")));
+        let left_width = ((min_width - cur_width) / 2) as usize;
+        let right_width = ((min_width + 1 - cur_width) / 2) as usize;
+        if left_width > 0 {
+            spans.0.insert(0, Span::raw(format!("{:left_width$}", "")));
+        }
+        if right_width > 0 {
+            spans.0.push(Span::raw(format!("{:right_width$}", "")));
+        }
+        (spans, min_width)
+    } else {
+        (spans, cur_width)
     }
-    spans
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_center_pad() {
+        let tests = [
+            (Spans::from(""), 0, Spans::from(""), 0),
+            (Spans::from("abc"), 3, Spans::from("abc"), 3),
+            (Spans::from("abc"), 2, Spans::from("abc"), 3),
+            (
+                Spans::from("abc"),
+                4,
+                Spans::from(vec!["abc".into(), " ".into()]),
+                4,
+            ),
+            (
+                Spans::from("abc"),
+                5,
+                Spans::from(vec![" ".into(), "abc".into(), " ".into()]),
+                5,
+            ),
+        ];
+
+        for (input, min_width, output, output_width) in tests {
+            assert_eq!(
+                center_pad(input.clone(), min_width),
+                (output, output_width),
+                "for input {input:?}, actual output matches expected"
+            );
+        }
+    }
 }
