@@ -305,6 +305,7 @@ impl Screen for ComponentScreen {
             self.draw_background(f);
             self.draw_menubar(f, state);
             self.draw_inventory(f, state);
+            state.status_bar.draw(f);
         })?;
         Ok(())
     }
@@ -323,8 +324,16 @@ impl Screen for ComponentScreen {
                 vec![]
             }
             ScreenEvent::Tick => {
+                let mut redraw = false;
+
                 if !self.help_menu_state.is_closed() {
                     self.help_menu_state.step();
+                    redraw = true;
+                }
+
+                redraw |= state.status_bar.should_redraw();
+
+                if redraw {
                     vec![Action::Redraw]
                 } else {
                     vec![]

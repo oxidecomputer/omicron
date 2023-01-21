@@ -69,7 +69,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackV1Inventory"
+                  "$ref": "#/components/schemas/GetInventoryResponse"
                 }
               }
             }
@@ -98,6 +98,25 @@
       }
     },
     "schemas": {
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -115,6 +134,55 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "GetInventoryResponse": {
+        "description": "The response to a `get_inventory` call: the inventory of artifacts known to wicketd, or a notification that data is unavailable.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "inventory": {
+                    "$ref": "#/components/schemas/RackV1Inventory"
+                  },
+                  "received_ago": {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                },
+                "required": [
+                  "inventory",
+                  "received_ago"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "response"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "RackV1Inventory": {
