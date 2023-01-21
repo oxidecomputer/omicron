@@ -40,7 +40,7 @@ impl RackScreen {
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
             ("<Enter> | left mouse click", "Select hovered object"),
             ("<ESC>", "Reset the TabIndex of the Rack"),
-            ("<CTRL-h", "Toggle this help menu"),
+            ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
 
