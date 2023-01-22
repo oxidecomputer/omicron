@@ -35,11 +35,24 @@ fn parse_partition_types<const N: usize>(
     expected_partitions: &[Partition; N],
 ) -> Result<Vec<Partition>, DiskError> {
     if partitions.len() != N {
-        return Err(DiskError::BadPartitionLayout { path: path.clone() });
+        return Err(DiskError::BadPartitionLayout {
+            path: path.clone(),
+            why: format!(
+                "Expected {} partitions, only saw {}",
+                partitions.len(),
+                N
+            ),
+        });
     }
     for i in 0..N {
         if partitions[i].index() != i {
-            return Err(DiskError::BadPartitionLayout { path: path.clone() });
+            return Err(DiskError::BadPartitionLayout {
+                path: path.clone(),
+                why: format!(
+                    "The {i}-th partition has index {}",
+                    partitions[i].index()
+                ),
+            });
         }
 
         // NOTE: If we wanted to, we could validate additional information about
@@ -88,6 +101,10 @@ pub fn ensure_partition_layout(
                     return Ok(vec![Partition::ZfsPool]);
                 }
                 DiskVariant::M2 => {
+                    // TODO: If we see a completely empty M.2, should we create
+                    // the expected partitions? Or would it be wiser to infer
+                    // that this indicates an unexpected error conditions that
+                    // needs mitigation?
                     todo!("Provisioning M.2 devices not yet supported");
                 }
             }

@@ -36,8 +36,8 @@ pub enum DiskError {
     IoError { path: PathBuf, error: std::io::Error },
     #[error("Failed to open partition at {path} due to {error}")]
     Gpt { path: PathBuf, error: anyhow::Error },
-    #[error("Unexpected partition layout at {path}")]
-    BadPartitionLayout { path: PathBuf },
+    #[error("Unexpected partition layout at {path}: {why}")]
+    BadPartitionLayout { path: PathBuf, why: String },
     #[error("Requested partition {partition:?} not found on device {path}")]
     NotFound { path: PathBuf, partition: Partition },
     #[error(transparent)]
