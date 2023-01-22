@@ -218,7 +218,7 @@ mod tests {
             id: ID.parse().unwrap(),
         };
         let hist = Histogram::new(&[0.0, 1.0]).unwrap();
-        let tracker = LatencyTracker::new(service, hist.clone());
+        let tracker = LatencyTracker::new(service, hist);
         let request = http::request::Builder::new()
             .method(http::Method::GET)
             .uri("/some/uri")

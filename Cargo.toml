@@ -127,6 +127,7 @@ heck = "0.4"
 hex = "0.4.3"
 http = "0.2.7"
 httptest = "0.15.4"
+hyper-rustls = "0.23.2"
 hyper = "0.14"
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -176,7 +177,10 @@ oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
 p256 = "0.9.0"
 parse-display = "0.7.0"
+paste = "1.0.11"
 percent-encoding = "2.2.0"
+pem = "1.1"
+petgraph = "0.6.2"
 postgres-protocol = "0.6.4"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
@@ -187,12 +191,14 @@ proptest = "1.0.0"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.6"
+rcgen = "0.10.0"
 ref-cast = "1.0"
 regex = "1.7.1"
 regress = "0.4.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rustfmt-wrapper = "0.2"
+rustls = "0.20.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.10"
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }

@@ -199,7 +199,7 @@ async fn test_instances_create_reboot_halt(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
@@ -525,7 +525,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     let client = &cptestctx.external_client;
     let oximeter = &cptestctx.oximeter;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
 
@@ -561,11 +561,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         )
     };
     oximeter.force_collect().await;
-    for id in vec![organization_id, project_id] {
+    for id in &[organization_id, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("virtual_disk_space_provisioned", id),
+                &metric_url("virtual_disk_space_provisioned", *id),
             )
             .await,
             0
@@ -573,16 +573,19 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("cpus_provisioned", id),
+                &metric_url("cpus_provisioned", *id),
             )
             .await,
             0
         );
-        assert_eq!(query_for_latest_metric(
-            client,
-            &metric_url("ram_provisioned", id),
-        )
-        .await, 0);
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            0
+        );
     }
 
     // Create an instance.
@@ -626,11 +629,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         expected_ram
     );
     oximeter.force_collect().await;
-    for id in vec![organization_id, project_id] {
+    for id in &[organization_id, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("virtual_disk_space_provisioned", id),
+                &metric_url("virtual_disk_space_provisioned", *id),
             )
             .await,
             0
@@ -638,16 +641,19 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("cpus_provisioned", id),
+                &metric_url("cpus_provisioned", *id),
             )
             .await,
             expected_cpus
         );
-        assert_eq!(query_for_latest_metric(
-            client,
-            &metric_url("ram_provisioned", id),
-        )
-        .await, expected_ram);
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            expected_ram
+        );
     }
 
     // Stop the instance
@@ -664,11 +670,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
     oximeter.force_collect().await;
-    for id in vec![organization_id, project_id] {
+    for id in &[organization_id, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("virtual_disk_space_provisioned", id),
+                &metric_url("virtual_disk_space_provisioned", *id),
             )
             .await,
             0
@@ -676,16 +682,19 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             query_for_latest_metric(
                 client,
-                &metric_url("cpus_provisioned", id),
+                &metric_url("cpus_provisioned", *id),
             )
             .await,
             0
         );
-        assert_eq!(query_for_latest_metric(
-            client,
-            &metric_url("ram_provisioned", id),
-        )
-        .await, 0);
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            0
+        );
     }
 }
 
@@ -694,7 +703,7 @@ async fn test_instances_create_stopped_start(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
@@ -748,7 +757,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
@@ -1203,7 +1212,7 @@ async fn test_instance_create_delete_network_interface(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let instance_name = "nic-attach-test-inst";
 
     create_org_and_project(&client).await;
@@ -1448,7 +1457,7 @@ async fn test_instance_update_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let instance_name = "nic-update-test-inst";
 
     create_org_and_project(&client).await;
@@ -2207,7 +2216,7 @@ async fn test_instance_create_attach_disks_undo(
     );
 
     // set `faulted_disk` to the faulted state
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     assert!(nexus
         .set_disk_as_faulted(&faulted_disk.identity.id)
@@ -2353,10 +2362,8 @@ async fn test_attach_eight_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2461,10 +2468,8 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2545,7 +2550,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 8);
 
     // Set the 7th to FAULTED
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     assert!(nexus.set_disk_as_faulted(&disks[6].identity.id).await.unwrap());
 
@@ -2585,10 +2590,8 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2696,10 +2699,8 @@ async fn test_disks_detached_when_instance_destroyed(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2748,7 +2749,7 @@ async fn test_disks_detached_when_instance_destroyed(
 
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
@@ -2884,7 +2885,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
 #[nexus_test]
 async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let instance_name = "kris-picks";
 
@@ -3231,5 +3232,5 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 /// going on.
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
-    sa.instance_finish_transition(id.clone()).await;
+    sa.instance_finish_transition(*id).await;
 }

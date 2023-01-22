@@ -195,7 +195,7 @@ mod test {
     fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.apictx().nexus.datastore().clone(),
         )
     }
 
@@ -204,7 +204,7 @@ mod test {
         org_id: Uuid,
         action: authz::Action,
     ) -> authz::Organization {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let org_selector =
             params::OrganizationSelector { organization: NameOrId::Id(org_id) };
         let opctx = test_opctx(&cptestctx);
@@ -276,7 +276,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let org_id = create_org(&client).await;
 
         // Before running the test, confirm we have no records of any projects.
@@ -301,7 +301,7 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let org_id = create_org(&client).await;
 
         // Build the saga DAG with the provided test parameters

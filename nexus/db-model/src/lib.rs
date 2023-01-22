@@ -11,6 +11,7 @@ extern crate newtype_derive;
 
 mod block_size;
 mod bytecount;
+mod certificate;
 mod collection;
 mod console_session;
 mod dataset;
@@ -85,6 +86,7 @@ pub use self::macaddr::*;
 pub use self::u16::*;
 pub use block_size::*;
 pub use bytecount::*;
+pub use certificate::*;
 pub use collection::*;
 pub use console_session::*;
 pub use dataset::*;

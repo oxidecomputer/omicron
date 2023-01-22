@@ -558,7 +558,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let ip_pools_url = "/system/ip-pools";
     let pool_name = "default";

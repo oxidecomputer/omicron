@@ -4,6 +4,7 @@
 
 //! Integration tests for oximeter collectors and producers.
 
+use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
@@ -203,7 +204,7 @@ async fn test_oximeter_reregistration() {
     // Restart the producer, and verify that we have _more_ data than before
     // Set up a test metric producer server
     context.producer = nexus_test_utils::start_producer_server(
-        context.server.http_server_internal.local_addr(),
+        context.server.get_http_server_internal_address().await,
         nexus_test_utils::PRODUCER_UUID.parse().unwrap(),
     )
     .await
@@ -281,7 +282,7 @@ async fn test_oximeter_reregistration() {
     // Restart oximeter again, and verify that we have even more new data.
     context.oximeter = nexus_test_utils::start_oximeter(
         context.logctx.log.new(o!("component" => "oximeter")),
-        context.server.http_server_internal.local_addr(),
+        context.server.get_http_server_internal_address().await,
         context.clickhouse.port(),
         oximeter_id,
     )

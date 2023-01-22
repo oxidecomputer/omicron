@@ -9,9 +9,9 @@ use super::views::IpPoolRange;
 use super::{
     console_api, device_auth, params, views,
     views::{
-        GlobalImage, Group, IdentityProvider, Image, Organization, Project,
-        Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc,
-        VpcRouter, VpcSubnet,
+        Certificate, GlobalImage, Group, IdentityProvider, Image, Organization,
+        Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin,
+        Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -58,6 +58,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -271,6 +272,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(local_idp_user_create)?;
         api.register(local_idp_user_delete)?;
         api.register(local_idp_user_set_password)?;
+
+        api.register(certificate_list)?;
+        api.register(certificate_create)?;
+        api.register(certificate_view)?;
+        api.register(certificate_delete)?;
 
         api.register(system_image_list)?;
         api.register(system_image_create)?;
@@ -3585,6 +3591,128 @@ async fn instance_disk_detach(
             .instance_detach_disk(&opctx, &instance_lookup, disk.name.into())
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Certificates
+
+/// List system-wide certificates
+///
+/// Returns a list of all the system-wide certificates. System-wide certificates
+/// are returned sorted by creation date, with the most recent certificates
+/// appearing first.
+#[endpoint {
+    method = GET,
+    path = "/system/certificates",
+    tags = ["system"],
+}]
+async fn certificate_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let certs = nexus
+            .certificates_list(
+                &opctx,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            certs,
+            &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new system-wide x.509 certificate.
+///
+/// This certificate is automatically used by the Oxide Control plane to serve
+/// external connections.
+#[endpoint {
+    method = POST,
+    path = "/system/certificates",
+    tags = ["system"]
+}]
+async fn certificate_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_cert: TypedBody<params::CertificateCreate>,
+) -> Result<HttpResponseCreated<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let new_cert_params = new_cert.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
+        Ok(HttpResponseCreated(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Certificate requests
+#[derive(Deserialize, JsonSchema)]
+struct CertificatePathParam {
+    certificate: NameOrId,
+}
+
+/// Fetch a certificate
+///
+/// Returns the details of a specific certificate
+#[endpoint {
+    method = GET,
+    path = "/system/certificates/{certificate}",
+    tags = ["system"],
+}]
+async fn certificate_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseOk<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., cert) =
+            nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
+        Ok(HttpResponseOk(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a certificate
+///
+/// Permanently delete a certificate. This operation cannot be undone.
+#[endpoint {
+    method = DELETE,
+    path = "/system/certificates/{certificate}",
+    tags = ["system"],
+}]
+async fn certificate_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .certificate_delete(
+                &opctx,
+                nexus.certificate_lookup(&opctx, &path.certificate),
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

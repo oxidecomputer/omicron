@@ -14,6 +14,7 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
+use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::Rack;
 use crate::db::model::Service;
@@ -86,8 +87,11 @@ impl DataStore {
         rack_id: Uuid,
         services: Vec<Service>,
         datasets: Vec<Dataset>,
+        certificates: Vec<Certificate>,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
+
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         #[derive(Debug)]
         enum RackInitError {
@@ -174,6 +178,16 @@ impl DataStore {
                     })?;
                 }
                 info!(log, "Inserted datasets");
+
+                {
+                    use db::schema::certificate::dsl;
+                    diesel::insert_into(dsl::certificate)
+                        .values(certificates)
+                        .on_conflict(dsl::id)
+                        .do_nothing()
+                        .execute_async(&conn)
+                        .await?;
+                }
 
                 let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))

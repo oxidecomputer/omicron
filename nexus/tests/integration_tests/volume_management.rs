@@ -1079,7 +1079,7 @@ async fn test_volume_remove_read_only_parent_base(
 ) {
     // Test the removal of a volume with a read only parent.
     // The ROP should end up on the t_vid volume.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1175,7 +1175,7 @@ async fn test_volume_remove_read_only_parent_no_parent(
 ) {
     // Test the removal of a read only parent from a volume
     // without a read only parent.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1193,7 +1193,7 @@ async fn test_volume_remove_read_only_parent_volume_not_volume(
 ) {
     // test removal of a read only volume for a volume that is not
     // of a type to have a read only parent.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1222,7 +1222,7 @@ async fn test_volume_remove_read_only_parent_bad_volume(
 ) {
     // Test the removal of a read only parent from a volume
     // that does not exist
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1238,7 +1238,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
     cptestctx: &ControlPlaneTestContext,
 ) {
     // Test the removal of a read_only_parent from a deleted volume.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1268,7 +1268,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
 async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
     // Test the saga for removal of a volume with a read only parent.
     // We create a volume with a read only parent, then call the saga on it.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1325,7 +1325,7 @@ async fn test_volume_remove_rop_saga_twice(
     // Test calling the saga for removal of a volume with a read only parent
     // two times, the first will remove the read_only_parent, the second will
     // do nothing.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1418,7 +1418,7 @@ async fn test_volume_remove_rop_saga_volume_not_volume(
 ) {
     // Test saga removal of a read only volume for a volume that is not
     // of a type to have a read only parent.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let volume_id = Uuid::new_v4();
     let datastore = nexus.datastore();
 
@@ -1457,7 +1457,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
 ) {
     // Test that a saga removal of a read_only_parent from a deleted volume
     // takes no action on that deleted volume.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1515,7 +1515,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
 async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
     // Verify that a volume_checkout will update the generation number in the
     // database when the volume type is Volume with sub_volume Region.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1554,7 +1554,7 @@ async fn test_volume_checkout_updates_nothing(
 ) {
     // Verify that a volume_checkout will do nothing for a volume that does
     // not contain a sub_volume with a generation field.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1595,7 +1595,7 @@ async fn test_volume_checkout_updates_multiple_gen(
     // Verify that a volume_checkout will update the generation number in the
     // database when the volume type is Volume with multiple sub_volumes of
     // type Region.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1643,7 +1643,7 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
     // database when the volume type is Volume with multiple sub_volumes of
     // type Region and also verify that a non generation sub_volume won't be a
     // problem
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1691,7 +1691,7 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     // database when the volume type is Volume with multiple sub_volumes of
     // type Region and also verify that a non generation sub_volume in the
     // middle of the sub_volumes won't be a problem
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1809,7 +1809,7 @@ fn volume_match_gen(
 async fn test_volume_hard_delete_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();

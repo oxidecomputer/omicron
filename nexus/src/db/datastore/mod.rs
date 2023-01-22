@@ -41,6 +41,7 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod certificate;
 mod console_session;
 mod dataset;
 mod device_auth;
@@ -472,7 +473,7 @@ mod test {
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
         let is_scrimlet = false;
-        let sled = Sled::new(sled_id, bogus_addr.clone(), is_scrimlet, rack_id);
+        let sled = Sled::new(sled_id, bogus_addr, is_scrimlet, rack_id);
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }
@@ -1036,14 +1037,14 @@ mod test {
 
         // Initialize the Rack.
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);

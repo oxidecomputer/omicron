@@ -6,6 +6,7 @@
 mod authn_http;
 mod authz;
 mod basic;
+mod certificates;
 mod commands;
 mod console_api;
 mod device_auth;

@@ -2461,13 +2461,15 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.23.0"
+version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d87c48c02e0dc5e3b849a2041db3029fd066650f8f717c07bf8ed78ccb895cac"
+checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
 dependencies = [
  "http",
  "hyper",
+ "log",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
 ]
@@ -3207,6 +3209,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-rpaths",
+ "openssl",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -3216,6 +3219,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
+ "thiserror",
  "uuid",
 ]
 
@@ -3575,6 +3579,7 @@ dependencies = [
  "http",
  "httptest",
  "hyper",
+ "hyper-rustls",
  "internal-dns-client",
  "ipnetwork",
  "itertools",
@@ -3608,14 +3613,17 @@ dependencies = [
  "oximeter-producer",
  "parse-display",
  "paste",
+ "pem",
  "petgraph",
  "pq-sys",
  "propolis-client",
  "rand 0.8.5",
+ "rcgen",
  "ref-cast",
  "regex",
  "reqwest",
  "ring",
+ "rustls",
  "samael",
  "schemars",
  "serde",
@@ -4007,6 +4015,7 @@ dependencies = [
  "clap 4.1.1",
  "dropshot",
  "expectorate",
+ "futures",
  "internal-dns-client",
  "nexus-client",
  "omicron-common",
@@ -4926,6 +4935,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcgen"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffbe84efe2f38dea12e9bfc1f65377fdf03e53a18cb3b995faedf7934c7e785b"
+dependencies = [
+ "pem",
+ "ring",
+ "time 0.3.16",
+ "yasna",
+]
+
+[[package]]
 name = "rdrand"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5273,6 +5294,18 @@ dependencies = [
  "ring",
  "sct",
  "webpki",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0167bac7a9f490495f3c33013e7722b53cb087ecbe082fb0c6387c96f634ea50"
+dependencies = [
+ "openssl-probe",
+ "rustls-pemfile",
+ "schannel",
+ "security-framework",
 ]
 
 [[package]]
@@ -7482,6 +7515,7 @@ checksum = "346d34a236c9d3e5f3b9b74563f238f955bbd05fa0b8b4efa53c130c43982f4c"
 dependencies = [
  "bit-vec",
  "num-bigint",
+ "time 0.3.16",
 ]
 
 [[package]]
