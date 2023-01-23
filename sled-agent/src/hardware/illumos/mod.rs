@@ -26,6 +26,9 @@ enum Error {
 
     #[error("Could not translate {0} to '/dev' path: no links")]
     NoDevLinks(PathBuf),
+
+    #[error("Device {path} missing device property: {property}")]
+    MissingProperty { path: PathBuf, property: String },
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -230,6 +233,34 @@ fn get_dev_path_of_whole_disk(
     Ok(None)
 }
 
+// Gather a notion of "device identity".
+//
+// NOTE: What exactly comprises a "reliable, unique identifier" for a disk is
+// still a little bit in flux. While that's being sorted out, we simply produce
+// a string that can uniquely identify the device to Nexus.
+//
+// TODO: We probably want to include the "vendor ID", which can be accessed
+// from an NVME-specific ioctl:
+//
+// https://github.com/illumos/illumos-gate/blob/98f586d71279849001034981c5906e9e3901d56f/usr/src/uts/common/sys/nvme.h#L166
+fn blkdev_device_identity(
+    devfs_path: &str,
+    node: &Node<'_>,
+) -> Result<String, Error> {
+    let props = node.string_props();
+    let p = "inquiry-serial-no";
+    let serial_id = props.get(p).ok_or_else(|| Error::MissingProperty {
+        path: PathBuf::from(devfs_path),
+        property: p.to_string(),
+    })?;
+    let p = "inquiry-product-id";
+    let product_id = props.get(p).ok_or_else(|| Error::MissingProperty {
+        path: PathBuf::from(devfs_path),
+        property: p.to_string(),
+    })?;
+    Ok(format!("{product_id}-{serial_id}"))
+}
+
 fn poll_blkdev_node(
     log: &Logger,
     disks: &mut HashSet<UnparsedDisk>,
@@ -247,6 +278,7 @@ fn poll_blkdev_node(
             // path "real".
             assert!(devfs_path.starts_with('/'));
             let devfs_path = format!("/devices{devfs_path}");
+            let device_id = blkdev_device_identity(&devfs_path, &node)?;
 
             while let Some(parent) = node.parent().map_err(Error::DevInfo)? {
                 node = parent;
@@ -280,6 +312,7 @@ fn poll_blkdev_node(
                         dev_path,
                         slot,
                         variant,
+                        device_id,
                     );
                     disks.insert(disk);
                     break;

@@ -132,6 +132,7 @@ pub struct UnparsedDisk {
     paths: DiskPaths,
     slot: i64,
     variant: DiskVariant,
+    device_id: String,
 }
 
 impl UnparsedDisk {
@@ -141,8 +142,14 @@ impl UnparsedDisk {
         dev_path: Option<PathBuf>,
         slot: i64,
         variant: DiskVariant,
+        device_id: String,
     ) -> Self {
-        Self { paths: DiskPaths { devfs_path, dev_path }, slot, variant }
+        Self {
+            paths: DiskPaths { devfs_path, dev_path },
+            slot,
+            variant,
+            device_id,
+        }
     }
 
     pub fn devfs_path(&self) -> &PathBuf {
@@ -156,12 +163,12 @@ pub struct Disk {
     paths: DiskPaths,
     slot: i64,
     variant: DiskVariant,
+    device_id: String,
     partitions: Vec<Partition>,
 
     // This embeds the assumtion that there is exactly one parsed zpool per
     // disk.
     zpool_name: ZpoolName,
-    // TODO: Device ID?
 }
 
 impl Disk {
@@ -213,6 +220,7 @@ impl Disk {
             paths: unparsed_disk.paths,
             slot: unparsed_disk.slot,
             variant: unparsed_disk.variant,
+            device_id: unparsed_disk.device_id,
             partitions,
             zpool_name,
         })

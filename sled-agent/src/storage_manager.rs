@@ -906,8 +906,7 @@ impl StorageManager {
         self.disks.lock().await.insert(disk.devfs_path().to_path_buf(), disk);
         self.upsert_zpool(&zpool_name).await?;
 
-        // TODO:
-        // - Notify Nexus
+        // TODO: Notify Nexus
         Ok(())
     }
 
@@ -921,8 +920,7 @@ impl StorageManager {
             self.pools.lock().await.remove(&disk.zpool_name());
         }
 
-        // TODO:
-        // - Notify Nexus
+        // TODO: Notify Nexus
         Ok(())
     }
 
