@@ -27,8 +27,16 @@
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
+    <!--
+      `config/id` is expected to have a single value; sled-agent will replace
+      "unknown" with a UUID as a part of starting us.
+    -->
     <propval name='id' type='astring' value='unknown' />
-    <propval name='address' type='astring' value='unknown' />
+    <!--
+      `config/address` is allow to have multiple values, so we do not seed it
+      with an initial `unknown` that sled-agent would need to delete.
+    -->
+    <property name='address' type='astring' />
   </property_group>
 
   <property_group name='startd' type='framework'>

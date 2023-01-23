@@ -227,7 +227,7 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
             .map_err(|err| Error::ValueAsString { prop: PROP_ADDR, err })?;
 
         addresses.push(addr.parse().map_err(|err| CmdError::Failure(format!(
-            "failed to parse `{CONFIG_PG}/{PROP_ADDR}` ({prop_id:?}) as a socket address: {err}"
+            "failed to parse `{CONFIG_PG}/{PROP_ADDR}` ({addr:?}) as a socket address: {err}"
         )))?);
     }
 
