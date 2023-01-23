@@ -12,9 +12,8 @@ pub mod http_entrypoints; // TODO pub only for testing - is this right?
 
 pub use config::Config;
 pub use context::ServerContext;
+use dropshot::ShutdownWaitFuture;
 use futures::stream::FuturesUnordered;
-use futures::Future;
-use futures::FutureExt;
 use futures::StreamExt;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
@@ -29,11 +28,11 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -55,8 +54,6 @@ pub struct MgsArguments {
 }
 
 type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;
-type HttpServerShutdownFut =
-    Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
 
 pub struct Server {
     /// shared state used by API request handlers
@@ -66,7 +63,7 @@ pub struct Server {
     pub http_servers: HashMap<SocketAddrV6, HttpServer>,
     /// collection of `wait_for_shutdown` futures for each server inserted into
     /// `http_servers`
-    all_servers_shutdown: FuturesUnordered<HttpServerShutdownFut>,
+    all_servers_shutdown: FuturesUnordered<ShutdownWaitFuture>,
     request_body_max_bytes: usize,
     log: Logger,
 }
@@ -85,7 +82,7 @@ fn start_dropshot_server(
     addr: SocketAddrV6,
     request_body_max_bytes: usize,
     http_servers: &mut HashMap<SocketAddrV6, HttpServer>,
-    all_servers_shutdown: &FuturesUnordered<HttpServerShutdownFut>,
+    all_servers_shutdown: &FuturesUnordered<ShutdownWaitFuture>,
     log: &Logger,
 ) -> Result<(), String> {
     let dropshot = ConfigDropshot {
@@ -101,17 +98,17 @@ fn start_dropshot_server(
     )
     .map_err(|error| format!("initializing http server: {}", error))?;
 
-    let http_server = http_server_starter.start();
-
-    // TODO Remove boxed() after
-    // https://github.com/oxidecomputer/dropshot/pull/569 is merged.
-    all_servers_shutdown.push(http_server.wait_for_shutdown().boxed());
-
-    if http_servers.insert(addr, http_server).is_some() {
-        return Err(format!("duplicate listening address: {addr}"));
+    match http_servers.entry(addr) {
+        Entry::Vacant(slot) => {
+            let http_server = http_server_starter.start();
+            all_servers_shutdown.push(http_server.wait_for_shutdown());
+            slot.insert(http_server);
+            Ok(())
+        }
+        Entry::Occupied(_) => {
+            Err(format!("duplicate listening address: {addr}"))
+        }
     }
-
-    Ok(())
 }
 
 impl Server {
