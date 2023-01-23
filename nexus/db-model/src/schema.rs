@@ -674,6 +674,16 @@ table! {
 }
 
 table! {
+    system_update_deployment (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+    }
+}
+
+table! {
     component_update (id) {
         id -> Uuid,
         time_created -> Timestamptz,

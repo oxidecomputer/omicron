@@ -702,6 +702,7 @@ pub enum ResourceType {
     SystemUpdate,
     ComponentUpdate,
     SystemUpdateComponentUpdate,
+    SystemUpdateDeployment,
     UpdateableComponent,
     UserBuiltin,
     Zpool,

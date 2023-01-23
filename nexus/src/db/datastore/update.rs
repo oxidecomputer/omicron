@@ -11,7 +11,8 @@ use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
-    ComponentUpdate, SystemUpdate, UpdateAvailableArtifact, UpdateableComponent,
+    ComponentUpdate, SystemUpdate, SystemUpdateDeployment,
+    UpdateAvailableArtifact, UpdateableComponent,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -19,6 +20,7 @@ use diesel::prelude::*;
 use nexus_db_model::SystemUpdateComponentUpdate;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, InternalContext, ListResultVec,
@@ -225,6 +227,38 @@ impl DataStore {
         paginated(updateable_component, id, pagparams)
             .select(UpdateableComponent::as_select())
             .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn system_update_deployments_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SystemUpdateDeployment> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::system_update_deployment::dsl::*;
+
+        paginated(system_update_deployment, id, pagparams)
+            .select(SystemUpdateDeployment::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn latest_update_deployment(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<SystemUpdateDeployment> {
+        use db::schema::system_update_deployment::dsl::*;
+
+        system_update_deployment
+            .select(SystemUpdateDeployment::as_returning())
+            .order(time_created.desc())
+            .limit(1)
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

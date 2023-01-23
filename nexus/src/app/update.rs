@@ -423,6 +423,35 @@ impl super::Nexus {
             .updateable_components_list_by_id(opctx, pagparams)
             .await
     }
+
+    pub async fn system_update_deployments_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SystemUpdateDeployment> {
+        self.db_datastore
+            .system_update_deployments_list_by_id(opctx, pagparams)
+            .await
+    }
+
+    pub async fn system_update_deployment_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        deployment_id: &Uuid,
+    ) -> LookupResult<db::model::SystemUpdateDeployment> {
+        let (.., db_deployment) = LookupPath::new(opctx, &self.db_datastore)
+            .system_update_deployment_id(*deployment_id)
+            .fetch()
+            .await?;
+        Ok(db_deployment)
+    }
+
+    pub async fn latest_update_deployment(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<db::model::SystemUpdateDeployment> {
+        self.db_datastore.latest_update_deployment(opctx).await
+    }
 }
 
 // TODO: should these tests be done as integration tests? the creates would

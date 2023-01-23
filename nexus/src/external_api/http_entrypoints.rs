@@ -289,6 +289,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_update_start)?;
         api.register(system_update_stop)?;
         api.register(system_update_components_list)?;
+        api.register(system_update_deployments_list)?;
+        api.register(system_update_deployment_view)?;
 
         api.register(user_list)?;
         api.register(silo_users_list)?;
@@ -5422,10 +5424,15 @@ async fn system_version(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::SystemVersion>, HttpError> {
     let apictx = rqctx.context();
-    let _nexus = &apictx.nexus;
+    let nexus = &apictx.nexus;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        // updating status of the system is the status of the latest update
+        // deployment: if there's one running, we're running. Otherwise we're not running.
+        let _latest_deployment = nexus.latest_update_deployment(&opctx).await;
+
         Ok(HttpResponseOk(views::SystemVersion {
             version_range: views::VersionRange {
                 low: SemverVersion::new(0, 0, 1),
@@ -5570,6 +5577,20 @@ async fn system_update_start(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // inverse situation to stop: we only want to actually start an update
+        // if there isn't one already in progress.
+
+        // 1. check that there is no update in progress
+        //   a. if there is one, this should probably 409
+        // 2. kick off the update start saga, which
+        //   a. tells the update system to get going
+        //   b. creates an update deployment
+
+        // similar question for stop: do we return the deployment directly, or a
+        // special StartUpdateResult that includes a deployment ID iff an update
+        // was actually started
+
         Ok(HttpResponseAccepted(views::SystemUpdateDeployment {
             identity: AssetIdentityMetadata {
                 id: Uuid::new_v4(),
@@ -5598,7 +5619,78 @@ async fn system_update_stop(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // TODO: Implement stopping an update. Should probably be a saga.
+
+        // Ask update subsystem if it's doing anything. If so, tell it to stop.
+        // This could be done in a single call to the updater if the latter can
+        // respond to a stop command differently depending on whether it did
+        // anything or not.
+
+        // If we did in fact stop a running update, update the status on the
+        // latest update deployment in the DB to `stopped` and respond with that
+        // deployment. If we do nothing, what should we return? Maybe instead of
+        // responding with the deployment, this endpoint gets its own
+        // `StopUpdateResult` response view that says whether it was a noop, and
+        // if it wasn't, includes the ID of the stopped deployment, which allows
+        // the client to fetch it if it actually wants it.
+
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List all update deployments
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/deployments",
+     tags = ["system"],
+}]
+async fn system_update_deployments_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::SystemUpdateDeployment>>, HttpError>
+{
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let updates = nexus
+            .system_update_deployments_list_by_id(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|u| u.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            updates,
+            &|_, u: &views::SystemUpdateDeployment| u.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a system update deployment
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/deployments/{id}",
+     tags = ["system"],
+}]
+async fn system_update_deployment_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<views::SystemUpdateDeployment>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let deployment =
+            nexus.system_update_deployment_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(deployment.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

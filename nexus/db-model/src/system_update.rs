@@ -6,7 +6,7 @@ use crate::{
     impl_enum_type,
     schema::{
         component_update, system_update, system_update_component_update,
-        updateable_component,
+        system_update_deployment, updateable_component,
     },
     SemverVersion,
 };
@@ -173,6 +173,32 @@ impl From<UpdateableComponent> for views::UpdateableComponent {
             component_type: component.component_type.into(),
             version: component.version.into(),
             parent_id: component.parent_id,
+        }
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Asset,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = system_update_deployment)]
+pub struct SystemUpdateDeployment {
+    #[diesel(embed)]
+    pub identity: SystemUpdateDeploymentIdentity,
+    pub version: SemverVersion,
+}
+
+impl From<SystemUpdateDeployment> for views::SystemUpdateDeployment {
+    fn from(deployment: SystemUpdateDeployment) -> Self {
+        Self {
+            identity: deployment.identity(),
+            version: deployment.version.into(),
         }
     }
 }

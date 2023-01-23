@@ -1569,6 +1569,27 @@ CREATE TABLE omicron.public.updateable_component (
     -- TODO: status and reason
 );
 
+CREATE TYPE omicron.public.update_deployment_status AS ENUM (
+    'running',
+    'stopped'
+);
+
+/*
+ * System updates
+ */
+CREATE TABLE omicron.public.system_update_deployment (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* Unique semver version */
+    version STRING(64) NOT NULL,
+
+    status update_deployment_status NOT NULL,
+    reason STRING(64) NOT NULL
+);
+
 /*******************************************************************/
 
 /*
