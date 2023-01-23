@@ -1151,7 +1151,7 @@ name = "crucible-smf"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/crucible?rev=07d86d85d54e4fe277b7f963c1c0d9fe475e1467#07d86d85d54e4fe277b7f963c1c0d9fe475e1467"
 dependencies = [
- "libc 0.2.139 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc",
  "num-derive",
  "num-traits",
  "thiserror",
