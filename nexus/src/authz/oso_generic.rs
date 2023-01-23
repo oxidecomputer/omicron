@@ -130,6 +130,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         RouterRoute::init(),
         VpcSubnet::init(),
         // Fleet-level resources
+        Certificate::init(),
         ConsoleSession::init(),
         DeviceAuthRequest::init(),
         DeviceAccessToken::init(),

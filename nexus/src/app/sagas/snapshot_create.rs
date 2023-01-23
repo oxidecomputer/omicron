@@ -1319,7 +1319,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.apictx().nexus.datastore().clone(),
         )
     }
 
@@ -1330,7 +1330,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let disk_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1351,7 +1351,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
+            Name::from_str(DISK_NAME).unwrap(),
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1413,7 +1413,7 @@ mod test {
         // Verifies:
         // - No snapshot records exist
         // - No region snapshot records exist
-        let datastore = cptestctx.server.apictx.nexus.datastore();
+        let datastore = cptestctx.server.apictx().nexus.datastore();
         assert!(no_snapshot_records_exist(datastore).await);
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
@@ -1426,7 +1426,7 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let mut disk_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1446,7 +1446,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
+            Name::from_str(DISK_NAME).unwrap(),
         );
         let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
 
@@ -1505,7 +1505,7 @@ mod test {
                 silo_id,
                 project_id,
                 disk_id,
-                Name::from_str(DISK_NAME).unwrap().into(),
+                Name::from_str(DISK_NAME).unwrap(),
             );
             dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         }

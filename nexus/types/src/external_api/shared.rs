@@ -151,6 +151,14 @@ pub enum UserProvisionType {
     Jit,
 }
 
+/// The service intended to use this certificate.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceUsingCertificate {
+    /// This certificate is intended for access to the external API.
+    ExternalApi,
+}
+
 /// An IP Range is a contiguous range of IP addresses, usually within an IP
 /// Pool.
 ///

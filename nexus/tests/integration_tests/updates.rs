@@ -158,7 +158,7 @@ fn new_tuf_repo(rng: &dyn SecureRandom) -> TempDir {
         roles: HashMap::new(),
         _extra: HashMap::new(),
     };
-    root.keys.insert(key_id.clone(), tuf_key.clone());
+    root.keys.insert(key_id.clone(), tuf_key);
     for role in [
         RoleType::Root,
         RoleType::Snapshot,
@@ -238,7 +238,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
     let artifacts = ArtifactsDocument {
         artifacts: vec![UpdateArtifact {
             name: "omicron-test-component".into(),
-            version: 1,
+            version: "0.0.0".into(),
             kind: Some(UpdateArtifactKind::Zone),
             target: "omicron-test-component-1".into(),
         }],

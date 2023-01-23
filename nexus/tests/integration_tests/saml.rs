@@ -88,7 +88,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Assert external authenticator opctx can read it
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let _retrieved_silo_nexus = nexus
         .silo_fetch(
@@ -979,7 +979,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
             - "2022-05-04T15:36:12.631Z"
@@ -1121,7 +1121,7 @@ async fn test_post_saml_response_with_relay_state(
     )
     .await;
 
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
             - "2022-05-04T15:36:12.631Z"

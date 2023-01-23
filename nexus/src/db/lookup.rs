@@ -384,13 +384,13 @@ impl<'a> LookupPath<'a> {
     pub fn update_available_artifact_tuple(
         self,
         name: &str,
-        version: i64,
+        version: &str,
         kind: UpdateArtifactKind,
     ) -> UpdateAvailableArtifact<'a> {
         UpdateAvailableArtifact::PrimaryKey(
             Root { lookup_root: self },
             name.to_string(),
-            version,
+            version.to_string(),
             kind,
         )
     }
@@ -435,6 +435,23 @@ impl<'a> LookupPath<'a> {
         'a: 'b,
     {
         GlobalImage::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type Certificate, identified by its name
+    pub fn certificate_name<'b, 'c>(self, name: &'b Name) -> Certificate<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Certificate::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type Certificate, identified by its id
+    pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
+    where
+        'a: 'b,
+    {
+        Certificate::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
 
@@ -698,7 +715,7 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "name", rust_type = String },
-        { column_name = "version", rust_type = i64 },
+        { column_name = "version", rust_type = String },
         { column_name = "kind", rust_type = UpdateArtifactKind }
     ]
 }
@@ -732,6 +749,15 @@ lookup_resource! {
 
 lookup_resource! {
     name = "GlobalImage",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Certificate",
     ancestors = [],
     children = [],
     lookup_by_name = true,

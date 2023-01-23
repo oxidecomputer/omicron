@@ -4,7 +4,9 @@
 
 //! Views are response bodies, most of which are public lenses onto DB models.
 
-use crate::external_api::shared::{self, IpKind, IpRange};
+use crate::external_api::shared::{
+    self, IpKind, IpRange, ServiceUsingCertificate,
+};
 use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
@@ -98,6 +100,16 @@ pub struct Project {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub organization_id: Uuid,
+}
+
+// CERTIFICATES
+
+/// Client view of a [`Certificate`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Certificate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub service: ServiceUsingCertificate,
 }
 
 // IMAGES

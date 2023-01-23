@@ -16,11 +16,13 @@ internal-dns-client.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
+openssl.workspace = true
 parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rand.workspace = true
 ref-cast.workspace = true
+thiserror.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true

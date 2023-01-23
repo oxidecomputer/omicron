@@ -120,13 +120,14 @@ expectorate = "1.0.6"
 fatfs = "0.3.6"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev="1a27a661d7824712aeb4d1b9801938888139eaa7", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev="1a27a661d7824712aeb4d1b9801938888139eaa7" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
 http = "0.2.7"
 httptest = "0.15.4"
+hyper-rustls = "0.23.2"
 hyper = "0.14"
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -176,7 +177,10 @@ oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
 p256 = "0.9.0"
 parse-display = "0.7.0"
+paste = "1.0.11"
 percent-encoding = "2.2.0"
+pem = "1.1"
+petgraph = "0.6.2"
 postgres-protocol = "0.6.4"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
@@ -187,12 +191,14 @@ proptest = "1.0.0"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.6"
+rcgen = "0.10.0"
 ref-cast = "1.0"
 regex = "1.7.1"
 regress = "0.4.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rustfmt-wrapper = "0.2"
+rustls = "0.20.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.10"
 semver = { version = "1.0.16", features = ["std", "serde"] }
@@ -239,7 +245,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.4"
-toml = "0.5.10"
+toml = "0.5.11"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"

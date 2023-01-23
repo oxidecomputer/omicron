@@ -378,7 +378,7 @@ fn test_config(
             level: dropshot::ConfigLoggingLevel::Info,
         },
         dropshot: dropshot::ConfigDropshot {
-            bind_address: format!("[::1]:0").parse().unwrap(),
+            bind_address: "[::1]:0".to_string().parse().unwrap(),
             request_body_max_bytes: 1024,
             ..Default::default()
         },

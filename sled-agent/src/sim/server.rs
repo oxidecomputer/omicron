@@ -125,6 +125,7 @@ impl Server {
         let rack_init_request = NexusTypes::RackInitializationRequest {
             services: vec![],
             datasets,
+            certs: vec![],
         };
 
         Ok((Server { sled_agent, http_server }, rack_init_request))

@@ -958,7 +958,15 @@ authz_resource! {
 authz_resource! {
     name = "UpdateAvailableArtifact",
     parent = "Fleet",
-    primary_key = (String, i64, UpdateArtifactKind),
+    primary_key = (String, String, UpdateArtifactKind),
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Certificate",
+    parent = "Fleet",
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

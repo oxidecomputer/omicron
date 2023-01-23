@@ -204,6 +204,7 @@ impl Zones {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
         zone_name: &str,

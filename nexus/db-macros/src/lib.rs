@@ -441,8 +441,7 @@ mod tests {
                     name: String,
                     is_cool: bool,
                 }
-            }
-            .into(),
+            },
             IdentityVariant::Resource,
         );
         assert!(out.is_err());
@@ -464,8 +463,7 @@ mod tests {
                     name: String,
                     is_cool: bool,
                 }
-            }
-            .into(),
+            },
             IdentityVariant::Resource,
         );
         assert!(out.is_err());
@@ -486,8 +484,7 @@ mod tests {
                     Foo,
                     Bar,
                 }
-            }
-            .into(),
+            },
             IdentityVariant::Resource,
         );
         assert!(out.is_err());
@@ -507,8 +504,7 @@ mod tests {
                     name: String,
                     is_cool: bool,
                 }
-            }
-            .into(),
+            },
             IdentityVariant::Resource,
         );
         assert!(out.is_err());
@@ -531,8 +527,7 @@ mod tests {
                     name: String,
                     is_cool: bool,
                 }
-            }
-            .into(),
+            },
             IdentityVariant::Resource,
         );
         assert!(out.is_ok());

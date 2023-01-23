@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::error::ConfigError;
+use crate::error::StartupError;
 use crate::management_switch::ManagementSwitch;
 use crate::management_switch::SwitchConfig;
+use gateway_sp_comms::error::HostPhase2Error;
 use slog::Logger;
 use std::sync::Arc;
 
@@ -18,11 +19,11 @@ impl ServerContext {
     pub async fn new(
         switch_config: SwitchConfig,
         log: &Logger,
-    ) -> Result<Arc<Self>, ConfigError> {
+    ) -> Result<Arc<Self>, StartupError> {
         let mgmt_switch = Arc::new(
             ManagementSwitch::new(
                 switch_config,
-                TempNoopHostPhase2RecoveryProvider,
+                &Arc::new(TempNoopHostPhase2RecoveryProvider),
                 log,
             )
             .await?,
@@ -44,14 +45,12 @@ struct TempNoopHostPhase2RecoveryProvider;
 impl gateway_sp_comms::HostPhase2Provider
     for TempNoopHostPhase2RecoveryProvider
 {
-    async fn read_phase2_data(
+    async fn read_data(
         &self,
-        hash: [u8; 32],
+        sha256_hash: [u8; 32],
         _offset: u64,
         _out: &mut [u8],
-    ) -> Result<usize, gateway_sp_comms::error::HostPhase2Error> {
-        Err(gateway_sp_comms::error::HostPhase2Error::NoImage {
-            hash: hex::encode(hash),
-        })
+    ) -> Result<usize, HostPhase2Error> {
+        Err(HostPhase2Error::NoImage { hash: hex::encode(sha256_hash) })
     }
 }

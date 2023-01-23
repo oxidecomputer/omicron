@@ -12,7 +12,11 @@ pub mod http_entrypoints; // TODO pub only for testing - is this right?
 
 pub use config::Config;
 pub use context::ServerContext;
+pub use management_switch::LocationConfig;
+pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::SpType;
+pub use management_switch::SwitchPortConfig;
+pub use management_switch::SwitchPortDescription;
 
 use dropshot::ConfigDropshot;
 use slog::debug;
