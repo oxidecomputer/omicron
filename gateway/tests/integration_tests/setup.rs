@@ -9,6 +9,7 @@ use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
 use omicron_gateway::MgsArguments;
 use omicron_gateway::SpType;
+use omicron_gateway::SwitchPortConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 use slog::o;
@@ -115,13 +116,8 @@ pub async fn test_setup_with_config(
             SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
             SpType::Power => todo!(),
         };
-        port_description.config.discovery_addr = sp_addr.unwrap();
-
-        // The default listen address has a fixed port, which is fine on
-        // hardware because each port should be listening on a different vlan
-        // interface. For tests, change the listening port to 0 so all our
-        // listeners don't try binding to the same port.
-        port_description.config.listen_addr.set_port(0);
+        port_description.config =
+            SwitchPortConfig::Simulated { addr: sp_addr.unwrap() };
     }
 
     // Start gateway server
@@ -157,15 +153,8 @@ pub async fn test_setup_with_config(
                     // All ids are valid; unwrap finding the handle to each one.
                     let sp = mgmt_switch.sp(id).unwrap();
 
-                    // Have we finished starting up (e.g., binding to our
-                    // listening port)? If not, return false and keep waiting.
-                    let sp_addr = match sp.sp_addr_watch() {
-                        Ok(addr) => addr,
-                        Err(_) => return false,
-                    };
-
                     // Have we found this SP?
-                    sp_addr.borrow().is_some()
+                    sp.sp_addr_watch().borrow().is_some()
                 }) {
                 Ok(())
             } else {

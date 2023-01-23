@@ -6,28 +6,36 @@
 
 use super::SpIdentifier;
 use super::SwitchPort;
-use crate::error::ConfigError;
+use crate::error::StartupError;
 use futures::stream::FuturesUnordered;
 use futures::Stream;
 use futures::StreamExt;
 use gateway_messages::SpPort;
 use gateway_sp_comms::SingleSp;
-use gateway_sp_comms::SwitchPortConfig;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::debug;
 use slog::info;
-use slog::warn;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryFrom;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Description of the network interface for a single switch port.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SwitchPortConfig {
+    SwitchZoneInterface { interface: String },
+    Simulated { addr: SocketAddrV6 },
+}
+
+/// Description of the network interface and location of a single switch port.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+// We can't use `#[serde(deny_unknown_fields)]` with `flatten`? Sad
 pub struct SwitchPortDescription {
     #[serde(flatten)]
     pub config: SwitchPortConfig,
@@ -41,6 +49,7 @@ pub struct SwitchPortDescription {
 /// Configure the topology of the rack where MGS is running, and describe how we
 /// can determine our own location.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocationConfig {
     /// List of human-readable location names; the actual strings don't matter,
     /// but they're used in log messages and to sync with the refined locations
@@ -53,6 +62,7 @@ pub struct LocationConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocationDeterminationConfig {
     /// Which port to contact.
     pub switch_port: usize,
@@ -180,7 +190,7 @@ struct ValidatedLocationDeterminationConfig {
 impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortDescription>, LocationConfig)>
     for ValidatedLocationConfig
 {
-    type Error = ConfigError;
+    type Error = StartupError;
 
     fn try_from(
         (ports, config): (
@@ -303,7 +313,7 @@ impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortDescription>, LocationConfig)>
         if reasons.is_empty() {
             Ok(Self { names, determination })
         } else {
-            Err(ConfigError::InvalidConfig { reasons })
+            Err(StartupError::InvalidConfig { reasons })
         }
     }
 }
@@ -326,27 +336,12 @@ async fn discover_sps(
     // SP address for each switch port in `sockets`.
     let mut futs = FuturesUnordered::new();
     for (switch_port, _config) in port_config {
-        let log = log.clone();
         futs.push(async move {
             // all ports in `port_config` also get sockets bound to them;
             // unwrapping this lookup is fine
             let sp = sockets.get(&switch_port).unwrap();
 
-            // Wait for local startup to complete (finding our interface,
-            // binding a socket, etc.).
-            if let Err(err) = sp.wait_for_startup_completion().await {
-                warn!(
-                    log,
-                    "SP communicator startup failed; giving up on this port";
-                    "switch_port" => ?switch_port,
-                    "err" => %err,
-                );
-                return (switch_port, None);
-            }
-
-            // `sp_addr_watch()` can only fail if startup fails, which we just
-            // checked; this is safe to unwrap.
-            let mut addr_watch = sp.sp_addr_watch().unwrap().clone();
+            let mut addr_watch = sp.sp_addr_watch().clone();
 
             loop {
                 let current = *addr_watch.borrow();
@@ -375,7 +370,15 @@ async fn discover_sps(
             .iter()
             .position(|d| d.switch_port == switch_port)
         {
-            Some(pos) => pos,
+            Some(pos) => {
+                info!(
+                    log, "received discovery response (used for location)";
+                    "switch_port" => ?switch_port,
+                    "sp_port" => ?sp_port,
+                    "pos" => pos,
+                );
+                pos
+            }
             None => {
                 info!(
                     log, "received discovery response (not used for location)";
@@ -397,10 +400,6 @@ async fn discover_sps(
         // location and doesn't care about more messages)
         let _ = refined_locations.send((switch_port, refined)).await;
     }
-
-    // TODO If we're exiting, we've now heard from an SP on every port. Is there
-    // any reason to continue pinging ports with discovery packets? This is TBD
-    // on how we handle sleds being power cycled, replaced, etc.
 }
 
 /// Given a list of possible location names (`locations`) and a stream of
@@ -432,7 +431,7 @@ where
         // we got a successful response from an SP; restrict `locations` to only
         // locations that could be possible given that response.
         debug!(
-            log, "received location deterimination response";
+            log, "received location determination response";
             "port" => ?port,
             "refined_locations" => ?refined_locations,
         );
@@ -476,10 +475,8 @@ mod tests {
         let bad_ports = HashMap::from([(
             SwitchPort(0),
             SwitchPortDescription {
-                config: SwitchPortConfig {
-                    listen_addr: "[::1]:0".parse().unwrap(),
-                    discovery_addr: "[::1]:0".parse().unwrap(),
-                    interface: None,
+                config: SwitchPortConfig::Simulated {
+                    addr: "[::1]:0".parse().unwrap(),
                 },
                 location: HashMap::from([
                     (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),
@@ -521,7 +518,8 @@ mod tests {
         let err = ValidatedLocationConfig::try_from((&bad_ports, bad_config))
             .unwrap_err();
         let reasons = match err {
-            ConfigError::InvalidConfig { reasons } => reasons,
+            StartupError::InvalidConfig { reasons } => reasons,
+            StartupError::BindError(err) => panic!("expected error: {err}"),
         };
 
         assert_eq!(
@@ -546,10 +544,8 @@ mod tests {
         let good_ports = HashMap::from([(
             SwitchPort(0),
             SwitchPortDescription {
-                config: SwitchPortConfig {
-                    listen_addr: "[::1]:0".parse().unwrap(),
-                    discovery_addr: "[::1]:0".parse().unwrap(),
-                    interface: None,
+                config: SwitchPortConfig::Simulated {
+                    addr: "[::1]:0".parse().unwrap(),
                 },
                 location: HashMap::from([
                     (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),

@@ -120,8 +120,8 @@ expectorate = "1.0.6"
 fatfs = "0.3.6"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev="1a27a661d7824712aeb4d1b9801938888139eaa7", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev="1a27a661d7824712aeb4d1b9801938888139eaa7" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"

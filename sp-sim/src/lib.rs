@@ -51,6 +51,17 @@ pub trait SimulatedSp {
     ) -> Result<RotResponseV1, RotSprocketError>;
 }
 
+// Helper function to pad a simulated serial number (stored as a `Vec<u8>`) to
+// the appropriate size for returning in the SpState message.
+fn serial_number_padded(serial_number: &[u8]) -> [u8; 32] {
+    let mut padded = [0; 32];
+    padded
+        .get_mut(0..serial_number.len())
+        .expect("simulated serial number too long")
+        .copy_from_slice(&serial_number);
+    padded
+}
+
 pub struct SimRack {
     pub sidecars: Vec<Sidecar>,
     pub gimlets: Vec<Gimlet>,
