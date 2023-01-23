@@ -190,6 +190,7 @@ fn get_dev_path_of_whole_disk(
 ) -> Result<Option<PathBuf>, Error> {
     let mut wm = node.minors();
     while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
+        // "wd" stands for "whole disk"
         if m.name() != "wd" {
             continue;
         }
@@ -206,6 +207,13 @@ fn get_dev_path_of_whole_disk(
             .map_err(Error::DevInfo)?
             .into_iter()
             .filter(|l| {
+                // Devices in "/dev/dsk" have names that denote their purpose,
+                // of the form "controller, disk, slice" or "controller, disk,
+                // partition".
+                //
+                // The suffix of "d0" is typical of an individual disk, and is
+                // the expected device to correspond with the "wd" device in
+                // the "/devices" hierarchy.
                 l.linktype() == DevLinkType::Primary
                     && l.path()
                         .file_name()

@@ -103,9 +103,7 @@ pub fn ensure_partition_layout(
             let dev_path = if let Some(dev_path) = &paths.dev_path {
                 dev_path
             } else {
-                return Err(DiskError::CannotFormatMissingDevPath {
-                    path: path.clone(),
-                });
+                return Err(DiskError::CannotFormatMissingDevPath { path });
             };
             match variant {
                 DiskVariant::U2 => {
@@ -130,7 +128,7 @@ pub fn ensure_partition_layout(
         }
         Err(err) => {
             return Err(DiskError::Gpt {
-                path: path.clone(),
+                path,
                 error: anyhow::Error::new(err),
             });
         }
