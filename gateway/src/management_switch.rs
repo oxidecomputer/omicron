@@ -246,7 +246,7 @@ impl ManagementSwitch {
                 let result = LocationMap::run_discovery(
                     config,
                     port_to_desc,
-                    Arc::clone(&port_to_handle),
+                    port_to_handle,
                     &log,
                 )
                 .await;
