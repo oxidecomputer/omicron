@@ -9,6 +9,8 @@ use crate::{RackV1Inventory, SpInventory};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use gateway_client::types::{SpComponentList, SpIdentifier, SpInfo};
+use schemars::JsonSchema;
+use serde::Serialize;
 use slog::{debug, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
@@ -33,7 +35,7 @@ pub struct ShutdownInProgress;
 pub enum MgsRequest {
     GetInventory {
         etag: Option<String>,
-        reply_tx: oneshot::Sender<RackV1Inventory>,
+        reply_tx: oneshot::Sender<GetInventoryResponse>,
     },
 }
 
@@ -42,10 +44,28 @@ pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
 }
 
+/// The response to a `get_inventory` call: the inventory of artifacts known to wicketd, or a
+/// notification that data is unavailable.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "kebab-case", tag = "type", content = "data")]
+pub enum GetInventoryResponse {
+    Response { inventory: RackV1Inventory },
+    Unavailable,
+}
+
+impl GetInventoryResponse {
+    fn new(inventory: Option<RackV1Inventory>) -> Self {
+        match inventory {
+            Some(inventory) => GetInventoryResponse::Response { inventory },
+            None => GetInventoryResponse::Unavailable,
+        }
+    }
+}
+
 impl MgsHandle {
     pub async fn get_inventory(
         &self,
-    ) -> Result<RackV1Inventory, ShutdownInProgress> {
+    ) -> Result<GetInventoryResponse, ShutdownInProgress> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let etag = None;
         self.tx
@@ -75,7 +95,7 @@ pub struct MgsManager {
     tx: mpsc::Sender<MgsRequest>,
     rx: mpsc::Receiver<MgsRequest>,
     mgs_client: gateway_client::Client,
-    inventory: RackV1Inventory,
+    inventory: Option<RackV1Inventory>,
 }
 
 impl MgsManager {
@@ -97,7 +117,7 @@ impl MgsManager {
             client,
             log.clone(),
         );
-        let inventory = RackV1Inventory::default();
+        let inventory = None;
         MgsManager { log, tx, rx, mgs_client, inventory }
     }
 
@@ -113,7 +133,7 @@ impl MgsManager {
             tokio::select! {
                 // Poll MGS inventory
                 Some(inventory) = inventory_rx.recv() => {
-                    self.inventory = inventory;
+                    self.inventory = Some(inventory);
                 }
 
                 // Handle requests from clients
@@ -121,7 +141,7 @@ impl MgsManager {
                     debug!(self.log, "{:?}", request);
                      match request {
                          MgsRequest::GetInventory {reply_tx, ..} => {
-                            let _ = reply_tx.send(self.inventory.clone());
+                            let _ = reply_tx.send(GetInventoryResponse::new(self.inventory.clone()));
                          }
                      }
                 }

@@ -2,18 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::{GimletConfig, SpComponentConfig};
+use crate::config::GimletConfig;
+use crate::config::SpComponentConfig;
 use crate::rot::RotSprocketExt;
+use crate::serial_number_padded;
 use crate::server;
 use crate::server::UdpServer;
-use crate::{Responsiveness, SimulatedSp};
+use crate::Responsiveness;
+use crate::SimulatedSp;
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
-use gateway_messages::SerialNumber;
+use gateway_messages::RotBootState;
+use gateway_messages::RotSlot;
+use gateway_messages::RotUpdateDetails;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
@@ -47,7 +52,7 @@ pub struct Gimlet {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
-    serial_number: SerialNumber,
+    serial_number: Vec<u8>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
@@ -66,7 +71,7 @@ impl Drop for Gimlet {
 #[async_trait]
 impl SimulatedSp for Gimlet {
     fn serial_number(&self) -> String {
-        hex::encode(self.serial_number)
+        hex::encode(&serial_number_padded(&self.serial_number))
     }
 
     fn manufacturing_public_key(&self) -> Ed25519PublicKey {
@@ -185,7 +190,7 @@ impl Gimlet {
                 servers,
                 gimlet.common.components.clone(),
                 attached_mgs,
-                gimlet.common.serial_number,
+                gimlet.common.serial_number.clone(),
                 incoming_console_tx,
                 commands_rx,
                 log,
@@ -204,7 +209,7 @@ impl Gimlet {
             rot: Mutex::new(rot),
             manufacturing_public_key,
             local_addrs,
-            serial_number: gimlet.common.serial_number,
+            serial_number: gimlet.common.serial_number.clone(),
             serial_console_addrs,
             commands,
             inner_tasks,
@@ -404,7 +409,7 @@ impl UdpTask {
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
-        serial_number: SerialNumber,
+        serial_number: Vec<u8>,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         commands: mpsc::UnboundedReceiver<(
             Command,
@@ -478,7 +483,7 @@ impl UdpTask {
 
 struct Handler {
     log: Logger,
-    serial_number: SerialNumber,
+    serial_number: Vec<u8>,
 
     components: Vec<SpComponentConfig>,
     // `SpHandler` wants `&'static str` references when describing components;
@@ -497,7 +502,7 @@ struct Handler {
 
 impl Handler {
     fn new(
-        serial_number: SerialNumber,
+        serial_number: Vec<u8>,
         components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
@@ -733,17 +738,29 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, SpError> {
+        const FAKE_GIMLET_MODEL: &[u8] = b"FAKE_SIM_GIMLET";
+
+        let mut model = [0; 32];
+        model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL);
+
         let state = SpState {
-            serial_number: self.serial_number,
+            hubris_archive_id: [0; 8],
+            serial_number: serial_number_padded(&self.serial_number),
+            model,
+            revision: 0,
+            base_mac_address: [0; 6],
             version: SIM_GIMLET_VERSION,
             power_state: self.power_state,
             rot: Ok(RotState {
-                version: SIM_GIMLET_VERSION,
-                messages_received: 0,
-                invalid_messages_received: 0,
-                incomplete_transmissions: 0,
-                rx_fifo_overrun: 0,
-                tx_fifo_underrun: 0,
+                rot_updates: RotUpdateDetails {
+                    // TODO replace with configurable data once something cares
+                    // about this?
+                    boot_state: RotBootState {
+                        active: RotSlot::A,
+                        slot_a: None,
+                        slot_b: None,
+                    },
+                },
             }),
         };
         debug!(

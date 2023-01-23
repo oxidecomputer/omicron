@@ -9,11 +9,11 @@ use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicketd_client::types::RackV1Inventory;
+use wicketd_client::types::GetInventoryResponse;
 
 use crate::wizard::Event;
 
-const WICKETD_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const WICKETD_TIMEOUT_MS: u32 = 1000;
 
 // Assume that these requests are periodic on the order of seconds or the
@@ -39,7 +39,6 @@ pub struct WicketdManager {
     rx: mpsc::Receiver<Request>,
     wizard_tx: Sender<Event>,
     inventory_client: wicketd_client::Client,
-    inventory: RackV1Inventory,
 }
 
 impl WicketdManager {
@@ -51,10 +50,8 @@ impl WicketdManager {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
         let inventory_client = create_wicketd_client(&log, wicketd_addr);
-        let inventory = RackV1Inventory { sps: vec![] };
         let handle = WicketdHandle { tx };
-        let manager =
-            WicketdManager { log, rx, wizard_tx, inventory_client, inventory };
+        let manager = WicketdManager { log, rx, wizard_tx, inventory_client };
 
         (handle, manager)
     }
@@ -67,8 +64,7 @@ impl WicketdManager {
     ///   that can be utilized by the UI.
     pub async fn run(self) {
         let mut inventory_rx =
-            poll_inventory(&self.log, self.inventory_client, self.inventory)
-                .await;
+            poll_inventory(&self.log, self.inventory_client).await;
 
         // TODO: Eventually there will be a tokio::select! here that also
         // allows issuing updates.
@@ -99,12 +95,12 @@ pub(crate) fn create_wicketd_client(
 async fn poll_inventory(
     log: &Logger,
     client: wicketd_client::Client,
-    mut inventory: RackV1Inventory,
-) -> mpsc::Receiver<RackV1Inventory> {
+) -> mpsc::Receiver<GetInventoryResponse> {
     let log = log.clone();
 
     // We only want one oustanding request at a time
     let (tx, rx) = mpsc::channel(1);
+    let mut state = InventoryState::new(&log, tx);
 
     tokio::spawn(async move {
         let mut ticker = interval(WICKETD_POLL_INTERVAL);
@@ -115,12 +111,7 @@ async fn poll_inventory(
             match client.get_inventory().await {
                 Ok(val) => {
                     let new_inventory = val.into_inner();
-                    if new_inventory != inventory {
-                        inventory = new_inventory;
-                        let _ = tx.send(inventory.clone()).await;
-                    } else {
-                        debug!(log, "No change to inventory");
-                    }
+                    state.send_if_changed(new_inventory).await;
                 }
                 Err(e) => {
                     warn!(log, "{e}");
@@ -130,4 +121,26 @@ async fn poll_inventory(
     });
 
     rx
+}
+
+struct InventoryState {
+    log: Logger,
+    current_inventory: GetInventoryResponse,
+    tx: mpsc::Sender<GetInventoryResponse>,
+}
+
+impl InventoryState {
+    fn new(log: &Logger, tx: mpsc::Sender<GetInventoryResponse>) -> Self {
+        let log = log.new(o!("component" => "InventoryState"));
+        Self { log, current_inventory: GetInventoryResponse::Unavailable, tx }
+    }
+
+    async fn send_if_changed(&mut self, new_inventory: GetInventoryResponse) {
+        if new_inventory != self.current_inventory {
+            self.current_inventory = new_inventory;
+            let _ = self.tx.send(self.current_inventory.clone()).await;
+        } else {
+            debug!(self.log, "No change to inventory");
+        }
+    }
 }

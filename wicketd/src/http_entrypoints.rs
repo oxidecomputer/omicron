@@ -4,7 +4,7 @@
 
 //! HTTP entrypoint functions for wicketd
 
-use crate::RackV1Inventory;
+use crate::mgs::GetInventoryResponse;
 use buf_list::BufList;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -50,9 +50,9 @@ pub fn api() -> WicketdApiDescription {
 }]
 async fn get_inventory(
     rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<RackV1Inventory>, HttpError> {
+) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
     match rqctx.context().mgs_handle.get_inventory().await {
-        Ok(inventory) => Ok(HttpResponseOk(inventory)),
+        Ok(response) => Ok(HttpResponseOk(response)),
         Err(_) => {
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))
         }
