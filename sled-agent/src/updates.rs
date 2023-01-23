@@ -58,7 +58,7 @@ pub async fn download_artifact(
                 .cpapi_artifact_download(
                     nexus_client::types::UpdateArtifactKind::Zone,
                     &artifact.name,
-                    artifact.version,
+                    &artifact.version,
                 )
                 .await
                 .map_err(Error::Response)?;
@@ -111,7 +111,7 @@ mod test {
         let expected_contents = "test_artifact contents";
         let artifact = UpdateArtifact {
             name: expected_name.to_string(),
-            version: 3,
+            version: "0.0.0".to_string(),
             kind: UpdateArtifactKind::Zone,
         };
         let expected_path = PathBuf::from("/var/tmp/zones").join(expected_name);
@@ -124,7 +124,7 @@ mod test {
         nexus_client.expect_cpapi_artifact_download().times(1).return_once(
             move |kind, name, version| {
                 assert_eq!(name, "test_artifact");
-                assert_eq!(version, 3);
+                assert_eq!(version, "0.0.0");
                 assert_eq!(kind.to_string(), "zone");
                 let response = ByteStream::new(Box::pin(
                     futures::stream::once(futures::future::ready(Result::Ok(

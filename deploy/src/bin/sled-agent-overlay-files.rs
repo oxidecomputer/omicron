@@ -37,7 +37,7 @@ fn overlay_sp_configs(server_dirs: &[PathBuf]) -> Result<()> {
                 common: SpCommonConfig {
                     multicast_addr: None,
                     bind_addrs: None,
-                    serial_number: [0; 16],
+                    serial_number: vec![0; 16],
                     manufacturing_root_cert_seed: [0; 32],
                     device_id_cert_seed: [0; 32],
                     components: Vec::new(),
@@ -59,7 +59,8 @@ fn overlay_sp_configs(server_dirs: &[PathBuf]) -> Result<()> {
                 salty::Keypair::from(&config.manufacturing_root_cert_seed);
             let device_id_keypair =
                 salty::Keypair::from(&config.device_id_cert_seed);
-            let serial_number = SerialNumber(config.serial_number);
+            let serial_number =
+                SerialNumber(config.serial_number.clone().try_into().unwrap());
             let config = RotConfig::bootstrap_for_testing(
                 &manufacturing_keypair,
                 device_id_keypair,

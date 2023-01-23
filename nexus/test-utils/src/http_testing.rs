@@ -653,7 +653,7 @@ impl<'a> NexusRequest<'a> {
         let mut next_token: Option<String> = None;
         const DEFAULT_PAGE_SIZE: usize = 10;
         let limit = limit.unwrap_or(DEFAULT_PAGE_SIZE);
-        let url_base = if collection_url.contains("?") {
+        let url_base = if collection_url.contains('?') {
             format!("{}&limit={}", collection_url, limit)
         } else {
             format!("{}?limit={}", collection_url, limit)

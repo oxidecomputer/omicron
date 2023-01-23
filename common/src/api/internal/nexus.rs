@@ -81,7 +81,7 @@ impl ProducerEndpoint {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpdateArtifact {
     pub name: String,
-    pub version: i64,
+    pub version: String,
     pub kind: UpdateArtifactKind,
 }
 

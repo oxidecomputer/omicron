@@ -725,7 +725,7 @@ mod tests {
         assert_eq!(measurement.start_time(), None);
 
         let datum = Cumulative::new(0i64);
-        let measurement = Measurement::new(chrono::Utc::now(), datum.clone());
+        let measurement = Measurement::new(chrono::Utc::now(), datum);
         assert_eq!(measurement.datum(), &Datum::from(datum));
         assert!(measurement.start_time().is_some());
         assert!(measurement.timestamp() >= measurement.start_time().unwrap());

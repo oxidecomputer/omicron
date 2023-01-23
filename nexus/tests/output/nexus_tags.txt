@@ -146,6 +146,10 @@ snapshot_view_by_id                      /by-id/snapshots/{id}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
+certificate_create                       /system/certificates
+certificate_delete                       /system/certificates/{certificate}
+certificate_list                         /system/certificates
+certificate_view                         /system/certificates/{certificate}
 ip_pool_create                           /system/ip-pools
 ip_pool_delete                           /system/ip-pools/{pool_name}
 ip_pool_list                             /system/ip-pools

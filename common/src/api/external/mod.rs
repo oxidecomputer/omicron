@@ -639,6 +639,7 @@ pub enum ResourceType {
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
+    Certificate,
     ConsoleSession,
     DeviceAuthRequest,
     DeviceAccessToken,
@@ -2495,7 +2496,7 @@ mod test {
             "vpc:foo".parse().unwrap()
         );
         assert_eq!(
-            RouteDestination::Subnet(name.clone()),
+            RouteDestination::Subnet(name),
             "subnet:foo".parse().unwrap()
         );
         assert_eq!(

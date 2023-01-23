@@ -94,7 +94,7 @@ async fn main() {
     let logging_config =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
     let server_info = ProducerEndpoint {
-        id: Uuid::new_v4().into(),
+        id: Uuid::new_v4(),
         address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),

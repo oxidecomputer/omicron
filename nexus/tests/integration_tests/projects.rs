@@ -182,7 +182,7 @@ async fn test_project_deletion_with_instance(
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-instance".parse().unwrap(),
-                description: format!("description"),
+                description: "description".to_string(),
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),

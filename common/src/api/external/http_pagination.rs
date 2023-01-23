@@ -56,7 +56,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
-use std::sync::Arc;
 use uuid::Uuid;
 
 // General pagination infrastructure
@@ -180,7 +179,7 @@ where
 /// Given a request and pagination parameters, return a [`DataPageParams`]
 /// describing the current page of results to return
 pub fn data_page_params_for<'a, S, C>(
-    rqctx: &'a Arc<RequestContext<C>>,
+    rqctx: &'a RequestContext<C>,
     pag_params: &'a PaginationParams<S, PageSelector<S, S::MarkerValue>>,
 ) -> Result<DataPageParams<'a, S::MarkerValue>, HttpError>
 where
@@ -582,6 +581,7 @@ mod test {
     }
 
     /// Function for running a bunch of tests on a ScanParams type.
+    #[allow(clippy::type_complexity)]
     fn test_scan_param_common<F, S>(
         list: &Vec<MyThing>,
         scan: &S,
@@ -795,7 +795,7 @@ mod test {
                 panic!("Expected Name pagination, got Id pagination")
             }
         };
-        assert_eq!(data_page.marker, Some(&thinglast_name.into()));
+        assert_eq!(data_page.marker, Some(&thinglast_name));
         assert_eq!(data_page.direction, PaginationOrder::Descending);
         assert_eq!(data_page.limit, limit);
     }
@@ -846,7 +846,7 @@ mod test {
                 panic!("Expected id pagination, got name pagination")
             }
         };
-        assert_eq!(data_page.marker, Some(&thinglast_id.into()));
+        assert_eq!(data_page.marker, Some(&thinglast_id));
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
     }
