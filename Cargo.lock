@@ -1149,7 +1149,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=07d86d85d54e4fe277b7f963c1c0d9fe475e1467#07d86d85d54e4fe277b7f963c1c0d9fe475e1467"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5f06c7ebc320c19846670e9d745a4d44f78901b4#5f06c7ebc320c19846670e9d745a4d44f78901b4"
 dependencies = [
  "libc",
  "num-derive",

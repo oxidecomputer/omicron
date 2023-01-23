@@ -108,7 +108,7 @@ criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
 crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "07d86d85d54e4fe277b7f963c1c0d9fe475e1467" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "5f06c7ebc320c19846670e9d745a4d44f78901b4" }
 display-error-chain = "0.1.1"
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
