@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::hardware::{Disk, DiskError, DiskPaths, DiskVariant, Partition};
+use crate::hardware::{
+    DiskError, DiskPaths, DiskVariant, Partition, UnparsedDisk,
+};
 use slog::Logger;
 use std::collections::HashSet;
 use tokio::sync::broadcast;
@@ -25,7 +27,7 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
-    pub fn disks(&self) -> HashSet<Disk> {
+    pub fn disks(&self) -> HashSet<UnparsedDisk> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
@@ -43,6 +45,7 @@ impl HardwareManager {
 }
 
 pub fn ensure_partition_layout(
+    _log: &Logger,
     _paths: &DiskPaths,
     _variant: DiskVariant,
 ) -> Result<Vec<Partition>, DiskError> {

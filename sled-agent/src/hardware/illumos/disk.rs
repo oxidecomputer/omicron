@@ -6,6 +6,7 @@
 
 use crate::hardware::{DiskError, DiskPaths, DiskVariant, Partition};
 use crate::illumos::zpool::{Zpool, ZpoolName};
+use slog::Logger;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -74,6 +75,7 @@ fn parse_partition_types<const N: usize>(
 /// Returns a Vec of partitions on success. The index of the Vec is guaranteed
 /// to also be the index of the partition.
 pub fn ensure_partition_layout(
+    log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
 ) -> Result<Vec<Partition>, DiskError> {
@@ -84,8 +86,20 @@ pub fn ensure_partition_layout(
     let path = paths.whole_disk(raw);
 
     let gpt = match libefi_illumos::Gpt::read(&path) {
-        Ok(gpt) => gpt,
+        Ok(gpt) => {
+            info!(
+                log,
+                "Disk at {} already has a GPT",
+                paths.devfs_path.display()
+            );
+            gpt
+        }
         Err(libefi_illumos::Error::LabelNotFound) => {
+            info!(
+                log,
+                "Disk at {} does not have a GPT",
+                paths.devfs_path.display()
+            );
             let dev_path = if let Some(dev_path) = &paths.dev_path {
                 dev_path
             } else {
@@ -95,6 +109,11 @@ pub fn ensure_partition_layout(
             };
             match variant {
                 DiskVariant::U2 => {
+                    info!(
+                        log,
+                        "Formatting zpool on disk {}",
+                        paths.devfs_path.display()
+                    );
                     // If a zpool does not already exist, create one.
                     let zpool_name = ZpoolName::new(Uuid::new_v4());
                     Zpool::create(zpool_name, dev_path)?;

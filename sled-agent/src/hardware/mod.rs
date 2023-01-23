@@ -2,7 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::illumos::fstyp::Fstyp;
+use crate::illumos::zpool::Zpool;
+use crate::illumos::zpool::ZpoolName;
+use slog::Logger;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -26,8 +31,8 @@ pub enum HardwareUpdate {
     TofinoDeviceChange,
     TofinoLoaded,
     TofinoUnloaded,
-    DiskAdded(Disk),
-    DiskRemoved(Disk),
+    DiskAdded(UnparsedDisk),
+    DiskRemoved(UnparsedDisk),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,60 +96,134 @@ impl DiskPaths {
             raw = if raw { ",raw" } else { "" },
         ))
     }
+
+    // Finds the first 'variant' partition, and returns the path to it.
+    fn partition_device_path(
+        &self,
+        partitions: &Vec<Partition>,
+        expected_partition: Partition,
+    ) -> Result<PathBuf, DiskError> {
+        for (index, partition) in partitions.iter().enumerate() {
+            if &expected_partition == partition {
+                let path = self.partition_path(index).ok_or_else(|| {
+                    DiskError::NotFound {
+                        path: self.devfs_path.clone(),
+                        partition: expected_partition,
+                    }
+                })?;
+                return Ok(path);
+            }
+        }
+        return Err(DiskError::NotFound {
+            path: self.devfs_path.clone(),
+            partition: expected_partition,
+        });
+    }
 }
 
+/// A disk which has been observed by monitoring hardware.
+///
+/// No guarantees are made about the partitions which exist within this disk.
+/// This exists as a distinct entity from [Disk] because it may be desirable to
+/// monitor for hardware in one context, and conform disks to partition layouts
+/// in a different context.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Disk {
+pub struct UnparsedDisk {
     paths: DiskPaths,
     slot: i64,
     variant: DiskVariant,
-    partitions: Vec<Partition>,
-    // TODO: Device ID?
 }
 
-impl Disk {
+impl UnparsedDisk {
     #[allow(dead_code)]
     pub fn new(
         devfs_path: PathBuf,
         dev_path: Option<PathBuf>,
         slot: i64,
         variant: DiskVariant,
-    ) -> Result<Self, DiskError> {
-        let paths = DiskPaths { devfs_path, dev_path };
-        let partitions = ensure_partition_layout(&paths, variant)?;
-        Ok(Self { paths, slot, variant, partitions })
+    ) -> Self {
+        Self { paths: DiskPaths { devfs_path, dev_path }, slot, variant }
     }
 
-    // Finds the first 'variant' partition, and returns the path to it.
-    fn partition_device_path(
-        &self,
-        expected_partition: Partition,
-    ) -> Result<PathBuf, DiskError> {
-        for (index, partition) in self.partitions.iter().enumerate() {
-            if &expected_partition == partition {
-                let path =
-                    self.paths.partition_path(index).ok_or_else(|| {
-                        DiskError::NotFound {
-                            path: self.paths.devfs_path.clone(),
-                            partition: expected_partition,
-                        }
-                    })?;
-                return Ok(path);
-            }
-        }
-        return Err(DiskError::NotFound {
-            path: self.paths.devfs_path.clone(),
-            partition: expected_partition,
-        });
+    pub fn devfs_path(&self) -> &PathBuf {
+        &self.paths.devfs_path
     }
+}
 
-    pub async fn zpool_path(&self) -> Result<PathBuf, DiskError> {
-        self.partition_device_path(Partition::ZfsPool)
-    }
+/// A physical disk conforming to the expected partition layout.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Disk {
+    paths: DiskPaths,
+    slot: i64,
+    variant: DiskVariant,
+    partitions: Vec<Partition>,
 
+    // This embeds the assumtion that there is exactly one parsed zpool per
+    // disk.
+    zpool_name: ZpoolName,
+    // TODO: Device ID?
+}
+
+impl Disk {
     #[allow(dead_code)]
-    pub async fn boot_path(&self) -> Result<PathBuf, DiskError> {
-        self.partition_device_path(Partition::BootImage)
+    pub fn new(
+        log: &Logger,
+        unparsed_disk: UnparsedDisk,
+    ) -> Result<Self, DiskError> {
+        let paths = &unparsed_disk.paths;
+        // First, ensure the GPT has the right format. This does not necessarily
+        // mean that the partitions are populated with the data we need.
+        let partitions =
+            ensure_partition_layout(&log, &paths, unparsed_disk.variant)?;
+
+        // Find the path to the zpool which exists on this disk.
+        //
+        // NOTE: At the moment, we're hard-coding the assumption that at least
+        // one zpool should exist on every disk.
+        let zpool_path =
+            paths.partition_device_path(&partitions, Partition::ZfsPool)?;
+
+        let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+            Ok(zpool_name) => zpool_name,
+            Err(_) => {
+                // What happened here?
+                // - We saw that a GPT exists for this Disk (or we didn't, and
+                // made our own).
+                // - However, this particular partition does not appear to have
+                // a zpool.
+                //
+                // This can happen in situations where "zpool create"
+                // initialized a zpool, and "zpool destroy" removes the zpool
+                // but still leaves the partition table untouched.
+                //
+                // To remedy: Let's enforce that the partition exists.
+                info!(
+                    log,
+                    "Formatting zpool on disk {}",
+                    paths.devfs_path.display()
+                );
+                // If a zpool does not already exist, create one.
+                let zpool_name = ZpoolName::new(Uuid::new_v4());
+                Zpool::create(zpool_name.clone(), &zpool_path)?;
+                zpool_name
+            }
+        };
+
+        Ok(Self {
+            paths: unparsed_disk.paths,
+            slot: unparsed_disk.slot,
+            variant: unparsed_disk.variant,
+            partitions,
+            zpool_name,
+        })
+    }
+
+    pub fn devfs_path(&self) -> &PathBuf {
+        &self.paths.devfs_path
+    }
+
+    pub fn zpool_name(&self) -> &ZpoolName {
+        &self.zpool_name
     }
 }
 

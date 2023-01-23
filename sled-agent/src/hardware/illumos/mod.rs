@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::hardware::{Disk, DiskVariant, HardwareUpdate};
+use crate::hardware::{DiskVariant, HardwareUpdate, UnparsedDisk};
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node};
 use slog::Logger;
 use std::collections::HashSet;
@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 mod disk;
+
 pub use disk::ensure_partition_layout;
 
 #[derive(thiserror::Error, Debug)]
@@ -43,7 +44,7 @@ impl TofinoSnapshot {
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
-    disks: HashSet<Disk>,
+    disks: HashSet<UnparsedDisk>,
 }
 
 impl HardwareSnapshot {
@@ -57,8 +58,8 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_tofino_node(&mut tofino, &node);
-            poll_blkdev_node(&log, &mut disks, &node)?;
+            poll_tofino_node(&log, &mut tofino, &node);
+            poll_blkdev_node(&log, &mut disks, node)?;
         }
 
         Ok(Self { tofino, disks })
@@ -86,7 +87,7 @@ enum TofinoView {
 // which services are currently executing.
 struct HardwareView {
     tofino: TofinoView,
-    disks: HashSet<Disk>,
+    disks: HashSet<UnparsedDisk>,
 }
 
 impl HardwareView {
@@ -167,11 +168,20 @@ fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
     }
 }
 
-fn poll_tofino_node(tofino: &mut TofinoSnapshot, node: &Node<'_>) {
+fn poll_tofino_node(
+    log: &Logger,
+    tofino: &mut TofinoSnapshot,
+    node: &Node<'_>,
+) {
     if node.node_name() == node_name(TOFINO_SUBSYSTEM_VID, TOFINO_SUBSYSTEM_ID)
     {
         tofino.exists = true;
         tofino.driver_loaded = node.driver_name().as_deref() == Some("tofino");
+        info!(
+            log,
+            "Found tofino node, with driver {}loaded",
+            if tofino.driver_loaded { "" } else { "not " }
+        );
     }
 }
 
@@ -214,18 +224,24 @@ fn get_dev_path_of_whole_disk(
 
 fn poll_blkdev_node(
     log: &Logger,
-    disks: &mut HashSet<Disk>,
-    original_node: &Node<'_>,
+    disks: &mut HashSet<UnparsedDisk>,
+    mut node: Node<'_>,
 ) -> Result<(), Error> {
-    if let Some(driver_name) = original_node.driver_name() {
+    if let Some(driver_name) = node.driver_name() {
         if driver_name == "blkdev" {
-            let devfs_path =
-                original_node.devfs_path().map_err(Error::DevInfo)?;
+            let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
+            let dev_path = get_dev_path_of_whole_disk(&node)?;
+
+            // For some reason, libdevfs doesn't prepend "/devices" when
+            // referring to the path, but it still returns an absolute path.
+            //
+            // Validate that we're still using this leading slash, but make the
+            // path "real".
             assert!(devfs_path.starts_with('/'));
-            let dev_path = get_dev_path_of_whole_disk(&original_node)?;
             let devfs_path = format!("/devices{devfs_path}");
-            let node = original_node;
-            while let Some(ref node) = node.parent().map_err(Error::DevInfo)? {
+
+            while let Some(parent) = node.parent().map_err(Error::DevInfo)? {
+                node = parent;
                 let slot_prop_name = "physical-slot#".to_string();
                 if let Some(Ok(slot_prop)) =
                     node.props().into_iter().find(|prop| {
@@ -251,19 +267,12 @@ fn poll_blkdev_node(
                         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
                         break;
                     };
-                    info!(log, "Found a {variant:?} device in slot# {slot}: {devfs_path}");
-                    let disk = match Disk::new(
+                    let disk = UnparsedDisk::new(
                         PathBuf::from(devfs_path),
                         dev_path,
                         slot,
                         variant,
-                    ) {
-                        Ok(disk) => disk,
-                        Err(err) => {
-                            warn!(log, "Failed to load disk: {err}");
-                            break;
-                        }
-                    };
+                    );
                     disks.insert(disk);
                     break;
                 }
@@ -281,7 +290,10 @@ fn poll_device_tree(
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), String> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = HardwareSnapshot::new(log).map_err(|e| e.to_string())?;
+    let polled_hw = HardwareSnapshot::new(log).map_err(|e| {
+        warn!(log, "Failed to poll device tree: {e}");
+        e.to_string()
+    })?;
 
     // After inspecting the device tree, diff with the old view, and provide
     // necessary updates.
@@ -291,6 +303,10 @@ fn poll_device_tree(
         inner.update_tofino(&polled_hw, &mut updates);
         inner.update_blkdev(&polled_hw, &mut updates);
     };
+
+    if updates.is_empty() {
+        debug!(log, "No updates from polling device tree");
+    }
 
     for update in updates.into_iter() {
         info!(log, "Update from polling device tree: {:?}", update);
@@ -338,6 +354,7 @@ impl HardwareManager {
         stub_scrimlet: Option<bool>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
+        info!(log, "Creating HardwareManager");
 
         // The size of the broadcast channel is arbitrary, but bounded.
         // If the channel fills up, old notifications will be dropped, and the
@@ -367,7 +384,7 @@ impl HardwareManager {
         Ok(Self { log, inner, tx, _worker })
     }
 
-    pub fn disks(&self) -> HashSet<Disk> {
+    pub fn disks(&self) -> HashSet<UnparsedDisk> {
         self.inner.lock().unwrap().disks.clone()
     }
 

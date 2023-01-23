@@ -22,7 +22,7 @@ use omicron_common::backoff;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
@@ -34,12 +34,10 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-#[cfg(not(test))]
-use crate::illumos::{fstyp::Fstyp, zfs::Zfs, zpool::Zpool};
 #[cfg(test)]
-use crate::illumos::{
-    fstyp::MockFstyp as Fstyp, zfs::MockZfs as Zfs, zpool::MockZpool as Zpool,
-};
+use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
+#[cfg(not(test))]
+use crate::illumos::{zfs::Zfs, zpool::Zpool};
 
 const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
 const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
@@ -841,8 +839,12 @@ impl StorageWorker {
 pub struct StorageManager {
     log: Logger,
 
-    // All disks attached to this sled.
-    disks: Arc<Mutex<HashSet<Disk>>>,
+    // A map of "devfs path" to "Disk" attached to this Sled.
+    //
+    // The key is kinda arbitrary; we just want to be able to identify the Disk
+    // within this sled for deduplication on insert and removal when further
+    // parsing may not be possible.
+    disks: Arc<Mutex<HashMap<PathBuf, Disk>>>,
 
     // A map of "zpool name" to "pool".
     pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
@@ -863,7 +865,7 @@ impl StorageManager {
         underlay_address: Ipv6Addr,
     ) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
-        let disks = Arc::new(Mutex::new(HashSet::new()));
+        let disks = Arc::new(Mutex::new(HashMap::new()));
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
         let (new_filesystems_tx, new_filesystems_rx) = mpsc::channel(10);
@@ -889,15 +891,19 @@ impl StorageManager {
 
     pub async fn upsert_disk(
         &self,
-        disk: crate::hardware::Disk,
+        disk: crate::hardware::UnparsedDisk,
     ) -> Result<(), Error> {
         info!(self.log, "Upserting disk: {disk:?}");
 
-        // If the disk contains a zpool, keep track of it.
-        let zpool_path = disk.zpool_path().await?;
-        let zpool_name = Fstyp::get_zpool(&zpool_path)?;
+        // Ensure the disk conforms to an expected partition layout.
+        let disk =
+            crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+                warn!(self.log, "Could not ensure partitions: {err}");
+                err
+            })?;
 
-        self.disks.lock().await.insert(disk);
+        let zpool_name = disk.zpool_name().clone();
+        self.disks.lock().await.insert(disk.devfs_path().to_path_buf(), disk);
         self.upsert_zpool(&zpool_name).await?;
 
         // TODO:
@@ -907,16 +913,13 @@ impl StorageManager {
 
     pub async fn delete_disk(
         &self,
-        disk: crate::hardware::Disk,
+        disk: crate::hardware::UnparsedDisk,
     ) -> Result<(), Error> {
         info!(self.log, "Deleting disk: {disk:?}");
 
-        // If the disk contains a zpool, remove it too.
-        let zpool_path = disk.zpool_path().await?;
-        let zpool_name = Fstyp::get_zpool(&zpool_path)?;
-
-        self.disks.lock().await.remove(&disk);
-        self.pools.lock().await.remove(&zpool_name);
+        if let Some(disk) = self.disks.lock().await.remove(disk.devfs_path()) {
+            self.pools.lock().await.remove(&disk.zpool_name());
+        }
 
         // TODO:
         // - Notify Nexus

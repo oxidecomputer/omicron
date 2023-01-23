@@ -4,7 +4,7 @@
 
 //! Utilities for managing Zpools.
 
-use crate::illumos::execute;
+use crate::illumos::{execute, PFEXEC};
 use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -164,13 +164,14 @@ pub struct Zpool {}
 impl Zpool {
     pub fn create(
         name: ZpoolName,
-        path: &std::path::PathBuf,
+        vdev: &std::path::PathBuf,
     ) -> Result<(), CreateError> {
-        let mut command = std::process::Command::new(ZPOOL);
+        let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
+            ZPOOL,
             "create",
             &name.to_string(),
-            &path.to_string_lossy(),
+            &vdev.to_string_lossy(),
         ]);
         execute(cmd).map_err(Error::from)?;
         Ok(())
