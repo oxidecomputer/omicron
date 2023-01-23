@@ -3620,7 +3620,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_with",
  "slog",
  "slog-dtrace",
  "sp-sim",
