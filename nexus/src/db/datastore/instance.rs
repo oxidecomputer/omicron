@@ -28,8 +28,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -37,6 +37,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -112,40 +113,31 @@ impl DataStore {
         Ok(instance)
     }
 
-    pub async fn project_list_instances_by_id(
+    pub async fn instance_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Instance> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::instance::dsl;
-        paginated(dsl::instance, dsl::id, &pagparams)
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .filter(dsl::time_deleted.is_null())
-            .select(Instance::as_select())
-            .load_async::<Instance>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn project_list_instances_by_name(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Instance> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
-
-        use db::schema::instance::dsl;
-        paginated(dsl::instance, dsl::name, &pagparams)
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .filter(dsl::time_deleted.is_null())
-            .select(Instance::as_select())
-            .load_async::<Instance>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::instance, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::instance,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(Instance::as_select())
+        .load_async::<Instance>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously
