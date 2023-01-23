@@ -113,21 +113,15 @@ fn start_dropshot_server(
 
 impl Server {
     /// Start a gateway server.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `args.addresses` is empty (i.e., we are not given any
-    /// addresses on which to bind dropshot servers).
     pub async fn start(
         config: Config,
         args: MgsArguments,
         _rack_id: Uuid,
         log: Logger,
     ) -> Result<Server, String> {
-        assert!(
-            !args.addresses.is_empty(),
-            "Cannot start server with no addresses"
-        );
+        if args.addresses.is_empty() {
+            return Err("Cannot start server with no addresses".to_string());
+        }
 
         let log = log.new(o!("name" => args.id.to_string()));
         info!(log, "setting up gateway server");
@@ -193,14 +187,16 @@ impl Server {
     ///    complete.
     ///
     /// This method fails if any operation required for 2 or 3 fails.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `addresses` is empty.
     pub async fn adjust_dropshot_addresses(
         &mut self,
         addresses: &[SocketAddrV6],
     ) -> Result<(), String> {
+        if addresses.is_empty() {
+            return Err(
+                "Cannot reconfigure server with no addresses".to_string()
+            );
+        }
+
         let mut http_servers = HashMap::with_capacity(addresses.len());
 
         // For each address in `addresses`, either start a new server or move
