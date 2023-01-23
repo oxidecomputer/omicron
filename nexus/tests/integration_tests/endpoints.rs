@@ -1530,11 +1530,12 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
+        // TODO: make system update endpoints work instead of expecting 404
+
         VerifyEndpoint {
             url: "/v1/system/update/updates/1.0.0",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            // TODO: should we figure out how to make this a regular working get?
             allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
@@ -1542,7 +1543,6 @@ lazy_static! {
             url: "/v1/system/update/updates/1.0.0/components",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            // TODO: should we figure out how to make this a regular working get?
             allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
@@ -1550,7 +1550,6 @@ lazy_static! {
             url: "/v1/system/update/start",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            // TODO: should we figure out how to make this a regular working get?
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::to_value(&*DEMO_SYSTEM_UPDATE_PARAMS).unwrap()
             )],
@@ -1560,10 +1559,23 @@ lazy_static! {
             url: "/v1/system/update/stop",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            // TODO: should we figure out how to make this a regular working get?
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/deployments",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/deployments/120bbb6f-660a-440c-8cb7-199be202ddff",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
         /* Global Images */

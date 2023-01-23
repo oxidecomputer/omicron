@@ -439,6 +439,7 @@ impl super::Nexus {
         opctx: &OpContext,
         deployment_id: &Uuid,
     ) -> LookupResult<db::model::SystemUpdateDeployment> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let (.., db_deployment) = LookupPath::new(opctx, &self.db_datastore)
             .system_update_deployment_id(*deployment_id)
             .fetch()
