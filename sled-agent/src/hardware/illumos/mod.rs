@@ -177,7 +177,7 @@ fn poll_tofino_node(
     {
         tofino.exists = true;
         tofino.driver_loaded = node.driver_name().as_deref() == Some("tofino");
-        info!(
+        debug!(
             log,
             "Found tofino node, with driver {}loaded",
             if tofino.driver_loaded { "" } else { "not " }
