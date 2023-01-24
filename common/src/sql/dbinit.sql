@@ -128,6 +128,99 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+-- x509 certificates which may be used by services
+CREATE TABLE omicron.public.certificate (
+    -- Identity metadata (resource)
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The service type which should use this certificate
+    service omicron.public.service_kind NOT NULL,
+
+    -- cert.pem file as a binary blob
+    cert BYTES NOT NULL,
+
+    -- key.pem file as a binary blob
+    key BYTES NOT NULL
+);
+
+-- Add an index which lets us look up certificates for a particular service
+-- class.
+CREATE INDEX ON omicron.public.certificate (
+    service,
+    id
+) WHERE
+    time_deleted IS NULL;
+
+-- Add an index which enforces that certificates have unique names, and which
+-- allows pagination-by-name.
+CREATE UNIQUE INDEX ON omicron.public.certificate (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+-- A table describing virtual resource provisioning which may be associated
+-- with a collection of objects, including:
+-- - Projects
+-- - Organizations
+-- - Silos
+-- - Fleet
+CREATE TABLE omicron.public.virtual_provisioning_collection (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the collection.
+    collection_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the collection.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned by VMs.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned by VMs.
+    ram_provisioned INT8 NOT NULL
+);
+
+-- A table describing a single virtual resource which has been provisioned.
+-- This may include:
+-- - Disks
+-- - Instances
+-- - Snapshots
+--
+-- NOTE: You might think to yourself: "This table looks an awful lot like
+-- the 'virtual_provisioning_collection' table, could they be condensed into
+-- a single table?"
+-- The answer to this question is unfortunately: "No". We use CTEs to both
+-- UPDATE the collection table while INSERTing rows in the resource table, and
+-- this would not be allowed if they came from the same table due to:
+-- https://www.cockroachlabs.com/docs/v22.2/known-limitations#statements-containing-multiple-modification-subqueries-of-the-same-table-are-disallowed
+-- However, by using separate tables, the CTE is able to function correctly.
+CREATE TABLE omicron.public.virtual_provisioning_resource (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the resource.
+    resource_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the resource.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned.
+    ram_provisioned INT8 NOT NULL
+);
+
 /*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
@@ -1396,8 +1489,8 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
 );
 
 CREATE TABLE omicron.public.update_available_artifact (
-    name STRING(40) NOT NULL,
-    version INT NOT NULL,
+    name STRING(63) NOT NULL,
+    version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
 
     /* the version of the targets.json role this came from */

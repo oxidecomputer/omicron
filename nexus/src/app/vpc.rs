@@ -17,6 +17,7 @@ use crate::db::model::Name;
 use crate::external_api::params;
 use nexus_defaults as defaults;
 use omicron_common::api::external;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -106,30 +107,15 @@ impl super::Nexus {
         Ok(db_vpc)
     }
 
-    pub async fn project_list_vpcs_by_id(
+    pub async fn vpc_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Vpc> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_vpcs_by_id(&opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn project_list_vpcs_by_name(
-        &self,
-        opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Vpc> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_vpcs_by_name(&opctx, &authz_project, pagparams)
-            .await
+        self.db_datastore.vpc_list(&opctx, &authz_project, pagparams).await
     }
 
     pub async fn project_update_vpc(

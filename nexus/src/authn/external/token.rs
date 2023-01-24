@@ -57,7 +57,7 @@ where
         &self,
         ctx: &T,
         _log: &slog::Logger,
-        request: &http::Request<hyper::Body>,
+        request: &dropshot::RequestInfo,
     ) -> SchemeResult {
         let headers = request.headers();
         match parse_token(headers.typed_get().as_ref()) {
@@ -106,7 +106,7 @@ mod test {
     /// Returns a value of the `Authorization` header for this actor that will be
     /// accepted using this scheme.
     fn make_header_value(token: &str) -> Authorization<Bearer> {
-        make_header_value_str(&token.to_string()).unwrap()
+        make_header_value_str(token).unwrap()
     }
 
     /// Returns a value of the `Authorization` header with `str` in the place where

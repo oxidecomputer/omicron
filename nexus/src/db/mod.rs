@@ -37,9 +37,13 @@ pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 pub use nexus_db_model::schema;
 
+#[cfg(test)]
+pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use pool::Pool;
+#[cfg(test)]
+pub use pool::ALLOW_FULL_TABLE_SCAN_SQL;
 pub use saga_recovery::{recover, RecoveryTask};
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;

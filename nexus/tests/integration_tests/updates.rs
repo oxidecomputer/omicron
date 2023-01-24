@@ -32,7 +32,6 @@ use std::fs::File;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tempfile::{NamedTempFile, TempDir};
 use tough::editor::signed::{PathExists, SignedRole};
 use tough::editor::RepositoryEditor;
@@ -118,7 +117,7 @@ struct AllPath {
 
 #[endpoint(method = GET, path = "/{path:.*}", unpublished = true)]
 async fn static_content(
-    rqctx: Arc<RequestContext<FileServerContext>>,
+    rqctx: RequestContext<FileServerContext>,
     path: Path<AllPath>,
 ) -> Result<Response<Body>, HttpError> {
     // NOTE: this is a particularly brief and bad implementation of this to keep the test shorter.
@@ -159,7 +158,7 @@ fn new_tuf_repo(rng: &dyn SecureRandom) -> TempDir {
         roles: HashMap::new(),
         _extra: HashMap::new(),
     };
-    root.keys.insert(key_id.clone(), tuf_key.clone());
+    root.keys.insert(key_id.clone(), tuf_key);
     for role in [
         RoleType::Root,
         RoleType::Snapshot,
@@ -239,7 +238,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
     let artifacts = ArtifactsDocument {
         artifacts: vec![UpdateArtifact {
             name: "omicron-test-component".into(),
-            version: 1,
+            version: "0.0.0".into(),
             kind: Some(UpdateArtifactKind::Zone),
             target: "omicron-test-component-1".into(),
         }],

@@ -5,6 +5,7 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
+use crate::authn;
 use crate::db;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
@@ -17,6 +18,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
+    pub serialized_authn: authn::saga::Serialized,
     pub volume_id: Uuid,
 }
 
@@ -65,14 +67,16 @@ impl NexusSaga for SagaVolumeRemoveROP {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         // Generate the temp volume ID this saga will use.
         let temp_volume_id = Uuid::new_v4();
         // Generate the params for the subsaga called at the end.
-        let subsaga_params =
-            sagas::volume_delete::Params { volume_id: temp_volume_id };
+        let subsaga_params = sagas::volume_delete::Params {
+            serialized_authn: params.serialized_authn.clone(),
+            volume_id: temp_volume_id,
+        };
         let subsaga_dag = {
             let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
                 sagas::volume_delete::SagaVolumeDelete::NAME,

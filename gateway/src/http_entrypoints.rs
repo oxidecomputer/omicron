@@ -17,6 +17,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
+use dropshot::RawRequest;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use futures::stream::FuturesUnordered;
@@ -357,7 +358,7 @@ struct PathSpComponent {
     path = "/sp",
 }]
 async fn sp_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<Vec<SpInfo>>, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
@@ -451,7 +452,7 @@ async fn sp_list(
     path = "/sp/{type}/{slot}",
 }]
 async fn sp_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpInfo>, HttpError> {
     let apictx = rqctx.context();
@@ -484,7 +485,7 @@ async fn sp_get(
     path = "/sp/{type}/{slot}/component",
 }]
 async fn sp_component_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
     let apictx = rqctx.context();
@@ -508,7 +509,7 @@ async fn sp_component_list(
     path = "/sp/{type}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _rqctx: RequestContext<Arc<ServerContext>>,
     _path: Path<PathSpComponent>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
@@ -521,14 +522,15 @@ async fn sp_component_get(
     path = "/sp/{type}/{slot}/component/{component}/serial-console/attach",
 }]
 async fn sp_component_serial_console_attach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
+    raw_request: RawRequest,
 ) -> Result<http::Response<hyper::Body>, HttpError> {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
 
     let component = component_from_str(&component)?;
-    let mut request = rqctx.request.lock().await;
+    let mut request = raw_request.into_inner();
 
     let sp = sp.into();
     Ok(crate::serial_console::attach(
@@ -548,7 +550,7 @@ async fn sp_component_serial_console_attach(
     path = "/sp/{type}/{slot}/component/{component}/serial-console/detach",
 }]
 async fn sp_component_serial_console_detach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -600,7 +602,7 @@ pub struct UpdateAbortBody {
     path = "/sp/{type}/{slot}/reset",
 }]
 async fn sp_reset(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -632,7 +634,7 @@ async fn sp_reset(
     path = "/sp/{type}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -659,7 +661,7 @@ async fn sp_component_update(
     path = "/sp/{type}/{slot}/component/{component}/update-status",
 }]
 async fn sp_component_update_status(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
 ) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError> {
     let apictx = rqctx.context();
@@ -685,7 +687,7 @@ async fn sp_component_update_status(
     path = "/sp/{type}/{slot}/component/{component}/update-abort",
 }]
 async fn sp_component_update_abort(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateAbortBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -709,7 +711,7 @@ async fn sp_component_update_abort(
     path = "/sp/{type}/{slot}/component/{component}/power-on",
 }]
 async fn sp_component_power_on(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _rqctx: RequestContext<Arc<ServerContext>>,
     _path: Path<PathSpComponent>,
     // TODO do we need a timeout?
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -724,7 +726,7 @@ async fn sp_component_power_on(
     path = "/sp/{type}/{slot}/component/{component}/power-off",
 }]
 async fn sp_component_power_off(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _rqctx: RequestContext<Arc<ServerContext>>,
     _path: Path<PathSpComponent>,
     // TODO do we need a timeout?
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -741,7 +743,7 @@ async fn sp_component_power_off(
     path = "/ignition",
 }]
 async fn ignition_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
@@ -768,7 +770,7 @@ async fn ignition_list(
     path = "/ignition/{type}/{slot}",
 }]
 async fn ignition_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     let apictx = rqctx.context();
@@ -795,7 +797,7 @@ async fn ignition_get(
     path = "/ignition/{type}/{slot}/power-on",
 }]
 async fn ignition_power_on(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -820,7 +822,7 @@ async fn ignition_power_on(
     path = "/ignition/{type}/{slot}/power-off",
 }]
 async fn ignition_power_off(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -846,7 +848,7 @@ async fn ignition_power_off(
     path = "/sp/{type}/{slot}/power-state",
 }]
 async fn sp_power_state_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<PowerState>, HttpError> {
     let apictx = rqctx.context();
@@ -866,7 +868,7 @@ async fn sp_power_state_get(
     path = "/sp/{type}/{slot}/power-state",
 }]
 async fn sp_power_state_set(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
     body: TypedBody<PowerState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

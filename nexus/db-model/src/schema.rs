@@ -405,6 +405,51 @@ table! {
 }
 
 table! {
+    certificate (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        service -> crate::ServiceKindEnum,
+        cert -> Binary,
+        key -> Binary,
+    }
+}
+
+table! {
+    virtual_provisioning_collection {
+        id -> Uuid,
+        // This type isn't actually "Nullable" - it's just handy to use the
+        // same type for insertion and querying, and doing so requires this
+        // field to appear optional so we can let this (default) field appear
+        // optional.
+        time_modified -> Nullable<Timestamptz>,
+        collection_type -> Text,
+        virtual_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+    }
+}
+
+table! {
+    virtual_provisioning_resource {
+        id -> Uuid,
+        // This type isn't actually "Nullable" - it's just handy to use the
+        // same type for insertion and querying, and doing so requires this
+        // field to appear optional so we can let this (default) field appear
+        // optional.
+        time_modified -> Nullable<Timestamptz>,
+        resource_type -> Text,
+        virtual_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+    }
+}
+
+table! {
     zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -623,7 +668,7 @@ table! {
 table! {
     update_available_artifact (name, version, kind) {
         name -> Text,
-        version -> Int8,
+        version -> Text,
         kind -> crate::UpdateArtifactKindEnum,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,

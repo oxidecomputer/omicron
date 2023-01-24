@@ -24,6 +24,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
 use nexus_db_model::Name;
 use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -228,30 +229,15 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
-    pub async fn project_list_instances_by_id(
+    pub async fn instance_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Instance> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_instances_by_id(opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn project_list_instances_by_name(
-        &self,
-        opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Instance> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_instances_by_name(opctx, &authz_project, pagparams)
-            .await
+        self.db_datastore.instance_list(opctx, &authz_project, pagparams).await
     }
 
     // This operation may only occur on stopped instances, which implies that
@@ -265,12 +251,13 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Delete).await?;
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(authz::Action::Delete).await?;
 
         let saga_params = sagas::instance_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             authz_instance,
+            instance,
         };
         self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
             saga_params,
@@ -478,15 +465,15 @@ impl super::Nexus {
         // Gather disk information and turn that into DiskRequests
         let disks = self
             .db_datastore
-            .instance_list_disks_by_name(
+            .instance_list_disks(
                 &opctx,
                 &authz_instance,
-                &DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
                         .unwrap(),
-                },
+                }),
             )
             .await?;
 
@@ -700,31 +687,17 @@ impl super::Nexus {
         }
     }
 
-    /// Lists disks attached to the instance by id.
-    pub async fn instance_list_disks_by_id(
+    /// Lists disks attached to the instance.
+    pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Disk> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .instance_list_disks_by_id(opctx, &authz_instance, pagparams)
-            .await
-    }
-
-    /// Lists disks attached to the instance by name.
-    pub async fn instance_list_disks_by_name(
-        &self,
-        opctx: &OpContext,
-        instance_lookup: &lookup::Instance<'_>,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .instance_list_disks_by_name(opctx, &authz_instance, pagparams)
+            .instance_list_disks(opctx, &authz_instance, pagparams)
             .await
     }
 

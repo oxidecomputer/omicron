@@ -12,6 +12,7 @@ use crate::app::{
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::ByteCount as DbByteCount;
 use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
@@ -75,6 +76,10 @@ declare_saga_actions! {
     ALLOC_SERVER -> "server_id" {
         + sic_alloc_server
     }
+    RESOURCES_ACCOUNT -> "no_result" {
+        + sic_account_resources
+        - sic_account_resources_undo
+    }
     ALLOC_PROPOLIS_IP -> "propolis_ip" {
         + sic_allocate_propolis_ip
     }
@@ -135,6 +140,7 @@ impl NexusSaga for SagaInstanceCreate {
         ));
 
         builder.append(alloc_server_action());
+        builder.append(resources_account_action());
         builder.append(alloc_propolis_ip_action());
         builder.append(create_instance_record_action());
 
@@ -771,6 +777,50 @@ pub(super) async fn allocate_sled_ipv6(
         .map_err(ActionError::action_failed)
 }
 
+async fn sic_account_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_insert_instance(
+            &opctx,
+            instance_id,
+            params.project_id,
+            i64::from(params.create_params.ncpus.0),
+            DbByteCount(params.create_params.memory),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sic_account_resources_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_instance(
+            &opctx,
+            instance_id,
+            params.project_id,
+            i64::from(params.create_params.ncpus.0),
+            DbByteCount(params.create_params.memory),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
 // Allocate an IP address on the destination sled for the Propolis server
 async fn sic_allocate_propolis_ip(
     sagactx: NexusActionContext,
@@ -967,8 +1017,13 @@ pub mod test {
         authn::saga::Serialized, context::OpContext, db::datastore::DataStore,
         external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        OptionalExtension,
+    };
+    use diesel::{
+        BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_organization;
@@ -1031,7 +1086,7 @@ pub mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.apictx().nexus.datastore().clone(),
         )
     }
 
@@ -1041,7 +1096,7 @@ pub mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1103,6 +1158,67 @@ pub mod test {
             .is_none()
     }
 
+    async fn no_virtual_provisioning_resource_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningResource;
+        use crate::db::schema::virtual_provisioning_resource::dsl;
+
+        datastore.pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn
+                    .batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_resource
+                        .filter(dsl::resource_type.eq(crate::db::model::ResourceTypeProvisioned::Instance.to_string()))
+                        .select(VirtualProvisioningResource::as_select())
+                        .get_results_async::<VirtualProvisioningResource>(&conn)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                )
+            }).await.unwrap()
+    }
+
+    async fn no_virtual_provisioning_collection_records_using_instances(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningCollection;
+        use crate::db::schema::virtual_provisioning_collection::dsl;
+
+        datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_collection
+                        .filter(
+                            dsl::cpus_provisioned
+                                .ne(0)
+                                .or(dsl::ram_provisioned.ne(0)),
+                        )
+                        .select(VirtualProvisioningCollection::as_select())
+                        .get_results_async::<VirtualProvisioningCollection>(
+                            &conn,
+                        )
+                        .await
+                        .unwrap()
+                        .is_empty(),
+                )
+            })
+            .await
+            .unwrap()
+    }
+
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use crate::db::model::Disk;
         use crate::db::schema::disk::dsl;
@@ -1128,12 +1244,21 @@ pub mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
-        let datastore = cptestctx.server.apictx.nexus.datastore();
+        let datastore = cptestctx.server.apictx().nexus.datastore();
 
         // Check that no partial artifacts of instance creation exist
         assert!(no_instance_records_exist(datastore).await);
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
+        assert!(
+            no_virtual_provisioning_resource_records_exist(datastore).await
+        );
+        assert!(
+            no_virtual_provisioning_collection_records_using_instances(
+                datastore
+            )
+            .await
+        );
         assert!(disk_is_detached(datastore).await);
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
     }
@@ -1146,7 +1271,7 @@ pub mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1192,7 +1317,7 @@ pub mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1252,7 +1377,7 @@ pub mod test {
     }
 
     async fn destroy_instance(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let instance_selector = params::InstanceSelector::new(
@@ -1272,7 +1397,7 @@ pub mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters

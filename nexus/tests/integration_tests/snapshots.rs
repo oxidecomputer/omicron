@@ -288,9 +288,11 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
     DiskTest::new(&cptestctx).await;
     populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    let project_id = create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
     // Create a blank disk
@@ -319,6 +321,14 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
+
     // Issue snapshot request
     let snapshots_url = format!(
         "/organizations/{}/projects/{}/snapshots",
@@ -333,13 +343,21 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.clone(),
         },
     )
     .await;
 
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        2 * disk_size.to_bytes()
+    );
 
     // Create a disk from this snapshot
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -367,6 +385,15 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        3 * disk_size.to_bytes()
+    );
+
     // Delete snapshot
     let snapshot_url = format!(
         "/organizations/{}/projects/{}/snapshots/not-attached",
@@ -381,6 +408,41 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        2 * disk_size.to_bytes()
+    );
+
+    // Delete the disk using the snapshot
+    let disk_url = format!("{}/{}", disks_url, snap_disk_name);
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
+
+    // Delete the original base disk
+    let disk_url = format!("{}/{}", disks_url, base_disk_name);
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(provision.virtual_disk_bytes_provisioned.to_bytes(), 0);
 }
 
 // Test the various ways Nexus can reject a disk created from a snapshot
@@ -389,7 +451,7 @@ async fn test_reject_creating_disk_from_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -434,8 +496,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 )
                 .unwrap()
                 .into(),
-            }
-            .into(),
+            },
         )
         .await
         .unwrap();
@@ -487,8 +548,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     snapshot_id: snapshot.id(),
                 },
 
-                size: ByteCount::try_from(1 * params::MIN_DISK_SIZE_BYTES)
-                    .unwrap(),
+                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES).unwrap(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -502,7 +562,7 @@ async fn test_reject_creating_disk_from_snapshot(
         error.message,
         format!(
             "disk size {} must be greater than or equal to snapshot size {}",
-            1 * params::MIN_DISK_SIZE_BYTES,
+            params::MIN_DISK_SIZE_BYTES,
             2 * params::MIN_DISK_SIZE_BYTES,
         )
     );
@@ -546,7 +606,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -591,8 +651,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 )
                 .unwrap()
                 .into(),
-            }
-            .into(),
+            },
         )
         .await
         .unwrap();
@@ -703,7 +762,7 @@ async fn test_create_snapshot_record_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -778,7 +837,7 @@ async fn test_create_snapshot_record_idempotent(
 async fn test_region_snapshot_create_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let region_snapshot = db::model::RegionSnapshot {

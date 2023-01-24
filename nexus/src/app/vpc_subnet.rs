@@ -15,6 +15,7 @@ use crate::db::model::VpcSubnet;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
 use omicron_common::api::external;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -214,29 +215,15 @@ impl super::Nexus {
         }
     }
 
-    pub async fn vpc_list_subnets_by_id(
+    pub async fn vpc_subnet_list(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::VpcSubnet> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .vpc_list_subnets_by_id(opctx, &authz_vpc, pagparams)
-            .await
-    }
-    pub async fn vpc_list_subnets_by_name(
-        &self,
-        opctx: &OpContext,
-        vpc_lookup: &lookup::Vpc<'_>,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::VpcSubnet> {
-        let (.., authz_vpc) =
-            vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .vpc_list_subnets_by_name(opctx, &authz_vpc, pagparams)
-            .await
+        self.db_datastore.vpc_subnet_list(opctx, &authz_vpc, pagparams).await
     }
 
     pub async fn vpc_update_subnet(

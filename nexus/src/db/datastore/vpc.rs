@@ -40,6 +40,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -49,44 +50,36 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn project_list_vpcs_by_id(
+    pub async fn vpc_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Vpc> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::vpc::dsl;
-        paginated(dsl::vpc, dsl::id, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Vpc::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn project_list_vpcs_by_name(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Vpc> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
-
-        use db::schema::vpc::dsl;
-        paginated(dsl::vpc, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Vpc::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::vpc, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::vpc,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .select(Vpc::as_select())
+        .load_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_vpc(
@@ -377,40 +370,31 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn vpc_list_subnets_by_id(
+    pub async fn vpc_subnet_list(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<VpcSubnet> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use db::schema::vpc_subnet::dsl;
-        paginated(dsl::vpc_subnet, dsl::id, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
-            .select(VpcSubnet::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn vpc_list_subnets_by_name(
-        &self,
-        opctx: &OpContext,
-        authz_vpc: &authz::Vpc,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<VpcSubnet> {
-        opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
-
-        use db::schema::vpc_subnet::dsl;
-        paginated(dsl::vpc_subnet, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
-            .select(VpcSubnet::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::vpc_subnet, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::vpc_subnet,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::vpc_id.eq(authz_vpc.id()))
+        .select(VpcSubnet::as_select())
+        .load_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Insert a VPC Subnet, checking for unique IP address ranges.

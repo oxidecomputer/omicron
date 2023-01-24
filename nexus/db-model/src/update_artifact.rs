@@ -33,7 +33,7 @@ impl_enum_wrapper!(
 pub struct UpdateAvailableArtifact {
     pub name: String,
     /// Version of the artifact itself
-    pub version: i64,
+    pub version: String,
     pub kind: UpdateArtifactKind,
     /// `version` field of targets.json from the repository
     // FIXME this *should* be a NonZeroU64
@@ -47,7 +47,7 @@ pub struct UpdateAvailableArtifact {
 }
 
 impl UpdateAvailableArtifact {
-    pub fn id(&self) -> (String, i64, UpdateArtifactKind) {
-        (self.name.clone(), self.version, self.kind)
+    pub fn id(&self) -> (String, String, UpdateArtifactKind) {
+        (self.name.clone(), self.version.clone(), self.kind)
     }
 }

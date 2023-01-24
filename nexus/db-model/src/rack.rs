@@ -13,7 +13,6 @@ use uuid::Uuid;
 pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
-
     pub initialized: bool,
     pub tuf_base_url: Option<String>,
 }

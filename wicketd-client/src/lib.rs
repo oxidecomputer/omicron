@@ -27,5 +27,6 @@ progenitor::generate_api!(
         SpIgnitionSystemType= { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         SpInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         RackV1Inventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        GetInventoryResponse = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
     }
 );

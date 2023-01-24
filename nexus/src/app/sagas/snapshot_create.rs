@@ -142,6 +142,10 @@ declare_saga_actions! {
         + ssc_create_snapshot_record
         - ssc_create_snapshot_record_undo
     }
+    SPACE_ACCOUNT -> "no_result" {
+        + ssc_account_space
+        - ssc_account_space_undo
+    }
     SEND_SNAPSHOT_REQUEST -> "snapshot_request" {
         + ssc_send_snapshot_request
         - ssc_send_snapshot_request_undo
@@ -204,6 +208,8 @@ impl NexusSaga for SagaSnapshotCreate {
         // (DB) Creates a record of the snapshot, referencing both the
         // original disk ID and the destination volume
         builder.append(create_snapshot_record_action());
+        // (DB) Tracks virtual resource provisioning.
+        builder.append(space_account_action());
         // (Sleds) Sends a request for the disk to create a ZFS snapshot
         builder.append(send_snapshot_request_action());
         // (Sleds + DB) Start snapshot downstairs, add an entry in the DB for
@@ -409,10 +415,12 @@ async fn ssc_create_destination_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
-    osagactx.nexus().volume_delete(destination_volume_id).await?;
+    osagactx.nexus().volume_delete(&opctx, destination_volume_id).await?;
 
     Ok(())
 }
@@ -501,6 +509,49 @@ async fn ssc_create_snapshot_record_undo(
         .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
         .await?;
 
+    Ok(())
+}
+
+async fn ssc_account_space(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let snapshot_created =
+        sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_insert_snapshot(
+            &opctx,
+            snapshot_created.id(),
+            params.project_id,
+            snapshot_created.size,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn ssc_account_space_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let snapshot_created =
+        sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_snapshot(
+            &opctx,
+            snapshot_created.id(),
+            params.project_id,
+            snapshot_created.size,
+        )
+        .await?;
     Ok(())
 }
 
@@ -874,10 +925,12 @@ async fn ssc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
     info!(log, "deleting volume {}", volume_id);
-    osagactx.nexus().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
 
     Ok(())
 }
@@ -1266,7 +1319,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.apictx().nexus.datastore().clone(),
         )
     }
 
@@ -1277,7 +1330,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let disk_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1298,7 +1351,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
+            Name::from_str(DISK_NAME).unwrap(),
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1360,7 +1413,7 @@ mod test {
         // Verifies:
         // - No snapshot records exist
         // - No region snapshot records exist
-        let datastore = cptestctx.server.apictx.nexus.datastore();
+        let datastore = cptestctx.server.apictx().nexus.datastore();
         assert!(no_snapshot_records_exist(datastore).await);
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
@@ -1373,7 +1426,7 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let mut disk_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1393,7 +1446,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
+            Name::from_str(DISK_NAME).unwrap(),
         );
         let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
 
@@ -1452,7 +1505,7 @@ mod test {
                 silo_id,
                 project_id,
                 disk_id,
-                Name::from_str(DISK_NAME).unwrap().into(),
+                Name::from_str(DISK_NAME).unwrap(),
             );
             dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         }

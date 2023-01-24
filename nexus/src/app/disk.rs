@@ -13,6 +13,7 @@ use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -258,30 +259,15 @@ impl super::Nexus {
         Ok(disk_created)
     }
 
-    pub async fn project_list_disks_by_id(
+    pub async fn disk_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Disk> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_disks_by_id(opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn project_list_disks_by_name(
-        &self,
-        opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_disks_by_name(opctx, &authz_project, pagparams)
-            .await
+        self.db_datastore.disk_list(opctx, &authz_project, pagparams).await
     }
 
     /// Modifies the runtime state of the Disk as requested.  This generally
@@ -386,13 +372,17 @@ impl super::Nexus {
 
     pub async fn project_delete_disk(
         self: &Arc<Self>,
+        opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
     ) -> DeleteResult {
-        let (.., authz_disk) =
+        let (.., project, authz_disk) =
             disk_lookup.lookup_for(authz::Action::Delete).await?;
 
-        let saga_params =
-            sagas::disk_delete::Params { disk_id: authz_disk.id() };
+        let saga_params = sagas::disk_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: project.id(),
+            disk_id: authz_disk.id(),
+        };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
         Ok(())
@@ -542,7 +532,7 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.volume_remove_read_only_parent(db_disk.volume_id).await?;
+        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
 
         Ok(())
     }
