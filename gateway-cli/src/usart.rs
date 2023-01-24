@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
+use crate::picocom_map::RemapRules;
 use anyhow::Context;
 use anyhow::Result;
-use gateway_messages::SpComponent;
-use gateway_sp_comms::AttachedSerialConsoleSend;
-use gateway_sp_comms::SingleSp;
+use futures::SinkExt;
+use futures::StreamExt;
+use std::borrow::Cow;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -18,15 +19,19 @@ use std::path::PathBuf;
 use std::time::Duration;
 use termios::Termios;
 use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-
-use crate::picocom_map::RemapRules;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::MaybeTlsStream;
+use tokio_tungstenite::WebSocketStream;
 
 const CTRL_A: u8 = b'\x01';
 const CTRL_X: u8 = b'\x18';
 
 pub(crate) async fn run(
-    sp: SingleSp,
+    mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     raw: bool,
     stdin_buffer_time: Duration,
     imap: Option<String>,
@@ -66,32 +71,25 @@ pub(crate) async fn run(
     let mut stdin_buf = Vec::with_capacity(64);
     let mut out_buf = StdinOutBuf::new(omap, raw);
     let mut flush_delay = FlushDelay::new(stdin_buffer_time);
-    let console = sp
-        .serial_console_attach(SpComponent::SP3_HOST_CPU)
-        .await
-        .with_context(|| "failed to attach to serial console")?;
-
-    let (console_tx, mut console_rx) = console.split();
-    let (send_tx, send_rx) = mpsc::channel(8);
-    let tx_to_sp_handle = tokio::spawn(async move {
-        relay_data_to_sp(console_tx, send_rx).await.unwrap();
-    });
 
     loop {
         tokio::select! {
             result = stdin.read_buf(&mut stdin_buf) => {
                 let n = result.context("failed to read from stdin")?;
-                if n == 0 {
-                    mem::drop(send_tx);
-                    tx_to_sp_handle.await.unwrap();
-                    return Ok(());
-                }
 
-                match out_buf.ingest(&mut stdin_buf) {
+                let result = if n == 0 {
+                    IngestResult::Exit
+                } else {
+                    out_buf.ingest(&mut stdin_buf)
+                };
+
+                match result {
                     IngestResult::Ok => (),
                     IngestResult::Exit => {
-                        mem::drop(send_tx);
-                        tx_to_sp_handle.await.unwrap();
+                        _ = ws.close(Some(CloseFrame {
+                            code: CloseCode::Normal,
+                            reason: Cow::Borrowed("client closed stdin"),
+                        })).await;
                         return Ok(());
                     }
                 }
@@ -99,8 +97,17 @@ pub(crate) async fn run(
                 flush_delay.start_if_unstarted().await;
             }
 
-            chunk = console_rx.recv() => {
-                let chunk = chunk.unwrap();
+            message = ws.next() => {
+                let chunk = match message {
+                    Some(Ok(Message::Binary(chunk))) => chunk,
+                    Some(Ok(Message::Close(..))) | None => {
+                        return Ok(());
+                    }
+                    _ => {
+                        // TODO should we log an unexpected websocket message?
+                        continue;
+                    }
+                };
 
                 if let Some(uart_logfile) = uart_logfile.as_mut() {
                     uart_logfile
@@ -116,25 +123,12 @@ pub(crate) async fn run(
             }
 
             _ = flush_delay.ready() => {
-                send_tx
-                    .send(out_buf.steal_buf())
+                ws.send(Message::Binary(out_buf.steal_buf()))
                     .await
-                    .with_context(|| "failed to send data (task shutdown?)")?;
+                    .context("failed to send data on websocket")?;
             }
         }
     }
-}
-
-async fn relay_data_to_sp(
-    mut console_tx: AttachedSerialConsoleSend,
-    mut data_rx: mpsc::Receiver<Vec<u8>>,
-) -> Result<()> {
-    while let Some(data) = data_rx.recv().await {
-        console_tx.write(data).await?;
-    }
-    console_tx.detach().await?;
-
-    Ok(())
 }
 
 struct UnrawTermiosGuard {
