@@ -65,12 +65,7 @@ fn parse_partition_types<const N: usize>(
     Ok(expected_partitions.iter().map(|p| p.clone()).collect())
 }
 
-/// Parses validates, and ensures the partition layout within a disk.
-///
-/// Arguments:
-/// - `devfs_path` should be the path to the disk, within `/devices/...`.
-/// - `variant` should describe the expected class of disk (which matters,
-/// since different disk types have different expected layouts).
+/// Parses, validates, and ensures the partition layout within a disk.
 ///
 /// Returns a Vec of partitions on success. The index of the Vec is guaranteed
 /// to also be the index of the partition.
@@ -87,6 +82,7 @@ pub fn ensure_partition_layout(
 
     let gpt = match libefi_illumos::Gpt::read(&path) {
         Ok(gpt) => {
+            // This should be the common steady-state case
             info!(
                 log,
                 "Disk at {} already has a GPT",
@@ -95,11 +91,17 @@ pub fn ensure_partition_layout(
             gpt
         }
         Err(libefi_illumos::Error::LabelNotFound) => {
+            // Fresh U.2 disks are an example of devices where "we don't expect
+            // a GPT to exist".
             info!(
                 log,
                 "Disk at {} does not have a GPT",
                 paths.devfs_path.display()
             );
+
+            // For ZFS-implementation-specific reasons, Zpool create can only
+            // act on devices under the "/dev" hierarchy, rather than the device
+            // path which exists in the "/devices" directory.
             let dev_path = if let Some(dev_path) = &paths.dev_path {
                 dev_path
             } else {

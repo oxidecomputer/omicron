@@ -243,7 +243,7 @@ fn get_dev_path_of_whole_disk(
 // still a little bit in flux. While that's being sorted out, we simply produce
 // a string that can uniquely identify the device to Nexus.
 //
-// At the moment, this consists of a "Vendor ID, Serial ID, and model ID".
+// At the moment, this consists of a "Vendor ID, Serial ID, and Model ID".
 fn blkdev_device_identity(devfs_path: &str) -> Result<String, Error> {
     let path = PathBuf::from(devfs_path);
     let ctrl_id = nvme::identify_controller(&path)
