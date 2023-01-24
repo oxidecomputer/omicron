@@ -241,3 +241,87 @@ pub enum DiskVariant {
     U2,
     M2,
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_disk_paths() {
+        const DEVFS_PATH: &'static str = "/devices/my/disk";
+        let paths =
+            DiskPaths { devfs_path: PathBuf::from(DEVFS_PATH), dev_path: None };
+        assert_eq!(
+            paths.whole_disk(false),
+            PathBuf::from(format!("{DEVFS_PATH}:wd"))
+        );
+        assert_eq!(
+            paths.whole_disk(true),
+            PathBuf::from(format!("{DEVFS_PATH}:wd,raw"))
+        );
+        assert_eq!(
+            paths.partition_path(0),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:a")))
+        );
+        assert_eq!(
+            paths.partition_path(1),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:b")))
+        );
+        assert_eq!(
+            paths.partition_path(2),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:c")))
+        );
+        assert_eq!(
+            paths.partition_path(3),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:d")))
+        );
+        assert_eq!(
+            paths.partition_path(4),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:e")))
+        );
+        assert_eq!(
+            paths.partition_path(5),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:f")))
+        );
+        assert_eq!(paths.partition_path(6), None);
+    }
+
+    #[test]
+    fn test_partition_device_paths() {
+        const DEVFS_PATH: &'static str = "/devices/my/disk";
+        let paths =
+            DiskPaths { devfs_path: PathBuf::from(DEVFS_PATH), dev_path: None };
+
+        assert_eq!(
+            paths
+                .partition_device_path(
+                    &vec![Partition::ZfsPool,],
+                    Partition::ZfsPool,
+                )
+                .expect("Should have found partition"),
+            paths.partition_path(0).unwrap(),
+        );
+
+        assert_eq!(
+            paths
+                .partition_device_path(
+                    &vec![
+                        Partition::BootImage,
+                        Partition::Reserved,
+                        Partition::ZfsPool,
+                        Partition::DumpDevice,
+                    ],
+                    Partition::ZfsPool,
+                )
+                .expect("Should have found partition"),
+            paths.partition_path(2).unwrap(),
+        );
+
+        assert!(matches!(
+            paths
+                .partition_device_path(&vec![], Partition::ZfsPool,)
+                .expect_err("Should not have found partition"),
+            DiskError::NotFound { .. },
+        ));
+    }
+}
