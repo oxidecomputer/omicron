@@ -203,7 +203,7 @@ mod test {
         let devfs_path = PathBuf::from("/devfs/path");
         let result = internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
-            &DiskPaths { devfs_path: devfs_path.clone(), dev_path: None },
+            &DiskPaths { devfs_path, dev_path: None },
             DiskVariant::U2,
         );
         match result {
