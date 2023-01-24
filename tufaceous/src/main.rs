@@ -128,7 +128,7 @@ fn main() -> Result<()> {
             };
             let filename = format!("{}-{}.tar.gz", name, version);
 
-            // if we already have an aritfact of this name/version/kind, replace it.
+            // if we already have an artifact of this name/version/kind, replace it.
             if let Some(artifact) =
                 artifacts.artifacts.iter_mut().find(|artifact| {
                     artifact.name == name
