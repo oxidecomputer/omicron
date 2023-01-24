@@ -1,0 +1,23 @@
+[package]
+name = "tufaceous"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true, features = ["backtrace"] }
+camino.workspace = true
+chrono.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+console = { version = "0.15.5", default-features = false }
+fs-err = "2.9.0"
+hex.workspace = true
+humantime = "2.1.0"
+omicron-common.workspace = true
+rand.workspace = true
+ring = { workspace = true, features = ["std"] }
+serde_json.workspace = true
+sha2 = "0.10.6"
+tempfile.workspace = true
+tough.workspace = true
+url = "2.3.1"
