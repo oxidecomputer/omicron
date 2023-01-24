@@ -1,6 +1,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Timelike, Utc};
 
+/// Parser for datelike command line arguments. Can accept a duration (e.g.
+/// "1w") or an ISO8601 timestamp.
 pub(crate) fn parse_duration_or_datetime(s: &str) -> Result<DateTime<Utc>> {
     match humantime::parse_duration(s) {
         Ok(duration) => {
