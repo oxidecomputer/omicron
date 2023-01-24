@@ -15,8 +15,8 @@ use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -26,7 +26,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use std::sync::Arc;
-use uuid::Uuid;
 
 impl super::Nexus {
     pub fn project_lookup<'a>(
@@ -94,30 +93,15 @@ impl super::Nexus {
         Ok(db_project)
     }
 
-    pub async fn projects_list_by_name(
+    pub async fn project_list(
         &self,
         opctx: &OpContext,
         organization_lookup: &lookup::Organization<'_>,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Project> {
         let (.., authz_org) =
             organization_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .projects_list_by_name(opctx, &authz_org, pagparams)
-            .await
-    }
-
-    pub async fn projects_list_by_id(
-        &self,
-        opctx: &OpContext,
-        organization_lookup: &lookup::Organization<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Project> {
-        let (.., authz_org) =
-            organization_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .projects_list_by_id(opctx, &authz_org, pagparams)
-            .await
+        self.db_datastore.projects_list(opctx, &authz_org, pagparams).await
     }
 
     pub async fn project_update(

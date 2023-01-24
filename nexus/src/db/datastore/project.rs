@@ -25,15 +25,15 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use uuid::Uuid;
+use ref_cast::RefCast;
 
 // Generates internal functions used for validation during project deletion.
 // Used simply to reduce boilerplate.
@@ -230,42 +230,31 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn projects_list_by_id(
+    pub async fn projects_list(
         &self,
         opctx: &OpContext,
         authz_org: &authz::Organization,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Project> {
-        use db::schema::project::dsl;
-
         opctx.authorize(authz::Action::ListChildren, authz_org).await?;
 
-        paginated(dsl::project, dsl::id, pagparams)
-            .filter(dsl::organization_id.eq(authz_org.id()))
-            .filter(dsl::time_deleted.is_null())
-            .select(Project::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn projects_list_by_name(
-        &self,
-        opctx: &OpContext,
-        authz_org: &authz::Organization,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Project> {
         use db::schema::project::dsl;
-
-        opctx.authorize(authz::Action::ListChildren, authz_org).await?;
-
-        paginated(dsl::project, dsl::name, &pagparams)
-            .filter(dsl::organization_id.eq(authz_org.id()))
-            .filter(dsl::time_deleted.is_null())
-            .select(Project::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::project, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::project,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::organization_id.eq(authz_org.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(Project::as_select())
+        .load_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Updates a project (clobbering update -- no etag)

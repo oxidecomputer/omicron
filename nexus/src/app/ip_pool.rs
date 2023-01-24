@@ -12,6 +12,7 @@ use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -43,20 +44,12 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn ip_pools_list_by_name(
+    pub async fn ip_pools_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.ip_pools_list_by_name(opctx, pagparams).await
-    }
-
-    pub async fn ip_pools_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.ip_pools_list_by_id(opctx, pagparams).await
+        self.db_datastore.ip_pools_list(opctx, pagparams).await
     }
 
     pub async fn ip_pool_fetch(
