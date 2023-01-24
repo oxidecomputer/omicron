@@ -33,7 +33,7 @@
     -->
     <propval name='id' type='astring' value='unknown' />
     <!--
-      `config/address` is allow to have multiple values, so we do not seed it
+      `config/address` is allowed to have multiple values, so we do not seed it
       with an initial `unknown` that sled-agent would need to delete.
     -->
     <property name='address' type='astring' />
