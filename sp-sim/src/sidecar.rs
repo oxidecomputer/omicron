@@ -61,7 +61,7 @@ pub struct Sidecar {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
-    serial_number: Vec<u8>,
+    serial_number: String,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
     inner_task: Option<JoinHandle<()>>,
@@ -79,7 +79,7 @@ impl Drop for Sidecar {
 #[async_trait]
 impl SimulatedSp for Sidecar {
     fn serial_number(&self) -> String {
-        hex::encode(&serial_number_padded(&self.serial_number))
+        self.serial_number.clone()
     }
 
     fn manufacturing_public_key(&self) -> Ed25519PublicKey {
@@ -207,7 +207,7 @@ impl Inner {
     fn new(
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
-        serial_number: Vec<u8>,
+        serial_number: String,
         ignition: FakeIgnition,
         commands: mpsc::UnboundedReceiver<(
             Command,
@@ -293,14 +293,14 @@ struct Handler {
     leaked_component_device_strings: Vec<&'static str>,
     leaked_component_description_strings: Vec<&'static str>,
 
-    serial_number: Vec<u8>,
+    serial_number: String,
     ignition: FakeIgnition,
     power_state: PowerState,
 }
 
 impl Handler {
     fn new(
-        serial_number: Vec<u8>,
+        serial_number: String,
         components: Vec<SpComponentConfig>,
         ignition: FakeIgnition,
         log: Logger,

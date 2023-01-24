@@ -26,8 +26,7 @@ pub struct SpCommonConfig {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bind_addrs: Option<[SocketAddrV6; 2]>,
     /// Fake serial number
-    #[serde(with = "hex")]
-    pub serial_number: Vec<u8>,
+    pub serial_number: String,
     /// 32-byte seed to create a manufacturing root certificate.
     #[serde(with = "hex")]
     pub manufacturing_root_cert_seed: [u8; 32],
