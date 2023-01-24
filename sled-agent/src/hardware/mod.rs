@@ -69,9 +69,9 @@ pub enum Partition {
 pub struct DiskPaths {
     // Full path to the disk under "/devices".
     // Should NOT end with a ":partition_letter".
-    devfs_path: PathBuf,
+    pub devfs_path: PathBuf,
     // Optional path to the disk under "/dev/dsk".
-    dev_path: Option<PathBuf>,
+    pub dev_path: Option<PathBuf>,
 }
 
 impl DiskPaths {

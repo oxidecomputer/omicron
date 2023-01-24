@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 mod disk;
+mod gpt;
 mod nvme;
 
 pub use disk::ensure_partition_layout;
