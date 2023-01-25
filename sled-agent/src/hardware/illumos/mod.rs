@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::hardware::{DiskVariant, HardwareUpdate, UnparsedDisk};
+use crate::hardware::{
+    DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
+};
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node};
 use slog::Logger;
 use std::collections::HashSet;
@@ -239,13 +241,7 @@ fn get_dev_path_of_whole_disk(
 }
 
 // Gather a notion of "device identity".
-//
-// NOTE: What exactly comprises a "reliable, unique identifier" for a disk is
-// still a little bit in flux. While that's being sorted out, we simply produce
-// a string that can uniquely identify the device to Nexus.
-//
-// At the moment, this consists of a "Vendor ID, Serial ID, and Model ID".
-fn blkdev_device_identity(devfs_path: &str) -> Result<String, Error> {
+fn blkdev_device_identity(devfs_path: &str) -> Result<DiskIdentity, Error> {
     let path = PathBuf::from(devfs_path);
     let ctrl_id = nvme::identify_controller(&path)
         .map_err(|err| Error::MissingNVMEIdentity { path, err })?;
@@ -254,8 +250,7 @@ fn blkdev_device_identity(devfs_path: &str) -> Result<String, Error> {
         format!("{:x}{:x}", ctrl_id.vendor_id, ctrl_id.subsystem_vendor_id);
     let serial = ctrl_id.serial;
     let model = ctrl_id.model;
-
-    Ok(format!("v:{vendor},s:{serial},m:{model}"))
+    Ok(DiskIdentity { vendor, serial, model })
 }
 
 fn poll_blkdev_node(

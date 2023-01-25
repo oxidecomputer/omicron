@@ -74,6 +74,14 @@ pub struct DiskPaths {
     pub dev_path: Option<PathBuf>,
 }
 
+/// Uniquely identifies a disk.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DiskIdentity {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+}
+
 impl DiskPaths {
     // Returns the "illumos letter-indexed path" for a device.
     fn partition_path(&self, index: usize) -> Option<PathBuf> {
@@ -132,7 +140,7 @@ pub struct UnparsedDisk {
     paths: DiskPaths,
     slot: i64,
     variant: DiskVariant,
-    device_id: String,
+    identity: DiskIdentity,
 }
 
 impl UnparsedDisk {
@@ -142,13 +150,13 @@ impl UnparsedDisk {
         dev_path: Option<PathBuf>,
         slot: i64,
         variant: DiskVariant,
-        device_id: String,
+        identity: DiskIdentity,
     ) -> Self {
         Self {
             paths: DiskPaths { devfs_path, dev_path },
             slot,
             variant,
-            device_id,
+            identity,
         }
     }
 
@@ -163,7 +171,7 @@ pub struct Disk {
     paths: DiskPaths,
     slot: i64,
     variant: DiskVariant,
-    device_id: String,
+    identity: DiskIdentity,
     partitions: Vec<Partition>,
 
     // This embeds the assumtion that there is exactly one parsed zpool per
@@ -220,7 +228,7 @@ impl Disk {
             paths: unparsed_disk.paths,
             slot: unparsed_disk.slot,
             variant: unparsed_disk.variant,
-            device_id: unparsed_disk.device_id,
+            identity: unparsed_disk.identity,
             partitions,
             zpool_name,
         })
