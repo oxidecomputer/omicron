@@ -13,8 +13,10 @@ use clap::Subcommand;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
+use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::UpdateBody;
+use gateway_client::Client;
 use serde::Serialize;
 use slog::o;
 use slog::Drain;
@@ -66,6 +68,9 @@ enum Command {
     },
 
     /// Get ignition state of one (or all) SPs
+    // `faux-mgs` also has `IngitionLinkEvents` and `ClearIgnitionLinkEvents`.
+    // Endpoints for these are not currently exposed by MGS, but I believe these
+    // are a "manual-debugging-only" kind of message, so that's okay?
     Ignition {
         /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
         #[clap(value_parser = sp_identifier_from_str, action)]
@@ -310,10 +315,7 @@ async fn main() -> Result<()> {
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = Logger::root(drain, o!("component" => "gateway-client"));
 
-    let client = gateway_client::Client::new(
-        &format!("http://{}", args.server),
-        log.clone(),
-    );
+    let client = Client::new(&format!("http://{}", args.server), log.clone());
 
     let dumper = Dumper { pretty: args.pretty };
 
@@ -373,6 +375,7 @@ async fn main() -> Result<()> {
                 SpType::Power => "power",
             };
             // TODO should we be able to attach through the openapi client?
+            // Check how propolis-cli does this.
             let path = format!(
                 "ws://{}/sp/{}/{}/component/{}/serial-console/attach",
                 args.server, type_, sp.slot, SERIAL_CONSOLE_COMPONENT,
@@ -406,17 +409,7 @@ async fn main() -> Result<()> {
             let image = fs::read(&image).with_context(|| {
                 format!("failed to read {}", image.display())
             })?;
-            let update_id = Uuid::new_v4();
-
-            let body = UpdateBody { id: update_id, image, slot };
-
-            client
-                .sp_component_update(sp.type_, sp.slot, &component, &body)
-                .await?;
-
-            // We don't get a meaningful response on success from the server,
-            // but we the CLI generated this update's ID, so print it.
-            println!("{update_id}");
+            update(&client, &dumper, sp, &component, slot, image).await?;
         }
         Command::UpdateStatus { sp, component } => {
             let info = client
@@ -450,4 +443,65 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn update(
+    client: &Client,
+    dumper: &Dumper,
+    sp: SpIdentifier,
+    component: &str,
+    slot: u16,
+    image: Vec<u8>,
+) -> Result<()> {
+    let update_id = Uuid::new_v4();
+    println!("generated update ID {update_id}");
+
+    let body = UpdateBody { id: update_id, image, slot };
+    client
+        .sp_component_update(sp.type_, sp.slot, component, &body)
+        .await
+        .context("failed to start update")?;
+
+    loop {
+        let status = client
+            .sp_component_update_status(sp.type_, sp.slot, component)
+            .await
+            .context("failed to get update status")?
+            .into_inner();
+        dumper.dump(&status)?;
+        match status {
+            SpUpdateStatus::None => {
+                bail!("no update status returned by SP (did it reset?)");
+            }
+            SpUpdateStatus::Preparing { id, .. } => {
+                if id != update_id {
+                    bail!("different update preparing ({:?})", id);
+                }
+            }
+            SpUpdateStatus::InProgress { id, .. } => {
+                if id != update_id {
+                    bail!("different update in progress ({:?})", id);
+                }
+            }
+            SpUpdateStatus::Complete { id } => {
+                if id != update_id {
+                    bail!("different update complete ({id:?})");
+                }
+                return Ok(());
+            }
+            SpUpdateStatus::Aborted { id } => {
+                if id != update_id {
+                    bail!("different update aborted ({id:?})");
+                }
+                bail!("update aborted");
+            }
+            SpUpdateStatus::Failed { id, code } => {
+                if id != update_id {
+                    bail!("different update failed ({id:?}, code {code})");
+                }
+                bail!("update failed (code {code})");
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
