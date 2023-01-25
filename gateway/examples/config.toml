@@ -2,10 +2,15 @@
 # Oxide API: example configuration file
 #
 
+[dropshot]
+# We want to allow uploads of host phase 2 recovery images, which may be
+# measured in the (small) hundreds of MiB. Set this to 512 MiB.
+request_body_max_bytes = 536870912
+
 [switch]
-# which vsc port is connected to our local sidecar SP (i.e., the SP that acts as
-# our contact to the ignition controller)
-local_ignition_controller_port = 0
+# Which interface is connected to our local sidecar SP (i.e., the SP that acts
+# as our contact to the ignition controller)?
+local_ignition_controller_interface = "fake-switch0"
 
 # when sending UDP RPC packets to an SP, how many total attempts do we make
 # before giving up?
@@ -31,12 +36,7 @@ names = ["switch0", "switch1"]
 # if there is a miscabling that results in an unsolvable system (e.g.,
 # determination 0 reports "switch0" and determination 1 reports "switch1").
 [[switch.location.determination]]
-switch_port = 1
-sp_port_1 = ["switch0"]
-sp_port_2 = ["switch1"]
-
-[[switch.location.determination]]
-switch_port = 2
+interfaces = ["fake-sled0", "fake-sled1"]
 sp_port_1 = ["switch0"]
 sp_port_2 = ["switch1"]
 
@@ -44,31 +44,26 @@ sp_port_2 = ["switch1"]
 # interface configured to use VLAN tag  assigned to the given port) and the
 # logical ID of the remote SP ("sled 7", "switch 1", etc.), which must have an
 # entry for each member of `[switch.location]` above.
-#
-# TODO This section has some concessions to local testing: ultimately we will
-# use a single multicast address, target port, and source port, but for now all
-# three are configured on a per-port basis, which allows a single system to
-# simulate a full set of ports and SPs.
-[switch.port.0]
-data_link_addr = "[::]:33200"
-multicast_addr = "[ff15:0:1de::0]:33300"
-[switch.port.0.location]
-switch0 = ["switch", 0]
-switch1 = ["switch", 1]
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-switch0"
+addr = "[::1]:33300"
+ignition-target = 1
+location = { switch0 = ["switch", 0], switch1 = ["switch", 1] }
 
-[switch.port.1]
-data_link_addr = "[::]:33201"
-multicast_addr = "[ff15:0:1de::1]:33310"
-[switch.port.1.location]
-switch0 = ["sled", 0]
-switch1 = ["sled", 0]
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-sled0"
+addr = "[::1]:33310"
+ignition-target = 2
+location = { switch0 = ["sled", 0], switch1 = ["sled", 0] }
 
-[switch.port.2]
-data_link_addr = "[::]:33202"
-multicast_addr = "[ff15:0:1de::2]:33320"
-[switch.port.2.location]
-switch0 = ["sled", 1]
-switch1 = ["sled", 1]
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-sled1"
+addr = "[::1]:33320"
+ignition-target = 3
+location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 
 [log]
 # Show log messages of this level and more severe
