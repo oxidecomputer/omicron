@@ -652,6 +652,7 @@ pub enum ResourceType {
     Instance,
     IpPool,
     NetworkInterface,
+    PhysicalDisk,
     Rack,
     Service,
     Sled,

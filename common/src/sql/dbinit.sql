@@ -128,34 +128,25 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
+  'm2',
+  'u2'
+);
+
 -- A physical disk which exists inside the rack.
--- For v1, this is an M.2 form-factor.
-CREATE TABLE omicron.public.internal_physical_disk (
-    device_id STRING(63) PRIMARY KEY,
+CREATE TABLE omicron.public.physical_disk (
+    vendor STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
     -- FK into the Sled table
     sled_id UUID NOT NULL,
-    total_size INT NOT NULL
+    total_size INT NOT NULL,
+
+    PRIMARY KEY (vendor, serial, model)
 );
-
--- A partition within an internal physical disk.
-CREATE TABLE omicron.public.internal_physical_disk_partition (
-    slice INT NOT NULL,
-    device_id STRING(63) NOT NULL,
-
-    PRIMARY KEY (device_id, slice)
-);
-
--- A physical disk which exists in the rack, but is externally removable.
--- For v1, this is a U.2 form-factor.
-CREATE TABLE omicron.public.external_physical_disk (
-    device_id STRING(63) PRIMARY KEY,
-    -- FK into the Sled table
-    sled_id UUID NOT NULL,
-    total_size INT NOT NULL
-);
-
--- TODO: Do we want internal / external disks to be in the same table?
--- TODO: how about their partitions?
 
 -- x509 certificates which may be used by services
 CREATE TABLE omicron.public.certificate (

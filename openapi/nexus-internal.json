@@ -256,6 +256,40 @@
         }
       }
     },
+    "/physical-disk": {
+      "put": {
+        "summary": "Report that a physical disk for the specified sled has come online.",
+        "operationId": "physical_disk_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskPutResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -1710,6 +1744,75 @@
           "address",
           "collector_id"
         ]
+      },
+      "PhysicalDiskKind": {
+        "description": "Describes the type of physical disk.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "m2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PhysicalDiskPutRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/PhysicalDiskKind"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "sled_id",
+          "total_size",
+          "variant",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskPutResponse": {
+        "type": "object"
       },
       "ProducerEndpoint": {
         "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",

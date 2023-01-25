@@ -5,7 +5,7 @@
 use super::{Generation, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::schema::{service, sled, zpool};
+use crate::schema::{physical_disk, service, sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
@@ -79,6 +79,17 @@ impl From<Sled> for views::Sled {
     fn from(sled: Sled) -> Self {
         Self { identity: sled.identity(), service_address: sled.address() }
     }
+}
+
+impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = sled::dsl::rcgen;
+    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
+    // TODO: This implies that we're using this column as a key.
+    //
+    // We aren't! We're using this column, as *well* as the vendor and model
+    // columns.
+    type CollectionIdColumn = physical_disk::dsl::serial;
 }
 
 impl DatastoreCollectionConfig<super::Zpool> for Sled {

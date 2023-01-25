@@ -405,6 +405,18 @@ table! {
 }
 
 table! {
+    physical_disk (vendor, serial, model) {
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        variant -> crate::PhysicalDiskKindEnum,
+        sled_id -> Uuid,
+        total_size -> Int8,
+    }
+}
+
+table! {
     certificate (id) {
         id -> Uuid,
         name -> Text,

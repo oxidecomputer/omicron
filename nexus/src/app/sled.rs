@@ -11,7 +11,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::ServiceKind;
 use crate::internal_api::params::{
-    SledAgentStartupInfo, SledRole, ZpoolPutRequest,
+    PhysicalDiskPutRequest, SledAgentStartupInfo, SledRole, ZpoolPutRequest,
 };
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -102,6 +102,32 @@ impl super::Nexus {
             .random_sled(&self.opctx_alloc)
             .await?
             .map(|sled| sled.id()))
+    }
+
+    // Physical disks
+    //
+    /// Upserts a physical disk into the database, updating it if it already exists.
+    pub async fn upsert_physical_disk(
+        &self,
+        request: PhysicalDiskPutRequest,
+    ) -> Result<(), Error> {
+        info!(
+            self.log, "upserting physical disk";
+            "sled_id" => request.sled_id.to_string(),
+            "vendor" => request.vendor.to_string(),
+            "serial" => request.serial.to_string(),
+            "model" => request.model.to_string()
+        );
+        let disk = db::model::PhysicalDisk::new(
+            request.vendor,
+            request.serial,
+            request.model,
+            request.variant.into(),
+            request.sled_id,
+            request.total_size,
+        );
+        self.db_datastore.physical_disk_upsert(disk).await?;
+        Ok(())
     }
 
     // Zpools (contained within sleds)
