@@ -291,6 +291,8 @@ pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
+    pub serial_number: Option<String>,
+    pub cubby: Option<u8>,
 }
 
 // SILO USERS

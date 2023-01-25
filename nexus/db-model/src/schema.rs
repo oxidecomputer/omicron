@@ -389,6 +389,8 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+        serial_number -> Text,
+        cubby -> Int2,
     }
 }
 

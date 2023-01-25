@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, SqlU16};
+use super::{Generation, SqlU16, SqlU8};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{service, sled, zpool};
@@ -32,6 +32,9 @@ pub struct Sled {
 
     /// The last IP address provided to an Oxide service on this sled
     pub last_used_address: ipv6::Ipv6Addr,
+
+    pub cubby: Option<SqlU8>,
+    pub serial_number: Option<String>,
 }
 
 impl Sled {
@@ -55,6 +58,9 @@ impl Sled {
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,
+            // TODO: these fields should be populated
+            cubby: None,
+            serial_number: None,
         }
     }
 
@@ -77,7 +83,12 @@ impl Sled {
 
 impl From<Sled> for views::Sled {
     fn from(sled: Sled) -> Self {
-        Self { identity: sled.identity(), service_address: sled.address() }
+        Self {
+            identity: sled.identity(),
+            service_address: sled.address(),
+            cubby: sled.cubby.map(|c| c.into()),
+            serial_number: sled.serial_number,
+        }
     }
 }
 

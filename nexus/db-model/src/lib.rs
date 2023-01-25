@@ -60,6 +60,7 @@ mod silo_user_password_hash;
 mod sled;
 mod snapshot;
 mod ssh_key;
+mod u8;
 mod u16;
 mod update_artifact;
 mod user_builtin;
@@ -83,6 +84,7 @@ mod db {
 }
 
 pub use self::macaddr::*;
+pub use self::u8::*;
 pub use self::u16::*;
 pub use block_size::*;
 pub use bytecount::*;

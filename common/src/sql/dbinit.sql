@@ -86,7 +86,14 @@ CREATE TABLE omicron.public.sled (
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     /* The last address allocated to an Oxide service on this sled. */
-    last_used_address INET NOT NULL
+    last_used_address INET NOT NULL,
+
+    /* The hardware serial number if reported */
+    /* TODO: What size should this be? */
+    serial_number STRING(63),
+
+    /* The physical location of the sled in the rack if known */
+    cubby INT2
 );
 
 /* Add an index which lets us look up sleds on a rack */
