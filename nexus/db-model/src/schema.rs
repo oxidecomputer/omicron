@@ -689,12 +689,14 @@ table! {
 }
 
 table! {
-    system_update_deployment (id) {
+    update_deployment (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
 
         version -> Text,
+        status -> crate::UpdateStatusEnum,
+        // TODO: status reason for updateable_component
     }
 }
 
@@ -721,8 +723,8 @@ table! {
         version -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
         parent_id -> Nullable<Uuid>,
-        // status
-        // reason
+        status -> crate::UpdateStatusEnum,
+        // TODO: status reason for updateable_component
     }
 }
 

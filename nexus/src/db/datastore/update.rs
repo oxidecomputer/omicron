@@ -11,8 +11,8 @@ use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
-    ComponentUpdate, SystemUpdate, SystemUpdateDeployment,
-    UpdateAvailableArtifact, UpdateableComponent,
+    ComponentUpdate, SystemUpdate, UpdateAvailableArtifact, UpdateDeployment,
+    UpdateableComponent,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -231,18 +231,18 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn system_update_deployments_list_by_id(
+    pub async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<SystemUpdateDeployment> {
+    ) -> ListResultVec<UpdateDeployment> {
         // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::system_update_deployment::dsl::*;
+        use db::schema::update_deployment::dsl::*;
 
-        paginated(system_update_deployment, id, pagparams)
-            .select(SystemUpdateDeployment::as_select())
+        paginated(update_deployment, id, pagparams)
+            .select(UpdateDeployment::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
@@ -251,11 +251,11 @@ impl DataStore {
     pub async fn latest_update_deployment(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<SystemUpdateDeployment> {
-        use db::schema::system_update_deployment::dsl::*;
+    ) -> LookupResult<UpdateDeployment> {
+        use db::schema::update_deployment::dsl::*;
 
-        system_update_deployment
-            .select(SystemUpdateDeployment::as_returning())
+        update_deployment
+            .select(UpdateDeployment::as_returning())
             .order(time_created.desc())
             .limit(1)
             .first_async(self.pool_authorized(opctx).await?)

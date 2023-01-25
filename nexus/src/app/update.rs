@@ -409,6 +409,7 @@ impl super::Nexus {
             component_type: create_component.component_type,
             parent_id: create_component.parent_id,
             device_id: create_component.device_id,
+            status: db::model::UpdateStatus::Steady,
         };
 
         self.db_datastore.updateable_component_create(opctx, component).await
@@ -424,24 +425,22 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn system_update_deployments_list_by_id(
+    pub async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SystemUpdateDeployment> {
-        self.db_datastore
-            .system_update_deployments_list_by_id(opctx, pagparams)
-            .await
+    ) -> ListResultVec<db::model::UpdateDeployment> {
+        self.db_datastore.update_deployments_list_by_id(opctx, pagparams).await
     }
 
-    pub async fn system_update_deployment_fetch_by_id(
+    pub async fn update_deployment_fetch_by_id(
         &self,
         opctx: &OpContext,
         deployment_id: &Uuid,
-    ) -> LookupResult<db::model::SystemUpdateDeployment> {
+    ) -> LookupResult<db::model::UpdateDeployment> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let (.., db_deployment) = LookupPath::new(opctx, &self.db_datastore)
-            .system_update_deployment_id(*deployment_id)
+            .update_deployment_id(*deployment_id)
             .fetch()
             .await?;
         Ok(db_deployment)
@@ -450,7 +449,7 @@ impl super::Nexus {
     pub async fn latest_update_deployment(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<db::model::SystemUpdateDeployment> {
+    ) -> LookupResult<db::model::UpdateDeployment> {
         self.db_datastore.latest_update_deployment(opctx).await
     }
 }
@@ -625,5 +624,19 @@ mod tests {
         assert_eq!(components.len(), 2);
 
         // TODO: update the version of a component
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_update_deployments(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx.nexus;
+        let opctx = test_opctx(&cptestctx);
+
+        // starts out empty
+        let deployments = nexus
+            .update_deployments_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap();
+
+        assert_eq!(deployments.len(), 0);
     }
 }

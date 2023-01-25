@@ -403,12 +403,9 @@ impl<'a> LookupPath<'a> {
         SystemUpdate::PrimaryKey(Root { lookup_root: self }, version)
     }
 
-    /// Select a resource of type SystemUpdateDeployment, identified by its id
-    pub fn system_update_deployment_id(
-        self,
-        id: Uuid,
-    ) -> SystemUpdateDeployment<'a> {
-        SystemUpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type UpdateDeployment, identified by its id
+    pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
+        UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -730,7 +727,7 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "SystemUpdateDeployment",
+    name = "UpdateDeployment",
     ancestors = [],
     children = [],
     lookup_by_name = false,

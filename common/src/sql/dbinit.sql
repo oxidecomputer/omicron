@@ -1587,6 +1587,15 @@ CREATE TABLE omicron.public.system_update_component_update (
     PRIMARY KEY (system_update_id, component_update_id)
 );
 
+-- For now, the plan is to treat stopped, failed, completed as sub-cases of
+-- "steady" described by a "reason". But reason is not implemented yet.
+-- Obviously this could be a boolean, but boolean status fields never stay
+-- boolean for long.
+CREATE TYPE omicron.public.update_status AS ENUM (
+    'updating',
+    'steady'
+);
+
 /*
  * Updateable components and their update status
  */
@@ -1600,19 +1609,16 @@ CREATE TABLE omicron.public.updateable_component (
     device_id STRING(40) NOT NULL,
     component_type omicron.public.updateable_component_type NOT NULL,
     version STRING(64) NOT NULL,
-    parent_id UUID
-    -- TODO: status and reason
-);
+    parent_id UUID,
 
-CREATE TYPE omicron.public.update_deployment_status AS ENUM (
-    'running',
-    'stopped'
+    status update_status NOT NULL
+    -- TODO: status reason for updateable_component
 );
 
 /*
  * System updates
  */
-CREATE TABLE omicron.public.system_update_deployment (
+CREATE TABLE omicron.public.update_deployment (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -1621,8 +1627,8 @@ CREATE TABLE omicron.public.system_update_deployment (
     /* Unique semver version */
     version STRING(64) NOT NULL,
 
-    status update_deployment_status NOT NULL,
-    reason STRING(64) NOT NULL
+    status update_status NOT NULL
+    -- TODO: status reason for update_deployment
 );
 
 /*******************************************************************/

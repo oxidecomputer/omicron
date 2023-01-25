@@ -295,8 +295,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_update_start)?;
         api.register(system_update_stop)?;
         api.register(system_update_components_list)?;
-        api.register(system_update_deployments_list)?;
-        api.register(system_update_deployment_view)?;
+        api.register(update_deployments_list)?;
+        api.register(update_deployment_view)?;
 
         api.register(user_list)?;
         api.register(silo_users_list)?;
@@ -5447,9 +5447,7 @@ async fn system_version(
                 low: SemverVersion::new(0, 0, 1),
                 high: SemverVersion::new(0, 0, 2),
             },
-            status: views::VersionStatus::Steady {
-                reason: views::VersionSteadyReason::Completed,
-            },
+            status: views::UpdateStatus::Steady,
         }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5580,7 +5578,7 @@ async fn system_update_start(
     // (instance there, system update here) identified by the param. This
     // approach also gives us symmetry with the /stop endpoint.
     update: TypedBody<params::SystemUpdateStart>,
-) -> Result<HttpResponseAccepted<views::SystemUpdateDeployment>, HttpError> {
+) -> Result<HttpResponseAccepted<views::UpdateDeployment>, HttpError> {
     let apictx = rqctx.context();
     let _nexus = &apictx.nexus;
     let handler = async {
@@ -5600,13 +5598,14 @@ async fn system_update_start(
         // special StartUpdateResult that includes a deployment ID iff an update
         // was actually started
 
-        Ok(HttpResponseAccepted(views::SystemUpdateDeployment {
+        Ok(HttpResponseAccepted(views::UpdateDeployment {
             identity: AssetIdentityMetadata {
                 id: Uuid::new_v4(),
                 time_created: Utc::now(),
                 time_modified: Utc::now(),
             },
             version: update.into_inner().version,
+            status: views::UpdateStatus::Updating,
         }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5655,11 +5654,10 @@ async fn system_update_stop(
      path = "/v1/system/update/deployments",
      tags = ["system"],
 }]
-async fn system_update_deployments_list(
+async fn update_deployments_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::SystemUpdateDeployment>>, HttpError>
-{
+) -> Result<HttpResponseOk<ResultsPage<views::UpdateDeployment>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -5667,7 +5665,7 @@ async fn system_update_deployments_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let updates = nexus
-            .system_update_deployments_list_by_id(&opctx, &pagparams)
+            .update_deployments_list_by_id(&opctx, &pagparams)
             .await?
             .into_iter()
             .map(|u| u.into())
@@ -5675,7 +5673,7 @@ async fn system_update_deployments_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             updates,
-            &|_, u: &views::SystemUpdateDeployment| u.identity.id,
+            &|_, u: &views::UpdateDeployment| u.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5687,10 +5685,10 @@ async fn system_update_deployments_list(
      path = "/v1/system/update/deployments/{id}",
      tags = ["system"],
 }]
-async fn system_update_deployment_view(
+async fn update_deployment_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<views::SystemUpdateDeployment>, HttpError> {
+) -> Result<HttpResponseOk<views::UpdateDeployment>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -5698,7 +5696,7 @@ async fn system_update_deployment_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let deployment =
-            nexus.system_update_deployment_fetch_by_id(&opctx, id).await?;
+            nexus.update_deployment_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(deployment.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

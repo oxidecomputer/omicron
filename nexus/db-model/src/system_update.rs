@@ -6,7 +6,7 @@ use crate::{
     impl_enum_type,
     schema::{
         component_update, system_update, system_update_component_update,
-        system_update_deployment, updateable_component,
+        update_deployment, updateable_component,
     },
     SemverVersion,
 };
@@ -37,6 +37,28 @@ impl From<SystemUpdate> for views::SystemUpdate {
         Self {
             identity: system_update.identity(),
             version: system_update.version.into(),
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "update_status"))]
+    pub struct UpdateStatusEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[diesel(sql_type = UpdateStatusEnum)]
+    pub enum UpdateStatus;
+
+    Updating => b"updating"
+    Steady => b"steady"
+);
+
+impl From<UpdateStatus> for views::UpdateStatus {
+    fn from(status: UpdateStatus) -> Self {
+        match status {
+            UpdateStatus::Updating => Self::Updating,
+            UpdateStatus::Steady => Self::Steady,
         }
     }
 }
@@ -158,7 +180,7 @@ pub struct UpdateableComponent {
     pub device_id: String,
     pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
-    // pub status: VersionStatus,
+    pub status: UpdateStatus,
     /// ID of the parent component, e.g., the sled a disk belongs to. Value will
     /// be `None` for top-level components whose "parent" is the rack.
     pub parent_id: Option<Uuid>,
@@ -173,6 +195,7 @@ impl From<UpdateableComponent> for views::UpdateableComponent {
             component_type: component.component_type.into(),
             version: component.version.into(),
             parent_id: component.parent_id,
+            status: component.status.into(),
         }
     }
 }
@@ -187,18 +210,20 @@ impl From<UpdateableComponent> for views::UpdateableComponent {
     Serialize,
     Deserialize,
 )]
-#[diesel(table_name = system_update_deployment)]
-pub struct SystemUpdateDeployment {
+#[diesel(table_name = update_deployment)]
+pub struct UpdateDeployment {
     #[diesel(embed)]
-    pub identity: SystemUpdateDeploymentIdentity,
+    pub identity: UpdateDeploymentIdentity,
     pub version: SemverVersion,
+    pub status: UpdateStatus,
 }
 
-impl From<SystemUpdateDeployment> for views::SystemUpdateDeployment {
-    fn from(deployment: SystemUpdateDeployment) -> Self {
+impl From<UpdateDeployment> for views::UpdateDeployment {
+    fn from(deployment: UpdateDeployment) -> Self {
         Self {
             identity: deployment.identity(),
             version: deployment.version.into(),
+            status: deployment.status.into(),
         }
     }
 }

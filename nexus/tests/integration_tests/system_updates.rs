@@ -33,9 +33,7 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
                 low: SemverVersion::new(0, 0, 1),
                 high: SemverVersion::new(0, 0, 2),
             },
-            status: views::VersionStatus::Steady {
-                reason: views::VersionSteadyReason::Completed,
-            },
+            status: views::UpdateStatus::Steady,
         }
     );
 }
@@ -105,4 +103,18 @@ async fn test_list_update_components(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn test_list_deployments(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let component_updates =
+        NexusRequest::object_get(&client, &"/v1/system/update/deployments")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<ResultsPage<views::UpdateDeployment>>()
+            .await;
+
+    assert_eq!(component_updates.items.len(), 0);
+    assert_eq!(component_updates.next_page, None);
 }

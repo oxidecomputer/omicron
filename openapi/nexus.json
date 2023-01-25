@@ -9219,7 +9219,7 @@
           "system"
         ],
         "summary": "List all update deployments",
-        "operationId": "system_update_deployments_list",
+        "operationId": "update_deployments_list",
         "parameters": [
           {
             "in": "query",
@@ -9255,7 +9255,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SystemUpdateDeploymentResultsPage"
+                  "$ref": "#/components/schemas/UpdateDeploymentResultsPage"
                 }
               }
             }
@@ -9276,7 +9276,7 @@
           "system"
         ],
         "summary": "Fetch a system update deployment",
-        "operationId": "system_update_deployment_view",
+        "operationId": "update_deployment_view",
         "parameters": [
           {
             "in": "path",
@@ -9294,7 +9294,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SystemUpdateDeployment"
+                  "$ref": "#/components/schemas/UpdateDeployment"
                 }
               }
             }
@@ -9351,7 +9351,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SystemUpdateDeployment"
+                  "$ref": "#/components/schemas/UpdateDeployment"
                 }
               }
             }
@@ -13785,57 +13785,6 @@
           "version"
         ]
       },
-      "SystemUpdateDeployment": {
-        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "id",
-          "time_created",
-          "time_modified",
-          "version"
-        ]
-      },
-      "SystemUpdateDeploymentResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SystemUpdateDeployment"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "SystemUpdateResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -13872,7 +13821,7 @@
         "type": "object",
         "properties": {
           "status": {
-            "$ref": "#/components/schemas/VersionStatus"
+            "$ref": "#/components/schemas/UpdateStatus"
           },
           "version_range": {
             "$ref": "#/components/schemas/VersionRange"
@@ -13938,6 +13887,93 @@
           "items"
         ]
       },
+      "UpdateDeployment": {
+        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UpdateStatus"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SemverVersion"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "time_created",
+          "time_modified",
+          "version"
+        ]
+      },
+      "UpdateDeploymentResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateDeployment"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UpdateStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "updating"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "steady"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
       "UpdateableComponent": {
         "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
         "type": "object",
@@ -13959,6 +13995,9 @@
             "type": "string",
             "format": "uuid"
           },
+          "status": {
+            "$ref": "#/components/schemas/UpdateStatus"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -13977,6 +14016,7 @@
           "component_type",
           "device_id",
           "id",
+          "status",
           "time_created",
           "time_modified",
           "version"
@@ -14227,54 +14267,6 @@
         "required": [
           "high",
           "low"
-        ]
-      },
-      "VersionStatus": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "updating"
-                ]
-              },
-              "target": {
-                "$ref": "#/components/schemas/SemverVersion"
-              }
-            },
-            "required": [
-              "status",
-              "target"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/VersionSteadyReason"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "steady"
-                ]
-              }
-            },
-            "required": [
-              "reason",
-              "status"
-            ]
-          }
-        ]
-      },
-      "VersionSteadyReason": {
-        "type": "string",
-        "enum": [
-          "completed",
-          "stopped",
-          "failed"
         ]
       },
       "Vpc": {

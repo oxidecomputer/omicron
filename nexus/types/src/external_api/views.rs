@@ -406,27 +406,17 @@ pub struct VersionRange {
     pub high: SemverVersion,
 }
 
-// currently shared between SystemVersion and UpdateableComponent, but it seems
-// likely they'll eventually diverge
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum VersionSteadyReason {
-    Completed,
-    Stopped,
-    Failed,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum VersionStatus {
-    Updating { target: SemverVersion },
-    Steady { reason: VersionSteadyReason },
+pub enum UpdateStatus {
+    Updating,
+    Steady,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct SystemVersion {
     pub version_range: VersionRange,
-    pub status: VersionStatus,
+    pub status: UpdateStatus,
     // TODO: time_released? time_last_applied? I got a fever and the only
     // prescription is more timestamps
 }
@@ -476,15 +466,16 @@ pub struct UpdateableComponent {
     pub device_id: String,
     pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
-    // pub status: VersionStatus,
     /// ID of the parent component, e.g., the sled a disk belongs to. Value will
     /// be `None` for top-level components whose "parent" is the rack.
     pub parent_id: Option<Uuid>,
+    pub status: UpdateStatus,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateDeployment {
+pub struct UpdateDeployment {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub version: SemverVersion,
+    pub status: UpdateStatus,
 }

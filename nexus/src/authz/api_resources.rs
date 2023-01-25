@@ -981,7 +981,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "SystemUpdateDeployment",
+    name = "UpdateDeployment",
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
