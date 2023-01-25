@@ -14,11 +14,13 @@ use tui::{
 };
 
 use crate::{
-    defaults::colors::{OX_GRAY, OX_GREEN_DARKEST},
+    defaults::colors::{
+        OX_GRAY, OX_GRAY_DARK, OX_GREEN_DARKEST, OX_GREEN_LIGHT, OX_YELLOW,
+    },
     Frame,
 };
 
-use super::LivenessState;
+use super::{liveness::LivenessStyles, LivenessState};
 
 /// A status bar shown at the bottom of the screen.
 #[derive(Debug)]
@@ -26,10 +28,20 @@ pub struct StatusBar {
     wicketd_liveness: LivenessState,
     mgs_liveness: LivenessState,
     last_redraw_at: Option<Instant>,
+    styles: StatusBarStyles,
 }
 
 impl StatusBar {
     pub fn new() -> Self {
+        let styles = StatusBarStyles {
+            table: Style::default().fg(OX_GRAY).bg(OX_GREEN_DARKEST),
+            liveness: LivenessStyles {
+                live: Style::default().fg(OX_GREEN_LIGHT),
+                delayed: Style::default().fg(OX_YELLOW),
+                time: Style::default().fg(OX_GRAY_DARK),
+            },
+        };
+
         Self {
             // Wicketd is polled every 500ms by wicket. Setting a 1 second
             // liveness threshold means that under normal operation it should
@@ -40,6 +52,7 @@ impl StatusBar {
             // delay.
             mgs_liveness: LivenessState::new(Duration::from_secs(11)),
             last_redraw_at: None,
+            styles,
         }
     }
 
@@ -90,6 +103,12 @@ impl StatusBar {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct StatusBarStyles {
+    pub table: Style,
+    pub liveness: LivenessStyles,
+}
+
 /// The status bar as a widget.
 pub struct StatusBarWidget<'a> {
     bar: &'a StatusBar,
@@ -101,11 +120,14 @@ impl<'a> Widget for StatusBarWidget<'a> {
         const LIVENESS_CELL_WIDTH: u16 = 13;
 
         let (wicketd_spans, wicketd_spans_width) = center_pad(
-            self.bar.wicketd_liveness.compute().to_spans(),
+            self.bar
+                .wicketd_liveness
+                .compute()
+                .to_spans(&self.bar.styles.liveness),
             LIVENESS_CELL_WIDTH,
         );
         let (mgs_spans, mgs_spans_width) = center_pad(
-            self.bar.mgs_liveness.compute().to_spans(),
+            self.bar.mgs_liveness.compute().to_spans(&self.bar.styles.liveness),
             LIVENESS_CELL_WIDTH,
         );
 
@@ -119,7 +141,6 @@ impl<'a> Widget for StatusBarWidget<'a> {
             mgs_spans,
         ]);
 
-        let table_style = Style::default().fg(OX_GRAY).bg(OX_GREEN_DARKEST);
         let table_widths = [
             Constraint::Min(7),
             Constraint::Min(wicketd_spans_width),
@@ -130,7 +151,7 @@ impl<'a> Widget for StatusBarWidget<'a> {
 
         let table = Table::new(std::iter::once(row))
             .widths(&table_widths)
-            .style(table_style)
+            .style(self.bar.styles.table)
             .column_spacing(1);
 
         table.render(area, buf);

@@ -10,7 +10,7 @@
 [[simulated_sps.sidecar]]
 multicast_addr = "::1"
 bind_addrs = ["[::1]:0", "[::1]:0"]
-serial_number = "00000000000000000000000000000001"
+serial_number = "SimSidecar0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
 
@@ -31,14 +31,14 @@ presence = "Failed"
 [[simulated_sps.sidecar]]
 multicast_addr = "::1"
 bind_addrs = ["[::1]:0", "[::1]:0"]
-serial_number = "00000000000000000000000000000002"
+serial_number = "SimSidecar1"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000001"
 
 [[simulated_sps.gimlet]]
 multicast_addr = "::1"
 bind_addrs = ["[::1]:0", "[::1]:0"]
-serial_number = "00000000000000000000000000000003"
+serial_number = "SimGimlet00"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
 
@@ -60,7 +60,7 @@ presence = "Failed"
 [[simulated_sps.gimlet]]
 multicast_addr = "::1"
 bind_addrs = ["[::1]:0", "[::1]:0"]
-serial_number = "00000000000000000000000000000004"
+serial_number = "SimGimlet01"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000003"
 

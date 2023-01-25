@@ -27,12 +27,14 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -195,21 +197,28 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn silos_list_by_name(
+    pub async fn silos_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Silo> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::silo::dsl;
-        paginated(dsl::silo, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::discoverable.eq(true))
-            .select(Silo::as_select())
-            .load_async::<Silo>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(params) => paginated(dsl::silo, dsl::id, &params),
+            PaginatedBy::Name(params) => paginated(
+                dsl::silo,
+                dsl::name,
+                &params.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::discoverable.eq(true))
+        .select(Silo::as_select())
+        .load_async::<Silo>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn silo_delete(

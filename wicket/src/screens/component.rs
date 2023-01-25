@@ -41,8 +41,8 @@ impl ComponentScreen {
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
             ("<ESC>", "Go back to the rack screen"),
-            ("<CTRL-r", "Go back to the rack screen"),
-            ("<CTRL-h", "Toggle this help menu"),
+            ("<CTRL-r>", "Go back to the rack screen"),
+            ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
         ComponentScreen {

@@ -16,37 +16,45 @@ mod location_map;
 pub use self::location_map::LocationConfig;
 pub use self::location_map::LocationDeterminationConfig;
 use self::location_map::LocationMap;
+pub use self::location_map::SwitchPortConfig;
 pub use self::location_map::SwitchPortDescription;
 use self::location_map::ValidatedLocationConfig;
-
-use crate::error::ConfigError;
 use crate::error::SpCommsError;
+use crate::error::StartupError;
 use gateway_messages::IgnitionState;
+use gateway_sp_comms::default_discovery_addr;
+use gateway_sp_comms::BindError;
 use gateway_sp_comms::HostPhase2Provider;
+use gateway_sp_comms::SharedSocket;
 use gateway_sp_comms::SingleSp;
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_with::serde_as;
-use serde_with::DisplayFromStr;
 use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::collections::HashMap;
-use std::convert::TryFrom;
+use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 
-#[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SwitchConfig {
-    pub local_ignition_controller_port: usize,
+    #[serde(default = "default_udp_listen_port")]
+    pub udp_listen_port: u16,
+    pub local_ignition_controller_interface: String,
     pub rpc_max_attempts: usize,
     pub rpc_per_attempt_timeout_millis: u64,
     pub location: LocationConfig,
-    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
-    pub port: HashMap<usize, SwitchPortDescription>,
+    pub port: Vec<SwitchPortDescription>,
+}
+
+fn default_udp_listen_port() -> u16 {
+    gateway_sp_comms::MGS_PORT
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -77,20 +85,21 @@ pub enum SpType {
 )]
 pub(crate) struct SwitchPort(usize);
 
-impl SwitchPort {
-    fn as_ignition_target(self) -> u8 {
-        assert!(
-            self.0 <= usize::from(u8::MAX),
-            "cannot exceed 255 ignition targets / switch ports"
-        );
-        self.0 as u8
-    }
-}
-
 #[derive(Debug)]
 pub struct ManagementSwitch {
     local_ignition_controller_port: SwitchPort,
-    sockets: Arc<HashMap<SwitchPort, SingleSp>>,
+    // Both `port_to_*` fields are "keyed" by `SwitchPort`, which are newtype
+    // wrappers around an index into those vecs. Both are guaranteed to have
+    // length equal to our config file's `[[switch.port]]` section, and we only
+    // ever create and hand out `SwitchPort` instances with indices in-range for
+    // that length.
+    port_to_handle: Arc<Vec<SingleSp>>,
+    port_to_ignition_target: Vec<u8>,
+    // We create a shared socket in real configs, but never use it after
+    // `new()`. We need to hold onto it to prevent it being dropped, though:
+    // When it's dropped, it cancels the background tokio task that loops on
+    // that socket receiving incoming packets.
+    _shared_socket: Option<SharedSocket>,
     location_map: Arc<OnceCell<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
     log: Logger,
@@ -105,64 +114,139 @@ impl Drop for ManagementSwitch {
 }
 
 impl ManagementSwitch {
-    pub(crate) async fn new<T: HostPhase2Provider + Clone>(
+    pub(crate) async fn new<T: HostPhase2Provider>(
         config: SwitchConfig,
-        host_phase2_provider: T,
+        host_phase2_provider: &Arc<T>,
         log: &Logger,
-    ) -> Result<Self, ConfigError> {
+    ) -> Result<Self, StartupError> {
         let log = log.new(o!("component" => "ManagementSwitch"));
 
-        // begin by binding to all our configured ports; insert them into a map
-        // keyed by the switch port they're listening on
-        let mut sockets = HashMap::with_capacity(config.port.len());
-        // while we're at it, rekey `config.port` to use `SwitchPort` keys
-        // instead of `usize`.
-        let mut ports = HashMap::with_capacity(config.port.len());
-        for (port, port_config) in config.port {
-            let single_sp = SingleSp::new(
-                port_config.config.clone(),
-                config.rpc_max_attempts,
-                Duration::from_millis(config.rpc_per_attempt_timeout_millis),
-                host_phase2_provider.clone(),
-                log.new(o!("switch_port" => port)),
-            );
-            let port = SwitchPort(port);
+        // Skim over our port configs - either all should be simulated or all
+        // should be switch zone interfaces. Reject a mix.
+        let mut shared_socket = None;
+        for (i, port_desc) in config.port.iter().enumerate() {
+            if i == 0 {
+                // First item: either create a shared socket (if we're going to
+                // share one socket among multiple switch zone VLAN interfaces)
+                // or leave it as `None` (if we're going to be connecting to
+                // simulated SPs by address).
+                if let SwitchPortConfig::SwitchZoneInterface { .. } =
+                    &port_desc.config
+                {
+                    shared_socket = Some(
+                        SharedSocket::bind(
+                            config.udp_listen_port,
+                            Arc::clone(&host_phase2_provider),
+                            log.clone(),
+                        )
+                        .await?,
+                    );
+                }
+            } else {
+                match (&shared_socket, &port_desc.config) {
+                    // OK - config is consistent
+                    (Some(_), SwitchPortConfig::SwitchZoneInterface { .. })
+                    | (None, SwitchPortConfig::Simulated { .. }) => (),
 
-            sockets.insert(port, single_sp);
-            ports.insert(port, port_config);
+                    // not OK - config is mixed
+                    (None, SwitchPortConfig::SwitchZoneInterface { .. })
+                    | (Some(_), SwitchPortConfig::Simulated { .. }) => {
+                        return Err(StartupError::InvalidConfig {
+                            reasons: vec![concat!(
+                                "switch port contains a mixture of `simulated`",
+                                " and `switch-zone-interface`"
+                            )
+                            .to_string()],
+                        });
+                    }
+                }
+            }
         }
 
-        // sanity check the local ignition controller port is bound
-        let local_ignition_controller_port =
-            SwitchPort(config.local_ignition_controller_port);
-        if !ports.contains_key(&local_ignition_controller_port) {
-            return Err(ConfigError::InvalidConfig {
+        // Convert our config into actual SP handles and sockets, keyed by
+        // `SwitchPort` (newtype around an index into `config.port`).
+        let mut port_to_handle = Vec::with_capacity(config.port.len());
+        let mut port_to_desc = Vec::with_capacity(config.port.len());
+        let mut port_to_ignition_target = Vec::with_capacity(config.port.len());
+        let mut interface_to_port = HashMap::with_capacity(config.port.len());
+        for (i, port_desc) in config.port.into_iter().enumerate() {
+            let per_attempt_timeout =
+                Duration::from_millis(config.rpc_per_attempt_timeout_millis);
+            let single_sp = match &port_desc.config {
+                SwitchPortConfig::SwitchZoneInterface { interface } => {
+                    SingleSp::new(
+                        shared_socket.as_ref().unwrap(),
+                        gateway_sp_comms::SwitchPortConfig {
+                            discovery_addr: default_discovery_addr(),
+                            interface: interface.clone(),
+                        },
+                        config.rpc_max_attempts,
+                        per_attempt_timeout,
+                    )
+                    .await
+                }
+                SwitchPortConfig::Simulated { addr, .. } => {
+                    // Bind a new socket for each simulated switch port.
+                    let bind_addr: SocketAddrV6 =
+                        SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
+                    let socket =
+                        UdpSocket::bind(bind_addr).await.map_err(|err| {
+                            StartupError::BindError(BindError {
+                                addr: bind_addr,
+                                err,
+                            })
+                        })?;
+                    SingleSp::new_direct_socket_for_testing(
+                        socket,
+                        *addr,
+                        config.rpc_max_attempts,
+                        per_attempt_timeout,
+                        log.clone(),
+                    )
+                }
+            };
+
+            let port = SwitchPort(i);
+            interface_to_port
+                .insert(port_desc.config.interface().to_string(), port);
+            port_to_ignition_target.push(port_desc.ignition_target);
+            port_to_handle.push(single_sp);
+            port_to_desc.push(port_desc);
+        }
+
+        // Ensure the local ignition interface was listed in config.port
+        let local_ignition_controller_port = interface_to_port
+            .get(&config.local_ignition_controller_interface)
+            .copied()
+            .ok_or_else(|| StartupError::InvalidConfig {
                 reasons: vec![format!(
-                    "missing local ignition controller port {}",
-                    local_ignition_controller_port.0
+                    "missing port local ignition controller {}",
+                    config.local_ignition_controller_interface
                 )],
-            });
-        }
+            })?;
 
         // Start running discovery to figure out the physical location of
         // ourselves (and therefore all SPs we talk to). We don't block waiting
         // for this, but we won't be able to service requests until it
         // completes (because we won't be able to map "the SP of sled 7" to a
         // correct switch port).
-        let sockets = Arc::new(sockets);
+        let port_to_handle = Arc::new(port_to_handle);
         let location_map = Arc::new(OnceCell::new());
         let discovery_task = {
             let log = log.clone();
-            let sockets = Arc::clone(&sockets);
+            let port_to_handle = Arc::clone(&port_to_handle);
             let location_map = Arc::clone(&location_map);
-            let config =
-                ValidatedLocationConfig::try_from((&ports, config.location))?;
+            let config = ValidatedLocationConfig::validate(
+                &port_to_desc,
+                &interface_to_port,
+                config.location,
+            )?;
 
             tokio::spawn(async move {
                 let result = LocationMap::run_discovery(
                     config,
-                    ports,
-                    Arc::clone(&sockets),
+                    port_to_desc,
+                    port_to_handle,
                     &log,
                 )
                 .await;
@@ -176,7 +260,9 @@ impl ManagementSwitch {
         Ok(Self {
             local_ignition_controller_port,
             location_map,
-            sockets,
+            _shared_socket: shared_socket,
+            port_to_handle,
+            port_to_ignition_target,
             discovery_task,
             log,
         })
@@ -211,7 +297,7 @@ impl ManagementSwitch {
     /// This is infallible: [`SwitchPort`] is a newtype that we control, and
     /// we only hand out instances that match our configuration.
     fn port_to_sp(&self, port: SwitchPort) -> &SingleSp {
-        self.sockets.get(&port).unwrap()
+        &self.port_to_handle[port.0]
     }
 
     /// Get the switch port associated with the given logical identifier.
@@ -253,7 +339,7 @@ impl ManagementSwitch {
         id: SpIdentifier,
     ) -> Result<u8, SpCommsError> {
         let port = self.get_port(id)?;
-        Ok(port.as_ignition_target())
+        Ok(self.port_to_ignition_target[port.0])
     }
 
     /// Get an iterator providing the ID and handle to communicate with every SP
@@ -279,12 +365,15 @@ impl ManagementSwitch {
         &self,
         target: usize,
     ) -> Option<SwitchPort> {
-        let port = SwitchPort(target);
-        if self.sockets.contains_key(&port) {
-            Some(port)
-        } else {
-            None
+        // We could build an ignition target -> port map, but for the size of
+        // this vec (~36) a scan is probably fine.
+        for (i, port_target) in self.port_to_ignition_target.iter().enumerate()
+        {
+            if target == usize::from(*port_target) {
+                return Some(SwitchPort(i));
+            }
         }
+        None
     }
 
     /// Ask the local ignition controller for the ignition state of all SPs.

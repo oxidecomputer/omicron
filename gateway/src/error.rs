@@ -9,13 +9,17 @@ use dropshot::HttpError;
 use gateway_messages::SpError;
 use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
+use gateway_sp_comms::BindError;
 use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum ConfigError {
+pub enum StartupError {
     #[error("invalid configuration file: {}", .reasons.join(", "))]
     InvalidConfig { reasons: Vec<String> },
+
+    #[error(transparent)]
+    BindError(#[from] BindError),
 }
 
 #[derive(Debug, Error)]

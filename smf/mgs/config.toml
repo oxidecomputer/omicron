@@ -3,13 +3,13 @@
 #
 
 [switch]
-# which vsc port is connected to our local sidecar SP (i.e., the SP that acts as
-# our contact to the ignition controller)
-local_ignition_controller_port = 0
+# Which interface is connected to our local sidecar SP (i.e., the SP that acts
+# as our contact to the ignition controller)?
+local_ignition_controller_interface = "sidecar0"
 
-# when sending UDP RPC packets to an SP, how many total attempts do we make
+# When sending UDP RPC packets to an SP, how many total attempts do we make
 # before giving up?
-rpc_max_attempts = 15
+rpc_max_attempts = 5
 
 # sleep time between UDP RPC resends (up to `rpc_max_attempts`)
 rpc_per_attempt_timeout_millis = 2000
@@ -31,12 +31,18 @@ names = ["switch0", "switch1"]
 # if there is a miscabling that results in an unsolvable system (e.g.,
 # determination 0 reports "switch0" and determination 1 reports "switch1").
 [[switch.location.determination]]
-switch_port = 1
-sp_port_1 = ["switch0"]
-sp_port_2 = ["switch1"]
-
-[[switch.location.determination]]
-switch_port = 2
+# We can use any gimlet as a determinant for our location - they should either
+# all respond "port 1" or all "port 2", which determines which switch we are.
+interfaces = [
+    "gimlet0", "gimlet1", "gimlet2", "gimlet3",
+    "gimlet4", "gimlet5", "gimlet6", "gimlet7",
+    "gimlet8", "gimlet9", "gimlet10", "gimlet11",
+    "gimlet12", "gimlet13", "gimlet14", "gimlet15",
+    "gimlet16", "gimlet17", "gimlet18", "gimlet19",
+    "gimlet20", "gimlet21", "gimlet22", "gimlet23",
+    "gimlet24", "gimlet25", "gimlet26", "gimlet27",
+    "gimlet28", "gimlet29", "gimlet30", "gimlet31"
+]
 sp_port_1 = ["switch0"]
 sp_port_2 = ["switch1"]
 
@@ -45,29 +51,229 @@ sp_port_2 = ["switch1"]
 # logical ID of the remote SP ("sled 7", "switch 1", etc.), which must have an
 # entry for each member of `[switch.location]` above.
 #
-# TODO This needs to be replaced with information relevant to real vlan
-# datalinks. For now we pick a bunch of arbitrary addresses and ports that don't
-# mean anything unless someone spins up simulated SPs on those ports.
-[switch.port.0]
-data_link_addr = "[::]:33200"
-multicast_addr = "[ff15:0:1de::0]:33300"
-[switch.port.0.location]
-switch0 = ["switch", 0]
-switch1 = ["switch", 1]
+# TODO: These interface names are based on the manual VLAN interfaces used in
+# compliance, which pre-applied port -> cubby mappings. Double-check dendrite
+# will create the interfaces with these names and that mapping applied.
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "sidecar0"
+# TODO: ignition-target 35 does not exist on rev-b sidecar but is coming:
+# https://github.com/oxidecomputer/hardware-sidecar/issues/735. We'll configure
+# it here but know that requests involving it will fail for now.
+ignition-target = 35
+location = { switch0 = ["switch", 0], switch1 = ["switch", 1] }
 
-[switch.port.1]
-data_link_addr = "[::]:33201"
-multicast_addr = "[ff15:0:1de::1]:33310"
-[switch.port.1.location]
-switch0 = ["sled", 0]
-switch1 = ["sled", 1]
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "sidecar1"
+ignition-target = 34
+location = { switch0 = ["switch", 1], switch1 = ["switch", 0] }
 
-[switch.port.2]
-data_link_addr = "[::]:33202"
-multicast_addr = "[ff15:0:1de::2]:33320"
-[switch.port.2.location]
-switch0 = ["sled", 1]
-switch1 = ["sled", 0]
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "psc0"
+ignition-target = 32
+location = { switch0 = ["power", 0], switch1 = ["power", 0] }
+
+# We have an ignition-target set aside for PSC1, but do not create an
+# interface for it since we don't have a second PSC.
+#[[switch.port]]
+#kind = "switch-zone-interface"
+#interface = "psc1"
+#ignition-target = 33
+#location = { switch0 = ["power", 1], switch1 = ["power", 1] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet0"
+ignition-target = 14
+location = { switch0 = ["sled", 0], switch1 = ["sled", 0] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet1"
+ignition-target = 30
+location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet2"
+ignition-target = 15
+location = { switch0 = ["sled", 2], switch1 = ["sled", 2] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet3"
+ignition-target = 31
+location = { switch0 = ["sled", 3], switch1 = ["sled", 3] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet4"
+ignition-target = 13
+location = { switch0 = ["sled", 4], switch1 = ["sled", 4] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet5"
+ignition-target = 29
+location = { switch0 = ["sled", 5], switch1 = ["sled", 5] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet6"
+ignition-target = 12
+location = { switch0 = ["sled", 6], switch1 = ["sled", 6] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet7"
+ignition-target = 28
+location = { switch0 = ["sled", 7], switch1 = ["sled", 7] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet8"
+ignition-target = 10
+location = { switch0 = ["sled", 8], switch1 = ["sled", 8] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet9"
+ignition-target = 26
+location = { switch0 = ["sled", 9], switch1 = ["sled", 9] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet10"
+ignition-target = 11
+location = { switch0 = ["sled", 10], switch1 = ["sled", 10] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet11"
+ignition-target = 27
+location = { switch0 = ["sled", 11], switch1 = ["sled", 11] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet12"
+ignition-target = 9
+location = { switch0 = ["sled", 12], switch1 = ["sled", 12] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet13"
+ignition-target = 25
+location = { switch0 = ["sled", 13], switch1 = ["sled", 13] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet14"
+ignition-target = 8
+location = { switch0 = ["sled", 14], switch1 = ["sled", 14] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet15"
+ignition-target = 24
+location = { switch0 = ["sled", 15], switch1 = ["sled", 15] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet16"
+ignition-target = 4
+location = { switch0 = ["sled", 16], switch1 = ["sled", 16] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet17"
+ignition-target = 20
+location = { switch0 = ["sled", 17], switch1 = ["sled", 17] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet18"
+ignition-target = 5
+location = { switch0 = ["sled", 18], switch1 = ["sled", 18] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet19"
+ignition-target = 21
+location = { switch0 = ["sled", 19], switch1 = ["sled", 19] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet20"
+ignition-target = 7
+location = { switch0 = ["sled", 20], switch1 = ["sled", 20] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet21"
+ignition-target = 23
+location = { switch0 = ["sled", 21], switch1 = ["sled", 21] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet22"
+ignition-target = 6
+location = { switch0 = ["sled", 22], switch1 = ["sled", 22] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet23"
+ignition-target = 22
+location = { switch0 = ["sled", 23], switch1 = ["sled", 23] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet24"
+ignition-target = 0
+location = { switch0 = ["sled", 24], switch1 = ["sled", 24] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet25"
+ignition-target = 16
+location = { switch0 = ["sled", 25], switch1 = ["sled", 25] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet26"
+ignition-target = 1
+location = { switch0 = ["sled", 26], switch1 = ["sled", 26] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet27"
+ignition-target = 17
+location = { switch0 = ["sled", 27], switch1 = ["sled", 27] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet28"
+ignition-target = 3
+location = { switch0 = ["sled", 28], switch1 = ["sled", 28] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet29"
+ignition-target = 19
+location = { switch0 = ["sled", 29], switch1 = ["sled", 29] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet30"
+ignition-target = 2
+location = { switch0 = ["sled", 30], switch1 = ["sled", 30] }
+
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "gimlet31"
+ignition-target = 18
+location = { switch0 = ["sled", 31], switch1 = ["sled", 31] }
 
 [log]
 level = "info"

@@ -9,8 +9,6 @@ use tui::{
     text::{Span, Spans},
 };
 
-use crate::defaults::colors::{OX_GRAY_DARK, OX_GREEN_LIGHT, OX_YELLOW};
-
 /// Tracker used by a single instance of liveness.
 #[derive(Debug)]
 pub struct LivenessState {
@@ -57,33 +55,36 @@ pub enum ComputedLiveness {
 }
 
 impl ComputedLiveness {
-    pub fn to_spans(&self) -> Spans<'static> {
+    pub fn to_spans(&self, styles: &LivenessStyles) -> Spans<'static> {
         match self {
             ComputedLiveness::Live(secs) => Spans::from(vec![
-                Span::styled("live", Style::default().fg(OX_GREEN_LIGHT)),
+                Span::styled("live", styles.live),
                 Span::raw(" "),
-                Self::secs_span(*secs),
+                Self::secs_span(*secs, styles.time),
             ]),
             ComputedLiveness::Delayed(secs) => Spans::from(vec![
-                Span::styled("delayed", Style::default().fg(OX_YELLOW)),
+                Span::styled("delayed", styles.delayed),
                 Span::raw(" "),
-                Self::secs_span(*secs),
+                Self::secs_span(*secs, styles.time),
             ]),
-            ComputedLiveness::NoResponse => Spans::from(Span::styled(
-                "no response",
-                Style::default().fg(OX_YELLOW),
-            )),
+            ComputedLiveness::NoResponse => {
+                Spans::from(Span::styled("no response", styles.delayed))
+            }
         }
     }
 
-    fn secs_span(secs: u64) -> Span<'static> {
+    fn secs_span(secs: u64, time_style: Style) -> Span<'static> {
         if secs < 1 {
-            Span::styled("(<1s)", Style::default().fg(OX_GRAY_DARK))
+            Span::styled("(<1s)", time_style)
         } else {
-            Span::styled(
-                format!("({secs}s)"),
-                Style::default().fg(OX_GRAY_DARK),
-            )
+            Span::styled(format!("({secs}s)"), time_style)
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct LivenessStyles {
+    pub live: Style,
+    pub delayed: Style,
+    pub time: Style,
 }

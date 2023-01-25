@@ -303,25 +303,23 @@ pub type PaginatedByNameOrId<Selector = ()> = PaginationParams<
 pub type PageSelectorByNameOrId<Selector = ()> =
     PageSelector<ScanByNameOrId<Selector>, NameOrId>;
 
-pub fn name_or_id_pagination<
-    'a,
-    Selector: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
->(
-    params: &PaginatedByNameOrId<Selector>,
-    pagparams: &'a DataPageParams<NameOrId>,
-) -> Result<PaginatedBy<'a, Selector>, HttpError> {
-    let params = ScanByNameOrId::<Selector>::from_query(params)?;
-    match params.sort_by {
-        NameOrIdSortMode::NameAscending => Ok(PaginatedBy::Name(
-            pagparams.try_into()?,
-            params.selector.clone(),
-        )),
-        NameOrIdSortMode::NameDescending => Ok(PaginatedBy::Name(
-            pagparams.try_into()?,
-            params.selector.clone(),
-        )),
+pub fn name_or_id_pagination<'a, Selector>(
+    pag_params: &'a DataPageParams<NameOrId>,
+    scan_params: &'a ScanByNameOrId<Selector>,
+) -> Result<PaginatedBy<'a>, HttpError>
+where
+    Selector:
+        Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+{
+    match scan_params.sort_by {
+        NameOrIdSortMode::NameAscending => {
+            Ok(PaginatedBy::Name(pag_params.try_into()?))
+        }
+        NameOrIdSortMode::NameDescending => {
+            Ok(PaginatedBy::Name(pag_params.try_into()?))
+        }
         NameOrIdSortMode::IdAscending => {
-            Ok(PaginatedBy::Id(pagparams.try_into()?, params.selector.clone()))
+            Ok(PaginatedBy::Id(pag_params.try_into()?))
         }
     }
 }
@@ -333,7 +331,7 @@ pub struct ScanByNameOrId<Selector> {
     sort_by: NameOrIdSortMode,
 
     #[serde(flatten)]
-    selector: Selector,
+    pub selector: Selector,
 }
 /// Supported set of sort modes for scanning by name or id
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
@@ -356,9 +354,9 @@ fn bad_token_error() -> HttpError {
 }
 
 #[derive(Debug)]
-pub enum PaginatedBy<'a, Selector> {
-    Id(DataPageParams<'a, Uuid>, Selector),
-    Name(DataPageParams<'a, Name>, Selector),
+pub enum PaginatedBy<'a> {
+    Id(DataPageParams<'a, Uuid>),
+    Name(DataPageParams<'a, Name>),
 }
 
 impl<
@@ -780,7 +778,7 @@ mod test {
         // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
-        let data_page = match name_or_id_pagination(&p0, &data_page) {
+        let data_page = match name_or_id_pagination(&data_page, &scan) {
             Ok(PaginatedBy::Name(params, ..)) => params,
             _ => {
                 panic!("Expected Name pagination, got Id pagination")
@@ -791,7 +789,7 @@ mod test {
         assert_eq!(data_page.limit, limit);
 
         let data_page = data_page_params_with_limit(limit, &p1).unwrap();
-        let data_page = match name_or_id_pagination(&p1, &data_page) {
+        let data_page = match name_or_id_pagination(&data_page, &scan) {
             Ok(PaginatedBy::Name(params, ..)) => params,
             _ => {
                 panic!("Expected Name pagination, got Id pagination")
@@ -831,7 +829,7 @@ mod test {
         // Verify data pages based on the query params.
         let limit = NonZeroU32::new(123).unwrap();
         let data_page = data_page_params_with_limit(limit, &p0).unwrap();
-        let data_page = match name_or_id_pagination(&p0, &data_page) {
+        let data_page = match name_or_id_pagination(&data_page, &scan) {
             Ok(PaginatedBy::Id(params, ..)) => params,
             _ => {
                 panic!("Expected id pagination, got name pagination")
@@ -842,7 +840,7 @@ mod test {
         assert_eq!(data_page.limit, limit);
 
         let data_page = data_page_params_with_limit(limit, &p1).unwrap();
-        let data_page = match name_or_id_pagination(&p1, &data_page) {
+        let data_page = match name_or_id_pagination(&data_page, &scan) {
             Ok(PaginatedBy::Id(params, ..)) => params,
             _ => {
                 panic!("Expected id pagination, got name pagination")

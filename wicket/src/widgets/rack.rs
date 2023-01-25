@@ -14,11 +14,14 @@ use crate::screens::TabIndex;
 use slog::Logger;
 use std::collections::BTreeMap;
 use tui::buffer::Buffer;
+use tui::layout::Alignment;
 use tui::layout::Rect;
 use tui::style::Color;
 use tui::style::Style;
+use tui::text::Text;
 use tui::widgets::Block;
 use tui::widgets::Borders;
+use tui::widgets::Paragraph;
 use tui::widgets::Widget;
 
 #[derive(Debug, Clone)]
@@ -155,11 +158,22 @@ fn borders(height: u16) -> Borders {
 
 impl<'a> Widget for Rack<'a> {
     fn render(self, _area: Rect, buf: &mut Buffer) {
-        for (id, rect) in self.state.component_rects.iter() {
-            match id {
-                ComponentId::Sled(i) => self.draw_sled(buf, rect, *i),
-                ComponentId::Switch(i) => self.draw_switch(buf, rect, *i),
-                ComponentId::Psc(i) => self.draw_power_shelf(buf, rect, *i),
+        match &self.state.component_rects {
+            ComponentRects::Displayed { rects_map, .. } => {
+                for (id, rect) in rects_map {
+                    match id {
+                        ComponentId::Sled(i) => self.draw_sled(buf, rect, *i),
+                        ComponentId::Switch(i) => {
+                            self.draw_switch(buf, rect, *i)
+                        }
+                        ComponentId::Psc(i) => {
+                            self.draw_power_shelf(buf, rect, *i)
+                        }
+                    }
+                }
+            }
+            ComponentRects::WindowTooShort { text, text_rect } => {
+                text.clone().render(*text_rect, buf);
             }
         }
     }
@@ -198,10 +212,9 @@ impl KnightRiderMode {
 pub struct RackState {
     control_id: ControlId,
     pub log: Option<Logger>,
-    pub rect: Rect,
     pub hovered: Option<ComponentId>,
     pub tabbed: Option<ComponentId>,
-    pub component_rects: BTreeMap<ComponentId, Rect>,
+    component_rects: ComponentRects,
     pub tab_index: TabIndex,
     pub tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
     pub component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
@@ -214,26 +227,18 @@ impl RackState {
         let mut state = RackState {
             control_id: get_control_id(),
             log: None,
-            rect: Rect::default(),
             hovered: None,
             tabbed: None,
-            component_rects: BTreeMap::new(),
+            // This will be filled out in the initial self.resize.
+            component_rects: ComponentRects::WindowTooShort {
+                text: Paragraph::new(""),
+                text_rect: Rect::default(),
+            },
             tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             tab_index_by_component_id: BTreeMap::new(),
             component_id_by_tab_index: BTreeMap::new(),
             knight_rider_mode: None,
         };
-
-        for i in 0..32 {
-            state.component_rects.insert(ComponentId::Sled(i), Rect::default());
-        }
-
-        for i in 0..2 {
-            state
-                .component_rects
-                .insert(ComponentId::Switch(i), Rect::default());
-            state.component_rects.insert(ComponentId::Psc(i), Rect::default());
-        }
 
         state.init_tab_index();
         state
@@ -241,9 +246,13 @@ impl RackState {
 
     pub fn toggle_knight_rider_mode(&mut self) {
         if self.knight_rider_mode.is_none() {
-            let mut kr = KnightRiderMode::default();
-            kr.width = self.rect.width / 2 - 2;
-            self.knight_rider_mode = Some(kr);
+            if let ComponentRects::Displayed { rack_rect, .. } =
+                &mut self.component_rects
+            {
+                let mut kr = KnightRiderMode::default();
+                kr.width = rack_rect.width / 2 - 2;
+                self.knight_rider_mode = Some(kr);
+            }
         } else {
             self.knight_rider_mode = None;
         }
@@ -255,27 +264,35 @@ impl RackState {
     /// Return true if the component being hovered over changed, false otherwise. This
     /// allows us to limit the number of re-draws necessary.
     pub fn set_hover_state(&mut self, x: u16, y: u16) -> bool {
-        // Find the interesecting component.
-        // I'm sure there's a faster way to do this with percentages, etc..,
-        // but this works for now.
-        for (id, rect) in self.component_rects.iter() {
-            let mouse_pointer = Rect { x, y, width: 1, height: 1 };
-            if rect.intersects(mouse_pointer) {
-                if self.hovered == Some(*id) {
-                    // No chnage
-                    return false;
+        match &self.component_rects {
+            ComponentRects::Displayed { rects_map, .. } => {
+                // Find the interesecting component.
+                // I'm sure there's a faster way to do this with percentages, etc..,
+                // but this works for now.
+                for (id, rect) in rects_map {
+                    let mouse_pointer = Rect { x, y, width: 1, height: 1 };
+                    if rect.intersects(mouse_pointer) {
+                        if self.hovered == Some(*id) {
+                            // No chnage
+                            return false;
+                        } else {
+                            self.hovered = Some(*id);
+                            return true;
+                        }
+                    }
+                }
+                if self.hovered == None {
+                    // No change
+                    false
                 } else {
-                    self.hovered = Some(*id);
-                    return true;
+                    self.hovered = None;
+                    true
                 }
             }
-        }
-        if self.hovered == None {
-            // No change
-            false
-        } else {
-            self.hovered = None;
-            true
+            ComponentRects::WindowTooShort { .. } => {
+                // Nothing to hover.
+                false
+            }
         }
     }
 
@@ -341,8 +358,8 @@ impl RackState {
     //
     // Therefore the minimum height of the rack is 2*16 + 2*2 + 2*2 + 1 = 41 lines.
     //
-    // With a 5 line margin at the top, the minimum size of the terminal is 46
-    // lines.
+    // With a 5 line margin at the top and a 2 line margin at the bottom, the
+    // minimum size of the terminal is 48 lines.
     //
     // If the terminal is smaller than 46 lines, the artistic rendering will
     // get progressively worse. XXX: We may want to bail on this instead.
@@ -351,19 +368,37 @@ impl RackState {
     // don't sweat it.
     //
     // The calculations below follow from this logic
-    pub fn resize(&mut self, width: u16, height: u16, margin: &Height) {
-        // Give ourself room for a top margin
-        let max_height = height - margin.0;
+    pub fn resize(
+        &mut self,
+        width: u16,
+        height: u16,
+        top_margin: Height,
+        bottom_margin: Height,
+    ) {
+        // Give ourself room for a top and bottom margin.
+        let max_height = height - top_margin.0 - bottom_margin.0;
 
-        // Let's size our components
+        // Let's size our components:
         let (rack_height, sled_height, other_height): (u16, u16, u16) =
             if max_height < 20 {
-                panic!(
-                    "Terminal size must be at least {} lines long",
-                    20 + margin.0
-                );
+                // The window is too short.
+                let text = Paragraph::new(Text::raw(format!(
+                    "[window too short: resize to at least {} lines high]",
+                    20 + top_margin.0 + bottom_margin.0
+                )))
+                .alignment(Alignment::Center);
+                // Center vertically.
+                let text_rect = Rect {
+                    x: 0,
+                    y: top_margin.0 + max_height / 2,
+                    width,
+                    height: 1,
+                };
+                self.component_rects =
+                    ComponentRects::WindowTooShort { text, text_rect };
+                return;
             } else if max_height < 37 {
-                (21, 1, 1)
+                (20, 1, 1)
             } else if max_height < 41 {
                 (37, 2, 1)
             } else if max_height < 56 {
@@ -379,72 +414,92 @@ impl RackState {
                 (component_height * 20, component_height, component_height)
             };
 
-        let mut rect = Rect { x: 0, y: 0, width, height: rack_height };
+        let mut rack_rect = Rect { x: 0, y: 0, width, height: rack_height };
 
         // Center the rack vertically as much as possible
         let extra_margin = (max_height - rack_height) / 2;
-        rect.y = margin.0 + extra_margin;
+        rack_rect.y = top_margin.0 + extra_margin;
 
         // Scale proportionally and center the rack horizontally
-        rect.width = make_even(rack_height * 2 / 3);
-        rect.x = width / 2 - rect.width / 2;
+        rack_rect.width = make_even(rack_height * 2 / 3);
+        rack_rect.x = width / 2 - rack_rect.width / 2;
 
-        let sled_width = rect.width / 2;
-
-        // Save our rack rect for later
-        self.rect = rect;
+        let sled_width = rack_rect.width / 2;
 
         // Is KnightRiderModeEnabled. Need to reset the width.
         if let Some(kr) = &mut self.knight_rider_mode {
             kr.pos = 0;
             kr.move_left = false;
-            kr.width = rect.width / 2 - 2;
+            kr.width = rack_rect.width / 2 - 2;
         }
+
+        let mut rects_map = ComponentRectsMap::new();
 
         // Top Sleds
         for i in 0..16u8 {
-            self.size_sled(i, &rect, sled_height, sled_width, other_height);
+            Self::size_sled(
+                &mut rects_map,
+                i,
+                &rack_rect,
+                sled_height,
+                sled_width,
+                other_height,
+            );
         }
 
         // Top Switch
-        let switch =
-            self.component_rects.get_mut(&ComponentId::Switch(1)).unwrap();
-        switch.y = rect.y + sled_height * 8;
-        switch.x = rect.x;
-        switch.height = other_height;
-        switch.width = sled_width * 2;
+        let top_switch_rect = Rect::new(
+            rack_rect.x,
+            rack_rect.y + sled_height * 8,
+            sled_width * 2,
+            other_height,
+        );
+        rects_map.insert(ComponentId::Switch(1), top_switch_rect);
 
         // Power Shelves
         for i in [17, 18] {
-            let shelf = self
-                .component_rects
-                .get_mut(&ComponentId::Psc(18 - i))
-                .unwrap();
-            shelf.y = rect.y + sled_height * 8 + other_height * (i as u16 - 16);
-            shelf.x = rect.x;
-            shelf.height = other_height;
-            shelf.width = sled_width * 2;
+            let shelf_rect = Rect {
+                x: rack_rect.x,
+                y: rack_rect.y
+                    + sled_height * 8
+                    + other_height * (i as u16 - 16),
+                width: sled_width * 2,
+                height: other_height,
+            };
+            rects_map.insert(ComponentId::Psc(18 - i), shelf_rect);
         }
 
         // Bottom Switch
-        let switch =
-            self.component_rects.get_mut(&ComponentId::Switch(0)).unwrap();
-        switch.y = rect.y + sled_height * 8 + 3 * other_height;
-        switch.x = rect.x;
-        switch.height = other_height;
-        switch.width = sled_width * 2;
+        let bottom_switch_rect = Rect {
+            x: rack_rect.x,
+            y: rack_rect.y + sled_height * 8 + 3 * other_height,
+            width: sled_width * 2,
+            height: other_height,
+        };
+
+        rects_map.insert(ComponentId::Switch(0), bottom_switch_rect);
 
         // Bottom Sleds
         // We treat each non-sled as 2 sleds for layout purposes
         for i in 24..40 {
-            self.size_sled(i, &rect, sled_height, sled_width, other_height);
+            Self::size_sled(
+                &mut rects_map,
+                i,
+                &rack_rect,
+                sled_height,
+                sled_width,
+                other_height,
+            );
         }
+
+        self.component_rects =
+            ComponentRects::Displayed { rack_rect, rects_map };
     }
 
     // Sleds are numbered bottom-to-top and left-to-rigth
     // See https://rfd.shared.oxide.computer/rfd/0200#_number_ordering
     fn size_sled(
-        &mut self,
+        rects_map: &mut ComponentRectsMap,
         i: u8,
         rack: &Rect,
         sled_height: u16,
@@ -453,37 +508,35 @@ impl RackState {
     ) {
         // The power shelves and switches are in between in the layout
         let index = if i < 16 { i } else { i - 8 };
-        let mut sled = 31 - index;
+        let mut sled_index = 31 - index;
         // Swap left and right
-        if sled & 1 == 1 {
-            sled -= 1;
+        if sled_index & 1 == 1 {
+            sled_index -= 1;
         } else {
-            sled += 1;
-        }
-        let sled =
-            self.component_rects.get_mut(&ComponentId::Sled(sled)).unwrap();
-
-        if index < 16 {
-            sled.y = rack.y + sled_height * (index as u16 / 2);
-        } else {
-            sled.y =
-                rack.y + sled_height * (index as u16 / 2) + other_height * 4;
+            sled_index += 1;
         }
 
-        if index % 2 == 0 {
+        let x = if index % 2 == 0 {
             // left sled
-            sled.x = rack.x
+            rack.x
         } else {
             // right sled
-            sled.x = rack.x + sled_width;
-        }
-        if (index == 30 || index == 31) && sled_height == 2 {
-            // We saved space for a bottom border
-            sled.height = 3;
+            rack.x + sled_width
+        };
+        let y = if index < 16 {
+            rack.y + sled_height * (index as u16 / 2)
         } else {
-            sled.height = sled_height;
-        }
-        sled.width = sled_width;
+            rack.y + sled_height * (index as u16 / 2) + other_height * 4
+        };
+        let height = if (index == 30 || index == 31) && sled_height == 2 {
+            // We saved space for a bottom border
+            3
+        } else {
+            sled_height
+        };
+
+        let sled_rect = Rect { x, y, width: sled_width, height };
+        rects_map.insert(ComponentId::Sled(sled_index), sled_rect);
     }
 
     // We tab bottom-to-top, left-to-right, same as component numbering
@@ -521,6 +574,24 @@ impl Control for RackState {
     }
 
     fn rect(&self) -> Rect {
-        self.rect
+        match &self.component_rects {
+            ComponentRects::Displayed { rack_rect, .. } => *rack_rect,
+            ComponentRects::WindowTooShort { text_rect, .. } => *text_rect,
+        }
     }
 }
+
+#[derive(Clone, Debug)]
+enum ComponentRects {
+    Displayed {
+        /// The enclosing rect for the rack.
+        rack_rect: Rect,
+        /// The individual rects.
+        rects_map: ComponentRectsMap,
+    },
+
+    /// The window is too short and needs to be resized.
+    WindowTooShort { text: Paragraph<'static>, text_rect: Rect },
+}
+
+type ComponentRectsMap = BTreeMap<ComponentId, Rect>;

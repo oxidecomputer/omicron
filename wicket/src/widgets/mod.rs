@@ -24,10 +24,10 @@ pub use banner::Banner;
 pub use help_button::{HelpButton, HelpButtonState};
 pub use help_menu::HelpMenu;
 pub use help_menu::HelpMenuState;
-pub use liveness::LivenessState;
+pub use liveness::{LivenessState, LivenessStyles};
 pub use rack::{KnightRiderMode, Rack, RackState};
 pub use screen_button::{ScreenButton, ScreenButtonState};
-pub use status_bar::StatusBar;
+pub use status_bar::{StatusBar, StatusBarStyles};
 
 /// A unique id for a [`Control`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
