@@ -244,6 +244,36 @@ struct SledAgentInfo {
     rack_id: Uuid,
 }
 
+fn is_char_device(name: impl Into<PathBuf>) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+
+    match std::fs::metadata(name.into()) {
+        Ok(metadata) => metadata.file_type().is_char_device(),
+        Err(_) => false,
+    }
+}
+
+// Depending on the kernel version, a tofino device can be found at either
+// /dev/tofino or /dev/tofino/<instance#>.  This method examines each in
+// turn, returning the first character device it finds in either of those
+// locations.
+fn find_tofino(root: &str) -> Result<String, Error> {
+    if is_char_device(root) {
+        return Ok(root.to_string());
+    }
+
+    for entry in std::fs::read_dir(root)
+        .map_err(|e| Error::Io { path: root.into(), err: e })?
+    {
+        let entry =
+            entry.map_err(|e| Error::Io { path: root.into(), err: e })?;
+        if is_char_device(&entry.path()) {
+            return Ok(entry.path().into_os_string().into_string().unwrap());
+        }
+    }
+    Err(Error::MissingDevice { device: "tofino".to_string() })
+}
+
 #[derive(Clone)]
 pub struct ServiceManager {
     inner: Arc<ServiceManagerInner>,
@@ -372,7 +402,7 @@ impl ServiceManager {
                 ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
                     // When running on a real sidecar, we need the /dev/tofino
                     // device to talk to the tofino ASIC.
-                    devices.push("/dev/tofino".to_string());
+                    devices.push(find_tofino("/dev/tofino")?);
                 }
                 _ => (),
             }
