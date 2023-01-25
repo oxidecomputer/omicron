@@ -28,7 +28,8 @@ use crate::screens::{Height, ScreenId, Screens};
 use crate::wicketd::{WicketdHandle, WicketdManager};
 use crate::widgets::RackState;
 
-pub const MARGIN: Height = Height(5);
+pub const TOP_MARGIN: Height = Height(5);
+pub const BOTTOM_MARGIN: Height = Height(2);
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -140,7 +141,12 @@ impl Wizard {
         info!(self.log, "Starting main loop");
         let rect = self.terminal.get_frame().size();
         // Size the rack for the initial draw
-        self.state.rack_state.resize(rect.width, rect.height, &MARGIN);
+        self.state.rack_state.resize(
+            rect.width,
+            rect.height,
+            TOP_MARGIN,
+            BOTTOM_MARGIN,
+        );
 
         // Draw the initial screen
         let screen = self.screens.get_mut(self.active_screen);
@@ -168,7 +174,12 @@ impl Wizard {
                     self.handle_actions(actions)?;
                 }
                 Event::Term(TermEvent::Resize(width, height)) => {
-                    self.state.rack_state.resize(width, height, &MARGIN);
+                    self.state.rack_state.resize(
+                        width,
+                        height,
+                        TOP_MARGIN,
+                        BOTTOM_MARGIN,
+                    );
                     screen.resize(&mut self.state, width, height);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
