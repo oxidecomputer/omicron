@@ -52,7 +52,7 @@ pub struct Gimlet {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
-    serial_number: Vec<u8>,
+    serial_number: String,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
@@ -71,7 +71,7 @@ impl Drop for Gimlet {
 #[async_trait]
 impl SimulatedSp for Gimlet {
     fn serial_number(&self) -> String {
-        hex::encode(&serial_number_padded(&self.serial_number))
+        self.serial_number.clone()
     }
 
     fn manufacturing_public_key(&self) -> Ed25519PublicKey {
@@ -409,7 +409,7 @@ impl UdpTask {
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
-        serial_number: Vec<u8>,
+        serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         commands: mpsc::UnboundedReceiver<(
             Command,
@@ -483,7 +483,7 @@ impl UdpTask {
 
 struct Handler {
     log: Logger,
-    serial_number: Vec<u8>,
+    serial_number: String,
 
     components: Vec<SpComponentConfig>,
     // `SpHandler` wants `&'static str` references when describing components;
@@ -502,7 +502,7 @@ struct Handler {
 
 impl Handler {
     fn new(
-        serial_number: Vec<u8>,
+        serial_number: String,
         components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,

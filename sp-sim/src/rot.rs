@@ -27,7 +27,7 @@ impl RotSprocketExt for RotSprocket {
         serial_number
             .get_mut(0..config.serial_number.len())
             .expect("simulated serial number too long")
-            .copy_from_slice(&config.serial_number);
+            .copy_from_slice(config.serial_number.as_bytes());
 
         let manufacturing_keypair =
             salty::Keypair::from(&config.manufacturing_root_cert_seed);
