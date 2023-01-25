@@ -3006,6 +3006,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsw"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d81b373cd988b6e2b6e32ded4ea80c15085028efcdd5f83e37f9cbfb9c517ca"
+
+[[package]]
 name = "libxml"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7457,6 +7463,7 @@ dependencies = [
  "crossterm",
  "futures",
  "hex",
+ "libsw",
  "reqwest",
  "semver 1.0.16",
  "serde",
