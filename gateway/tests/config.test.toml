@@ -2,6 +2,9 @@
 # Oxide API: example configuration file
 #
 
+[dropshot]
+request_body_max_bytes = 131072
+
 [switch]
 # For tests, bind to port 0 (i.e., OS chooses an open port) instead of MGS's
 # default port for SP communication. This option should be omitted in the real
