@@ -39,6 +39,7 @@ members = [
     "sled-agent-client",
     "sp-sim",
     "test-utils",
+    "tufaceous",
     "wicket",
     "wicketd",
     "wicketd-client",
@@ -78,6 +79,7 @@ default-members = [
     "sled-agent-client",
     "sp-sim",
     "test-utils",
+    "tufaceous",
     "wicket",
     "wicketd",
     "wicketd-client",
@@ -90,7 +92,7 @@ api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
 assert_cmd = "2.0.8"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.60"
+async-trait = "0.1.63"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.0"
@@ -108,6 +110,7 @@ criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
 crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "5f06c7ebc320c19846670e9d745a4d44f78901b4" }
 display-error-chain = "0.1.1"
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
@@ -120,8 +123,8 @@ expectorate = "1.0.6"
 fatfs = "0.3.6"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev="1a27a661d7824712aeb4d1b9801938888139eaa7", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev="1a27a661d7824712aeb4d1b9801938888139eaa7" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -244,7 +247,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.4"
-toml = "0.5.10"
+toml = "0.5.11"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"

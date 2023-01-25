@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::hardware::{DiskVariant, HardwareUpdate, UnparsedDisk};
+use crate::hardware::{
+    DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
+};
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node};
 use slog::Logger;
 use std::collections::HashSet;
@@ -13,6 +15,8 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 mod disk;
+mod gpt;
+mod nvme;
 
 pub use disk::ensure_partition_layout;
 
@@ -26,6 +30,12 @@ enum Error {
 
     #[error("Could not translate {0} to '/dev' path: no links")]
     NoDevLinks(PathBuf),
+
+    #[error("Cannot query for NVME identity of {path}: {err}")]
+    MissingNVMEIdentity { path: PathBuf, err: std::io::Error },
+
+    #[error("Not an NVME device: {0}")]
+    NotAnNVMEDevice(PathBuf),
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -230,6 +240,19 @@ fn get_dev_path_of_whole_disk(
     Ok(None)
 }
 
+// Gather a notion of "device identity".
+fn blkdev_device_identity(devfs_path: &str) -> Result<DiskIdentity, Error> {
+    let path = PathBuf::from(devfs_path);
+    let ctrl_id = nvme::identify_controller(&path)
+        .map_err(|err| Error::MissingNVMEIdentity { path, err })?;
+
+    let vendor =
+        format!("{:x}{:x}", ctrl_id.vendor_id, ctrl_id.subsystem_vendor_id);
+    let serial = ctrl_id.serial;
+    let model = ctrl_id.model;
+    Ok(DiskIdentity { vendor, serial, model })
+}
+
 fn poll_blkdev_node(
     log: &Logger,
     disks: &mut HashSet<UnparsedDisk>,
@@ -247,9 +270,18 @@ fn poll_blkdev_node(
             // path "real".
             assert!(devfs_path.starts_with('/'));
             let devfs_path = format!("/devices{devfs_path}");
-
+            let mut device_id = None;
             while let Some(parent) = node.parent().map_err(Error::DevInfo)? {
                 node = parent;
+
+                if let Some(driver_name) = node.driver_name() {
+                    if driver_name == "nvme" {
+                        device_id = Some(blkdev_device_identity(&format!(
+                            "/devices{}:devctl",
+                            node.devfs_path().map_err(Error::DevInfo)?
+                        ))?);
+                    }
+                }
                 let slot_prop_name = "physical-slot#".to_string();
                 if let Some(Ok(slot_prop)) =
                     node.props().into_iter().find(|prop| {
@@ -276,10 +308,13 @@ fn poll_blkdev_node(
                         break;
                     };
                     let disk = UnparsedDisk::new(
-                        PathBuf::from(devfs_path),
+                        PathBuf::from(&devfs_path),
                         dev_path,
                         slot,
                         variant,
+                        device_id.ok_or_else(|| {
+                            Error::NotAnNVMEDevice(PathBuf::from(devfs_path))
+                        })?,
                     );
                     disks.insert(disk);
                     break;

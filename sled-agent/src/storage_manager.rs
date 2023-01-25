@@ -841,9 +841,9 @@ pub struct StorageManager {
 
     // A map of "devfs path" to "Disk" attached to this Sled.
     //
-    // The key is kinda arbitrary; we just want to be able to identify the Disk
-    // within this sled for deduplication on insert and removal when further
-    // parsing may not be possible.
+    // Note that we're keying off of devfs path, rather than device ID.
+    // This should allow us to identify when a U.2 has been removed from
+    // one slot and placed into another one.
     disks: Arc<Mutex<HashMap<PathBuf, Disk>>>,
 
     // A map of "zpool name" to "pool".
@@ -889,6 +889,87 @@ impl StorageManager {
         }
     }
 
+    /// Ensures that the storage manager tracks exactly the provided disks.
+    ///
+    /// This acts similar to a batch [Self::upsert_disk] for all new disks, and
+    /// [Self::delete_disk] for all removed disks.
+    pub async fn ensure_using_exactly_these_disks<I>(
+        &self,
+        unparsed_disks: I,
+    ) -> Result<(), Error>
+    where
+        I: IntoIterator<Item = crate::hardware::UnparsedDisk>,
+    {
+        let mut new_disks = HashMap::new();
+
+        // We may encounter errors while parsing any of the disks; keep track of
+        // any errors that occur and return any of them if something goes wrong.
+        //
+        // That being said, we should not prevent access to the other disks if
+        // only one failure occurs.
+        let mut err: Option<Error> = None;
+
+        // Ensure all disks conform to the expected partition layout.
+        for disk in unparsed_disks.into_iter() {
+            match crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+                warn!(self.log, "Could not ensure partitions: {err}");
+                err
+            }) {
+                Ok(disk) => {
+                    let devfs_path = disk.devfs_path().clone();
+                    new_disks.insert(devfs_path, disk);
+                }
+                Err(e) => {
+                    warn!(self.log, "Cannot parse disk: {e}");
+                    err = Some(e.into());
+                }
+            };
+        }
+
+        let mut disks = self.disks.lock().await;
+
+        // Remove disks that don't appear in the "new_disks" set.
+        //
+        // This also accounts for zpools and notifies Nexus.
+        let keys_to_be_removed = disks
+            .keys()
+            .filter_map(|key| {
+                if !new_disks.contains_key(key) {
+                    Some(key.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for key in keys_to_be_removed.into_iter() {
+            if let Err(e) = self.delete_disk_locked(&mut disks, &key).await {
+                warn!(self.log, "Failed do delete disk: {e}");
+                err = Some(e);
+            }
+        }
+
+        // Add new disks that appear in the "new_disks" set.
+        //
+        // This also accounts for zpools and notifies Nexus.
+        let disks_to_be_added = new_disks
+            .into_iter()
+            .filter(|(key, _)| !disks.contains_key(key))
+            .collect::<Vec<_>>();
+        for (_, disk) in disks_to_be_added.into_iter() {
+            if let Err(e) = self.upsert_disk_locked(&mut disks, disk).await {
+                warn!(self.log, "Failed do delete disk: {e}");
+                err = Some(e);
+            }
+        }
+
+        if let Some(err) = err {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Adds a disk and associated zpool to the storage manager.
     pub async fn upsert_disk(
         &self,
         disk: crate::hardware::UnparsedDisk,
@@ -902,27 +983,45 @@ impl StorageManager {
                 err
             })?;
 
+        let mut disks = self.disks.lock().await;
+        self.upsert_disk_locked(&mut disks, disk).await
+    }
+
+    async fn upsert_disk_locked(
+        &self,
+        disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
+        disk: Disk,
+    ) -> Result<(), Error> {
         let zpool_name = disk.zpool_name().clone();
-        self.disks.lock().await.insert(disk.devfs_path().to_path_buf(), disk);
+        disks.insert(disk.devfs_path().to_path_buf(), disk);
         self.upsert_zpool(&zpool_name).await?;
 
-        // TODO:
-        // - Notify Nexus
+        // TODO: Notify Nexus
         Ok(())
     }
 
+    /// Removes a disk, if it's tracked by the storage manager, as well
+    /// as any associated zpools.
     pub async fn delete_disk(
         &self,
         disk: crate::hardware::UnparsedDisk,
     ) -> Result<(), Error> {
         info!(self.log, "Deleting disk: {disk:?}");
 
-        if let Some(disk) = self.disks.lock().await.remove(disk.devfs_path()) {
+        let mut disks = self.disks.lock().await;
+        self.delete_disk_locked(&mut disks, disk.devfs_path()).await
+    }
+
+    async fn delete_disk_locked(
+        &self,
+        disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
+        key: &PathBuf,
+    ) -> Result<(), Error> {
+        if let Some(disk) = disks.remove(key) {
             self.pools.lock().await.remove(&disk.zpool_name());
         }
 
-        // TODO:
-        // - Notify Nexus
+        // TODO: Notify Nexus
         Ok(())
     }
 

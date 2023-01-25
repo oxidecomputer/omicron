@@ -4,11 +4,17 @@
 
 //! illumos-specific mechanisms for parsing disk info.
 
+use crate::hardware::illumos::gpt;
 use crate::hardware::{DiskError, DiskPaths, DiskVariant, Partition};
-use crate::illumos::zpool::{Zpool, ZpoolName};
+use crate::illumos::zpool::ZpoolName;
 use slog::Logger;
 use std::path::PathBuf;
 use uuid::Uuid;
+
+#[cfg(test)]
+use crate::illumos::zpool::MockZpool as Zpool;
+#[cfg(not(test))]
+use crate::illumos::zpool::Zpool;
 
 // The expected layout of an M.2 device within the Oxide rack.
 //
@@ -32,7 +38,7 @@ static U2_EXPECTED_PARTITIONS: [Partition; U2_EXPECTED_PARTITION_COUNT] =
 
 fn parse_partition_types<const N: usize>(
     path: &PathBuf,
-    partitions: &Vec<libefi_illumos::Partition>,
+    partitions: &Vec<impl gpt::LibEFIPartition>,
     expected_partitions: &[Partition; N],
 ) -> Result<Vec<Partition>, DiskError> {
     if partitions.len() != N {
@@ -65,16 +71,21 @@ fn parse_partition_types<const N: usize>(
     Ok(expected_partitions.iter().map(|p| p.clone()).collect())
 }
 
-/// Parses validates, and ensures the partition layout within a disk.
-///
-/// Arguments:
-/// - `devfs_path` should be the path to the disk, within `/devices/...`.
-/// - `variant` should describe the expected class of disk (which matters,
-/// since different disk types have different expected layouts).
+/// Parses, validates, and ensures the partition layout within a disk.
 ///
 /// Returns a Vec of partitions on success. The index of the Vec is guaranteed
 /// to also be the index of the partition.
 pub fn ensure_partition_layout(
+    log: &Logger,
+    paths: &DiskPaths,
+    variant: DiskVariant,
+) -> Result<Vec<Partition>, DiskError> {
+    internal_ensure_partition_layout::<libefi_illumos::Gpt>(log, paths, variant)
+}
+
+// Same as the [ensure_partition_layout], but with generic parameters
+// for access to external resources.
+fn internal_ensure_partition_layout<GPT: gpt::LibEFIGpt>(
     log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
@@ -85,8 +96,9 @@ pub fn ensure_partition_layout(
     let raw = true;
     let path = paths.whole_disk(raw);
 
-    let gpt = match libefi_illumos::Gpt::read(&path) {
+    let gpt = match GPT::read(&path) {
         Ok(gpt) => {
+            // This should be the common steady-state case
             info!(
                 log,
                 "Disk at {} already has a GPT",
@@ -95,11 +107,17 @@ pub fn ensure_partition_layout(
             gpt
         }
         Err(libefi_illumos::Error::LabelNotFound) => {
+            // Fresh U.2 disks are an example of devices where "we don't expect
+            // a GPT to exist".
             info!(
                 log,
                 "Disk at {} does not have a GPT",
                 paths.devfs_path.display()
             );
+
+            // For ZFS-implementation-specific reasons, Zpool create can only
+            // act on devices under the "/dev" hierarchy, rather than the device
+            // path which exists in the "/devices" directory.
             let dev_path = if let Some(dev_path) = &paths.dev_path {
                 dev_path
             } else {
@@ -133,7 +151,7 @@ pub fn ensure_partition_layout(
             });
         }
     };
-    let mut partitions: Vec<_> = gpt.partitions().collect();
+    let mut partitions: Vec<_> = gpt.partitions();
     match variant {
         DiskVariant::U2 => {
             partitions.truncate(U2_EXPECTED_PARTITION_COUNT);
@@ -143,5 +161,247 @@ pub fn ensure_partition_layout(
             partitions.truncate(M2_EXPECTED_PARTITION_COUNT);
             parse_partition_types(&path, &partitions, &M2_EXPECTED_PARTITIONS)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::hardware::DiskPaths;
+    use crate::illumos::zpool::MockZpool;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::path::Path;
+
+    struct FakePartition {
+        index: usize,
+    }
+
+    impl gpt::LibEFIPartition for FakePartition {
+        fn index(&self) -> usize {
+            self.index
+        }
+    }
+
+    struct LabelNotFoundGPT {}
+    impl gpt::LibEFIGpt for LabelNotFoundGPT {
+        type Partition<'a> = FakePartition;
+        fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
+            Err(libefi_illumos::Error::LabelNotFound)
+        }
+        fn partitions(&self) -> Vec<Self::Partition<'_>> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn ensure_partition_layout_u2_no_format_without_dev_path() {
+        let logctx = test_setup_log(
+            "ensure_partition_layout_u2_no_format_without_dev_path",
+        );
+        let log = &logctx.log;
+
+        let devfs_path = PathBuf::from("/devfs/path");
+        let result = internal_ensure_partition_layout::<LabelNotFoundGPT>(
+            &log,
+            &DiskPaths { devfs_path, dev_path: None },
+            DiskVariant::U2,
+        );
+        match result {
+            Err(DiskError::CannotFormatMissingDevPath { .. }) => {}
+            _ => panic!("Should have failed with a missing dev path error"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn ensure_partition_layout_u2_format_with_dev_path() {
+        let logctx =
+            test_setup_log("ensure_partition_layout_u2_format_with_dev_path");
+        let log = &logctx.log;
+
+        let devfs_path = PathBuf::from("/devfs/path");
+        const DEV_PATH: &'static str = "/dev/path";
+
+        // We expect that formatting a zpool will involve calling
+        // "Zpool::create" with the provided "dev_path".
+        let create_ctx = MockZpool::create_context();
+        create_ctx.expect().return_once(|_, observed_dev_path| {
+            assert_eq!(&PathBuf::from(DEV_PATH), observed_dev_path);
+            Ok(())
+        });
+
+        let partitions = internal_ensure_partition_layout::<LabelNotFoundGPT>(
+            &log,
+            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            DiskVariant::U2,
+        )
+        .expect("Should have succeeded partitioning disk");
+
+        assert_eq!(partitions.len(), U2_EXPECTED_PARTITION_COUNT);
+        assert_eq!(partitions[0], Partition::ZfsPool);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    #[should_panic(expected = "Provisioning M.2 devices not yet supported")]
+    fn ensure_partition_layout_m2_cannot_format() {
+        let logctx = test_setup_log("ensure_partition_layout_m2_cannot_format");
+        let log = &logctx.log.clone();
+
+        let devfs_path = PathBuf::from("/devfs/path");
+        const DEV_PATH: &'static str = "/dev/path";
+
+        // This is kinda silly, but necessary to not leave leftover log files.
+        // Once we panic, we won't be able to clean it up.
+        logctx.cleanup_successful();
+
+        let _ = internal_ensure_partition_layout::<LabelNotFoundGPT>(
+            &log,
+            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            DiskVariant::M2,
+        );
+        panic!("We should have panicked earlier...");
+    }
+
+    struct FakeU2GPT {}
+    impl gpt::LibEFIGpt for FakeU2GPT {
+        type Partition<'a> = FakePartition;
+        fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
+            Ok(Self {})
+        }
+        fn partitions(&self) -> Vec<Self::Partition<'_>> {
+            let mut r = vec![];
+            for i in 0..U2_EXPECTED_PARTITION_COUNT {
+                r.push(FakePartition { index: i });
+            }
+            r
+        }
+    }
+
+    #[test]
+    fn ensure_partition_layout_u2_with_expected_format() {
+        let logctx =
+            test_setup_log("ensure_partition_layout_u2_with_expected_format");
+        let log = &logctx.log;
+
+        let devfs_path = PathBuf::from("/devfs/path");
+        const DEV_PATH: &'static str = "/dev/path";
+
+        let partitions = internal_ensure_partition_layout::<FakeU2GPT>(
+            &log,
+            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            DiskVariant::U2,
+        )
+        .expect("Should be able to parse disk");
+
+        assert_eq!(partitions.len(), U2_EXPECTED_PARTITION_COUNT);
+        for i in 0..U2_EXPECTED_PARTITION_COUNT {
+            assert_eq!(partitions[i], U2_EXPECTED_PARTITIONS[i]);
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    struct FakeM2GPT {}
+    impl gpt::LibEFIGpt for FakeM2GPT {
+        type Partition<'a> = FakePartition;
+        fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
+            Ok(Self {})
+        }
+        fn partitions(&self) -> Vec<Self::Partition<'_>> {
+            let mut r = vec![];
+            for i in 0..M2_EXPECTED_PARTITION_COUNT {
+                r.push(FakePartition { index: i });
+            }
+            r
+        }
+    }
+
+    #[test]
+    fn ensure_partition_layout_m2_with_expected_format() {
+        let logctx =
+            test_setup_log("ensure_partition_layout_m2_with_expected_format");
+        let log = &logctx.log;
+
+        let devfs_path = PathBuf::from("/devfs/path");
+        const DEV_PATH: &'static str = "/dev/path";
+
+        let partitions = internal_ensure_partition_layout::<FakeM2GPT>(
+            &log,
+            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            DiskVariant::M2,
+        )
+        .expect("Should be able to parse disk");
+
+        assert_eq!(partitions.len(), M2_EXPECTED_PARTITION_COUNT);
+        for i in 0..M2_EXPECTED_PARTITION_COUNT {
+            assert_eq!(partitions[i], M2_EXPECTED_PARTITIONS[i]);
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    struct EmptyGPT {}
+    impl gpt::LibEFIGpt for EmptyGPT {
+        type Partition<'a> = FakePartition;
+        fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
+            Ok(Self {})
+        }
+        fn partitions(&self) -> Vec<Self::Partition<'_>> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn ensure_partition_layout_m2_fails_with_empty_gpt() {
+        let logctx =
+            test_setup_log("ensure_partition_layout_m2_fails_with_empty_gpt");
+        let log = &logctx.log;
+
+        let devfs_path = PathBuf::from("/devfs/path");
+        const DEV_PATH: &'static str = "/dev/path";
+
+        assert!(matches!(
+            internal_ensure_partition_layout::<EmptyGPT>(
+                &log,
+                &DiskPaths {
+                    devfs_path,
+                    dev_path: Some(PathBuf::from(DEV_PATH)),
+                },
+                DiskVariant::M2,
+            )
+            .expect_err("Should have failed parsing empty GPT"),
+            DiskError::BadPartitionLayout { .. }
+        ));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_partition_layout_u2_fails_with_empty_gpt() {
+        let logctx =
+            test_setup_log("ensure_partition_layout_u2_fails_with_empty_gpt");
+        let log = &logctx.log;
+
+        let devfs_path = PathBuf::from("/devfs/path");
+        const DEV_PATH: &'static str = "/dev/path";
+
+        assert!(matches!(
+            internal_ensure_partition_layout::<EmptyGPT>(
+                &log,
+                &DiskPaths {
+                    devfs_path,
+                    dev_path: Some(PathBuf::from(DEV_PATH)),
+                },
+                DiskVariant::U2,
+            )
+            .expect_err("Should have failed parsing empty GPT"),
+            DiskError::BadPartitionLayout { .. }
+        ));
+
+        logctx.cleanup_successful();
     }
 }

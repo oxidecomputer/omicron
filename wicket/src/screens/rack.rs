@@ -40,7 +40,7 @@ impl RackScreen {
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
             ("<Enter> | left mouse click", "Select hovered object"),
             ("<ESC>", "Reset the TabIndex of the Rack"),
-            ("<CTRL-h", "Toggle this help menu"),
+            ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
 
@@ -116,7 +116,7 @@ impl RackScreen {
 
         // Only draw the banner if there is enough horizontal whitespace to
         // make it look good.
-        if state.rack_state.rect.width * 3 + width > rect.width {
+        if state.rack_state.rect().width * 3 + width > rect.width {
             return (Height(0), Width(0));
         }
 
@@ -152,7 +152,7 @@ impl RackScreen {
             power_shelf_selected_style: Style::default().bg(OX_GRAY),
         };
 
-        let area = state.rack_state.rect;
+        let area = state.rack_state.rect();
         f.render_widget(rack, area);
     }
 

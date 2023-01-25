@@ -9,6 +9,7 @@ use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
 use omicron_gateway::MgsArguments;
 use omicron_gateway::SpType;
+use omicron_gateway::SwitchPortConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 use slog::o;
@@ -17,6 +18,8 @@ use sp_sim::SimulatedSp;
 use std::collections::HashSet;
 use std::convert::Infallible;
 use std::future;
+use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
@@ -34,7 +37,7 @@ pub struct GatewayTestContext {
 
 impl GatewayTestContext {
     pub async fn teardown(self) {
-        self.server.http_server.close().await.unwrap();
+        self.server.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
 }
@@ -91,6 +94,9 @@ pub async fn test_setup_with_config(
     mut server_config: omicron_gateway::Config,
     sp_sim_config: &mut sp_sim::Config,
 ) -> GatewayTestContext {
+    // Can't be `const` because `SocketAddrV6::new()` isn't const yet
+    let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+
     // Use log settings from the server config and ignore log settings in
     // sp_sim_config; we'll give it the same logger as the server
     let logctx = LogContext::new(test_name, &server_config.log);
@@ -103,7 +109,7 @@ pub async fn test_setup_with_config(
 
     // Update discovery addrs of `server_config` to point to the SP ports that
     // will identify us as the expected location
-    for port_description in server_config.switch.port.values_mut() {
+    for port_description in &mut server_config.switch.port {
         // we need to know whether this port points to a switch or sled; for now
         // assume that matches whether we end up as `switch0` or `switch1`
         let target_sp =
@@ -115,41 +121,40 @@ pub async fn test_setup_with_config(
             SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
             SpType::Power => todo!(),
         };
-        port_description.config.discovery_addr = sp_addr.unwrap();
-
-        // The default listen address has a fixed port, which is fine on
-        // hardware because each port should be listening on a different vlan
-        // interface. For tests, change the listening port to 0 so all our
-        // listeners don't try binding to the same port.
-        port_description.config.listen_addr.set_port(0);
+        match &mut port_description.config {
+            SwitchPortConfig::Simulated { addr, .. } => {
+                *addr = sp_addr.unwrap();
+            }
+            SwitchPortConfig::SwitchZoneInterface { .. } => {
+                panic!("test config using `switch-zone-interface` config")
+            }
+        }
     }
 
     // Start gateway server
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    let args = MgsArguments {
-        id: Uuid::new_v4(),
-        address: "[::1]:0".parse().unwrap(),
-    };
+    let args =
+        MgsArguments { id: Uuid::new_v4(), addresses: vec![localhost_port_0] };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,
         rack_id,
-        log,
+        log.clone(),
     )
     .await
     .unwrap();
 
     // Build a list of all SPs defined in our config
     let mut all_sp_ids = Vec::new();
-    for port_config in server_config.switch.port.values() {
+    for port_config in &server_config.switch.port {
         all_sp_ids.push(
             port_config.location.get(&expected_location).copied().unwrap(),
         );
     }
 
     // Wait until the server has figured out the socket address of all those SPs
-    let mgmt_switch = &*server.apictx.mgmt_switch;
+    let mgmt_switch = server.management_switch();
     poll::wait_for_condition::<(), Infallible, _, _>(
         || {
             let result = if mgmt_switch.is_discovery_complete()
@@ -157,15 +162,8 @@ pub async fn test_setup_with_config(
                     // All ids are valid; unwrap finding the handle to each one.
                     let sp = mgmt_switch.sp(id).unwrap();
 
-                    // Have we finished starting up (e.g., binding to our
-                    // listening port)? If not, return false and keep waiting.
-                    let sp_addr = match sp.sp_addr_watch() {
-                        Ok(addr) => addr,
-                        Err(_) => return false,
-                    };
-
                     // Have we found this SP?
-                    sp_addr.borrow().is_some()
+                    sp.sp_addr_watch().borrow().is_some()
                 }) {
                 Ok(())
             } else {
@@ -183,7 +181,10 @@ pub async fn test_setup_with_config(
     assert_eq!(mgmt_switch.location_name().unwrap(), expected_location);
 
     let client = ClientTestContext::new(
-        server.http_server.local_addr(),
+        server
+            .dropshot_server_for_address(localhost_port_0)
+            .unwrap()
+            .local_addr(),
         log.new(o!("component" => "client test context")),
     );
 

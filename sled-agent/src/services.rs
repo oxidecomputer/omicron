@@ -694,12 +694,21 @@ impl ServiceManager {
                 ServiceType::ManagementGatewayService => {
                     info!(self.inner.log, "Setting up MGS service");
                     smfh.setprop("config/id", request.id)?;
+
+                    // Always tell MGS to listen on localhost so wicketd can
+                    // contact it even before we have an underlay network.
+                    smfh.addpropvalue(
+                        "config/address",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )?;
+
                     if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
+                        smfh.addpropvalue(
                             "config/address",
-                            &format!("[{}]:{}", address, MGS_PORT),
+                            &format!("[{address}]:{MGS_PORT}"),
                         )?;
                     }
+
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {
@@ -953,14 +962,24 @@ impl ServiceManager {
 
                     match service {
                         ServiceType::ManagementGatewayService => {
+                            // Remove any existing `config/address` values
+                            // without deleting the property itself.
+                            smfh.delpropvalue("config/address", "*")?;
+
+                            // Restore the localhost address that we always add
+                            // when setting up MGS.
+                            smfh.addpropvalue(
+                                "config/address",
+                                &format!("[::1]:{MGS_PORT}"),
+                            )?;
+
+                            // Add the underlay address.
                             smfh.setprop(
                                 "config/address",
-                                &format!("[{}]:{}", address, MGS_PORT),
+                                &format!("[{address}]:{MGS_PORT}"),
                             )?;
+
                             smfh.refresh()?;
-                            // TODO: For this restart to be optional, MGS must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
                         }
                         ServiceType::Dendrite { .. } => {
                             smfh.setprop(
