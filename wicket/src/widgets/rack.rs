@@ -273,7 +273,7 @@ impl RackState {
                     let mouse_pointer = Rect { x, y, width: 1, height: 1 };
                     if rect.intersects(mouse_pointer) {
                         if self.hovered == Some(*id) {
-                            // No chnage
+                            // No change
                             return false;
                         } else {
                             self.hovered = Some(*id);
