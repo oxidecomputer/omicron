@@ -17,6 +17,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
+use management_switch::ManagementSwitch;
 pub use management_switch::SpType;
 pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;
@@ -57,10 +58,10 @@ type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;
 
 pub struct Server {
     /// shared state used by API request handlers
-    pub apictx: Arc<ServerContext>,
+    apictx: Arc<ServerContext>,
     /// dropshot servers for requests from nexus or wicketd, keyed by their bind
     /// address
-    pub http_servers: HashMap<SocketAddrV6, HttpServer>,
+    http_servers: HashMap<SocketAddrV6, HttpServer>,
     /// collection of `wait_for_shutdown` futures for each server inserted into
     /// `http_servers`
     all_servers_shutdown: FuturesUnordered<ShutdownWaitFuture>,
@@ -159,6 +160,31 @@ impl Server {
             request_body_max_bytes: config.dropshot.request_body_max_bytes,
             log,
         })
+    }
+
+    /// Get a handle to our [`ManagementSwitch`].
+    pub fn management_switch(&self) -> &ManagementSwitch {
+        &self.apictx.mgmt_switch
+    }
+
+    /// Get a handle to the dropshot server listening on `address`, if one
+    /// exists.
+    ///
+    /// This exists for integration tests; in general clients of this class
+    /// should not interact with specific dropshot server instances.
+    pub fn dropshot_server_for_address(
+        &self,
+        address: SocketAddrV6,
+    ) -> Option<&HttpServer> {
+        self.http_servers.get(&address)
+    }
+
+    /// Close all running dropshot servers.
+    pub async fn close(self) -> Result<(), String> {
+        for (_, server) in self.http_servers {
+            server.close().await?;
+        }
+        Ok(())
     }
 
     /// Wait for the server to shut down

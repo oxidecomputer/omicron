@@ -37,9 +37,7 @@ pub struct GatewayTestContext {
 
 impl GatewayTestContext {
     pub async fn teardown(self) {
-        for (_, server) in self.server.http_servers {
-            server.close().await.unwrap();
-        }
+        self.server.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
 }
@@ -156,7 +154,7 @@ pub async fn test_setup_with_config(
     }
 
     // Wait until the server has figured out the socket address of all those SPs
-    let mgmt_switch = &*server.apictx.mgmt_switch;
+    let mgmt_switch = server.management_switch();
     poll::wait_for_condition::<(), Infallible, _, _>(
         || {
             let result = if mgmt_switch.is_discovery_complete()
@@ -183,7 +181,10 @@ pub async fn test_setup_with_config(
     assert_eq!(mgmt_switch.location_name().unwrap(), expected_location);
 
     let client = ClientTestContext::new(
-        server.http_servers.get(&localhost_port_0).unwrap().local_addr(),
+        server
+            .dropshot_server_for_address(localhost_port_0)
+            .unwrap()
+            .local_addr(),
         log.new(o!("component" => "client test context")),
     );
 
