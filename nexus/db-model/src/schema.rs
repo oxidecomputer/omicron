@@ -390,7 +390,7 @@ table! {
         port -> Int4,
         last_used_address -> Inet,
         serial_number -> Text,
-        cubby -> Int2,
+        slot -> Int2,
     }
 }
 

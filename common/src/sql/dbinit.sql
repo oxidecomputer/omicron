@@ -93,7 +93,7 @@ CREATE TABLE omicron.public.sled (
     serial_number STRING(63),
 
     /* The physical location of the sled in the rack if known */
-    cubby INT2
+    slot INT2
 );
 
 /* Add an index which lets us look up sleds on a rack */
