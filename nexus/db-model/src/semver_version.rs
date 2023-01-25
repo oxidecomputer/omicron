@@ -35,6 +35,39 @@ impl SemverVersion {
     pub fn new(major: u64, minor: u64, patch: u64) -> Self {
         Self(external::SemverVersion(semver::Version::new(major, minor, patch)))
     }
+
+    /// Generate a string with 0s padding the numbers so the result is
+    /// lexicographically sortable. 0.1.2 -> 00000000.00000001.00000002.
+    ///
+    /// This requires that we impose a maximum size on each of the numbers so as
+    /// not to exceed the available number of digits. See TODO for this
+    /// validation logic.
+    ///
+    /// An important caveat is that while lexicographic sort with padding does
+    /// work for the maj/min/patch part of the version string, it does not
+    /// technically satisfy the semver spec's rules for sorting pre-release and
+    /// build metadata. Build metadata is supposed to be ignored. Pre-release
+    /// has more complicated rules, most notably that a version *with* a
+    /// pre-lease string on it has lower precedence than one *without*. See:
+    /// <https://semver.org/#spec-item-11>. We have decided this is tolerable for
+    /// now. We can revisit later if necessary.
+    ///
+    /// Compare to the `Display` implementation on Semver::Version
+    /// <https://github.com/dtolnay/semver/blob/7fd09f7/src/display.rs>
+    pub fn to_sortable_string(self) -> String {
+        let v = &self.0 .0;
+        let mut result =
+            format!("{:0>8}.{:0>8}.{:0>8}", v.major, v.minor, v.patch);
+
+        if !v.pre.is_empty() {
+            result.push_str(&format!("-{}", v.pre));
+        }
+        if !v.build.is_empty() {
+            result.push_str(&format!("+{}", v.build));
+        }
+
+        result
+    }
 }
 
 impl<DB> ToSql<sql_types::Text, DB> for SemverVersion

@@ -30,6 +30,8 @@ pub struct SystemUpdate {
     #[diesel(embed)]
     pub identity: SystemUpdateIdentity,
     pub version: SemverVersion,
+    /// Semver version with 0-padding to make it lexicographically sortable
+    pub version_sort: String,
 }
 
 impl From<SystemUpdate> for views::SystemUpdate {

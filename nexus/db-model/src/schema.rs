@@ -685,6 +685,7 @@ table! {
         time_modified -> Timestamptz,
 
         version -> Text,
+        version_sort -> Text,
     }
 }
 

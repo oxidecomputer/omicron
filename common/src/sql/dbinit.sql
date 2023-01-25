@@ -1517,7 +1517,10 @@ CREATE INDEX ON omicron.public.update_available_artifact (
  */
 CREATE TABLE omicron.public.system_update (
     /* Unique semver version */
-    version STRING(64) PRIMARY KEY,
+    version STRING(64) PRIMARY KEY, -- TODO: length
+    
+    -- version string with maj/min/patch 0-padded to be string sortable
+    version_sort STRING(64) NOT NULL, -- TODO: length
 
     -- The ID is not strictly necessary here because we're using the version
     -- string as the PK. However, removing it would make this one of the only
@@ -1531,6 +1534,9 @@ CREATE TABLE omicron.public.system_update (
     time_modified TIMESTAMPTZ NOT NULL
 );
 
+CREATE UNIQUE INDEX ON omicron.public.system_update (
+    version_sort
+);
  
 -- Used for the join with components. That and pagination is all id is used for
 CREATE UNIQUE INDEX ON omicron.public.system_update (
@@ -1567,8 +1573,7 @@ CREATE TABLE omicron.public.component_update (
 
     -- So far we are not implementing fetch component update by (component_type,
     -- version). If we did, we'd probably want to make that pair the PK.
-    -- TODO: figure out the actual length version strings should have
-    version STRING(64) NOT NULL,
+    version STRING(64) NOT NULL, -- TODO: length
     component_type omicron.public.updateable_component_type NOT NULL,
 
     -- the ID of another component_update

@@ -311,13 +311,15 @@ impl super::Nexus {
         create_update: CreateSystemUpdate,
     ) -> CreateResult<db::model::SystemUpdate> {
         let now = Utc::now();
+        let version = SemverVersion(create_update.version);
         let update = db::model::SystemUpdate {
             identity: db::model::SystemUpdateIdentity {
                 id: Uuid::new_v4(),
                 time_created: now,
                 time_modified: now,
             },
-            version: SemverVersion(create_update.version),
+            version: version.clone(),
+            version_sort: version.to_sortable_string(),
         };
         self.db_datastore.system_update_create(opctx, update).await
     }
@@ -507,18 +509,31 @@ mod tests {
             version: external::SemverVersion::new(1, 0, 0),
         };
         let su1 = nexus.system_update_create(&opctx, su1_create).await.unwrap();
+
+        // 1,3,2 order is deliberate
+        let su3_create = CreateSystemUpdate {
+            version: external::SemverVersion::new(3, 0, 0),
+        };
+        let _su3 =
+            nexus.system_update_create(&opctx, su3_create).await.unwrap();
+
         let su2_create = CreateSystemUpdate {
             version: external::SemverVersion::new(2, 0, 0),
         };
         let su2 = nexus.system_update_create(&opctx, su2_create).await.unwrap();
 
-        // now there should be two system updates
+        // now there should be three system updates, sorted by version descending
         let system_updates = nexus
             .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(system_updates.len(), 2);
+        let versions: Vec<String> =
+            system_updates.iter().map(|su| su.version.to_string()).collect();
+        assert_eq!(versions.len(), 3);
+        assert_eq!(versions[0], "3.0.0".to_string());
+        assert_eq!(versions[1], "2.0.0".to_string());
+        assert_eq!(versions[2], "1.0.0".to_string());
 
         // let's also make sure we can fetch them by version
         let su1_fetched = nexus

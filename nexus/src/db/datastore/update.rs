@@ -161,6 +161,7 @@ impl DataStore {
 
         paginated(system_update, id, pagparams)
             .select(SystemUpdate::as_select())
+            .order(version_sort.desc())
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
