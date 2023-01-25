@@ -6036,9 +6036,9 @@ dependencies = [
 
 [[package]]
 name = "slog-dtrace"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "190194b8b00b629b1003daf2a4e40167b7b6b35b00598a131b6b0481205e96a4"
+checksum = "8a37d13a54955d22a120656475baa60bb10462646378fadeaad840fc5f7d396c"
 dependencies = [
  "chrono",
  "serde",
