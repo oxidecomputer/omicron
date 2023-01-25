@@ -10,6 +10,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use gateway_client::types::IgnitionCommand;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
@@ -263,13 +264,6 @@ fn sp_identifier_from_str(s: &str) -> Result<SpIdentifier> {
     })
 }
 
-#[derive(Debug, Clone, Copy)]
-enum IgnitionCommand {
-    PowerOn,
-    PowerOff,
-    PowerReset,
-}
-
 fn ignition_command_from_str(s: &str) -> Result<IgnitionCommand> {
     match s {
         "power-on" => Ok(IgnitionCommand::PowerOn),
@@ -339,15 +333,9 @@ async fn main() -> Result<()> {
                 dumper.dump(&info)?;
             }
         }
-        Command::IgnitionCommand { sp, command } => match command {
-            IgnitionCommand::PowerOn => {
-                client.ignition_power_on(sp.type_, sp.slot).await?;
-            }
-            IgnitionCommand::PowerOff => {
-                client.ignition_power_off(sp.type_, sp.slot).await?;
-            }
-            IgnitionCommand::PowerReset => todo!("missing MGS endpoint"),
-        },
+        Command::IgnitionCommand { sp, command } => {
+            client.ignition_command(sp.type_, sp.slot, command).await?;
+        }
         Command::ComponentActiveSlot { .. }
         | Command::StartupOptions { .. } => {
             todo!("missing MGS endpoint");
