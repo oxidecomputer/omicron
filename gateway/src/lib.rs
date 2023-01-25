@@ -17,7 +17,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
-use management_switch::ManagementSwitch;
+pub use management_switch::ManagementSwitch;
 pub use management_switch::SpType;
 pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;
