@@ -4347,6 +4347,7 @@ async fn snapshot_delete(
 
 // VPCs
 
+/// List VPCs
 #[endpoint {
     method = GET,
     path = "/v1/vpcs",
@@ -4426,6 +4427,7 @@ async fn vpc_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create a VPC
 #[endpoint {
     method = POST,
     path = "/v1/vpcs",
@@ -4465,10 +4467,10 @@ async fn vpc_create(
     new_vpc: TypedBody<params::VpcCreate>,
 ) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let new_vpc_params = &new_vpc.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let new_vpc_params = &new_vpc.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
             Some(path.organization_name.into()),
@@ -4573,6 +4575,7 @@ async fn vpc_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Update a VPC
 #[endpoint {
     method = PUT,
     path = "/v1/vpcs/{vpc}",
@@ -4636,6 +4639,7 @@ async fn vpc_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete a VPC
 #[endpoint {
     method = DELETE,
     path = "/v1/vpcs/{vpc}",
@@ -4692,6 +4696,7 @@ async fn vpc_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a subnet
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets",
@@ -4751,11 +4756,10 @@ async fn vpc_subnet_list(
         );
         let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let vpcs = nexus
-            .vpc_list_subnets_by_name(
+            .vpc_subnet_list(
                 &opctx,
                 &vpc_lookup,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -4770,6 +4774,7 @@ async fn vpc_subnet_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create a subnet
 #[endpoint {
     method = POST,
     path = "/v1/vpc-subnets",
@@ -4826,6 +4831,7 @@ async fn vpc_subnet_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a subnet
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4920,6 +4926,7 @@ async fn vpc_subnet_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete a subnet
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4979,6 +4986,7 @@ async fn vpc_subnet_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Update a subnet
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-subnets/{subnet}",

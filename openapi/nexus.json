@@ -9205,6 +9205,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Fetch a subnet",
         "operationId": "vpc_subnet_list_v1",
         "parameters": [
           {
@@ -9280,6 +9281,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Create a subnet",
         "operationId": "vpc_subnet_create_v1",
         "parameters": [
           {
@@ -9340,6 +9342,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Fetch a subnet",
         "operationId": "vpc_subnet_view_v1",
         "parameters": [
           {
@@ -9396,6 +9399,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Update a subnet",
         "operationId": "vpc_subnet_update_v1",
         "parameters": [
           {
@@ -9461,6 +9465,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Delete a subnet",
         "operationId": "vpc_subnet_delete_v1",
         "parameters": [
           {
@@ -9511,6 +9516,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "List VPCs",
         "operationId": "vpc_list_v1",
         "parameters": [
           {
@@ -9579,6 +9585,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Create a VPC",
         "operationId": "vpc_create_v1",
         "parameters": [
           {
@@ -9632,6 +9639,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Fetch a VPC",
         "operationId": "vpc_view_v1",
         "parameters": [
           {
@@ -9680,6 +9688,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Update a VPC",
         "operationId": "vpc_update_v1",
         "parameters": [
           {
@@ -9738,6 +9747,7 @@
         "tags": [
           "vpcs"
         ],
+        "summary": "Delete a VPC",
         "operationId": "vpc_delete_v1",
         "parameters": [
           {
