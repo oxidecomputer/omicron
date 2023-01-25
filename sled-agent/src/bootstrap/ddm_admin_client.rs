@@ -64,7 +64,7 @@ impl DdmAdminClient {
         let me = self.clone();
         tokio::spawn(async move {
             let prefix =
-                Ipv6Prefix { addr: address.net().network(), mask: SLED_PREFIX };
+                Ipv6Prefix { addr: address.net().network(), len: SLED_PREFIX };
             retry_notify(retry_policy_internal_service_aggressive(), || async {
                 info!(
                     me.log, "Sending prefix to ddmd for advertisement";
@@ -100,7 +100,7 @@ impl DdmAdminClient {
             // authenticated via sprockets, which only needs one address.
             prefixes.into_iter().find_map(|prefix| {
                 let mut segments = prefix.addr.segments();
-                if prefix.mask == BOOTSTRAP_MASK
+                if prefix.len == BOOTSTRAP_MASK
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
                     // Bootstrap agent IPs always end in ::1; convert the
