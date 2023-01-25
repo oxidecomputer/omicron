@@ -358,8 +358,8 @@ impl RackState {
     //
     // Therefore the minimum height of the rack is 2*16 + 2*2 + 2*2 + 1 = 41 lines.
     //
-    // With a 5 line margin at the top, the minimum size of the terminal is 46
-    // lines.
+    // With a 5 line margin at the top and a 2 line margin at the bottom, the
+    // minimum size of the terminal is 48 lines.
     //
     // If the terminal is smaller than 46 lines, the artistic rendering will
     // get progressively worse. XXX: We may want to bail on this instead.
