@@ -27,14 +27,15 @@ use crate::external_api::params;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -174,10 +175,10 @@ impl DataStore {
             })
     }
 
-    pub async fn organizations_list_by_id(
+    pub async fn organizations_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Organization> {
         let authz_silo = opctx
             .authn
@@ -186,34 +187,22 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
         use db::schema::organization::dsl;
-        paginated(dsl::organization, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .select(Organization::as_select())
-            .load_async::<Organization>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn organizations_list_by_name(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Organization> {
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("listing Organizations")?;
-        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
-
-        use db::schema::organization::dsl;
-        paginated(dsl::organization, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .select(Organization::as_select())
-            .load_async::<Organization>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::organization, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::organization,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::silo_id.eq(authz_silo.id()))
+        .select(Organization::as_select())
+        .load_async::<Organization>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Updates a organization by name (clobbering update -- no etag)

@@ -18,6 +18,8 @@ use sp_sim::SimulatedSp;
 use std::collections::HashSet;
 use std::convert::Infallible;
 use std::future;
+use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
@@ -35,7 +37,7 @@ pub struct GatewayTestContext {
 
 impl GatewayTestContext {
     pub async fn teardown(self) {
-        self.server.http_server.close().await.unwrap();
+        self.server.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
 }
@@ -92,6 +94,9 @@ pub async fn test_setup_with_config(
     mut server_config: omicron_gateway::Config,
     sp_sim_config: &mut sp_sim::Config,
 ) -> GatewayTestContext {
+    // Can't be `const` because `SocketAddrV6::new()` isn't const yet
+    let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+
     // Use log settings from the server config and ignore log settings in
     // sp_sim_config; we'll give it the same logger as the server
     let logctx = LogContext::new(test_name, &server_config.log);
@@ -129,15 +134,13 @@ pub async fn test_setup_with_config(
     // Start gateway server
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    let args = MgsArguments {
-        id: Uuid::new_v4(),
-        address: "[::1]:0".parse().unwrap(),
-    };
+    let args =
+        MgsArguments { id: Uuid::new_v4(), addresses: vec![localhost_port_0] };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,
         rack_id,
-        log,
+        log.clone(),
     )
     .await
     .unwrap();
@@ -151,7 +154,7 @@ pub async fn test_setup_with_config(
     }
 
     // Wait until the server has figured out the socket address of all those SPs
-    let mgmt_switch = &*server.apictx.mgmt_switch;
+    let mgmt_switch = server.management_switch();
     poll::wait_for_condition::<(), Infallible, _, _>(
         || {
             let result = if mgmt_switch.is_discovery_complete()
@@ -178,7 +181,10 @@ pub async fn test_setup_with_config(
     assert_eq!(mgmt_switch.location_name().unwrap(), expected_location);
 
     let client = ClientTestContext::new(
-        server.http_server.local_addr(),
+        server
+            .dropshot_server_for_address(localhost_port_0)
+            .unwrap()
+            .local_addr(),
         log.new(o!("component" => "client test context")),
     );
 

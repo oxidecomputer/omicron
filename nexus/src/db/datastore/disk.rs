@@ -31,54 +31,45 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
-    /// List disks associated with a given instance by id.
-    pub async fn instance_list_disks_by_id(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<Disk> {
-        use db::schema::disk::dsl;
-
-        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
-
-        paginated(dsl::disk, dsl::id, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::attach_instance_id.eq(authz_instance.id()))
-            .select(Disk::as_select())
-            .load_async::<Disk>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
     /// List disks associated with a given instance by name.
-    pub async fn instance_list_disks_by_name(
+    pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Disk> {
         use db::schema::disk::dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        paginated(dsl::disk, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::attach_instance_id.eq(authz_instance.id()))
-            .select(Disk::as_select())
-            .load_async::<Disk>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::disk, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::disk,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::attach_instance_id.eq(authz_instance.id()))
+        .select(Disk::as_select())
+        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_disk(
@@ -129,39 +120,31 @@ impl DataStore {
         Ok(disk)
     }
 
-    pub async fn project_list_disks_by_id(
+    pub async fn disk_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Disk> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::disk::dsl;
-        paginated(dsl::disk, dsl::id, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Disk::as_select())
-            .load_async::<Disk>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-    pub async fn project_list_disks_by_name(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Disk> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
-
-        use db::schema::disk::dsl;
-        paginated(dsl::disk, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Disk::as_select())
-            .load_async::<Disk>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::disk, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::disk,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .select(Disk::as_select())
+        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Attaches a disk to an instance, if both objects:

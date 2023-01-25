@@ -28,6 +28,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -38,46 +39,37 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::Name as ExternalName;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
-    /// List IP Pools by their name
-    pub async fn ip_pools_list_by_name(
+    /// List IP Pools
+    pub async fn ip_pools_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
         use db::schema::ip_pool::dsl;
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
-        paginated(dsl::ip_pool, dsl::name, pagparams)
-            .filter(dsl::internal.eq(false))
-            .filter(dsl::time_deleted.is_null())
-            .select(db::model::IpPool::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// List IP Pools by their IDs
-    pub async fn ip_pools_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<IpPool> {
-        use db::schema::ip_pool::dsl;
-        opctx
-            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
-            .await?;
-        paginated(dsl::ip_pool, dsl::id, pagparams)
-            .filter(dsl::internal.eq(false))
-            .filter(dsl::time_deleted.is_null())
-            .select(db::model::IpPool::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::ip_pool, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::ip_pool,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::internal.eq(false))
+        .filter(dsl::time_deleted.is_null())
+        .select(db::model::IpPool::as_select())
+        .get_results_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Looks up the default IP pool by name.
