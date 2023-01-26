@@ -7,42 +7,71 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::RouterRoute;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
 use crate::external_api::params;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::RouterRouteCreateParams;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouterRouteKind;
-use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
     // Routers
+    pub fn vpc_router_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        router_selector: &'a params::RouterSelector,
+    ) -> LookupResult<lookup::VpcRouter<'a>> {
+        match router_selector {
+            params::RouterSelector {
+                router: NameOrId::Id(id),
+                vpc_selector: None,
+            } => {
+                let router = LookupPath::new(opctx, &self.db_datastore)
+                    .vpc_router_id(*id);
+                Ok(router)
+            }
+            params::RouterSelector {
+                router: NameOrId::Name(name),
+                vpc_selector: Some(vpc_selector),
+            } => {
+                let router = self
+                    .vpc_lookup(opctx, vpc_selector)?
+                    .vpc_router_name(Name::ref_cast(name));
+                Ok(router)
+            }
+            params::RouterSelector {
+                router: NameOrId::Id(_),
+                vpc_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing subnet as an ID, vpc should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "router should either be an ID or vpc should be specified",
+            )),
+        }
+    }
 
     pub async fn vpc_create_router(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
         kind: &VpcRouterKind,
         params: &params::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
         let id = Uuid::new_v4();
         let router = db::model::VpcRouter::new(
             id,
@@ -57,73 +86,29 @@ impl super::Nexus {
         Ok(router)
     }
 
-    pub async fn vpc_list_routers(
+    pub async fn vpc_router_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        vpc_lookup: &lookup::Vpc<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::VpcRouter> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
         let routers = self
             .db_datastore
-            .vpc_list_routers(opctx, &authz_vpc, pagparams)
+            .vpc_router_list(opctx, &authz_vpc, pagparams)
             .await?;
         Ok(routers)
-    }
-
-    pub async fn vpc_router_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-    ) -> LookupResult<db::model::VpcRouter> {
-        let (.., db_router) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_router_name(router_name)
-            .fetch()
-            .await?;
-        Ok(db_router)
-    }
-
-    pub async fn vpc_router_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        vpc_router_id: &Uuid,
-    ) -> LookupResult<db::model::VpcRouter> {
-        let (.., db_router) = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_router_id(*vpc_router_id)
-            .fetch()
-            .await?;
-        Ok(db_router)
     }
 
     pub async fn vpc_update_router(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
+        vpc_router_lookup: &lookup::VpcRouter<'_>,
         params: &params::VpcRouterUpdate,
     ) -> UpdateResult<VpcRouter> {
-        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_router_name(router_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_router) =
+            vpc_router_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
             .await
@@ -135,19 +120,10 @@ impl super::Nexus {
     pub async fn vpc_delete_router(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
+        vpc_router_lookup: &lookup::VpcRouter<'_>,
     ) -> DeleteResult {
         let (.., authz_router, db_router) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .vpc_router_name(router_name)
-                .fetch()
-                .await?;
+            vpc_router_lookup.fetch_for(authz::Action::Delete).await?;
         // TODO-performance shouldn't this check be part of the "update"
         // database query?  This shouldn't affect correctness, assuming that a
         // router kind cannot be changed, but it might be able to save us a
@@ -162,24 +138,50 @@ impl super::Nexus {
 
     // Routes
 
-    #[allow(clippy::too_many_arguments)]
+    pub fn vpc_router_route_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        route_selector: &'a params::RouteSelector,
+    ) -> LookupResult<lookup::RouterRoute<'a>> {
+        match route_selector {
+            params::RouteSelector {
+                route: NameOrId::Id(id),
+                router_selector: None,
+            } => {
+                let route = LookupPath::new(opctx, &self.db_datastore)
+                    .router_route_id(*id);
+                Ok(route)
+            }
+            params::RouteSelector {
+                route: NameOrId::Name(name),
+                router_selector: Some(selector),
+            } => {
+                let route = self
+                    .vpc_router_lookup(opctx, selector)?
+                    .router_route_name(Name::ref_cast(name));
+                Ok(route)
+            }
+            params::RouteSelector {
+                route: NameOrId::Id(_),
+                router_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing subnet as an ID, vpc should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "router should either be an ID or vpc should be specified",
+            )),
+        }
+    }
+
     pub async fn router_create_route(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
+        router_lookup: &lookup::VpcRouter<'_>,
         kind: &RouterRouteKind,
-        params: &RouterRouteCreateParams,
+        params: &params::RouterRouteCreate,
     ) -> CreateResult<db::model::RouterRoute> {
-        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_router_name(router_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_router) =
+            router_lookup.lookup_for(authz::Action::CreateChild).await?;
         let id = Uuid::new_v4();
         let route = db::model::RouterRoute::new(
             id,
@@ -194,79 +196,27 @@ impl super::Nexus {
         Ok(route)
     }
 
-    pub async fn router_list_routes(
+    pub async fn vpc_router_route_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        vpc_router_lookup: &lookup::VpcRouter<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::RouterRoute> {
-        let (.., authz_router) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_router_name(router_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_router) =
+            vpc_router_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .router_list_routes(opctx, &authz_router, pagparams)
+            .vpc_router_route_list(opctx, &authz_router, pagparams)
             .await
     }
 
-    pub async fn route_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-        route_name: &Name,
-    ) -> LookupResult<db::model::RouterRoute> {
-        let (.., db_route) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_router_name(router_name)
-            .router_route_name(route_name)
-            .fetch()
-            .await?;
-        Ok(db_route)
-    }
-
-    pub async fn route_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        route_id: &Uuid,
-    ) -> LookupResult<db::model::RouterRoute> {
-        let (.., db_route) = LookupPath::new(opctx, &self.db_datastore)
-            .router_route_id(*route_id)
-            .fetch()
-            .await?;
-        Ok(db_route)
-    }
-
-    #[allow(clippy::too_many_arguments)]
     pub async fn router_update_route(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-        route_name: &Name,
-        params: &RouterRouteUpdateParams,
+        route_lookup: &lookup::RouterRoute<'_>,
+        params: &params::RouterRouteUpdate,
     ) -> UpdateResult<RouterRoute> {
-        let (.., authz_route, db_route) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .vpc_router_name(router_name)
-                .router_route_name(route_name)
-                .fetch()
-                .await?;
+        let (.., vpc, _, authz_route, db_route) =
+            route_lookup.fetch_for(authz::Action::Modify).await?;
         // TODO: Write a test for this once there's a way to test it (i.e.
         // subnets automatically register to the system router table)
         match db_route.kind.0 {
@@ -276,7 +226,8 @@ impl super::Nexus {
                     internal_message: format!(
                         "routes of type {} from the system table of VPC {:?} \
                         are not modifiable",
-                        db_route.kind.0, vpc_name
+                        db_route.kind.0,
+                        vpc.id()
                     ),
                 })
             }
@@ -289,21 +240,10 @@ impl super::Nexus {
     pub async fn router_delete_route(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        router_name: &Name,
-        route_name: &Name,
+        route_lookup: &lookup::RouterRoute<'_>,
     ) -> DeleteResult {
         let (.., authz_route, db_route) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .vpc_router_name(router_name)
-                .router_route_name(route_name)
-                .fetch()
-                .await?;
+            route_lookup.fetch_for(authz::Action::Delete).await?;
 
         // Only custom routes can be deleted
         // TODO Shouldn't this constraint be checked by the database query?

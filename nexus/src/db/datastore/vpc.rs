@@ -537,24 +537,31 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn vpc_list_routers(
+    pub async fn vpc_router_list(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<VpcRouter> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use db::schema::vpc_router::dsl;
-        paginated(dsl::vpc_router, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
-            .select(VpcRouter::as_select())
-            .load_async::<db::model::VpcRouter>(
-                self.pool_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::vpc_router, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::vpc_router,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::vpc_id.eq(authz_vpc.id()))
+        .select(VpcRouter::as_select())
+        .load_async::<db::model::VpcRouter>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_create_router(
@@ -641,24 +648,33 @@ impl DataStore {
             })
     }
 
-    pub async fn router_list_routes(
+    pub async fn vpc_router_route_list(
         &self,
         opctx: &OpContext,
         authz_router: &authz::VpcRouter,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<RouterRoute> {
         opctx.authorize(authz::Action::ListChildren, authz_router).await?;
 
         use db::schema::router_route::dsl;
-        paginated(dsl::router_route, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_router_id.eq(authz_router.id()))
-            .select(RouterRoute::as_select())
-            .load_async::<db::model::RouterRoute>(
-                self.pool_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::router_route, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::router_route,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::vpc_router_id.eq(authz_router.id()))
+        .select(RouterRoute::as_select())
+        .load_async::<db::model::RouterRoute>(
+            self.pool_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn router_create_route(

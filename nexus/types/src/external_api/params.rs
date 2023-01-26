@@ -9,7 +9,8 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, RouteDestination,
+    RouteTarget,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -43,6 +44,16 @@ pub struct VpcPath {
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetPath {
     pub subnet: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouterPath {
+    pub router: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RoutePath {
+    pub route: NameOrId,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -181,6 +192,60 @@ impl SubnetSelector {
             vpc_selector: vpc
                 .map(|vpc| VpcSelector::new(organization, project, vpc)),
             subnet,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct RouterSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+    pub router: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouterSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: NameOrId,
+    ) -> Self {
+        RouterSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            router,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalRouterSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouteSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+    pub route: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouteSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: Option<NameOrId>,
+        route: NameOrId,
+    ) -> Self {
+        RouteSelector {
+            router_selector: router.map(|router| {
+                RouterSelector::new(organization, project, vpc, router)
+            }),
+            route,
         }
     }
 }
@@ -984,6 +1049,26 @@ pub struct VpcRouterCreate {
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+// VPC ROUTER ROUTES
+
+/// Create-time parameters for a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Updateable properties of a [`RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
 }
 
 // DISKS
