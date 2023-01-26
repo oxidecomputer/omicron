@@ -11,8 +11,8 @@ use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
-    ComponentUpdate, SystemUpdate, UpdateAvailableArtifact, UpdateDeployment,
-    UpdateableComponent,
+    ComponentUpdate, SemverVersion, SystemUpdate, UpdateAvailableArtifact,
+    UpdateDeployment, UpdateableComponent,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -232,6 +232,40 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    pub async fn lowest_component_version(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<SemverVersion> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::updateable_component::dsl::*;
+
+        updateable_component
+            .select(version)
+            .order(version_sort.asc())
+            .first_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn highest_component_version(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<SemverVersion> {
+        // TODO: what's the right permission here?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::updateable_component::dsl::*;
+
+        updateable_component
+            .select(version)
+            .order(version_sort.desc())
+            .first_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     pub async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,
@@ -258,7 +292,6 @@ impl DataStore {
         update_deployment
             .select(UpdateDeployment::as_returning())
             .order(time_created.desc())
-            .limit(1)
             .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))

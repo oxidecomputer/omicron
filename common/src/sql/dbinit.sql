@@ -1574,6 +1574,7 @@ CREATE TABLE omicron.public.component_update (
     -- So far we are not implementing fetch component update by (component_type,
     -- version). If we did, we'd probably want to make that pair the PK.
     version STRING(64) NOT NULL, -- TODO: length
+
     component_type omicron.public.updateable_component_type NOT NULL,
 
     -- the ID of another component_update
@@ -1613,11 +1614,19 @@ CREATE TABLE omicron.public.updateable_component (
     -- free-form string that comes from the device
     device_id STRING(40) NOT NULL,
     component_type omicron.public.updateable_component_type NOT NULL,
+
     version STRING(64) NOT NULL,
+    -- version string with maj/min/patch 0-padded to be string sortable
+    version_sort STRING(64) NOT NULL, -- TODO: length
+
     parent_id UUID,
 
     status update_status NOT NULL
     -- TODO: status reason for updateable_component
+);
+
+CREATE INDEX ON omicron.public.updateable_component (
+    version_sort
 );
 
 /*

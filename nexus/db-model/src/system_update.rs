@@ -11,7 +11,10 @@ use crate::{
     SemverVersion,
 };
 use db_macros::Asset;
-use nexus_types::{external_api::views, identity::Asset};
+use nexus_types::{
+    external_api::{params, shared, views},
+    identity::Asset,
+};
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -104,31 +107,88 @@ impl_enum_type!(
     HostOmicron => b"host_omicron"
 );
 
-impl From<UpdateableComponentType> for views::UpdateableComponentType {
-    fn from(component_type: UpdateableComponentType) -> Self {
+impl From<shared::UpdateableComponentType> for UpdateableComponentType {
+    fn from(component_type: shared::UpdateableComponentType) -> Self {
         match component_type {
-            UpdateableComponentType::BootloaderForRot => Self::BootloaderForRot,
-            UpdateableComponentType::BootloaderForSp => Self::BootloaderForSp,
-            UpdateableComponentType::BootloaderForHostProc => {
-                Self::BootloaderForHostProc
+            shared::UpdateableComponentType::BootloaderForRot => {
+                UpdateableComponentType::BootloaderForRot
             }
-            UpdateableComponentType::HubrisForPscRot => Self::HubrisForPscRot,
-            UpdateableComponentType::HubrisForPscSp => Self::HubrisForPscSp,
+            shared::UpdateableComponentType::BootloaderForSp => {
+                UpdateableComponentType::BootloaderForSp
+            }
+            shared::UpdateableComponentType::BootloaderForHostProc => {
+                UpdateableComponentType::BootloaderForHostProc
+            }
+            shared::UpdateableComponentType::HubrisForPscRot => {
+                UpdateableComponentType::HubrisForPscRot
+            }
+            shared::UpdateableComponentType::HubrisForPscSp => {
+                UpdateableComponentType::HubrisForPscSp
+            }
+            shared::UpdateableComponentType::HubrisForSidecarRot => {
+                UpdateableComponentType::HubrisForSidecarRot
+            }
+            shared::UpdateableComponentType::HubrisForSidecarSp => {
+                UpdateableComponentType::HubrisForSidecarSp
+            }
+            shared::UpdateableComponentType::HubrisForGimletRot => {
+                UpdateableComponentType::HubrisForGimletRot
+            }
+            shared::UpdateableComponentType::HubrisForGimletSp => {
+                UpdateableComponentType::HubrisForGimletSp
+            }
+            shared::UpdateableComponentType::HeliosHostPhase1 => {
+                UpdateableComponentType::HeliosHostPhase1
+            }
+            shared::UpdateableComponentType::HeliosHostPhase2 => {
+                UpdateableComponentType::HeliosHostPhase2
+            }
+            shared::UpdateableComponentType::HostOmicron => {
+                UpdateableComponentType::HostOmicron
+            }
+        }
+    }
+}
+
+impl Into<shared::UpdateableComponentType> for UpdateableComponentType {
+    fn into(self) -> shared::UpdateableComponentType {
+        match self {
+            UpdateableComponentType::BootloaderForRot => {
+                shared::UpdateableComponentType::BootloaderForRot
+            }
+            UpdateableComponentType::BootloaderForSp => {
+                shared::UpdateableComponentType::BootloaderForSp
+            }
+            UpdateableComponentType::BootloaderForHostProc => {
+                shared::UpdateableComponentType::BootloaderForHostProc
+            }
+            UpdateableComponentType::HubrisForPscRot => {
+                shared::UpdateableComponentType::HubrisForPscRot
+            }
+            UpdateableComponentType::HubrisForPscSp => {
+                shared::UpdateableComponentType::HubrisForPscSp
+            }
             UpdateableComponentType::HubrisForSidecarRot => {
-                Self::HubrisForSidecarRot
+                shared::UpdateableComponentType::HubrisForSidecarRot
             }
             UpdateableComponentType::HubrisForSidecarSp => {
-                Self::HubrisForSidecarSp
+                shared::UpdateableComponentType::HubrisForSidecarSp
             }
             UpdateableComponentType::HubrisForGimletRot => {
-                Self::HubrisForGimletRot
+                shared::UpdateableComponentType::HubrisForGimletRot
             }
             UpdateableComponentType::HubrisForGimletSp => {
-                Self::HubrisForGimletSp
+                shared::UpdateableComponentType::HubrisForGimletSp
             }
-            UpdateableComponentType::HeliosHostPhase1 => Self::HeliosHostPhase1,
-            UpdateableComponentType::HeliosHostPhase2 => Self::HeliosHostPhase2,
-            UpdateableComponentType::HostOmicron => Self::HostOmicron,
+            UpdateableComponentType::HeliosHostPhase1 => {
+                shared::UpdateableComponentType::HeliosHostPhase1
+            }
+            UpdateableComponentType::HeliosHostPhase2 => {
+                shared::UpdateableComponentType::HeliosHostPhase2
+            }
+            UpdateableComponentType::HostOmicron => {
+                shared::UpdateableComponentType::HostOmicron
+            }
         }
     }
 }
@@ -198,11 +258,33 @@ pub struct UpdateableComponent {
     pub device_id: String,
     pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
+    /// Semver version string with 0-padding on the numeric parts to make it
+    /// DB-sortable. See `to_sortable_string` on `SemverVersion`
+    pub version_sort: String,
     pub status: UpdateStatus,
     /// ID of the parent component, e.g., the sled a disk belongs to. Value will
     /// be `None` for top-level components whose "parent" is the rack.
     pub parent_id: Option<Uuid>,
     // TODO: point to the actual update artifact
+}
+
+impl TryFrom<params::UpdateableComponentCreate> for UpdateableComponent {
+    type Error = external::Error;
+
+    fn try_from(
+        create: params::UpdateableComponentCreate,
+    ) -> Result<Self, Self::Error> {
+        let version = SemverVersion(create.version);
+        Ok(Self {
+            identity: UpdateableComponentIdentity::new(Uuid::new_v4()),
+            version: version.clone(),
+            version_sort: version.to_sortable_string()?,
+            component_type: create.component_type.into(),
+            parent_id: create.parent_id,
+            device_id: create.device_id,
+            status: UpdateStatus::Steady,
+        })
+    }
 }
 
 impl From<UpdateableComponent> for views::UpdateableComponent {

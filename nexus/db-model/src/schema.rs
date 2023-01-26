@@ -722,6 +722,7 @@ table! {
 
         device_id -> Text,
         version -> Text,
+        version_sort -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
         parent_id -> Nullable<Uuid>,
         status -> crate::UpdateStatusEnum,

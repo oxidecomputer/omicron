@@ -12,7 +12,8 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
 use chrono::Utc;
 use hex;
-use nexus_db_model::{SemverVersion, UpdateableComponentType};
+use nexus_db_model::SemverVersion;
+use nexus_types::external_api::params;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
     PaginationOrder,
@@ -27,29 +28,6 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
-
-pub struct CreateSystemUpdate {
-    version: external::SemverVersion,
-}
-
-// TODO: it's janky to use the external version of SemverVersion (which makes
-// sense because this is all coming from outside the db layer) but
-// UpdateableComponentType comes from the db model. We probably need to move
-// views::UpdateableComponentType out of views and into shared, and then
-// important that here and use it.
-pub struct CreateComponentUpdate {
-    version: external::SemverVersion,
-    component_type: UpdateableComponentType,
-    parent_id: Option<Uuid>,
-    system_update_id: Uuid,
-}
-
-pub struct CreateUpdateableComponent {
-    version: external::SemverVersion, // TODO: is this weird? do we know the version at create time?
-    component_type: UpdateableComponentType,
-    parent_id: Option<Uuid>,
-    device_id: String,
-}
 
 impl super::Nexus {
     async fn tuf_base_url(
@@ -308,7 +286,7 @@ impl super::Nexus {
     pub async fn system_update_create(
         &self,
         opctx: &OpContext,
-        create_update: CreateSystemUpdate,
+        create_update: params::SystemUpdateCreate,
     ) -> CreateResult<db::model::SystemUpdate> {
         let update = db::model::SystemUpdate::new(create_update.version)?;
         self.db_datastore.system_update_create(opctx, update).await
@@ -317,7 +295,7 @@ impl super::Nexus {
     pub async fn component_update_create(
         &self,
         opctx: &OpContext,
-        create_update: CreateComponentUpdate,
+        create_update: params::ComponentUpdateCreate,
     ) -> CreateResult<db::model::ComponentUpdate> {
         let now = Utc::now();
         let update = db::model::ComponentUpdate {
@@ -327,7 +305,7 @@ impl super::Nexus {
                 time_modified: now,
             },
             version: SemverVersion(create_update.version),
-            component_type: create_update.component_type,
+            component_type: create_update.component_type.into(),
             parent_id: create_update.parent_id,
         };
 
@@ -388,22 +366,10 @@ impl super::Nexus {
     pub async fn updateable_component_create(
         &self,
         opctx: &OpContext,
-        create_component: CreateUpdateableComponent,
+        create_component: params::UpdateableComponentCreate,
     ) -> CreateResult<db::model::UpdateableComponent> {
-        let now = Utc::now();
-        let component = db::model::UpdateableComponent {
-            identity: db::model::UpdateableComponentIdentity {
-                id: Uuid::new_v4(),
-                time_created: now,
-                time_modified: now,
-            },
-            version: SemverVersion(create_component.version),
-            component_type: create_component.component_type,
-            parent_id: create_component.parent_id,
-            device_id: create_component.device_id,
-            status: db::model::UpdateStatus::Steady,
-        };
-
+        let component =
+            db::model::UpdateableComponent::try_from(create_component)?;
         self.db_datastore.updateable_component_create(opctx, component).await
     }
 
@@ -444,6 +410,20 @@ impl super::Nexus {
     ) -> LookupResult<db::model::UpdateDeployment> {
         self.db_datastore.latest_update_deployment(opctx).await
     }
+
+    pub async fn lowest_component_version(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<db::model::SemverVersion> {
+        self.db_datastore.lowest_component_version(opctx).await
+    }
+
+    pub async fn highest_component_version(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<db::model::SemverVersion> {
+        self.db_datastore.highest_component_version(opctx).await
+    }
 }
 
 // TODO: should these tests be done as integration tests? the creates would
@@ -454,13 +434,16 @@ impl super::Nexus {
 mod tests {
     use std::num::NonZeroU32;
 
-    use crate::app::update::{
-        CreateComponentUpdate, CreateSystemUpdate, CreateUpdateableComponent,
-    };
     use crate::context::OpContext;
     use dropshot::PaginationOrder;
-    use nexus_db_model::UpdateableComponentType;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::{
+        params::{
+            ComponentUpdateCreate, SystemUpdateCreate,
+            UpdateableComponentCreate,
+        },
+        shared::UpdateableComponentType,
+    };
     use omicron_common::api::external::{self, DataPageParams};
     use uuid::Uuid;
 
@@ -495,19 +478,19 @@ mod tests {
 
         assert_eq!(system_updates.len(), 0);
 
-        let su1_create = CreateSystemUpdate {
+        let su1_create = SystemUpdateCreate {
             version: external::SemverVersion::new(1, 0, 0),
         };
         let su1 = nexus.system_update_create(&opctx, su1_create).await.unwrap();
 
         // 1,3,2 order is deliberate
-        let su3_create = CreateSystemUpdate {
+        let su3_create = SystemUpdateCreate {
             version: external::SemverVersion::new(3, 0, 0),
         };
         let _su3 =
             nexus.system_update_create(&opctx, su3_create).await.unwrap();
 
-        let su2_create = CreateSystemUpdate {
+        let su2_create = SystemUpdateCreate {
             version: external::SemverVersion::new(2, 0, 0),
         };
         let su2 = nexus.system_update_create(&opctx, su2_create).await.unwrap();
@@ -543,7 +526,7 @@ mod tests {
         let cu1 = nexus
             .component_update_create(
                 &opctx,
-                CreateComponentUpdate {
+                ComponentUpdateCreate {
                     version: external::SemverVersion::new(1, 0, 0),
                     component_type: UpdateableComponentType::BootloaderForRot,
                     parent_id: None,
@@ -555,7 +538,7 @@ mod tests {
         let _cu1a = nexus
             .component_update_create(
                 &opctx,
-                CreateComponentUpdate {
+                ComponentUpdateCreate {
                     version: external::SemverVersion::new(2, 0, 0),
                     component_type: UpdateableComponentType::HubrisForGimletSp,
                     parent_id: Some(cu1.identity.id),
@@ -596,21 +579,21 @@ mod tests {
 
         // major, minor, and patch are all capped
 
-        let su_create = CreateSystemUpdate {
+        let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(100000000, 0, 0),
         };
         let error =
             nexus.system_update_create(&opctx, su_create).await.unwrap_err();
         assert_eq!(error, expected);
 
-        let su_create = CreateSystemUpdate {
+        let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 100000000, 0),
         };
         let error =
             nexus.system_update_create(&opctx, su_create).await.unwrap_err();
         assert_eq!(error, expected);
 
-        let su_create = CreateSystemUpdate {
+        let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 0, 100000000),
         };
         let error =
@@ -631,10 +614,15 @@ mod tests {
 
         assert_eq!(components.len(), 0);
 
+        // TODO: test high and low version with no updateable components
+        // with no components these should both 404 (currently they 500)
+        // let low = nexus.lowest_component_version(&opctx).await.unwrap_err();
+        // let high = nexus.highest_component_version(&opctx).await.unwrap_err();
+
         let uc1 = nexus
             .updateable_component_create(
                 &opctx,
-                CreateUpdateableComponent {
+                UpdateableComponentCreate {
                     version: external::SemverVersion::new(1, 0, 0),
                     component_type: UpdateableComponentType::BootloaderForSp,
                     parent_id: None,
@@ -643,10 +631,10 @@ mod tests {
             )
             .await
             .unwrap();
-        let _uc2 = nexus
+        let uc2 = nexus
             .updateable_component_create(
                 &opctx,
-                CreateUpdateableComponent {
+                UpdateableComponentCreate {
                     version: external::SemverVersion::new(2, 0, 0),
                     component_type: UpdateableComponentType::HeliosHostPhase2,
                     parent_id: Some(uc1.identity.id),
@@ -655,14 +643,31 @@ mod tests {
             )
             .await
             .unwrap();
+        let _uc3 = nexus
+            .updateable_component_create(
+                &opctx,
+                UpdateableComponentCreate {
+                    version: external::SemverVersion::new(3, 0, 0),
+                    component_type: UpdateableComponentType::HeliosHostPhase1,
+                    parent_id: Some(uc2.identity.id),
+                    device_id: "a-third-device".to_string(),
+                },
+            )
+            .await
+            .unwrap();
 
-        // now there should be 2
+        // now there should be 3
         let components = nexus
             .updateable_components_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(components.len(), 2);
+        assert_eq!(components.len(), 3);
+
+        let low = nexus.lowest_component_version(&opctx).await.unwrap();
+        assert_eq!(&low.to_string(), "1.0.0");
+        let high = nexus.highest_component_version(&opctx).await.unwrap();
+        assert_eq!(&high.to_string(), "3.0.0");
 
         // TODO: update the version of a component
     }
@@ -679,5 +684,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(deployments.len(), 0);
+
+        // add some
+
+        // test latest_deployment
     }
 }

@@ -65,7 +65,6 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
@@ -5438,16 +5437,16 @@ async fn system_version(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        // updating status of the system is the status of the latest update
-        // deployment: if there's one running, we're running. Otherwise we're not running.
-        let _latest_deployment = nexus.latest_update_deployment(&opctx).await;
+        let latest_deployment = nexus.latest_update_deployment(&opctx).await?;
+        let low = nexus.lowest_component_version(&opctx).await?;
+        let high = nexus.highest_component_version(&opctx).await?;
 
         Ok(HttpResponseOk(views::SystemVersion {
             version_range: views::VersionRange {
-                low: SemverVersion::new(0, 0, 1),
-                high: SemverVersion::new(0, 0, 2),
+                low: low.into(),
+                high: high.into(),
             },
-            status: views::UpdateStatus::Steady,
+            status: latest_deployment.status.into(),
         }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

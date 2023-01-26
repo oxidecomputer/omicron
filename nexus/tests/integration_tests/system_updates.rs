@@ -26,6 +26,10 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
             .execute_and_parse_unwrap::<views::SystemVersion>()
             .await;
 
+    // This 500s because there are no updateable components or update
+    // deployments in the DB. It should probably 404 instead. Also figure out
+    // how to populate the DB so it can be tested with good data.
+
     assert_eq!(
         version,
         views::SystemVersion {
@@ -42,7 +46,7 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
 // updateable components for these tests in light of the fact that there are no
 // create endpoints for those resources. We can call the Nexus functions
 // directly here, but that requires nexus::app::update to be public so we can
-// import CreateSystemUpdate from it. A test-only helper function that lives in
+// import SystemUpdateCreate from it. A test-only helper function that lives in
 // a different file might let us avoid over-exporting.
 
 #[nexus_test]
