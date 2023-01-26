@@ -165,7 +165,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // cannot snapshot attached disk for instance in state starting
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Issue snapshot request
