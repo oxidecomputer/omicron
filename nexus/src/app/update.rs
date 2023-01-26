@@ -310,17 +310,7 @@ impl super::Nexus {
         opctx: &OpContext,
         create_update: CreateSystemUpdate,
     ) -> CreateResult<db::model::SystemUpdate> {
-        let now = Utc::now();
-        let version = SemverVersion(create_update.version);
-        let update = db::model::SystemUpdate {
-            identity: db::model::SystemUpdateIdentity {
-                id: Uuid::new_v4(),
-                time_created: now,
-                time_modified: now,
-            },
-            version: version.clone(),
-            version_sort: version.to_sortable_string(),
-        };
+        let update = db::model::SystemUpdate::new(create_update.version)?;
         self.db_datastore.system_update_create(opctx, update).await
     }
 
@@ -590,6 +580,42 @@ mod tests {
             .unwrap();
 
         assert_eq!(cus_for_su2.len(), 0);
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_semver_max(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx.nexus;
+        let opctx = test_opctx(&cptestctx);
+
+        let expected = external::Error::InvalidValue {
+            label: "version".to_string(),
+            message:
+                "Major, minor, and patch version must be less than 99999999"
+                    .to_string(),
+        };
+
+        // major, minor, and patch are all capped
+
+        let su_create = CreateSystemUpdate {
+            version: external::SemverVersion::new(100000000, 0, 0),
+        };
+        let error =
+            nexus.system_update_create(&opctx, su_create).await.unwrap_err();
+        assert_eq!(error, expected);
+
+        let su_create = CreateSystemUpdate {
+            version: external::SemverVersion::new(0, 100000000, 0),
+        };
+        let error =
+            nexus.system_update_create(&opctx, su_create).await.unwrap_err();
+        assert_eq!(error, expected);
+
+        let su_create = CreateSystemUpdate {
+            version: external::SemverVersion::new(0, 0, 100000000),
+        };
+        let error =
+            nexus.system_update_create(&opctx, su_create).await.unwrap_err();
+        assert_eq!(error, expected);
     }
 
     #[nexus_test(server = crate::Server)]

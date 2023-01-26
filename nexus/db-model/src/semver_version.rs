@@ -31,6 +31,8 @@ pub struct SemverVersion(pub external::SemverVersion);
 NewtypeFrom! { () pub struct SemverVersion(external::SemverVersion); }
 NewtypeDeref! { () pub struct SemverVersion(external::SemverVersion); }
 
+const MAX_VERSION_NUM: u64 = 99999999;
+
 impl SemverVersion {
     pub fn new(major: u64, minor: u64, patch: u64) -> Self {
         Self(external::SemverVersion(semver::Version::new(major, minor, patch)))
@@ -54,8 +56,19 @@ impl SemverVersion {
     ///
     /// Compare to the `Display` implementation on Semver::Version
     /// <https://github.com/dtolnay/semver/blob/7fd09f7/src/display.rs>
-    pub fn to_sortable_string(self) -> String {
+    pub fn to_sortable_string(self) -> Result<String, external::Error> {
         let v = &self.0 .0;
+
+        if v.major > MAX_VERSION_NUM
+            || v.minor > MAX_VERSION_NUM
+            || v.patch > MAX_VERSION_NUM
+        {
+            return Err(external::Error::InvalidValue {
+                label: "version".to_string(),
+                message: format!("Major, minor, and patch version must be less than {MAX_VERSION_NUM}"),
+            });
+        }
+
         let mut result =
             format!("{:0>8}.{:0>8}.{:0>8}", v.major, v.minor, v.patch);
 
@@ -66,7 +79,7 @@ impl SemverVersion {
             result.push_str(&format!("+{}", v.build));
         }
 
-        result
+        Ok(result)
     }
 }
 

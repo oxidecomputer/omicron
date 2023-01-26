@@ -12,6 +12,7 @@ use crate::{
 };
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
+use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,8 +31,23 @@ pub struct SystemUpdate {
     #[diesel(embed)]
     pub identity: SystemUpdateIdentity,
     pub version: SemverVersion,
-    /// Semver version with 0-padding to make it lexicographically sortable
+    /// Semver version string with 0-padding on the numeric parts to make it
+    /// DB-sortable. See `to_sortable_string` on `SemverVersion`
     pub version_sort: String,
+}
+
+impl SystemUpdate {
+    /// Can fail if version numbers are too high.
+    pub fn new(
+        version: external::SemverVersion,
+    ) -> Result<Self, external::Error> {
+        let db_version = SemverVersion(version);
+        Ok(Self {
+            identity: SystemUpdateIdentity::new(Uuid::new_v4()),
+            version: db_version.clone(),
+            version_sort: db_version.to_sortable_string()?,
+        })
+    }
 }
 
 impl From<SystemUpdate> for views::SystemUpdate {
