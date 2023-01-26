@@ -107,7 +107,7 @@ lazy_static! {
     pub static ref DEMO_PROJECT_POLICY_URL: String =
         format!("/v1/projects/{}/policy?organization={}", *DEMO_PROJECT_NAME, *DEMO_ORG_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
-        format!("/organizations/{}/projects/{}/disks", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/disks?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
         format!("/organizations/{}/projects/{}/images", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
@@ -130,7 +130,7 @@ lazy_static! {
     pub static ref DEMO_VPC_URL_FIREWALL_RULES: String =
         format!("/organizations/{}/projects/{}/vpcs/{}/firewall/rules", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_ROUTERS: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}/routers", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-routers?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_SUBNETS: String =
         format!("/v1/vpc-subnets?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_CREATE: params::VpcCreate =
@@ -164,9 +164,9 @@ lazy_static! {
     pub static ref DEMO_VPC_ROUTER_NAME: Name =
         "demo-vpc-router".parse().unwrap();
     pub static ref DEMO_VPC_ROUTER_URL: String =
-        format!("{}/{}", *DEMO_VPC_URL_ROUTERS, *DEMO_VPC_ROUTER_NAME);
+        format!("/v1/vpc-routers/{}?organization={}&project={}&vpc={}", *DEMO_VPC_ROUTER_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_ROUTER_URL_ROUTES: String =
-        format!("{}/routes", *DEMO_VPC_ROUTER_URL);
+        format!("/v1/vpc-router-routes?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_ROUTER_CREATE: params::VpcRouterCreate =
         params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
@@ -179,7 +179,7 @@ lazy_static! {
     pub static ref DEMO_ROUTER_ROUTE_NAME: Name =
         "demo-router-route".parse().unwrap();
     pub static ref DEMO_ROUTER_ROUTE_URL: String =
-        format!("{}/{}", *DEMO_VPC_ROUTER_URL_ROUTES, *DEMO_ROUTER_ROUTE_NAME);
+        format!("/v1/vpc-router-routes/{}?organization={}&project={}&vpc={}", *DEMO_ROUTER_ROUTE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_ROUTER_ROUTE_CREATE: params::RouterRouteCreate =
         params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
