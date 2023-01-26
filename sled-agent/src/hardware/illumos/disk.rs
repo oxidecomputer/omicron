@@ -246,7 +246,6 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Provisioning M.2 devices not yet supported")]
     fn ensure_partition_layout_m2_cannot_format() {
         let logctx = test_setup_log("ensure_partition_layout_m2_cannot_format");
         let log = &logctx.log.clone();
@@ -254,16 +253,14 @@ mod test {
         let devfs_path = PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
-        // This is kinda silly, but necessary to not leave leftover log files.
-        // Once we panic, we won't be able to clean it up.
-        logctx.cleanup_successful();
-
-        let _ = internal_ensure_partition_layout::<LabelNotFoundGPT>(
+        assert!(internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
             &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
             DiskVariant::M2,
-        );
-        panic!("We should have panicked earlier...");
+        )
+        .is_err());
+
+        logctx.cleanup_successful();
     }
 
     struct FakeU2GPT {}
