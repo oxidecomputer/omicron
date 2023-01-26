@@ -389,8 +389,10 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
-        serial_number -> Text,
-        slot -> Int2,
+        part_number -> Nullable<Text>,
+        serial_number -> Nullable<Text>,
+        revision -> Nullable<Int4>,
+        slot -> Nullable<Int2>,
     }
 }
 

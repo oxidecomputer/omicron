@@ -88,9 +88,21 @@ CREATE TABLE omicron.public.sled (
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL,
 
-    /* The hardware serial number if reported */
-    /* TODO: What size should this be? */
-    serial_number STRING(63),
+    /* 
+     * Oxide's CPN, reported by the SP via MGS
+     * See: https://rfd.shared.oxide.computer/rfd/0308#_part_number 
+     */
+    part_number STRING(32),
+    /* 
+     * The manufacturer's serial number, reported by the SP via MGS
+     * See: https://rfd.shared.oxide.computer/rfd/0308#_serial_number 
+     */
+    serial_number STRING(32),
+    /* 
+     * The production revision number, reported by the SP via MGS
+     * See: https://rfd.shared.oxide.computer/rfd/0308#_revision_number 
+     */
+    revision INT4,
 
     /* The physical location of the sled in the rack if known */
     slot INT2

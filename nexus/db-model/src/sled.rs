@@ -34,7 +34,9 @@ pub struct Sled {
     pub last_used_address: ipv6::Ipv6Addr,
 
     pub slot: Option<SqlU8>,
+    pub part_number: Option<String>,
     pub serial_number: Option<String>,
+    pub revision: Option<SqlU16>,
 }
 
 impl Sled {
@@ -60,7 +62,9 @@ impl Sled {
             last_used_address,
             // TODO: these fields should be populated
             slot: None,
+            part_number: None,
             serial_number: None,
+            revision: None,
         }
     }
 
@@ -88,6 +92,8 @@ impl From<Sled> for views::Sled {
             service_address: sled.address(),
             slot: sled.slot.map(|c| c.into()),
             serial_number: sled.serial_number,
+            part_number: sled.part_number,
+            revision: sled.revision.map(|c| c.into()),
         }
     }
 }

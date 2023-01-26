@@ -291,7 +291,9 @@ pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
+    pub part_number: Option<String>,
     pub serial_number: Option<String>,
+    pub revision: Option<u16>,
     pub slot: Option<u8>,
 }
 
