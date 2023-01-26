@@ -127,7 +127,7 @@ pub struct Nexus {
     sec_client: Arc<steno::SecClient>,
 
     /// Task representing completion of recovered Sagas
-    recovery_task: Mutex<Option<db::RecoveryTask>>,
+    recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
     /// External dropshot servers
     external_servers: Mutex<ExternalServers>,
@@ -159,7 +159,7 @@ pub struct Nexus {
     // this amount of time is called "max issue delay" and we have to set that
     // in order for our integration tests that POST static SAML responses to
     // Nexus to not all fail.
-    samael_max_issue_delay: Mutex<Option<chrono::Duration>>,
+    samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
     resolver: Arc<Mutex<internal_dns_client::multiclient::Resolver>>,
 }
@@ -259,7 +259,7 @@ impl Nexus {
                 authn::Context::external_authn(),
                 Arc::clone(&db_datastore),
             ),
-            samael_max_issue_delay: Mutex::new(None),
+            samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
         };
 
