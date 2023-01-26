@@ -1122,7 +1122,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2f700a52e063f2ef6c6e44cd7e4195127484c9b7#2f700a52e063f2ef6c6e44cd7e4195127484c9b7"
+source = "git+https://github.com/oxidecomputer/crucible?rev=0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec#0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1144,6 +1144,33 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "crucible-pantry-client"
+version = "0.0.1"
+source = "git+https://github.com/oxidecomputer/crucible?rev=0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec#0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "percent-encoding",
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-smf"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5f06c7ebc320c19846670e9d745a4d44f78901b4#5f06c7ebc320c19846670e9d745a4d44f78901b4"
+dependencies = [
+ "libc",
+ "num-derive",
+ "num-traits",
+ "thiserror",
 ]
 
 [[package]]
@@ -3800,14 +3827,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.20.0",
+ "base64 0.21.0",
  "bincode",
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
  "clap 4.1.1",
  "crucible-agent-client",
- "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=2f700a52e063f2ef6c6e44cd7e4195127484c9b7)",
+ "crucible-client-types",
  "ddm-admin-client",
  "dropshot",
  "expectorate",
