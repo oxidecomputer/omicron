@@ -13063,8 +13063,28 @@
             "type": "string",
             "format": "uuid"
           },
+          "part_number": {
+            "nullable": true,
+            "type": "string"
+          },
+          "revision": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "serial_number": {
+            "nullable": true,
+            "type": "string"
+          },
           "service_address": {
             "type": "string"
+          },
+          "slot": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "time_created": {
             "description": "timestamp when this resource was created",
