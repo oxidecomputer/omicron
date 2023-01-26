@@ -748,15 +748,17 @@ async fn ssc_attach_disk_to_pantry(
                 //
                 return Err(ActionError::action_failed(
                     "disk attached to instance after saga was \
-                    constructed".to_string()
+                    constructed"
+                        .to_string(),
                 ));
             }
         }
 
         _ => {
-            return Err(ActionError::action_failed(
-                format!("disk is in state {:?}", db_disk.state())
-            ));
+            return Err(ActionError::action_failed(format!(
+                "disk is in state {:?}",
+                db_disk.state()
+            )));
         }
     }
 

@@ -219,10 +219,10 @@ async fn bulk_write(
     let pantry = rc.context();
 
     let data = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            body.base64_encoded_data,
-        )
-        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
+        &base64::engine::general_purpose::STANDARD,
+        body.base64_encoded_data,
+    )
+    .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
 
     pantry
         .bulk_write(path.id.clone(), body.offset, data)

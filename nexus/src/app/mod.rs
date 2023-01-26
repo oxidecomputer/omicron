@@ -609,10 +609,7 @@ impl Nexus {
         *self.resolver.lock().await = resolver;
     }
 
-    pub async fn resolver(
-        &self,
-    ) -> internal_dns_client::multiclient::Resolver
-    {
+    pub async fn resolver(&self) -> internal_dns_client::multiclient::Resolver {
         let resolver = self.resolver.lock().await;
         resolver.clone()
     }
