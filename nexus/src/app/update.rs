@@ -623,7 +623,7 @@ mod tests {
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
-                    version: external::SemverVersion::new(1, 0, 0),
+                    version: external::SemverVersion::new(0, 2, 0),
                     component_type: UpdateableComponentType::BootloaderForSp,
                     parent_id: None,
                     device_id: "look-a-device".to_string(),
@@ -635,7 +635,7 @@ mod tests {
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
-                    version: external::SemverVersion::new(2, 0, 0),
+                    version: external::SemverVersion::new(3, 0, 0),
                     component_type: UpdateableComponentType::HeliosHostPhase2,
                     parent_id: Some(uc1.identity.id),
                     device_id: "another-device".to_string(),
@@ -647,7 +647,7 @@ mod tests {
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
-                    version: external::SemverVersion::new(3, 0, 0),
+                    version: external::SemverVersion::new(10, 0, 0),
                     component_type: UpdateableComponentType::HeliosHostPhase1,
                     parent_id: Some(uc2.identity.id),
                     device_id: "a-third-device".to_string(),
@@ -665,9 +665,9 @@ mod tests {
         assert_eq!(components.len(), 3);
 
         let low = nexus.lowest_component_version(&opctx).await.unwrap();
-        assert_eq!(&low.to_string(), "1.0.0");
+        assert_eq!(&low.to_string(), "0.2.0");
         let high = nexus.highest_component_version(&opctx).await.unwrap();
-        assert_eq!(&high.to_string(), "3.0.0");
+        assert_eq!(&high.to_string(), "10.0.0");
 
         // TODO: update the version of a component
     }
