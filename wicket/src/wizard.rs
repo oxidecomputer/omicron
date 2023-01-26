@@ -428,6 +428,7 @@ pub enum InventoryEvent {
 
         /// The time at which information was received from MGS.
         mgs_received: libsw::Stopwatch,
+        // TODO: add and handle errors
     },
     /// The inventory is unavailable.
     Unavailable {

@@ -11,7 +11,7 @@ use futures::StreamExt;
 use gateway_client::types::{SpComponentList, SpIdentifier, SpInfo};
 use schemars::JsonSchema;
 use serde::Serialize;
-use slog::{debug, info, o, warn, Logger};
+use slog::{info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use tokio::sync::{mpsc, oneshot};
@@ -49,20 +49,47 @@ pub struct MgsHandle {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, received_ago: Duration },
-    Unavailable,
+    Response {
+        inventory: RackV1Inventory,
+        received_ago: Duration,
+        last_error: Option<GetInventoryError>,
+    },
+    Unavailable {
+        // These will be None if the last response received was not an error.
+        last_error: Option<GetInventoryError>,
+    },
 }
 
 impl GetInventoryResponse {
-    fn new(inventory: Option<(RackV1Inventory, Instant)>) -> Self {
+    fn new(
+        inventory: Option<(RackV1Inventory, Instant)>,
+        last_error: Option<&(
+            gateway_client::Error<gateway_client::types::Error>,
+            Instant,
+        )>,
+    ) -> Self {
+        let last_error = match last_error {
+            Some((error, ago)) => Some(GetInventoryError {
+                error: format!("{error}"),
+                received_ago: ago.elapsed(),
+            }),
+            None => None,
+        };
         match inventory {
             Some((inventory, received_at)) => GetInventoryResponse::Response {
                 inventory,
                 received_ago: received_at.elapsed(),
+                last_error,
             },
-            None => GetInventoryResponse::Unavailable,
+            None => GetInventoryResponse::Unavailable { last_error },
         }
     }
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+pub struct GetInventoryError {
+    error: String,
+    received_ago: Duration,
 }
 
 impl MgsHandle {
@@ -100,6 +127,8 @@ pub struct MgsManager {
     mgs_client: gateway_client::Client,
     // The Instant indicates the moment at which the inventory was received.
     inventory: Option<(RackV1Inventory, Instant)>,
+    last_error:
+        Option<(gateway_client::Error<gateway_client::types::Error>, Instant)>,
 }
 
 impl MgsManager {
@@ -122,7 +151,8 @@ impl MgsManager {
             log.clone(),
         );
         let inventory = None;
-        MgsManager { log, tx, rx, mgs_client, inventory }
+        let last_error = None;
+        MgsManager { log, tx, rx, mgs_client, inventory, last_error }
     }
 
     pub fn get_handle(&self) -> MgsHandle {
@@ -136,18 +166,31 @@ impl MgsManager {
         loop {
             tokio::select! {
                 // Poll MGS inventory
-                Some((inventory, instant)) = inventory_rx.recv() => {
-                    self.inventory = Some((inventory, instant));
+                Some(PollSps { changed_inventory, mgs_received }) = inventory_rx.recv() => {
+                    match changed_inventory {
+                        Ok(changed_inventory) => {
+                            self.last_error = None;
+                            let inventory = match (changed_inventory, self.inventory.take()) {
+                                (Some(inventory), _) => inventory,
+                                (None, Some((inventory, _))) => inventory,
+                                (None, None) => continue,
+                            };
+                            self.inventory = Some((inventory, mgs_received));
+                        }
+                        Err(error) => {
+                            self.last_error = Some((error, mgs_received));
+                        }
+                    }
                 }
 
                 // Handle requests from clients
                 Some(request) = self.rx.recv() => {
-                    debug!(self.log, "{:?}", request);
-                     match request {
-                         MgsRequest::GetInventory {reply_tx, ..} => {
-                            let _ = reply_tx.send(GetInventoryResponse::new(self.inventory.clone()));
-                         }
-                     }
+                    match request {
+                        MgsRequest::GetInventory {reply_tx, ..} => {
+                            let response = GetInventoryResponse::new(self.inventory.clone(), self.last_error.as_ref());
+                            let _ = reply_tx.send(response);
+                        }
+                    }
                 }
             }
         }
@@ -243,7 +286,7 @@ async fn update_inventory(
 async fn poll_sps(
     log: &Logger,
     client: gateway_client::Client,
-) -> mpsc::Receiver<(RackV1Inventory, Instant)> {
+) -> mpsc::Receiver<PollSps> {
     let log = log.clone();
 
     // We only want one outstanding inventory request at a time
@@ -260,26 +303,45 @@ async fn poll_sps(
             ticker.tick().await;
             match client.sp_list().await {
                 Ok(val) => {
-                    if update_inventory(
+                    let changed_inventory = update_inventory(
                         &log,
                         &mut inventory,
                         val.into_inner(),
                         &client,
                     )
                     .await
-                    {
-                        let inventory = RackV1Inventory {
-                            sps: inventory.values().cloned().collect(),
-                        };
-                        let _ = tx.send((inventory, Instant::now())).await;
-                    }
+                    .then(|| RackV1Inventory {
+                        sps: inventory.values().cloned().collect(),
+                    });
+
+                    let _ = tx
+                        .send(PollSps {
+                            changed_inventory: Ok(changed_inventory),
+                            mgs_received: Instant::now(),
+                        })
+                        .await;
                 }
                 Err(e) => {
                     warn!(log, "{e}");
+                    let _ = tx
+                        .send(PollSps {
+                            changed_inventory: Err(e),
+                            mgs_received: Instant::now(),
+                        })
+                        .await;
                 }
             }
         }
     });
 
     rx
+}
+
+#[derive(Debug)]
+struct PollSps {
+    changed_inventory: Result<
+        Option<RackV1Inventory>,
+        gateway_client::Error<gateway_client::types::Error>,
+    >,
+    mgs_received: Instant,
 }

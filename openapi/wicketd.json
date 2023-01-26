@@ -136,6 +136,21 @@
           "request_id"
         ]
       },
+      "GetInventoryError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "received_ago": {
+            "$ref": "#/components/schemas/Duration"
+          }
+        },
+        "required": [
+          "error",
+          "received_ago"
+        ]
+      },
       "GetInventoryResponse": {
         "description": "The response to a `get_inventory` call: the inventory of artifacts known to wicketd, or a notification that data is unavailable.",
         "oneOf": [
@@ -147,6 +162,14 @@
                 "properties": {
                   "inventory": {
                     "$ref": "#/components/schemas/RackV1Inventory"
+                  },
+                  "last_error": {
+                    "nullable": true,
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/GetInventoryError"
+                      }
+                    ]
                   },
                   "received_ago": {
                     "$ref": "#/components/schemas/Duration"
@@ -172,6 +195,19 @@
           {
             "type": "object",
             "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "last_error": {
+                    "nullable": true,
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/GetInventoryError"
+                      }
+                    ]
+                  }
+                }
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -180,6 +216,7 @@
               }
             },
             "required": [
+              "data",
               "type"
             ]
           }

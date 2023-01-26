@@ -145,6 +145,7 @@ impl InventoryState {
                 GetInventoryResponse::Response {
                     inventory: new_inventory,
                     received_ago: mgs_received_ago,
+                    last_error,
                 },
             ) => {
                 let changed_inventory = (current_inventory.as_ref()
@@ -165,7 +166,7 @@ impl InventoryState {
                     })
                     .await;
             }
-            (Some(_), GetInventoryResponse::Unavailable) => {
+            (Some(_), GetInventoryResponse::Unavailable { last_error }) => {
                 // This is an illegal state transition -- wicketd can never return Unavailable after
                 // returning a response.
                 slog::error!(
@@ -173,7 +174,7 @@ impl InventoryState {
                     "Illegal state transition from response to unavailable"
                 );
             }
-            (None, GetInventoryResponse::Unavailable) => {
+            (None, GetInventoryResponse::Unavailable { last_error }) => {
                 // No response received by wicketd from MGS yet.
                 let _ = self
                     .tx

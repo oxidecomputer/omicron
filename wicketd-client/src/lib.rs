@@ -40,8 +40,14 @@ progenitor::generate_api!(
 /// rather than `types::Duration`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, received_ago: Duration },
-    Unavailable,
+    Response {
+        inventory: RackV1Inventory,
+        received_ago: Duration,
+        last_error: Option<GetInventoryError>,
+    },
+    Unavailable {
+        last_error: Option<GetInventoryError>,
+    },
 }
 
 impl From<types::GetInventoryResponse> for GetInventoryResponse {
@@ -50,12 +56,43 @@ impl From<types::GetInventoryResponse> for GetInventoryResponse {
             types::GetInventoryResponse::Response {
                 inventory,
                 received_ago,
+                last_error,
             } => {
                 let received_ago =
                     Duration::new(received_ago.secs, received_ago.nanos);
-                Self::Response { inventory, received_ago }
+                Self::Response {
+                    inventory,
+                    received_ago,
+                    last_error: last_error.map(GetInventoryError::from),
+                }
             }
-            types::GetInventoryResponse::Unavailable => Self::Unavailable,
+            types::GetInventoryResponse::Unavailable { last_error } => {
+                Self::Unavailable {
+                    last_error: last_error.map(GetInventoryError::from),
+                }
+            }
+        }
+    }
+}
+
+/// A domain type for errors returned from the `get_inventory` method.
+///
+/// This struct has the same shape as `types::GetInventoryError`, but uses `std::time::Duration`
+/// rather than `types::Duration`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GetInventoryError {
+    error: String,
+    received_ago: Duration,
+}
+
+impl From<types::GetInventoryError> for GetInventoryError {
+    fn from(error: types::GetInventoryError) -> Self {
+        Self {
+            error: error.error,
+            received_ago: Duration::new(
+                error.received_ago.secs,
+                error.received_ago.nanos,
+            ),
         }
     }
 }
