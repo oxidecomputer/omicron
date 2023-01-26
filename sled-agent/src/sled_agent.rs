@@ -318,7 +318,7 @@ impl SledAgent {
                     "Sled Agent upserting zpool to Storage Manager: {}",
                     pool.to_string()
                 );
-                storage.upsert_zpool(pool).await?;
+                storage.upsert_zpool(pool.clone()).await;
             }
         }
         let instances = InstanceManager::new(
@@ -401,14 +401,11 @@ impl SledAgent {
             }
         }
 
-        if let Err(e) = self
+        self
             .inner
             .storage
             .ensure_using_exactly_these_disks(self.inner.hardware.disks())
-            .await
-        {
-            warn!(log, "Failed to ensure the set of disks: {e}");
-        }
+            .await;
     }
 
     async fn hardware_monitor_task(&self, log: Logger) {
@@ -451,18 +448,10 @@ impl SledAgent {
                         }
                     }
                     HardwareUpdate::DiskAdded(disk) => {
-                        if let Err(e) =
-                            self.inner.storage.upsert_disk(disk).await
-                        {
-                            warn!(log, "Failed to add disk: {e}");
-                        }
+                        self.inner.storage.upsert_disk(disk).await;
                     }
                     HardwareUpdate::DiskRemoved(disk) => {
-                        if let Err(e) =
-                            self.inner.storage.delete_disk(disk).await
-                        {
-                            warn!(log, "Failed to remove disk: {e}");
-                        }
+                        self.inner.storage.delete_disk(disk).await;
                     }
                 },
                 Err(RecvError::Lagged(count)) => {

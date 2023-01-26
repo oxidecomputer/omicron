@@ -4,7 +4,7 @@
 
 //! Management of sled-local storage.
 
-use crate::hardware::Disk;
+use crate::hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
 use crate::illumos::dladm::Etherstub;
 use crate::illumos::link::VnicAllocator;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
@@ -16,6 +16,9 @@ use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
+use nexus_client::types::PhysicalDiskKind;
+use nexus_client::types::PhysicalDiskPutRequest;
+use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
@@ -23,6 +26,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::HashMap;
+use std::collections::hash_map;
 use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
@@ -541,16 +545,32 @@ struct NewFilesystemRequest {
     responder: oneshot::Sender<Result<(), Error>>,
 }
 
+#[derive(Clone)]
+struct StorageResources {
+    // A map of "devfs path" to "Disk" attached to this Sled.
+    //
+    // Note that we're keying off of devfs path, rather than device ID.
+    // This should allow us to identify when a U.2 has been removed from
+    // one slot and placed into another one.
+    disks: Arc<Mutex<HashMap<PathBuf, Disk>>>,
+    // A map of "zpool name" to "pool".
+    pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
+}
+
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
     log: Logger,
     sled_id: Uuid,
     lazy_nexus_client: LazyNexusClient,
-    pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
-    new_pools_rx: mpsc::Receiver<ZpoolName>,
-    new_filesystems_rx: mpsc::Receiver<NewFilesystemRequest>,
+    rx: mpsc::Receiver<StorageWorkerRequest>,
     vnic_allocator: VnicAllocator<Etherstub>,
     underlay_address: Ipv6Addr,
+}
+
+#[derive(Clone, Debug)]
+enum NotifyDiskRequest {
+    Add(Disk),
+    Remove(DiskIdentity),
 }
 
 impl StorageWorker {
@@ -632,7 +652,7 @@ impl StorageWorker {
     // Adds a "notification to nexus" to `nexus_notifications`,
     // informing it about the addition of `pool_id` to this sled.
     fn add_zpool_notify(
-        &self,
+        &mut self,
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
         pool_id: Uuid,
         size: ByteCount,
@@ -674,16 +694,317 @@ impl StorageWorker {
         );
     }
 
-    // TODO: a lot of these functions act on the `FuturesOrdered` - should
-    // that just be a part of the "worker" struct?
+    async fn ensure_using_exactly_these_disks(
+        &mut self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        resources: &StorageResources,
+        unparsed_disks: Vec<UnparsedDisk>,
+    ) -> Result<(), Error> {
+        let mut new_disks = HashMap::new();
+
+        // We may encounter errors while parsing any of the disks; keep track of
+        // any errors that occur and return any of them if something goes wrong.
+        //
+        // That being said, we should not prevent access to the other disks if
+        // only one failure occurs.
+        let mut err: Option<Error> = None;
+
+        // Ensure all disks conform to the expected partition layout.
+        for disk in unparsed_disks.into_iter() {
+            match crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+                warn!(self.log, "Could not ensure partitions: {err}");
+                err
+            }) {
+                Ok(disk) => {
+                    let devfs_path = disk.devfs_path().clone();
+                    new_disks.insert(devfs_path, disk);
+                }
+                Err(e) => {
+                    warn!(self.log, "Cannot parse disk: {e}");
+                    err = Some(e.into());
+                }
+            };
+        }
+
+        let mut disks = resources.disks.lock().await;
+
+        // Steal the old contents of `disks`; we'll rebuild it below by
+        // inserting an entry for every element of `new_disks`, so replace it
+        // with a hash map that's already appropriately sized. If we return
+        // before completing the loop over `new_disks` below, we will leave
+        // `resources.disks` empty or incomplete.
+        let mut old_disks = HashMap::with_capacity(new_disks.len());
+        std::mem::swap(&mut *disks, &mut old_disks);
+
+        // Remove disks that don't appear in the "new_disks" set.
+        //
+        // This also accounts for zpools and notifies Nexus.
+        let disks_to_be_removed = old_disks
+            .iter()
+            .filter(|(key, old_disk)| {
+                // If this disk appears in the "new" and "old" set, it should
+                // only be removed if it has changed.
+                //
+                // This treats a disk changing in an unexpected way as a
+                // "removal and re-insertion".
+                if let Some(new_disk) = new_disks.get(*key) {
+                    // Changed Disk -> Disk should be removed.
+                    new_disk != *old_disk
+                } else {
+                    // Not in the new set -> Disk should be removed.
+                    true
+                }
+            })
+            .map(|(_key, disk)| disk);
+        for disk in disks_to_be_removed {
+            if let Err(e) = self.delete_disk_locked(nexus_notifications, &resources, &mut disks, disk.devfs_path()).await {
+                warn!(self.log, "Failed to delete disk: {e}");
+                err = Some(e);
+            }
+        }
+
+        // Rebuild `resources.disks`, adding new disks that appear in the "new_disks"
+        // set.
+        //
+        // This also accounts for zpools and notifies Nexus.
+        for (key, new_disk) in new_disks {
+            if let Some(old_disk) = old_disks.remove(&key) {
+                // In this case, the disk should be unchanged.
+                //
+                // This assertion should be upheld by the filter above, which
+                // should remove disks that changed.
+                assert!(old_disk == new_disk);
+                disks.insert(key, new_disk);
+            } else {
+                if let Err(e) =
+                    self.upsert_disk_locked(nexus_notifications, &resources, &mut disks, new_disk).await
+                {
+                    warn!(self.log, "Failed to upsert disk: {e}");
+                    err = Some(e);
+                }
+            }
+        }
+
+        if let Some(err) = err {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn upsert_disk(
+        &mut self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        resources: &StorageResources,
+        disk: UnparsedDisk,
+    ) -> Result<(), Error> {
+        info!(self.log, "Upserting disk: {disk:?}");
+
+        // Ensure the disk conforms to an expected partition layout.
+        let disk =
+            crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+                warn!(self.log, "Could not ensure partitions: {err}");
+                err
+            })?;
+
+        let mut disks = resources.disks.lock().await;
+        self.upsert_disk_locked(
+            nexus_notifications,
+            resources,
+            &mut disks,
+            disk
+        ).await
+    }
+
+    async fn upsert_disk_locked(
+        &mut self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        resources: &StorageResources,
+        disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
+        disk: Disk,
+    ) -> Result<(), Error> {
+        let zpool_name = disk.zpool_name().clone();
+        disks.insert(disk.devfs_path().to_path_buf(), disk.clone());
+        self.upsert_zpool(nexus_notifications, &resources, &zpool_name).await?;
+        self.physical_disk_notify(
+            nexus_notifications,
+            NotifyDiskRequest::Add(disk),
+        );
+
+        Ok(())
+   }
+
+    async fn delete_disk(
+        &mut self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        resources: &StorageResources,
+        disk: UnparsedDisk,
+    ) -> Result<(), Error> {
+        info!(self.log, "Deleting disk: {disk:?}");
+
+        let mut disks = resources.disks.lock().await;
+        self.delete_disk_locked(
+            nexus_notifications,
+            resources,
+            &mut disks,
+            disk.devfs_path(),
+        ).await
+    }
+
+    async fn delete_disk_locked(
+        &mut self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        resources: &StorageResources,
+        disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
+        key: &PathBuf,
+    ) -> Result<(), Error> {
+        if let Some(parsed_disk) = disks.remove(key) {
+            resources.pools.lock().await.remove(&parsed_disk.zpool_name());
+            self.physical_disk_notify(
+                nexus_notifications,
+                NotifyDiskRequest::Remove(parsed_disk.identity().clone()),
+            );
+        }
+        Ok(())
+    }
+
+    // Adds a "notification to nexus" to `nexus_notifications`, informing it
+    // about the addition/removal of a physical disk to this sled.
+    fn physical_disk_notify(
+        &mut self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        disk: NotifyDiskRequest,
+    ) {
+        let sled_id = self.sled_id;
+        let lazy_nexus_client = self.lazy_nexus_client.clone();
+        let notify_nexus = move || {
+            let disk = disk.clone();
+            let lazy_nexus_client = lazy_nexus_client.clone();
+            async move {
+                let nexus = lazy_nexus_client
+                    .get()
+                    .await
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(e.to_string())
+                    })?;
+
+                match disk {
+                    NotifyDiskRequest::Add(disk) => {
+                        let request = PhysicalDiskPutRequest {
+                            model: disk.identity().model.clone(),
+                            serial: disk.identity().serial.clone(),
+                            vendor: disk.identity().vendor.clone(),
+                            variant: match disk.variant() {
+                                DiskVariant::U2 => PhysicalDiskKind::U2,
+                                DiskVariant::M2 => PhysicalDiskKind::M2,
+                            },
+                            sled_id,
+                            // TODO TODO TODO: ??? Maybe remove?
+                            total_size: 0,
+                        };
+                        nexus.physical_disk_put(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
+                    },
+                    NotifyDiskRequest::Remove(disk_identity) => {
+                        let request = PhysicalDiskDeleteRequest {
+                            model: disk_identity.model.clone(),
+                            serial: disk_identity.serial.clone(),
+                            vendor: disk_identity.vendor.clone(),
+                        };
+                        nexus.physical_disk_delete(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
+                    },
+                }
+                Ok(())
+            }
+        };
+        let log = self.log.clone();
+        let log_post_failure = move |_, delay| {
+            warn!(
+                log,
+                "failed to notify nexus, will retry in {:?}", delay;
+            );
+        };
+        nexus_notifications.push_back(
+            backoff::retry_notify(
+                backoff::retry_policy_internal_service_aggressive(),
+                notify_nexus,
+                log_post_failure,
+            )
+            .boxed(),
+        );
+    }
+
+    async fn upsert_zpool(
+        &mut self,
+        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        resources: &StorageResources,
+        pool_name: &ZpoolName,
+    ) -> Result<(), Error> {
+        let mut pools = resources.pools.lock().await;
+        let zpool = Pool::new(pool_name)?;
+
+        let pool = match pools.entry(pool_name.clone()) {
+            hash_map::Entry::Occupied(mut entry) => {
+                // The pool already exists.
+                entry.get_mut().info = zpool.info.clone();
+                return Ok(());
+            },
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(zpool)
+            },
+        };
+
+        info!(
+            &self.log,
+            "Storage manager processing zpool: {:#?}", pool.info
+        );
+
+        let size = ByteCount::try_from(pool.info.size())
+            .map_err(|err| Error::BadPoolSize { name: pool_name.to_string(), err })?;
+
+        // If we find filesystems within our datasets, ensure their
+        // zones are up-and-running.
+        let mut datasets = vec![];
+        let existing_filesystems = Zfs::list_datasets(&pool_name.to_string())?;
+        for fs_name in existing_filesystems {
+            info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name.to_string());
+            // We intentionally do not exit on error here -
+            // otherwise, the failure of a single dataset would
+            // stop the storage manager from processing all storage.
+            //
+            // Instead, we opt to log the failure.
+            let dataset_name = DatasetName::new(&pool_name.to_string(), &fs_name);
+            let result = self.load_dataset(pool, &dataset_name).await;
+            match result {
+                Ok(dataset) => datasets.push(dataset),
+                Err(e) => warn!(&self.log, "StorageWorker Failed to load dataset: {}", e),
+            }
+        }
+
+        // Notify Nexus of the zpool.
+        self.add_zpool_notify(
+            nexus_notifications,
+            pool.id(),
+            size,
+        );
+        Ok(())
+    }
 
     // Attempts to add a dataset within a zpool, according to `request`.
     async fn add_dataset(
         &self,
+        resources: &StorageResources,
         request: &NewFilesystemRequest,
     ) -> Result<(), Error> {
         info!(self.log, "add_dataset: {:?}", request);
-        let mut pools = self.pools.lock().await;
+        let mut pools = resources.pools.lock().await;
         let name = ZpoolName::new(request.zpool_id);
         let pool = pools.get_mut(&name).ok_or_else(|| {
             Error::ZpoolNotFound(format!(
@@ -770,8 +1091,8 @@ impl StorageWorker {
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
     // emit info to the log when we exit.
-    async fn do_work(&mut self) -> Result<(), Error> {
-        self.do_work_internal()
+    async fn do_work(&mut self, resources: StorageResources) -> Result<(), Error> {
+        self.do_work_internal(resources)
             .await
             .map(|()| {
                 info!(self.log, "StorageWorker exited successfully");
@@ -782,74 +1103,53 @@ impl StorageWorker {
             })
     }
 
-    async fn do_work_internal(&mut self) -> Result<(), Error> {
+    async fn do_work_internal(&mut self, resources: StorageResources) -> Result<(), Error> {
         let mut nexus_notifications = FuturesOrdered::new();
-
         loop {
             tokio::select! {
                 _ = nexus_notifications.next(), if !nexus_notifications.is_empty() => {},
-                Some(pool_name) = self.new_pools_rx.recv() => {
-                    let mut pools = self.pools.lock().await;
-                    let pool = pools.get_mut(&pool_name).unwrap();
-
-                    info!(
-                        &self.log,
-                        "Storage manager processing zpool: {:#?}", pool.info
-                    );
-
-                    let size = ByteCount::try_from(pool.info.size())
-                        .map_err(|err| Error::BadPoolSize { name: pool_name.to_string(), err })?;
-
-                    // If we find filesystems within our datasets, ensure their
-                    // zones are up-and-running.
-                    let mut datasets = vec![];
-                    let existing_filesystems = Zfs::list_datasets(&pool_name.to_string())?;
-                    for fs_name in existing_filesystems {
-                        info!(&self.log, "StorageWorker loading fs {} on zpool {}", fs_name, pool_name.to_string());
-                        // We intentionally do not exit on error here -
-                        // otherwise, the failure of a single dataset would
-                        // stop the storage manager from processing all storage.
-                        //
-                        // Instead, we opt to log the failure.
-                        let dataset_name = DatasetName::new(&pool_name.to_string(), &fs_name);
-                        let result = self.load_dataset(pool, &dataset_name).await;
-                        match result {
-                            Ok(dataset) => datasets.push(dataset),
-                            Err(e) => warn!(&self.log, "StorageWorker Failed to load dataset: {}", e),
-                        }
+                Some(request) = self.rx.recv() => {
+                    use StorageWorkerRequest::*;
+                    match request {
+                        AddDisk(disk) => {
+                            self.upsert_disk(&mut nexus_notifications, &resources, disk).await?;
+                        },
+                        RemoveDisk(disk) => {
+                            self.delete_disk(&mut nexus_notifications, &resources, disk).await?;
+                        },
+                        NewPool(pool_name) => {
+                            self.upsert_zpool(&mut nexus_notifications, &resources, &pool_name).await?;
+                        },
+                        NewFilesystem(request) => {
+                            let result = self.add_dataset(&resources, &request).await;
+                            let _ = request.responder.send(result);
+                        },
+                        DisksChanged(disks) => {
+                            self.ensure_using_exactly_these_disks(&mut nexus_notifications, &resources, disks).await?;
+                        },
                     }
-
-                    // Notify Nexus of the zpool.
-                    self.add_zpool_notify(
-                        &mut nexus_notifications,
-                        pool.id(),
-                        size,
-                    );
                 },
-                Some(request) = self.new_filesystems_rx.recv() => {
-                    let result = self.add_dataset(&request).await;
-                    let _ = request.responder.send(result);
-                }
             }
         }
     }
+}
+
+#[derive(Debug)]
+enum StorageWorkerRequest {
+    AddDisk(UnparsedDisk),
+    RemoveDisk(UnparsedDisk),
+    DisksChanged(Vec<UnparsedDisk>),
+    NewPool(ZpoolName),
+    NewFilesystem(NewFilesystemRequest),
 }
 
 /// A sled-local view of all attached storage.
 pub struct StorageManager {
     log: Logger,
 
-    // A map of "devfs path" to "Disk" attached to this Sled.
-    //
-    // Note that we're keying off of devfs path, rather than device ID.
-    // This should allow us to identify when a U.2 has been removed from
-    // one slot and placed into another one.
-    disks: Arc<Mutex<HashMap<PathBuf, Disk>>>,
+    resources: StorageResources,
 
-    // A map of "zpool name" to "pool".
-    pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
-    new_pools_tx: mpsc::Sender<ZpoolName>,
-    new_filesystems_tx: mpsc::Sender<NewFilesystemRequest>,
+    tx: mpsc::Sender<StorageWorkerRequest>,
 
     // A handle to a worker which updates "pools".
     task: JoinHandle<Result<(), Error>>,
@@ -865,27 +1165,29 @@ impl StorageManager {
         underlay_address: Ipv6Addr,
     ) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
-        let disks = Arc::new(Mutex::new(HashMap::new()));
-        let pools = Arc::new(Mutex::new(HashMap::new()));
-        let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
-        let (new_filesystems_tx, new_filesystems_rx) = mpsc::channel(10);
-        let mut worker = StorageWorker {
-            log: log.clone(),
-            sled_id,
-            lazy_nexus_client,
-            pools: pools.clone(),
-            new_pools_rx,
-            new_filesystems_rx,
-            vnic_allocator: VnicAllocator::new("Storage", etherstub),
-            underlay_address,
+        let resources = StorageResources {
+            disks: Arc::new(Mutex::new(HashMap::new())),
+            pools: Arc::new(Mutex::new(HashMap::new())),
         };
+        let (tx, rx) = mpsc::channel(30);
+        let vnic_allocator = VnicAllocator::new("Storage", etherstub);
+
         StorageManager {
-            log,
-            disks,
-            pools,
-            new_pools_tx,
-            new_filesystems_tx,
-            task: tokio::task::spawn(async move { worker.do_work().await }),
+            log: log.clone(),
+            resources: resources.clone(),
+            tx,
+            task: tokio::task::spawn(async move {
+                let mut worker = StorageWorker {
+                    log,
+                    sled_id,
+                    lazy_nexus_client,
+                    rx,
+                    vnic_allocator,
+                    underlay_address,
+                };
+
+                worker.do_work(resources).await
+            }),
         }
     }
 
@@ -896,190 +1198,47 @@ impl StorageManager {
     ///
     /// If errors occur, an arbitrary "one" of them will be returned, but a
     /// best-effort attempt to add all disks will still be attempted.
+    // Receiver implemented by [StorageWorker::ensure_using_exactly_these_disks]
     pub async fn ensure_using_exactly_these_disks<I>(
         &self,
         unparsed_disks: I,
-    ) -> Result<(), Error>
+    )
     where
-        I: IntoIterator<Item = crate::hardware::UnparsedDisk>,
+        I: IntoIterator<Item = UnparsedDisk>,
     {
-        let mut new_disks = HashMap::new();
-
-        // We may encounter errors while parsing any of the disks; keep track of
-        // any errors that occur and return any of them if something goes wrong.
-        //
-        // That being said, we should not prevent access to the other disks if
-        // only one failure occurs.
-        let mut err: Option<Error> = None;
-
-        // Ensure all disks conform to the expected partition layout.
-        for disk in unparsed_disks.into_iter() {
-            match crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
-                warn!(self.log, "Could not ensure partitions: {err}");
-                err
-            }) {
-                Ok(disk) => {
-                    let devfs_path = disk.devfs_path().clone();
-                    new_disks.insert(devfs_path, disk);
-                }
-                Err(e) => {
-                    warn!(self.log, "Cannot parse disk: {e}");
-                    err = Some(e.into());
-                }
-            };
-        }
-
-        let mut disks = self.disks.lock().await;
-
-        // Steal the old contents of `disks`; we'll rebuild it below by
-        // inserting an entry for every element of `new_disks`, so replace it
-        // with a hash map that's already appropriately sized. If we return
-        // before completing the loop over `new_disks` below, we will leave
-        // `self.disks` empty or incomplete.
-        let mut old_disks = HashMap::with_capacity(new_disks.len());
-        std::mem::swap(&mut *disks, &mut old_disks);
-
-        // Remove disks that don't appear in the "new_disks" set.
-        //
-        // This also accounts for zpools and notifies Nexus.
-        let keys_to_be_removed = old_disks
-            .iter()
-            .filter(|(key, old_disk)| {
-                // If this disk appears in the "new" and "old" set, it should
-                // only be removed if it has changed.
-                //
-                // This treats a disk changing in an unexpected way as a
-                // "removal and re-insertion".
-                if let Some(new_disk) = new_disks.get(*key) {
-                    // Changed Disk -> Disk should be removed.
-                    new_disk != *old_disk
-                } else {
-                    // Not in the new set -> Disk should be removed.
-                    true
-                }
-            })
-            .map(|(key, _)| key);
-        for key in keys_to_be_removed {
-            if let Err(e) = self.delete_disk_locked(&mut disks, &key).await {
-                warn!(self.log, "Failed to delete disk: {e}");
-                err = Some(e);
-            }
-        }
-
-        // Rebuild `self.disks`, adding new disks that appear in the "new_disks"
-        // set.
-        //
-        // This also accounts for zpools and notifies Nexus.
-        for (key, new_disk) in new_disks {
-            if let Some(old_disk) = old_disks.remove(&key) {
-                // In this case, the disk should be unchanged.
-                //
-                // This assertion should be upheld by the filter above, which
-                // should remove disks that changed.
-                assert!(old_disk == new_disk);
-                disks.insert(key, new_disk);
-            } else {
-                if let Err(e) =
-                    self.upsert_disk_locked(&mut disks, new_disk).await
-                {
-                    warn!(self.log, "Failed to upsert disk: {e}");
-                    err = Some(e);
-                }
-            }
-        }
-
-        if let Some(err) = err {
-            Err(err)
-        } else {
-            Ok(())
-        }
+        self.tx.send(StorageWorkerRequest::DisksChanged(unparsed_disks.into_iter().collect::<Vec<_>>())).await.unwrap();
     }
 
     /// Adds a disk and associated zpool to the storage manager.
+    // Receiver implemented by [StorageWorker::upsert_disk].
     pub async fn upsert_disk(
         &self,
-        disk: crate::hardware::UnparsedDisk,
-    ) -> Result<(), Error> {
+        disk: UnparsedDisk,
+    ) {
         info!(self.log, "Upserting disk: {disk:?}");
-
-        // Ensure the disk conforms to an expected partition layout.
-        let disk =
-            crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
-                warn!(self.log, "Could not ensure partitions: {err}");
-                err
-            })?;
-
-        let mut disks = self.disks.lock().await;
-        self.upsert_disk_locked(&mut disks, disk).await
-    }
-
-    async fn upsert_disk_locked(
-        &self,
-        disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
-        disk: Disk,
-    ) -> Result<(), Error> {
-        let zpool_name = disk.zpool_name().clone();
-        disks.insert(disk.devfs_path().to_path_buf(), disk);
-        self.upsert_zpool(&zpool_name).await?;
-
-        // TODO: Notify Nexus
-        Ok(())
+        self.tx.send(StorageWorkerRequest::AddDisk(disk)).await.unwrap();
     }
 
     /// Removes a disk, if it's tracked by the storage manager, as well
     /// as any associated zpools.
+    // Receiver implemented by [StorageWorker::delete_disk].
     pub async fn delete_disk(
         &self,
-        disk: crate::hardware::UnparsedDisk,
-    ) -> Result<(), Error> {
+        disk: UnparsedDisk,
+    ) {
         info!(self.log, "Deleting disk: {disk:?}");
-
-        let mut disks = self.disks.lock().await;
-        self.delete_disk_locked(&mut disks, disk.devfs_path()).await
-    }
-
-    async fn delete_disk_locked(
-        &self,
-        disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
-        key: &PathBuf,
-    ) -> Result<(), Error> {
-        if let Some(disk) = disks.remove(key) {
-            self.pools.lock().await.remove(&disk.zpool_name());
-        }
-
-        // TODO: Notify Nexus
-        Ok(())
+        self.tx.send(StorageWorkerRequest::RemoveDisk(disk)).await.unwrap();
     }
 
     /// Adds a zpool to the storage manager.
-    pub async fn upsert_zpool(&self, name: &ZpoolName) -> Result<(), Error> {
-        let zpool = Pool::new(name)?;
-
-        let is_new = {
-            let mut pools = self.pools.lock().await;
-            let entry = pools.entry(name.clone());
-            let is_new =
-                matches!(entry, std::collections::hash_map::Entry::Vacant(_));
-
-            // Ensure that the pool info is up-to-date.
-            entry
-                .and_modify(|e| {
-                    e.info = zpool.info.clone();
-                })
-                .or_insert_with(|| zpool);
-            is_new
-        };
-
-        // If we hadn't previously been handling this zpool, hand it off to the
-        // worker for management (zone creation).
-        if is_new {
-            self.new_pools_tx.send(name.clone()).await.unwrap();
-        }
-        Ok(())
+    // Receiver implemented by [StorageWorker::upsert_zpool].
+    pub async fn upsert_zpool(&self, name: ZpoolName) {
+        info!(self.log, "Inserting zpool: {name:?}");
+        self.tx.send(StorageWorkerRequest::NewPool(name)).await.unwrap();
     }
 
     pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
-        let pools = self.pools.lock().await;
+        let pools = self.resources.pools.lock().await;
         Ok(pools
             .keys()
             .map(|zpool| crate::params::Zpool { id: zpool.id() })
@@ -1100,8 +1259,8 @@ impl StorageManager {
             responder: tx,
         };
 
-        self.new_filesystems_tx
-            .send(request)
+        self.tx
+            .send(StorageWorkerRequest::NewFilesystem(request))
             .await
             .expect("Storage worker bug (not alive)");
         rx.await.expect(

@@ -7,7 +7,9 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    OximeterInfo, PhysicalDiskPutRequest, PhysicalDiskPutResponse,
+    OximeterInfo,
+    PhysicalDiskDeleteRequest, PhysicalDiskDeleteResponse,
+    PhysicalDiskPutRequest, PhysicalDiskPutResponse,
     RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
     ZpoolPutResponse,
 };
@@ -40,6 +42,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(sled_agent_put)?;
         api.register(rack_initialization_complete)?;
         api.register(physical_disk_put)?;
+        api.register(physical_disk_delete)?;
         api.register(zpool_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
@@ -130,6 +133,22 @@ async fn physical_disk_put(
     let disk = body.into_inner();
     nexus.upsert_physical_disk(disk).await?;
     Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
+}
+
+/// Report that a physical disk for the specified sled has gone offline.
+#[endpoint {
+     method = DELETE,
+     path = "/physical-disk",
+ }]
+async fn physical_disk_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<PhysicalDiskDeleteRequest>,
+) -> Result<HttpResponseOk<PhysicalDiskDeleteResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let disk = body.into_inner();
+    nexus.delete_physical_disk(disk).await?;
+    Ok(HttpResponseOk(PhysicalDiskDeleteResponse {}))
 }
 
 /// Path parameters for Zpool requests (internal API)

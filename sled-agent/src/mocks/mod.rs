@@ -6,7 +6,9 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DiskRuntimeState, InstanceRuntimeState, RackInitializationRequest,
+    DiskRuntimeState, InstanceRuntimeState,
+    PhysicalDiskPutRequest, PhysicalDiskDeleteRequest,
+    RackInitializationRequest,
     SledAgentStartupInfo, UpdateArtifactKind, ZpoolPutRequest,
     ZpoolPutResponse,
 };
@@ -27,6 +29,14 @@ mock! {
             &self,
             id: &Uuid,
             info: &SledAgentStartupInfo,
+        ) -> Result<()>;
+        pub async fn physical_disk_put(
+            &self,
+            request: &PhysicalDiskPutRequest,
+        ) -> Result<()>;
+        pub async fn physical_disk_delete(
+            &self,
+            request: &PhysicalDiskDeleteRequest,
         ) -> Result<()>;
         pub async fn cpapi_instances_put(
             &self,

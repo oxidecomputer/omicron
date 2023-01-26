@@ -236,6 +236,14 @@ impl Disk {
         })
     }
 
+    pub fn identity(&self) -> &DiskIdentity {
+        &self.identity
+    }
+
+    pub fn variant(&self) -> DiskVariant {
+        self.variant
+    }
+
     pub fn devfs_path(&self) -> &PathBuf {
         &self.paths.devfs_path
     }

@@ -11,7 +11,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::ServiceKind;
 use crate::internal_api::params::{
-    PhysicalDiskPutRequest, SledAgentStartupInfo, SledRole, ZpoolPutRequest,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo, SledRole, ZpoolPutRequest,
 };
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -105,7 +105,7 @@ impl super::Nexus {
     }
 
     // Physical disks
-    //
+
     /// Upserts a physical disk into the database, updating it if it already exists.
     pub async fn upsert_physical_disk(
         &self,
@@ -127,6 +127,25 @@ impl super::Nexus {
             request.total_size,
         );
         self.db_datastore.physical_disk_upsert(disk).await?;
+        Ok(())
+    }
+
+    /// Upserts a physical disk into the database, updating it if it already exists.
+    pub async fn delete_physical_disk(
+        &self,
+        request: PhysicalDiskDeleteRequest,
+    ) -> Result<(), Error> {
+        info!(
+            self.log, "deleting physical disk";
+            "vendor" => request.vendor.to_string(),
+            "serial" => request.serial.to_string(),
+            "model" => request.model.to_string()
+        );
+        self.db_datastore.physical_disk_delete(
+            request.vendor,
+            request.serial,
+            request.model,
+        ).await?;
         Ok(())
     }
 

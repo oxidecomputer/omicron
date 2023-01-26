@@ -62,6 +62,16 @@ pub struct PhysicalDiskPutRequest {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutResponse {}
 
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskDeleteRequest {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskDeleteResponse {}
+
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {

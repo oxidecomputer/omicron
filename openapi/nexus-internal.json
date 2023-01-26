@@ -288,6 +288,38 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "delete": {
+        "summary": "Report that a physical disk for the specified sled has gone offline.",
+        "operationId": "physical_disk_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskDeleteResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/racks/{rack_id}/initialization-complete": {
@@ -1744,6 +1776,28 @@
           "address",
           "collector_id"
         ]
+      },
+      "PhysicalDiskDeleteRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskDeleteResponse": {
+        "type": "object"
       },
       "PhysicalDiskKind": {
         "description": "Describes the type of physical disk.",
