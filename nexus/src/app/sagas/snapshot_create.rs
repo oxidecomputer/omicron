@@ -725,6 +725,41 @@ async fn ssc_attach_disk_to_pantry(
             .await
             .map_err(ActionError::action_failed)?;
 
+    // Query the fetched disk's runtime to see if it was attached to an instance
+    // after the saga was constructed. If it was, then bail out. If it wasn't,
+    // then try to update the runtime and attach it to the Pantry. In the case
+    // where the disk is attached to an instance after this lookup, the
+    // "runtime().attach(...)" call below should fail because the generation
+    // number is too low.
+    match db_disk.state().into() {
+        external::DiskState::Detached => {
+            // Ok
+        }
+
+        external::DiskState::Attached(instance_id) => {
+            if instance_id == PANTRY_SENTINEL_ID {
+                // A previous run of ssc_attach_disk_to_pantry already attached
+                // this to the Pantry
+            } else {
+                // This disk is attached to another instance
+                //
+                // XXX this is a race condition, as the DAG was constructed with
+                // use_the_pantry = True.
+                //
+                return Err(ActionError::action_failed(
+                    "disk attached to instance after saga was \
+                    constructed".to_string()
+                ));
+            }
+        }
+
+        _ => {
+            return Err(ActionError::action_failed(
+                format!("disk is in state {:?}", db_disk.state())
+            ));
+        }
+    }
+
     info!(
         log,
         "attaching disk {} to pantry with id {:?}",
