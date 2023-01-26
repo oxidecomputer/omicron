@@ -116,7 +116,7 @@ impl RackScreen {
 
         // Only draw the banner if there is enough horizontal whitespace to
         // make it look good.
-        if state.rack_state.rect.width * 3 + width > rect.width {
+        if state.rack_state.rect().width * 3 + width > rect.width {
             return (Height(0), Width(0));
         }
 
@@ -152,7 +152,7 @@ impl RackScreen {
             power_shelf_selected_style: Style::default().bg(OX_GRAY),
         };
 
-        let area = state.rack_state.rect;
+        let area = state.rack_state.rect();
         f.render_widget(rack, area);
     }
 
@@ -279,6 +279,7 @@ impl Screen for RackScreen {
             self.draw_rack(state, f);
             self.draw_watermark(state, f);
             self.draw_menubar(f);
+            state.status_bar.draw(f);
         })?;
         Ok(())
     }
@@ -292,14 +293,20 @@ impl Screen for RackScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
+                let mut redraw = false;
+
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
                     k.step();
+                    redraw = true;
                 }
-
                 if !self.help_menu_state.is_closed() {
                     self.help_menu_state.step();
-                    vec![Action::Redraw]
-                } else if state.rack_state.knight_rider_mode.is_some() {
+                    redraw = true;
+                }
+
+                redraw |= state.status_bar.should_redraw();
+
+                if redraw {
                     vec![Action::Redraw]
                 } else {
                     vec![]

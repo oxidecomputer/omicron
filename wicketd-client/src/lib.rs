@@ -4,6 +4,10 @@
 
 //! Interface for making API requests to wicketd
 
+use std::time::Duration;
+
+use types::RackV1Inventory;
+
 progenitor::generate_api!(
     spec = "../openapi/wicketd.json",
     inner_type = slog::Logger,
@@ -27,6 +31,31 @@ progenitor::generate_api!(
         SpIgnitionSystemType= { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         SpInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         RackV1Inventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        GetInventoryResponse = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
     }
 );
+
+/// A domain type for the response from the `get_inventory` method.
+///
+/// This enum has the same shape as `types::GetInventoryResponse`, but uses `std::time::Duration`
+/// rather than `types::Duration`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum GetInventoryResponse {
+    Response { inventory: RackV1Inventory, received_ago: Duration },
+    Unavailable,
+}
+
+impl From<types::GetInventoryResponse> for GetInventoryResponse {
+    fn from(response: types::GetInventoryResponse) -> Self {
+        match response {
+            types::GetInventoryResponse::Response {
+                inventory,
+                received_ago,
+            } => {
+                let received_ago =
+                    Duration::new(received_ago.secs, received_ago.nanos);
+                Self::Response { inventory, received_ago }
+            }
+            types::GetInventoryResponse::Unavailable => Self::Unavailable,
+        }
+    }
+}

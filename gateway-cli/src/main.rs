@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -10,34 +10,32 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
-use futures::future::Fuse;
-use futures::future::FusedFuture;
-use futures::prelude::*;
+use gateway_client::types::PowerState;
+use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
+use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::UpdateBody;
-use slog::info;
+use gateway_client::Client;
+use serde::Serialize;
 use slog::o;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
-use std::borrow::Cow;
 use std::fs;
-use std::net::IpAddr;
-use std::net::ToSocketAddrs;
-use std::path::Path;
+use std::io;
+use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
-use tokio::select;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
+
+mod picocom_map;
+mod usart;
+
+// MGS's serial console APIs expect a component name, but in practice we only
+// have the one serial console associated with the CPU, so we don't require
+// users of this CLI to specify it.
+const SERIAL_CONSOLE_COMPONENT: &str = "sp3-host-cpu";
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -50,19 +48,11 @@ struct Args {
     )]
     log_level: Level,
 
-    #[clap(
-        short,
-        long,
-        value_parser = resolve_host,
-        help = "IP address of MGS server",
-    )]
-    server: IpAddr,
+    #[clap(short, long, help = "Address of MGS server")]
+    server: SocketAddrV6,
 
-    #[clap(short, long, help = "Port of MGS server", action)]
-    port: u16,
-
-    #[clap(long, help = "Target sled number", action)]
-    sled: u32,
+    #[clap(long, help = "Pretty JSON output")]
+    pretty: bool,
 
     #[clap(subcommand)]
     command: Command,
@@ -70,31 +60,178 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    #[clap(about = "Attach to serial console")]
-    Attach {
-        #[clap(long, help = "Put terminal in raw mode", action)]
+    /// Get state of one (or all) SPs
+    State {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: Option<SpIdentifier>,
+    },
+
+    /// Get ignition state of one (or all) SPs
+    // `faux-mgs` also has `IngitionLinkEvents` and `ClearIgnitionLinkEvents`.
+    // Endpoints for these are not currently exposed by MGS, but I believe these
+    // are a "manual-debugging-only" kind of message, so that's okay?
+    Ignition {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: Option<SpIdentifier>,
+    },
+
+    /// Send an ignition command
+    IgnitionCommand {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Command (power-on, power-off, power-reset)
+        #[clap(value_parser = ignition_command_from_str, action)]
+        command: IgnitionCommand,
+    },
+
+    /// Get or set the active slot of a component
+    ComponentActiveSlot {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Component (e.g., host-boot-flash)
+        component: String,
+        /// If provided, set the active slot
+        set_slot: Option<u16>,
+    },
+
+    /// Get or set startup options on an SP.
+    StartupOptions {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        options: Option<u64>,
+    },
+
+    /// Ask SP for its inventory.
+    Inventory {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+    },
+
+    /// Ask SP for details of a component.
+    ComponentDetails {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Component name, from this SP's inventory of components
+        component: String,
+    },
+
+    /// Ask SP to clear the state (e.g., reset counters) on a component.
+    ComponentClearStatus {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Component name, from this SP's inventory of components
+        component: String,
+    },
+
+    /// Attach to the SP's USART.
+    UsartAttach {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+
+        /// Put the local terminal in raw mode.
+        #[clap(
+            long = "no-raw",
+            help = "do not put terminal in raw mode",
+            action = clap::ArgAction::SetFalse,
+        )]
         raw: bool,
+
+        /// Amount of time to buffer input from stdin before forwarding to SP.
+        #[clap(long, default_value = "500")]
+        stdin_buffer_time_millis: u64,
+
+        /// Specifies the input character map (i.e., special characters to be
+        /// replaced when reading from the serial port). See picocom's manpage.
+        #[clap(long)]
+        imap: Option<String>,
+
+        /// Specifies the output character map (i.e., special characters to be
+        /// replaced when writing to the serial port). See picocom's manpage.
+        #[clap(long)]
+        omap: Option<String>,
+
+        /// Record all input read from the serial port to this logfile (before
+        /// any remapping).
+        #[clap(long)]
+        uart_logfile: Option<PathBuf>,
     },
-    #[clap(about = "Detach any existing serial console connection")]
-    Detach,
-    #[clap(about = "Update the SP or one of its componenets")]
+
+    /// Force-detach any attached USART connection
+    UsartDetach {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+    },
+
+    /// Upload a host phase 2 recovery image to be served on request
+    UploadRecoveryHostPhase2 { path: PathBuf },
+
+    /// Upload a new image to the SP or one of its components.
+    ///
+    /// To update the SP itself:
+    ///
+    /// 1. Use the component name "sp"
+    /// 2. Specify slot 0 (the SP only has a single updateable slot: its
+    ///    alternate bank).
+    /// 3. Pass the path to a hubris archive as `image`.
     Update {
-        #[clap(help = "Component name")]
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Component name, from this SP's inventory of components
         component: String,
-        #[clap(help = "Update slot of the component")]
+        /// Slot number to apply the update
         slot: u16,
-        #[clap(help = "Path to the new image")]
-        path: PathBuf,
+        /// Path to the image
+        image: PathBuf,
     },
-    #[clap(about = "Abort an update the SP or one of its componenets")]
-    UpdateAbort {
-        #[clap(help = "Component name")]
+
+    /// Get the status of an update to the specified component.
+    UpdateStatus {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Component name, from this SP's inventory of components
         component: String,
-        #[clap(help = "ID of the update to abort")]
-        id: Uuid,
     },
-    #[clap(about = "Reset the SP")]
-    Reset,
+
+    /// Abort an in-progress update.
+    UpdateAbort {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Component with an update-in-progress to be aborted
+        component: String,
+        /// ID of the update to abort (from `update-status`)
+        update_id: Uuid,
+    },
+
+    /// Get or set the power state.
+    PowerState {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// If present, instruct the SP to set this power state. If not present,
+        /// get the current power state instead.
+        #[clap(value_parser = power_state_from_str)]
+        new_power_state: Option<PowerState>,
+    },
+
+    /// Instruct the SP to reset.
+    Reset {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+    },
 }
 
 fn level_from_str(s: &str) -> Result<Level> {
@@ -105,104 +242,65 @@ fn level_from_str(s: &str) -> Result<Level> {
     }
 }
 
-/// Given a string representing an host, attempts to resolve it to a specific IP
-/// address
-fn resolve_host(server: &str) -> Result<IpAddr> {
-    (server, 0)
-        .to_socket_addrs()?
-        .map(|sock_addr| sock_addr.ip())
-        .next()
-        .ok_or_else(|| {
-            anyhow!("failed to resolve server argument '{}'", server)
-        })
+fn sp_identifier_from_str(s: &str) -> Result<SpIdentifier> {
+    const BAD_FORMAT: &str = concat!(
+        "SP identifier must be of the form TYPE/SLOT; ",
+        "e.g., `sled/7`, `switch/1`, `power/0`"
+    );
+    let mut parts = s.split('/');
+    let type_ = parts.next().context(BAD_FORMAT)?;
+    let slot = parts.next().context(BAD_FORMAT)?;
+    if parts.next().is_some() {
+        bail!(BAD_FORMAT);
+    }
+    Ok(SpIdentifier {
+        type_: type_.parse().map_err(|s| {
+            anyhow!("failed to parse {type_} as an SpType: {s}")
+        })?,
+        slot: slot.parse().map_err(|err| {
+            anyhow!("failed to parse slot {slot} as a u32: {err}")
+        })?,
+    })
 }
 
-struct Client {
-    inner: gateway_client::Client,
-    server: IpAddr,
-    port: u16,
-    sp_type: SpType,
-    component: &'static str,
-    sled: u32,
+#[derive(Debug, Clone, Copy)]
+enum IgnitionCommand {
+    PowerOn,
+    PowerOff,
+    PowerReset,
 }
 
-impl Client {
-    fn new(server: IpAddr, port: u16, sled: u32, log: Logger) -> Self {
-        // We currently hardcode `sled` and the SP3 host CPU component, as that
-        // is the only sptype+component pair that has a serial port.
-        Self {
-            inner: gateway_client::Client::new(
-                &format!("http://{}:{}", server, port),
-                log,
-            ),
-            server,
-            port,
-            sled,
-            sp_type: SpType::Sled,
-            component: "sp3-host-cpu",
+fn ignition_command_from_str(s: &str) -> Result<IgnitionCommand> {
+    match s {
+        "power-on" => Ok(IgnitionCommand::PowerOn),
+        "power-off" => Ok(IgnitionCommand::PowerOff),
+        "power-reset" => Ok(IgnitionCommand::PowerReset),
+        _ => Err(anyhow!("Invalid ignition command: {s}")),
+    }
+}
+
+fn power_state_from_str(s: &str) -> Result<PowerState> {
+    match s {
+        "a0" | "A0" => Ok(PowerState::A0),
+        "a1" | "A1" => Ok(PowerState::A1),
+        "a2" | "A2" => Ok(PowerState::A2),
+        _ => Err(anyhow!("Invalid power state: {s}")),
+    }
+}
+
+struct Dumper {
+    pretty: bool,
+}
+
+impl Dumper {
+    fn dump<T: Serialize>(&self, value: &T) -> Result<()> {
+        let stdout = io::stdout().lock();
+        if self.pretty {
+            serde_json::to_writer_pretty(stdout, value)?;
+        } else {
+            serde_json::to_writer(stdout, value)?;
         }
-    }
-
-    async fn reset(&self) -> Result<()> {
-        self.inner.sp_reset(self.sp_type, self.sled).await?;
         Ok(())
-    }
-
-    async fn update(
-        &self,
-        component: &str,
-        id: Uuid,
-        slot: u16,
-        path: &Path,
-    ) -> Result<()> {
-        let image = fs::read(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        self.inner
-            .sp_component_update(
-                self.sp_type,
-                self.sled,
-                component,
-                &UpdateBody { id, image, slot },
-            )
-            .await?;
-        Ok(())
-    }
-
-    async fn update_abort(&self, component: &str, id: Uuid) -> Result<()> {
-        self.inner
-            .sp_component_update_abort(
-                self.sp_type,
-                self.sled,
-                component,
-                &UpdateAbortBody { id },
-            )
-            .await?;
-        Ok(())
-    }
-
-    async fn detach(&self) -> Result<()> {
-        self.inner
-            .sp_component_serial_console_detach(
-                self.sp_type,
-                self.sled,
-                self.component,
-            )
-            .await?;
-        Ok(())
-    }
-
-    async fn attach(
-        &self,
-    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        // TODO should we be able to attach through the openapi client?
-        let path = format!(
-            "ws://{}:{}/sp/sled/{}/component/sp3/serial-console/attach",
-            self.server, self.port, self.sled
-        );
-        let (ws, _response) = tokio_tungstenite::connect_async(path)
-            .await
-            .with_context(|| "failed to create serial websocket stream")?;
-        Ok(ws)
     }
 }
 
@@ -217,207 +315,193 @@ async fn main() -> Result<()> {
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = Logger::root(drain, o!("component" => "gateway-client"));
 
-    let client = Client::new(args.server, args.port, args.sled, log.clone());
+    let client = Client::new(&format!("http://{}", args.server), log.clone());
 
-    let term_raw = match args.command {
-        Command::Attach { raw } => raw, // continue; primary use case
-        Command::Detach => {
-            return client.detach().await;
-        }
-        Command::Update { component, slot, path } => {
-            let id = Uuid::new_v4();
-            info!(log, "generated update ID {id}");
-            return client.update(&component, id, slot, &path).await;
-        }
-        Command::UpdateAbort { component, id } => {
-            return client.update_abort(&component, id).await;
-        }
-        Command::Reset => {
-            return client.reset().await;
-        }
-    };
+    let dumper = Dumper { pretty: args.pretty };
 
-    // TODO Much of the code from this point on is derived from propolis's CLI,
-    // but isn't identical. Can/should we share it, or is this small enough that
-    // having it duplicated is fine?
-
-    let _raw_guard = if term_raw {
-        Some(
-            RawTermiosGuard::stdio_guard()
-                .with_context(|| "failed to set raw mode")?,
-        )
-    } else {
-        None
-    };
-
-    // https://docs.rs/tokio/latest/tokio/io/trait.AsyncReadExt.html#method.read_exact
-    // is not cancel safe! Meaning reads from tokio::io::stdin are not cancel
-    // safe. Spawn a separate task to read and put bytes onto this channel.
-    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
-
-    tokio::spawn(async move {
-        let mut stdin = tokio::io::stdin();
-
-        // next_raw must live outside loop, because Ctrl-A should work across
-        // multiple inbuf reads.
-        let mut next_raw = false;
-        let mut inbuf = [0u8; 1024];
-
-        // We're connected to a websocket which itself is forwarding data we
-        // send it over UDP. If our terminal is in raw mode, our `stdin.read()`
-        // below will happily return a single byte at a time, which would result
-        // in a UDP packet for every byte read. Instead, we'll start a timer any
-        // time we receive a byte and only flush it when that timer fires. This
-        // introduces a human-noticeable delay, but results in overall better
-        // performance. This mechanism is unused in non-raw mode where our
-        // `stdin.read()` blocks until we get a newline.
-        let flush_timeout = Fuse::terminated();
-        futures::pin_mut!(flush_timeout);
-
-        let mut exit = false;
-        let mut outbuf = Vec::new();
-
-        loop {
-            let n = select! {
-                read_result = stdin.read(&mut inbuf) => match read_result {
-                    Err(_) | Ok(0) => if outbuf.is_empty() {
-                        break;
-                    } else {
-                        exit = true;
-                        continue;
-                    }
-                    Ok(n) => n,
-                },
-
-                () = &mut flush_timeout => {
-                    tx.send(outbuf).await.unwrap();
-                    if exit {
-                        break;
-                    } else {
-                        outbuf = Vec::new();
-                        continue;
-                    }
-                }
-            };
-
-            if term_raw {
-                // Put bytes from inbuf to outbuf, but don't send Ctrl-A unless
-                // next_raw is true.
-                for i in 0..n {
-                    let c = inbuf[i];
-                    match c {
-                        // Ctrl-A means send next one raw
-                        b'\x01' => {
-                            if next_raw {
-                                // Ctrl-A Ctrl-A should be sent as Ctrl-A
-                                outbuf.push(c);
-                                next_raw = false;
-                            } else {
-                                next_raw = true;
-                            }
-                        }
-                        b'\x03' => {
-                            if !next_raw {
-                                // Exit on non-raw Ctrl-C
-                                exit = true;
-                                break;
-                            } else {
-                                // Otherwise send Ctrl-C
-                                outbuf.push(c);
-                                next_raw = false;
-                            }
-                        }
-                        _ => {
-                            outbuf.push(c);
-                            next_raw = false;
-                        }
-                    }
-                }
-
-                // start a timer to flush what we have and send a UDP packet,
-                // unless we're already waiting to flush
-                if flush_timeout.is_terminated() {
-                    flush_timeout.set(
-                        tokio::time::sleep(Duration::from_millis(500)).fuse(),
-                    );
-                }
+    match args.command {
+        Command::State { sp } => {
+            if let Some(sp) = sp {
+                let info = client.sp_get(sp.type_, sp.slot).await?.into_inner();
+                dumper.dump(&info)?;
             } else {
-                outbuf.extend_from_slice(&inbuf[..n]);
-                flush_timeout
-                    .set(tokio::time::sleep(Duration::default()).fuse());
+                let info = client.sp_list().await?.into_inner();
+                dumper.dump(&info)?;
             }
         }
-    });
-
-    let mut stdout = tokio::io::stdout();
-    let mut ws = client.attach().await?;
-    loop {
-        tokio::select! {
-            c = rx.recv() => {
-                match c {
-                    None => {
-                        // channel is closed
-                        _ = ws.close(Some(CloseFrame {
-                            code: CloseCode::Normal,
-                            reason: Cow::Borrowed("client closed stdin"),
-                        })).await;
-                        break;
-                    }
-                    Some(c) => {
-                        ws.send(Message::Binary(c)).await?;
-                    },
-                }
+        Command::Ignition { sp } => {
+            if let Some(sp) = sp {
+                let info =
+                    client.ignition_get(sp.type_, sp.slot).await?.into_inner();
+                dumper.dump(&info)?;
+            } else {
+                let info = client.ignition_list().await?.into_inner();
+                dumper.dump(&info)?;
             }
-            msg = ws.next() => {
-                match msg {
-                    Some(Ok(Message::Binary(input))) => {
-                        stdout.write_all(&input).await?;
-                        stdout.flush().await?;
-                    }
-                    Some(Ok(Message::Close(..))) | None => break,
-                    _ => continue,
-                }
+        }
+        Command::IgnitionCommand { sp, command } => match command {
+            IgnitionCommand::PowerOn => {
+                client.ignition_power_on(sp.type_, sp.slot).await?;
             }
+            IgnitionCommand::PowerOff => {
+                client.ignition_power_off(sp.type_, sp.slot).await?;
+            }
+            IgnitionCommand::PowerReset => todo!("missing MGS endpoint"),
+        },
+        Command::ComponentActiveSlot { .. }
+        | Command::StartupOptions { .. } => {
+            todo!("missing MGS endpoint");
+        }
+        Command::Inventory { sp } => {
+            let info =
+                client.sp_component_list(sp.type_, sp.slot).await?.into_inner();
+            dumper.dump(&info)?;
+        }
+        Command::ComponentDetails { .. }
+        | Command::ComponentClearStatus { .. } => {
+            todo!("missing MGS endpoint");
+        }
+        Command::UsartAttach {
+            sp,
+            raw,
+            stdin_buffer_time_millis,
+            imap,
+            omap,
+            uart_logfile,
+        } => {
+            let type_ = match sp.type_ {
+                SpType::Sled => "sled",
+                SpType::Switch => "switch",
+                SpType::Power => "power",
+            };
+            // TODO should we be able to attach through the openapi client?
+            // Check how propolis-cli does this.
+            let path = format!(
+                "ws://{}/sp/{}/{}/component/{}/serial-console/attach",
+                args.server, type_, sp.slot, SERIAL_CONSOLE_COMPONENT,
+            );
+            let (ws, _response) = tokio_tungstenite::connect_async(path)
+                .await
+                .with_context(|| "failed to create serial websocket stream")?;
+            usart::run(
+                ws,
+                raw,
+                Duration::from_millis(stdin_buffer_time_millis),
+                imap,
+                omap,
+                uart_logfile,
+            )
+            .await?;
+        }
+        Command::UsartDetach { sp } => {
+            client
+                .sp_component_serial_console_detach(
+                    sp.type_,
+                    sp.slot,
+                    SERIAL_CONSOLE_COMPONENT,
+                )
+                .await?;
+        }
+        Command::UploadRecoveryHostPhase2 { .. } => {
+            todo!("missing MGS endpoint");
+        }
+        Command::Update { sp, component, slot, image } => {
+            let image = fs::read(&image).with_context(|| {
+                format!("failed to read {}", image.display())
+            })?;
+            update(&client, &dumper, sp, &component, slot, image).await?;
+        }
+        Command::UpdateStatus { sp, component } => {
+            let info = client
+                .sp_component_update_status(sp.type_, sp.slot, &component)
+                .await?
+                .into_inner();
+            dumper.dump(&info)?;
+        }
+        Command::UpdateAbort { sp, component, update_id } => {
+            let body = UpdateAbortBody { id: update_id };
+            client
+                .sp_component_update_abort(sp.type_, sp.slot, &component, &body)
+                .await?;
+        }
+        Command::PowerState { sp, new_power_state } => {
+            if let Some(power_state) = new_power_state {
+                client
+                    .sp_power_state_set(sp.type_, sp.slot, power_state)
+                    .await?;
+            } else {
+                let info = client
+                    .sp_power_state_get(sp.type_, sp.slot)
+                    .await?
+                    .into_inner();
+                dumper.dump(&info)?;
+            }
+        }
+        Command::Reset { sp } => {
+            client.sp_reset(sp.type_, sp.slot).await?;
         }
     }
 
     Ok(())
 }
 
-/// Guard object that will set the terminal to raw mode and restore it
-/// to its previous state when it's dropped
-struct RawTermiosGuard(libc::c_int, libc::termios);
+async fn update(
+    client: &Client,
+    dumper: &Dumper,
+    sp: SpIdentifier,
+    component: &str,
+    slot: u16,
+    image: Vec<u8>,
+) -> Result<()> {
+    let update_id = Uuid::new_v4();
+    println!("generated update ID {update_id}");
 
-impl RawTermiosGuard {
-    fn stdio_guard() -> Result<RawTermiosGuard, std::io::Error> {
-        use std::os::unix::prelude::AsRawFd;
-        let fd = std::io::stdout().as_raw_fd();
-        let termios = unsafe {
-            let mut curr_termios = std::mem::zeroed();
-            let r = libc::tcgetattr(fd, &mut curr_termios);
-            if r == -1 {
-                return Err(std::io::Error::last_os_error());
+    let body = UpdateBody { id: update_id, image, slot };
+    client
+        .sp_component_update(sp.type_, sp.slot, component, &body)
+        .await
+        .context("failed to start update")?;
+
+    loop {
+        let status = client
+            .sp_component_update_status(sp.type_, sp.slot, component)
+            .await
+            .context("failed to get update status")?
+            .into_inner();
+        dumper.dump(&status)?;
+        match status {
+            SpUpdateStatus::None => {
+                bail!("no update status returned by SP (did it reset?)");
             }
-            curr_termios
-        };
-        let guard = RawTermiosGuard(fd, termios);
-        unsafe {
-            let mut raw_termios = termios;
-            libc::cfmakeraw(&mut raw_termios);
-            let r = libc::tcsetattr(fd, libc::TCSAFLUSH, &raw_termios);
-            if r == -1 {
-                return Err(std::io::Error::last_os_error());
+            SpUpdateStatus::Preparing { id, .. } => {
+                if id != update_id {
+                    bail!("different update preparing ({:?})", id);
+                }
+            }
+            SpUpdateStatus::InProgress { id, .. } => {
+                if id != update_id {
+                    bail!("different update in progress ({:?})", id);
+                }
+            }
+            SpUpdateStatus::Complete { id } => {
+                if id != update_id {
+                    bail!("different update complete ({id:?})");
+                }
+                return Ok(());
+            }
+            SpUpdateStatus::Aborted { id } => {
+                if id != update_id {
+                    bail!("different update aborted ({id:?})");
+                }
+                bail!("update aborted");
+            }
+            SpUpdateStatus::Failed { id, code } => {
+                if id != update_id {
+                    bail!("different update failed ({id:?}, code {code})");
+                }
+                bail!("update failed (code {code})");
             }
         }
-        Ok(guard)
-    }
-}
-
-impl Drop for RawTermiosGuard {
-    fn drop(&mut self) {
-        let r = unsafe { libc::tcsetattr(self.0, libc::TCSADRAIN, &self.1) };
-        if r == -1 {
-            Err::<(), _>(std::io::Error::last_os_error()).unwrap();
-        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

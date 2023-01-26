@@ -1147,6 +1147,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-smf"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5f06c7ebc320c19846670e9d745a4d44f78901b4#5f06c7ebc320c19846670e9d745a4d44f78901b4"
+dependencies = [
+ "libc",
+ "num-derive",
+ "num-traits",
+ "thiserror",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2073,9 +2084,12 @@ dependencies = [
  "futures",
  "gateway-client",
  "libc",
+ "serde",
+ "serde_json",
  "slog",
  "slog-async",
  "slog-term",
+ "termios",
  "tokio",
  "tokio-tungstenite",
  "uuid",
@@ -2995,6 +3009,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsw"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d81b373cd988b6e2b6e32ded4ea80c15085028efcdd5f83e37f9cbfb9c517ca"
+
+[[package]]
 name = "libxml"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3452,6 +3472,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-derive"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3610,6 +3641,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap 4.1.1",
+ "crucible-smf",
  "dropshot",
  "expectorate",
  "futures",
@@ -3626,6 +3658,8 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "signal-hook",
+ "signal-hook-tokio",
  "slog",
  "slog-dtrace",
  "sp-sim",
@@ -6471,6 +6505,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "termios"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "411c5bf740737c7918b8b1fe232dca4dc9f8e754b8ad5e20966814001ed0ac6b"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "termtree"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7432,6 +7475,7 @@ dependencies = [
  "crossterm",
  "futures",
  "hex",
+ "libsw",
  "reqwest",
  "semver 1.0.16",
  "serde",

@@ -15,6 +15,8 @@ use thiserror::Error;
 /// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
+    /// Partial configuration for our dropshot server.
+    pub dropshot: PartialDropshotConfig,
     /// Configuration of the management switch.
     pub switch: SwitchConfig,
     /// Server-wide logging configuration.
@@ -34,6 +36,11 @@ impl Config {
             .map_err(|e| (path.to_path_buf(), e))?;
         Ok(config_parsed)
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PartialDropshotConfig {
+    pub request_body_max_bytes: usize,
 }
 
 #[derive(Debug, Error)]
