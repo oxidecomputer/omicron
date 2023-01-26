@@ -9884,12 +9884,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "parent_id": {
-            "nullable": true,
-            "description": "ID of the parent component. Not present for top-level components.",
-            "type": "string",
-            "format": "uuid"
-          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -13986,12 +13980,6 @@
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "parent_id": {
-            "nullable": true,
-            "description": "ID of the parent component, e.g., the sled a disk belongs to. Value will be `None` for top-level components whose \"parent\" is the rack.",
             "type": "string",
             "format": "uuid"
           },

@@ -209,7 +209,6 @@ pub struct ComponentUpdate {
     pub identity: ComponentUpdateIdentity,
     pub version: SemverVersion,
     pub component_type: UpdateableComponentType,
-    pub parent_id: Option<Uuid>,
 }
 
 #[derive(
@@ -227,19 +226,9 @@ impl From<ComponentUpdate> for views::ComponentUpdate {
             identity: component_update.identity(),
             version: component_update.version.into(),
             component_type: component_update.component_type.into(),
-            parent_id: component_update.parent_id,
         }
     }
 }
-
-// TODO: As mentioned in the "open questions" section of the PR description,
-// I've determined this model is insufficient because it does not allow me to
-// represent nodes like PSC or Host below (example tree taken from RFD 334),
-// which are parents of updateable components but which are not themselves
-// directly associated with any update artifacts. Displaying this tree in full
-// seems pretty important for the UI, so I'm going to rethink this model a bit.
-// It's probably not a drastic change. Might be as simple as making the artifact
-// field nullable.
 
 #[derive(
     Queryable,
@@ -262,9 +251,6 @@ pub struct UpdateableComponent {
     /// DB-sortable. See `to_sortable_string` on `SemverVersion`
     pub version_sort: String,
     pub status: UpdateStatus,
-    /// ID of the parent component, e.g., the sled a disk belongs to. Value will
-    /// be `None` for top-level components whose "parent" is the rack.
-    pub parent_id: Option<Uuid>,
     // TODO: point to the actual update artifact
 }
 
@@ -280,7 +266,6 @@ impl TryFrom<params::UpdateableComponentCreate> for UpdateableComponent {
             version: version.clone(),
             version_sort: version.to_sortable_string()?,
             component_type: create.component_type.into(),
-            parent_id: create.parent_id,
             device_id: create.device_id,
             status: UpdateStatus::Steady,
         })
@@ -294,7 +279,6 @@ impl From<UpdateableComponent> for views::UpdateableComponent {
             device_id: component.device_id,
             component_type: component.component_type.into(),
             version: component.version.into(),
-            parent_id: component.parent_id,
             status: component.status.into(),
         }
     }

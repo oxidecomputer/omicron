@@ -1159,13 +1159,11 @@ pub struct SystemUpdateCreate {
 pub struct ComponentUpdateCreate {
     pub version: SemverVersion,
     pub component_type: shared::UpdateableComponentType,
-    pub parent_id: Option<Uuid>,
     pub system_update_id: Uuid,
 }
 
 pub struct UpdateableComponentCreate {
     pub version: SemverVersion,
     pub component_type: shared::UpdateableComponentType,
-    pub parent_id: Option<Uuid>,
     pub device_id: String,
 }

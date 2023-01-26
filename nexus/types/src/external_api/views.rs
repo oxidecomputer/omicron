@@ -435,10 +435,6 @@ pub struct ComponentUpdate {
 
     pub component_type: shared::UpdateableComponentType,
     pub version: SemverVersion,
-    // TODO: parent ID doesn't need to be optional if we say top-level
-    // components have the rack as their parent
-    /// ID of the parent component. Not present for top-level components.
-    pub parent_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -449,9 +445,6 @@ pub struct UpdateableComponent {
     pub device_id: String,
     pub component_type: shared::UpdateableComponentType,
     pub version: SemverVersion,
-    /// ID of the parent component, e.g., the sled a disk belongs to. Value will
-    /// be `None` for top-level components whose "parent" is the rack.
-    pub parent_id: Option<Uuid>,
     pub status: UpdateStatus,
 }
 

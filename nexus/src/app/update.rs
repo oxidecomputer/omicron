@@ -306,7 +306,6 @@ impl super::Nexus {
             },
             version: SemverVersion(create_update.version),
             component_type: create_update.component_type.into(),
-            parent_id: create_update.parent_id,
         };
 
         // TODO: make sure system update with that ID exists first
@@ -487,8 +486,7 @@ mod tests {
         let su3_create = SystemUpdateCreate {
             version: external::SemverVersion::new(3, 0, 0),
         };
-        let _su3 =
-            nexus.system_update_create(&opctx, su3_create).await.unwrap();
+        nexus.system_update_create(&opctx, su3_create).await.unwrap();
 
         let su2_create = SystemUpdateCreate {
             version: external::SemverVersion::new(2, 0, 0),
@@ -496,52 +494,45 @@ mod tests {
         let su2 = nexus.system_update_create(&opctx, su2_create).await.unwrap();
 
         // now there should be three system updates, sorted by version descending
-        let system_updates = nexus
+        let versions: Vec<String> = nexus
             .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
-            .unwrap();
+            .unwrap()
+            .iter()
+            .map(|su| su.version.to_string())
+            .collect();
 
-        let versions: Vec<String> =
-            system_updates.iter().map(|su| su.version.to_string()).collect();
         assert_eq!(versions.len(), 3);
         assert_eq!(versions[0], "3.0.0".to_string());
         assert_eq!(versions[1], "2.0.0".to_string());
         assert_eq!(versions[2], "1.0.0".to_string());
 
-        // let's also make sure we can fetch them by version
+        // let's also make sure we can fetch by version
         let su1_fetched = nexus
             .system_update_fetch_by_version(&opctx, &su1.version)
             .await
             .unwrap();
         assert_eq!(su1.identity.id, su1_fetched.identity.id);
 
-        let su2_fetched = nexus
-            .system_update_fetch_by_version(&opctx, &su2.version)
-            .await
-            .unwrap();
-        assert_eq!(su2.identity.id, su2_fetched.identity.id);
-
         // now create two component updates for update 1, one at root, and one
         // hanging off the first
-        let cu1 = nexus
+        let _cu1 = nexus
             .component_update_create(
                 &opctx,
                 ComponentUpdateCreate {
                     version: external::SemverVersion::new(1, 0, 0),
                     component_type: UpdateableComponentType::BootloaderForRot,
-                    parent_id: None,
                     system_update_id: su1.identity.id,
                 },
             )
             .await
             .unwrap();
-        let _cu1a = nexus
+        let _cu2 = nexus
             .component_update_create(
                 &opctx,
                 ComponentUpdateCreate {
                     version: external::SemverVersion::new(2, 0, 0),
                     component_type: UpdateableComponentType::HubrisForGimletSp,
-                    parent_id: Some(cu1.identity.id),
                     system_update_id: su1.identity.id,
                 },
             )
@@ -619,25 +610,23 @@ mod tests {
         // let low = nexus.lowest_component_version(&opctx).await.unwrap_err();
         // let high = nexus.highest_component_version(&opctx).await.unwrap_err();
 
-        let uc1 = nexus
+        let _uc1 = nexus
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
                     version: external::SemverVersion::new(0, 2, 0),
                     component_type: UpdateableComponentType::BootloaderForSp,
-                    parent_id: None,
                     device_id: "look-a-device".to_string(),
                 },
             )
             .await
             .unwrap();
-        let uc2 = nexus
+        let _uc2 = nexus
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
                     version: external::SemverVersion::new(3, 0, 0),
                     component_type: UpdateableComponentType::HeliosHostPhase2,
-                    parent_id: Some(uc1.identity.id),
                     device_id: "another-device".to_string(),
                 },
             )
@@ -649,7 +638,6 @@ mod tests {
                 UpdateableComponentCreate {
                     version: external::SemverVersion::new(10, 0, 0),
                     component_type: UpdateableComponentType::HeliosHostPhase1,
-                    parent_id: Some(uc2.identity.id),
                     device_id: "a-third-device".to_string(),
                 },
             )

@@ -709,8 +709,6 @@ table! {
 
         version -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
-        // parent component update ID
-        parent_id -> Nullable<Uuid>,
     }
 }
 
@@ -724,7 +722,6 @@ table! {
         version -> Text,
         version_sort -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
-        parent_id -> Nullable<Uuid>,
         status -> crate::UpdateStatusEnum,
         // TODO: status reason for updateable_component
     }
