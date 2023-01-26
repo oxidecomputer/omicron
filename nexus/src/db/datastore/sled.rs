@@ -39,8 +39,8 @@ impl DataStore {
                 dsl::is_scrimlet.eq(sled.is_scrimlet()),
                 dsl::part_number.eq(sled.part_number.clone()),
                 dsl::serial_number.eq(sled.serial_number.clone()),
-                dsl::revision.eq(sled.revision.clone()),
-                dsl::slot.eq(sled.slot.clone()),
+                dsl::revision.eq(sled.revision),
+                dsl::slot.eq(sled.slot),
             ))
             .returning(Sled::as_returning())
             .get_result_async(self.pool())
