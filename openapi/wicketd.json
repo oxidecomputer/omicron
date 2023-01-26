@@ -98,6 +98,25 @@
       }
     },
     "schemas": {
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -128,10 +147,14 @@
                 "properties": {
                   "inventory": {
                     "$ref": "#/components/schemas/RackV1Inventory"
+                  },
+                  "received_ago": {
+                    "$ref": "#/components/schemas/Duration"
                   }
                 },
                 "required": [
-                  "inventory"
+                  "inventory",
+                  "received_ago"
                 ]
               },
               "type": {

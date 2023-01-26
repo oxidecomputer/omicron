@@ -13,8 +13,8 @@ use std::path::Path;
 ///
 /// Feel free to extend this interface to exactly match the methods exposed
 /// by libefi_illumos::Gpt for testing.
-pub(crate) trait LibEFIGpt {
-    type Partition<'a>: LibEFIPartition
+pub(crate) trait LibEfiGpt {
+    type Partition<'a>: LibEfiPartition
     where
         Self: 'a;
     fn read<P: AsRef<Path>>(path: P) -> Result<Self, Error>
@@ -23,7 +23,7 @@ pub(crate) trait LibEFIGpt {
     fn partitions(&self) -> Vec<Self::Partition<'_>>;
 }
 
-impl LibEFIGpt for libefi_illumos::Gpt {
+impl LibEfiGpt for libefi_illumos::Gpt {
     type Partition<'a> = libefi_illumos::Partition<'a>;
     fn read<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         libefi_illumos::Gpt::read(path)
@@ -38,11 +38,11 @@ impl LibEFIGpt for libefi_illumos::Gpt {
 ///
 /// Feel free to extend this interface to exactly match the methods exposed
 /// by libefi_illumos::Partition for testing.
-pub(crate) trait LibEFIPartition {
+pub(crate) trait LibEfiPartition {
     fn index(&self) -> usize;
 }
 
-impl LibEFIPartition for libefi_illumos::Partition<'_> {
+impl LibEfiPartition for libefi_illumos::Partition<'_> {
     fn index(&self) -> usize {
         self.index()
     }

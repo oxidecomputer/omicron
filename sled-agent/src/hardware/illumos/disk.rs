@@ -8,7 +8,7 @@ use crate::hardware::illumos::gpt;
 use crate::hardware::{DiskError, DiskPaths, DiskVariant, Partition};
 use crate::illumos::zpool::ZpoolName;
 use slog::Logger;
-use std::path::PathBuf;
+use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -37,13 +37,13 @@ static U2_EXPECTED_PARTITIONS: [Partition; U2_EXPECTED_PARTITION_COUNT] =
     [Partition::ZfsPool];
 
 fn parse_partition_types<const N: usize>(
-    path: &PathBuf,
-    partitions: &Vec<impl gpt::LibEFIPartition>,
+    path: &Path,
+    partitions: &Vec<impl gpt::LibEfiPartition>,
     expected_partitions: &[Partition; N],
 ) -> Result<Vec<Partition>, DiskError> {
     if partitions.len() != N {
         return Err(DiskError::BadPartitionLayout {
-            path: path.clone(),
+            path: path.to_path_buf(),
             why: format!(
                 "Expected {} partitions, only saw {}",
                 partitions.len(),
@@ -54,7 +54,7 @@ fn parse_partition_types<const N: usize>(
     for i in 0..N {
         if partitions[i].index() != i {
             return Err(DiskError::BadPartitionLayout {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 why: format!(
                     "The {i}-th partition has index {}",
                     partitions[i].index()
@@ -68,7 +68,7 @@ fn parse_partition_types<const N: usize>(
         // "intent" of the partition.
     }
 
-    Ok(expected_partitions.iter().map(|p| p.clone()).collect())
+    Ok(expected_partitions.to_vec())
 }
 
 /// Parses, validates, and ensures the partition layout within a disk.
@@ -85,7 +85,7 @@ pub fn ensure_partition_layout(
 
 // Same as the [ensure_partition_layout], but with generic parameters
 // for access to external resources.
-fn internal_ensure_partition_layout<GPT: gpt::LibEFIGpt>(
+fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
@@ -140,7 +140,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEFIGpt>(
                     // the expected partitions? Or would it be wiser to infer
                     // that this indicates an unexpected error conditions that
                     // needs mitigation?
-                    todo!("Provisioning M.2 devices not yet supported");
+                    return Err(DiskError::CannotFormatM2NotImplemented);
                 }
             }
         }
@@ -170,20 +170,20 @@ mod test {
     use crate::hardware::DiskPaths;
     use crate::illumos::zpool::MockZpool;
     use omicron_test_utils::dev::test_setup_log;
-    use std::path::Path;
+    use std::path::PathBuf;
 
     struct FakePartition {
         index: usize,
     }
 
-    impl gpt::LibEFIPartition for FakePartition {
+    impl gpt::LibEfiPartition for FakePartition {
         fn index(&self) -> usize {
             self.index
         }
     }
 
     struct LabelNotFoundGPT {}
-    impl gpt::LibEFIGpt for LabelNotFoundGPT {
+    impl gpt::LibEfiGpt for LabelNotFoundGPT {
         type Partition<'a> = FakePartition;
         fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
             Err(libefi_illumos::Error::LabelNotFound)
@@ -267,7 +267,7 @@ mod test {
     }
 
     struct FakeU2GPT {}
-    impl gpt::LibEFIGpt for FakeU2GPT {
+    impl gpt::LibEfiGpt for FakeU2GPT {
         type Partition<'a> = FakePartition;
         fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
             Ok(Self {})
@@ -306,7 +306,7 @@ mod test {
     }
 
     struct FakeM2GPT {}
-    impl gpt::LibEFIGpt for FakeM2GPT {
+    impl gpt::LibEfiGpt for FakeM2GPT {
         type Partition<'a> = FakePartition;
         fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
             Ok(Self {})
@@ -345,7 +345,7 @@ mod test {
     }
 
     struct EmptyGPT {}
-    impl gpt::LibEFIGpt for EmptyGPT {
+    impl gpt::LibEfiGpt for EmptyGPT {
         type Partition<'a> = FakePartition;
         fn read<P: AsRef<Path>>(_: P) -> Result<Self, libefi_illumos::Error> {
             Ok(Self {})

@@ -17,16 +17,17 @@ use slog::{error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use tokio::time::Instant;
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
-use wicketd_client::types::GetInventoryResponse;
 use wicketd_client::types::RackV1Inventory;
 
 use crate::inventory::Inventory;
 use crate::screens::{Height, ScreenId, Screens};
 use crate::wicketd::{WicketdHandle, WicketdManager};
 use crate::widgets::RackState;
+use crate::widgets::StatusBar;
 
 pub const TOP_MARGIN: Height = Height(5);
 pub const BOTTOM_MARGIN: Height = Height(2);
@@ -192,21 +193,48 @@ impl Wizard {
                     );
                     self.handle_actions(actions)?;
                 }
-                Event::Inventory(inventory) => {
-                    let inventory = match inventory {
-                        GetInventoryResponse::Response { inventory } => {
-                            inventory
+                Event::Inventory(event) => {
+                    let mut redraw = false;
+
+                    match event {
+                        InventoryEvent::Inventory {
+                            changed_inventory,
+                            wicketd_received,
+                            mgs_received,
+                        } => {
+                            if let Some(inventory) = changed_inventory {
+                                if let Err(e) = self
+                                    .state
+                                    .inventory
+                                    .update_inventory(inventory)
+                                {
+                                    error!(
+                                        self.log,
+                                        "Failed to update inventory: {e}",
+                                    );
+                                } else {
+                                    redraw = true;
+                                }
+                            };
+
+                            self.state
+                                .status_bar
+                                .reset_wicketd(wicketd_received.elapsed());
+                            self.state
+                                .status_bar
+                                .reset_mgs(mgs_received.elapsed());
                         }
-                        GetInventoryResponse::Unavailable => {
-                            RackV1Inventory { sps: vec![] }
+                        InventoryEvent::Unavailable { wicketd_received } => {
+                            self.state
+                                .status_bar
+                                .reset_wicketd(wicketd_received.elapsed());
                         }
-                    };
-                    if let Err(e) =
-                        self.state.inventory.update_inventory(inventory)
-                    {
-                        error!(self.log, "Failed to update inventory: {e}",);
-                    } else {
-                        // Inventory changed. Redraw the screen.
+                    }
+
+                    redraw |= self.state.status_bar.should_redraw();
+
+                    if redraw {
+                        // Inventory or status bar changed. Redraw the screen.
                         screen.draw(&self.state, &mut self.terminal)?;
                     }
                 }
@@ -322,6 +350,7 @@ pub struct Point {
 pub struct State {
     pub inventory: Inventory,
     pub rack_state: RackState,
+    pub status_bar: StatusBar,
     pub mouse: Point,
 }
 
@@ -336,6 +365,7 @@ impl State {
         State {
             inventory: Inventory::default(),
             rack_state: RackState::new(),
+            status_bar: StatusBar::new(),
             mouse: Point::default(),
         }
     }
@@ -355,7 +385,7 @@ pub enum Event {
     Term(TermEvent),
 
     /// An Inventory Update Event
-    Inventory(GetInventoryResponse),
+    Inventory(InventoryEvent),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
@@ -383,4 +413,25 @@ pub enum ScreenEvent {
 
     /// The tick of a timer
     Tick,
+}
+
+/// An inventory event occurred.
+#[derive(Clone, Debug)]
+pub enum InventoryEvent {
+    /// Inventory was received.
+    Inventory {
+        /// This is Some if the inventory changed.
+        changed_inventory: Option<RackV1Inventory>,
+
+        /// The time at which at which information was received from wicketd.
+        wicketd_received: Instant,
+
+        /// The time at which information was received from MGS.
+        mgs_received: libsw::Stopwatch,
+    },
+    /// The inventory is unavailable.
+    Unavailable {
+        /// The time at which at which information was received from wicketd.
+        wicketd_received: Instant,
+    },
 }

@@ -6,6 +6,7 @@
 
 use crate::illumos::{execute, PFEXEC};
 use serde::{Deserialize, Deserializer};
+use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -29,7 +30,6 @@ enum Error {
 #[error("Failed to create zpool: {err}")]
 pub struct CreateError {
     #[from]
-    #[source]
     err: Error,
 }
 
@@ -37,7 +37,6 @@ pub struct CreateError {
 #[error("Failed to list zpools: {err}")]
 pub struct ListError {
     #[from]
-    #[source]
     err: Error,
 }
 
@@ -162,18 +161,12 @@ pub struct Zpool {}
 
 #[cfg_attr(test, mockall::automock)]
 impl Zpool {
-    pub fn create(
-        name: ZpoolName,
-        vdev: &std::path::PathBuf,
-    ) -> Result<(), CreateError> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            ZPOOL,
-            "create",
-            &name.to_string(),
-            &vdev.to_string_lossy(),
-        ]);
-        execute(cmd).map_err(Error::from)?;
+    pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.arg(ZPOOL).arg("create");
+        cmd.arg(&name.to_string());
+        cmd.arg(vdev);
+        execute(&mut cmd).map_err(Error::from)?;
         Ok(())
     }
 

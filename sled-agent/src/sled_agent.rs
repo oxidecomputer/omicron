@@ -407,7 +407,7 @@ impl SledAgent {
             .ensure_using_exactly_these_disks(self.inner.hardware.disks())
             .await
         {
-            warn!(log, "Failed to add disk: {e}");
+            warn!(log, "Failed to ensure the set of disks: {e}");
         }
     }
 
