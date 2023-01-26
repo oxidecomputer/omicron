@@ -5424,7 +5424,7 @@ async fn vpc_router_create(
 /// Delete a router
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
 }]
 async fn vpc_router_delete_v1(
@@ -5451,7 +5451,7 @@ async fn vpc_router_delete_v1(
 }
 
 /// Delete a router
-/// Use `DELETE /v1/vpc-router/{router}` instead
+/// Use `DELETE /v1/vpc-routers/{router}` instead
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
@@ -5484,7 +5484,7 @@ async fn vpc_router_delete(
 /// Update a router
 #[endpoint {
     method = PUT,
-    path = "/v1/vpc-router/{router}",
+    path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
 }]
 async fn vpc_router_update_v1(
@@ -5556,7 +5556,7 @@ async fn vpc_router_update(
 /// List the routes associated with a router in a particular VPC.
 #[endpoint {
     method = GET,
-    path = "/v1/vpc-router-routes/",
+    path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
 }]
 async fn vpc_router_route_list_v1(
@@ -5898,6 +5898,7 @@ async fn vpc_router_route_update_v1(
 }
 
 /// Update a route
+/// Use `PUT /v1/vpc-router-routes/{route}` instead
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",

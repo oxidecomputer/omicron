@@ -23,8 +23,6 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteCreateParams;
-use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authz;
@@ -182,8 +180,8 @@ lazy_static! {
         "demo-router-route".parse().unwrap();
     pub static ref DEMO_ROUTER_ROUTE_URL: String =
         format!("{}/{}", *DEMO_VPC_ROUTER_URL_ROUTES, *DEMO_ROUTER_ROUTE_NAME);
-    pub static ref DEMO_ROUTER_ROUTE_CREATE: RouterRouteCreateParams =
-        RouterRouteCreateParams {
+    pub static ref DEMO_ROUTER_ROUTE_CREATE: params::RouterRouteCreate =
+        params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_ROUTER_ROUTE_NAME.clone(),
                 description: String::from(""),
@@ -1129,7 +1127,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
-                    serde_json::to_value(&RouterRouteUpdateParams {
+                    serde_json::to_value(&params::RouterRouteUpdate {
                         identity: IdentityMetadataUpdateParams {
                             name: None,
                             description: Some("different".to_string())

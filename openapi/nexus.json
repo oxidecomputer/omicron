@@ -364,7 +364,7 @@
           "vpcs"
         ],
         "summary": "Fetch a subnet by id",
-        "description": "Use `GET /v1/vpc-subnets/{id}` instead.",
+        "description": "Use `GET /v1/vpc-subnets/{id}` instead",
         "operationId": "vpc_subnet_view_by_id",
         "parameters": [
           {
@@ -404,7 +404,7 @@
           "vpcs"
         ],
         "summary": "Fetch a VPC",
-        "description": "Use `GET /v1/vpcs/{id}` instead.",
+        "description": "Use `GET /v1/vpcs/{id}` instead",
         "operationId": "vpc_view_by_id",
         "parameters": [
           {
@@ -3446,7 +3446,7 @@
           "vpcs"
         ],
         "summary": "List VPCs",
-        "description": "Use `GET /v1/vpcs` instead.",
+        "description": "Use `GET /v1/vpcs` instead",
         "operationId": "vpc_list",
         "parameters": [
           {
@@ -3521,7 +3521,7 @@
           "vpcs"
         ],
         "summary": "Create a VPC",
-        "description": "Use `POST /v1/vpcs` instead.",
+        "description": "Use `POST /v1/vpcs` instead",
         "operationId": "vpc_create",
         "parameters": [
           {
@@ -3580,7 +3580,7 @@
           "vpcs"
         ],
         "summary": "Fetch a VPC",
-        "description": "Use `GET /v1/vpcs/{vpc}` instead.",
+        "description": "Use `GET /v1/vpcs/{vpc}` instead",
         "operationId": "vpc_view",
         "parameters": [
           {
@@ -3633,7 +3633,7 @@
           "vpcs"
         ],
         "summary": "Update a VPC",
-        "description": "Use `PUT /v1/vpcs/{vpc}` instead.",
+        "description": "Use `PUT /v1/vpcs/{vpc}` instead",
         "operationId": "vpc_update",
         "parameters": [
           {
@@ -3696,7 +3696,7 @@
           "vpcs"
         ],
         "summary": "Delete a VPC",
-        "description": "Use `DELETE /v1/vpcs/{vpc}` instead.",
+        "description": "Use `DELETE /v1/vpcs/{vpc}` instead",
         "operationId": "vpc_delete",
         "parameters": [
           {
@@ -3858,6 +3858,7 @@
           "vpcs"
         ],
         "summary": "List routers",
+        "description": "Use `GET /v1/vpc-routers` instead",
         "operationId": "vpc_router_list",
         "parameters": [
           {
@@ -3930,6 +3931,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -3937,6 +3939,7 @@
           "vpcs"
         ],
         "summary": "Create a router",
+        "description": "Use `POST /v1/vpc-routers` instead",
         "operationId": "vpc_router_create",
         "parameters": [
           {
@@ -3991,7 +3994,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}": {
@@ -4000,6 +4004,7 @@
           "vpcs"
         ],
         "summary": "Get a router",
+        "description": "Use `GET /v1/vpc-routers/{router}` instead",
         "operationId": "vpc_router_view",
         "parameters": [
           {
@@ -4052,7 +4057,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
@@ -4121,13 +4127,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "vpcs"
         ],
         "summary": "Delete a router",
+        "description": "Use `DELETE /v1/vpc-routers/{router}` instead",
         "operationId": "vpc_router_delete",
         "parameters": [
           {
@@ -4173,7 +4181,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes": {
@@ -4309,7 +4318,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RouterRouteCreateParams"
+                "$ref": "#/components/schemas/RouterRouteCreate"
               }
             }
           },
@@ -4341,6 +4350,7 @@
           "vpcs"
         ],
         "summary": "Fetch a route",
+        "description": "Use `GET /v1/vpc-router-routes/{route}` instead",
         "operationId": "vpc_router_route_view",
         "parameters": [
           {
@@ -4408,6 +4418,7 @@
           "vpcs"
         ],
         "summary": "Update a route",
+        "description": "Use `PUT /v1/vpc-router-routes/{route}` instead",
         "operationId": "vpc_router_route_update",
         "parameters": [
           {
@@ -4455,7 +4466,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RouterRouteUpdateParams"
+                "$ref": "#/components/schemas/RouterRouteUpdate"
               }
             }
           },
@@ -4478,13 +4489,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "vpcs"
         ],
         "summary": "Delete a route",
+        "description": "Use `DELETE /v1/vpc-router-routes/{route}` instead",
         "operationId": "vpc_router_route_delete",
         "parameters": [
           {
@@ -4538,7 +4551,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets": {
@@ -4547,7 +4561,7 @@
           "vpcs"
         ],
         "summary": "List subnets",
-        "description": "Use `GET /v1/vpc-subnets` instead.",
+        "description": "Use `GET /v1/vpc-subnets` instead",
         "operationId": "vpc_subnet_list",
         "parameters": [
           {
@@ -4628,7 +4642,7 @@
           "vpcs"
         ],
         "summary": "Create a subnet",
-        "description": "Use `POST /v1/vpc-subnets` instead.",
+        "description": "Use `POST /v1/vpc-subnets` instead",
         "operationId": "vpc_subnet_create",
         "parameters": [
           {
@@ -4693,7 +4707,7 @@
           "vpcs"
         ],
         "summary": "Fetch a subnet",
-        "description": "Use `GET /v1/vpc-subnets/{subnet}` instead.",
+        "description": "Use `GET /v1/vpc-subnets/{subnet}` instead",
         "operationId": "vpc_subnet_view",
         "parameters": [
           {
@@ -9200,6 +9214,662 @@
         }
       }
     },
+    "/v1/vpc-router-routes": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List the routes associated with a router in a particular VPC.",
+        "operationId": "vpc_router_route_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRouteResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Create a router",
+        "operationId": "vpc_router_route_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterRouteCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-router-routes/{route}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Fetch a route",
+        "operationId": "vpc_router_route_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Update a route",
+        "operationId": "vpc_router_route_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterRouteUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Delete a route",
+        "operationId": "vpc_router_route_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-routers": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List routers",
+        "operationId": "vpc_router_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouterResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "operationId": "vpc_router_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcRouterCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-routers/{router}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Get a router",
+        "operationId": "vpc_router_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Update a router",
+        "operationId": "vpc_router_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcRouterUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Delete a router",
+        "operationId": "vpc_router_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/vpc-subnets": {
       "get": {
         "tags": [
@@ -13065,7 +13735,7 @@
           "vpc_router_id"
         ]
       },
-      "RouterRouteCreateParams": {
+      "RouterRouteCreate": {
         "description": "Create-time parameters for a [`RouterRoute`]",
         "type": "object",
         "properties": {
@@ -13143,7 +13813,7 @@
           "items"
         ]
       },
-      "RouterRouteUpdateParams": {
+      "RouterRouteUpdate": {
         "description": "Updateable properties of a [`RouterRoute`]",
         "type": "object",
         "properties": {
