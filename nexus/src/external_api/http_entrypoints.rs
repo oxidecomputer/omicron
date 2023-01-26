@@ -5437,16 +5437,23 @@ async fn system_version(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        let latest_deployment = nexus.latest_update_deployment(&opctx).await?;
-        let low = nexus.lowest_component_version(&opctx).await?;
-        let high = nexus.highest_component_version(&opctx).await?;
+        // The only way we have no latest deployment is if the rack was just set
+        // up and no system updates have ever been run. In this case there is no
+        // update running, so we can fall back to steady.
+        let status = nexus
+            .latest_update_deployment(&opctx)
+            .await
+            .map_or(views::UpdateStatus::Steady, |d| d.status.into());
+
+        // Updateable components, however, are populated at rack setup before
+        // the external API is even started, so if we get here and there are no
+        // components, that's a real issue and the 500 we throw is appropriate.
+        let low = nexus.lowest_component_version(&opctx).await?.into();
+        let high = nexus.highest_component_version(&opctx).await?.into();
 
         Ok(HttpResponseOk(views::SystemVersion {
-            version_range: views::VersionRange {
-                low: low.into(),
-                high: high.into(),
-            },
-            status: latest_deployment.status.into(),
+            version_range: views::VersionRange { low, high },
+            status,
         }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

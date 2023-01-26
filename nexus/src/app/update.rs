@@ -610,7 +610,7 @@ mod tests {
         // let low = nexus.lowest_component_version(&opctx).await.unwrap_err();
         // let high = nexus.highest_component_version(&opctx).await.unwrap_err();
 
-        let _uc1 = nexus
+        nexus
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
@@ -620,8 +620,8 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
-        let _uc2 = nexus
+            .expect("failed to create updateable component");
+        nexus
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
@@ -631,8 +631,8 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
-        let _uc3 = nexus
+            .expect("failed to create updateable component");
+        nexus
             .updateable_component_create(
                 &opctx,
                 UpdateableComponentCreate {
@@ -642,7 +642,7 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
+            .expect("failed to create updateable component");
 
         // now there should be 3
         let components = nexus

@@ -8,14 +8,15 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
-use crate::db::error::ErrorHandler;
+use crate::db::error::{
+    public_error_from_diesel_pool, ErrorHandler, TransactionError,
+};
 use crate::db::model::{
     ComponentUpdate, SemverVersion, SystemUpdate, UpdateAvailableArtifact,
     UpdateDeployment, UpdateableComponent,
 };
 use crate::db::pagination::paginated;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use diesel::prelude::*;
 use nexus_db_model::SystemUpdateComponentUpdate;
 use nexus_types::identity::Asset;
@@ -72,7 +73,6 @@ impl DataStore {
         opctx: &OpContext,
         update: SystemUpdate,
     ) -> CreateResult<SystemUpdate> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         use db::schema::system_update::dsl::*;
@@ -101,52 +101,48 @@ impl DataStore {
         system_update_id: Uuid,
         update: ComponentUpdate,
     ) -> CreateResult<ComponentUpdate> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         use db::schema::component_update;
         use db::schema::system_update_component_update as join_table;
 
-        let result = diesel::insert_into(component_update::table)
-            .values(update.clone())
-            .on_conflict(component_update::columns::id) // TODO: should also conflict on version
-            .do_nothing()
-            .returning(ComponentUpdate::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        let version_string = update.version.to_string();
+
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                let db_update = diesel::insert_into(component_update::table)
+                    .values(update.clone())
+                    .on_conflict(component_update::columns::id) // TODO: should also conflict on version
+                    .do_nothing()
+                    .returning(ComponentUpdate::as_returning())
+                    .get_result_async(&conn)
+                    .await?;
+
+                diesel::insert_into(join_table::table)
+                    .values(SystemUpdateComponentUpdate {
+                        system_update_id,
+                        component_update_id: update.id(),
+                    })
+                    .on_conflict(join_table::all_columns)
+                    .do_nothing()
+                    .returning(SystemUpdateComponentUpdate::as_returning())
+                    .get_result_async(&conn)
+                    .await?;
+
+                Ok(db_update)
+            })
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::ComponentUpdate,
-                        // TODO: string representing both system and component updates?
-                        &update.version.to_string(),
+                        &version_string,
                     ),
-                )
-            });
-
-        diesel::insert_into(join_table::table)
-            .values(SystemUpdateComponentUpdate {
-                system_update_id,
-                component_update_id: update.id(),
+                ),
             })
-            .on_conflict(join_table::all_columns)
-            .do_nothing()
-            .returning(SystemUpdateComponentUpdate::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SystemUpdateComponentUpdate,
-                        // TODO: string representing both system and component updates?
-                        &update.version.to_string(),
-                    ),
-                )
-            })?;
-
-        result
     }
 
     pub async fn system_updates_list_by_id(
@@ -154,7 +150,6 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SystemUpdate> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::system_update::dsl::*;
@@ -172,7 +167,6 @@ impl DataStore {
         opctx: &OpContext,
         authz_update: &authz::SystemUpdate,
     ) -> ListResultVec<ComponentUpdate> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::component_update;
@@ -192,7 +186,6 @@ impl DataStore {
         opctx: &OpContext,
         component: UpdateableComponent,
     ) -> CreateResult<UpdateableComponent> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         use db::schema::updateable_component::dsl::*;
@@ -220,7 +213,6 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<UpdateableComponent> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::updateable_component::dsl::*;
@@ -236,7 +228,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<SemverVersion> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::updateable_component::dsl::*;
@@ -253,7 +244,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<SemverVersion> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::updateable_component::dsl::*;
@@ -271,7 +261,6 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<UpdateDeployment> {
-        // TODO: what's the right permission here?
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::update_deployment::dsl::*;
@@ -287,6 +276,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<UpdateDeployment> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         use db::schema::update_deployment::dsl::*;
 
         update_deployment

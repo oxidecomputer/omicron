@@ -7,7 +7,10 @@ use http::{method::Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::SemverVersion;
-use omicron_nexus::external_api::views;
+use omicron_nexus::{
+    context::OpContext,
+    external_api::{params, shared::UpdateableComponentType, views},
+};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -16,26 +19,73 @@ type ControlPlaneTestContext =
 // there that has nothing to do with testing the API endpoints. We could come up
 // with more descriptive names.
 
+/// Because there are no create endpoints for these resources, we need to call
+/// the `nexus` functions directly.
+async fn populate_db(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.apictx().nexus;
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        cptestctx.server.apictx().nexus.datastore().clone(),
+    );
+
+    nexus
+        .updateable_component_create(
+            &opctx,
+            params::UpdateableComponentCreate {
+                version: SemverVersion::new(0, 2, 0),
+                component_type: UpdateableComponentType::BootloaderForSp,
+                device_id: "look-a-device".to_string(),
+            },
+        )
+        .await
+        .expect("failed to create updateable component");
+
+    nexus
+        .updateable_component_create(
+            &opctx,
+            params::UpdateableComponentCreate {
+                version: SemverVersion::new(1, 0, 1),
+                component_type: UpdateableComponentType::HubrisForGimletSp,
+                device_id: "another-device".to_string(),
+            },
+        )
+        .await
+        .expect("failed to create updateable component");
+}
+
 #[nexus_test]
 async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    // Initially the endpoint 500s because there are no updateable components.
+    // This is the desired behavior because those are populated by rack startup
+    // before the external API starts, so it really is a problem if we can hit
+    // this endpoint without any data backing it.
+    let _ = NexusRequest::expect_failure(
+        &client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::GET,
+        "/v1/system/update/version",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await;
+
+    // create two updateable components
+    populate_db(&cptestctx).await;
+
     let version =
-        NexusRequest::object_get(&client, &"/v1/system/update/version")
+        NexusRequest::object_get(&client, "/v1/system/update/version")
             .authn_as(AuthnMode::PrivilegedUser)
             .execute_and_parse_unwrap::<views::SystemVersion>()
             .await;
-
-    // This 500s because there are no updateable components or update
-    // deployments in the DB. It should probably 404 instead. Also figure out
-    // how to populate the DB so it can be tested with good data.
 
     assert_eq!(
         version,
         views::SystemVersion {
             version_range: views::VersionRange {
-                low: SemverVersion::new(0, 0, 1),
-                high: SemverVersion::new(0, 0, 2),
+                low: SemverVersion::new(0, 2, 0),
+                high: SemverVersion::new(1, 0, 1),
             },
             status: views::UpdateStatus::Steady,
         }
