@@ -9,9 +9,11 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -21,26 +23,58 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use ref_cast::RefCast;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
     // Disks
+    pub fn disk_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        disk_selector: &'a params::DiskSelector,
+    ) -> LookupResult<lookup::Disk<'a>> {
+        match disk_selector {
+            params::DiskSelector {
+                disk: NameOrId::Id(id),
+                project_selector: None,
+            } => {
+                let disk =
+                    LookupPath::new(opctx, &self.db_datastore).disk_id(*id);
+                Ok(disk)
+            }
+            params::DiskSelector {
+                disk: NameOrId::Name(name),
+                project_selector: Some(project_selector),
+            } => {
+                let disk = self
+                    .project_lookup(opctx, project_selector)?
+                    .disk_name(Name::ref_cast(name));
+                Ok(disk)
+            }
+            params::DiskSelector {
+                disk: NameOrId::Id(_),
+                project_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing disk as an ID, project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "disk should either be UUID or project should be specified",
+            )),
+        }
+    }
 
     pub async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         match &params.disk_source {
             params::DiskSource::Blank { block_size } => {
@@ -226,49 +260,15 @@ impl super::Nexus {
         Ok(disk_created)
     }
 
-    pub async fn project_list_disks(
+    pub async fn disk_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore
-            .project_list_disks(opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn disk_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<db::model::Disk> {
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .fetch()
-            .await?;
-        Ok(db_disk)
-    }
-
-    pub async fn disk_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        disk_id: &Uuid,
-    ) -> LookupResult<db::model::Disk> {
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(*disk_id)
-            .fetch()
-            .await?;
-        Ok(db_disk)
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore.disk_list(opctx, &authz_project, pagparams).await
     }
 
     /// Modifies the runtime state of the Disk as requested.  This generally
@@ -374,19 +374,16 @@ impl super::Nexus {
     pub async fn project_delete_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
+        disk_lookup: &lookup::Disk<'_>,
     ) -> DeleteResult {
-        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .lookup_for(authz::Action::Delete)
-            .await?;
+        let (.., project, authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Delete).await?;
 
-        let saga_params =
-            sagas::disk_delete::Params { disk_id: authz_disk.id() };
+        let saga_params = sagas::disk_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: project.id(),
+            disk_id: authz_disk.id(),
+        };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
         Ok(())
@@ -577,7 +574,7 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.volume_remove_read_only_parent(db_disk.volume_id).await?;
+        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
 
         Ok(())
     }

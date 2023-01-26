@@ -68,7 +68,7 @@ fn test_unauthorized_coverage() {
             let label = op
                 .operation_id
                 .clone()
-                .unwrap_or(String::from("unknown operation-id"));
+                .unwrap_or_else(|| String::from("unknown operation-id"));
             (Operation { method, path, label }, regex)
         })
         .collect();
@@ -85,8 +85,9 @@ fn test_unauthorized_coverage() {
             // a VerifyEndpoint for it.
             let method_string = m.http_method().to_string().to_uppercase();
             let found = spec_operations.iter().find(|(op, regex)| {
-                op.method.to_uppercase() == method_string
-                    && regex.is_match(v.url.split('?').next().unwrap_or(v.url))
+                // Strip query parameters, if they exist.
+                let url = v.url.split('?').next().unwrap();
+                op.method.to_uppercase() == method_string && regex.is_match(url)
             });
             if let Some((op, _)) = found {
                 println!(

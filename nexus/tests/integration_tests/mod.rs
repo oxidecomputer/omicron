@@ -6,6 +6,7 @@
 mod authn_http;
 mod authz;
 mod basic;
+mod certificates;
 mod commands;
 mod console_api;
 mod device_auth;
@@ -13,6 +14,7 @@ mod disks;
 mod images;
 mod instances;
 mod ip_pools;
+mod metrics;
 mod organizations;
 mod oximeter;
 mod password_login;

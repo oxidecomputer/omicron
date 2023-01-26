@@ -109,11 +109,12 @@ pub struct DeploymentConfig {
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
-    /// Dropshot configurations for external API server.
+    /// Dropshot configuration for the external API server.
     ///
-    /// Multiple configurations may be supplied to request
-    /// combinations of HTTP / HTTPS servers.
-    pub dropshot_external: Vec<ConfigDropshot>,
+    /// If certificate information is available to Nexus, these
+    /// settings will also be used to launch an HTTPS server
+    /// on [PackageConfig::nexus_https_port].
+    pub dropshot_external: ConfigDropshot,
     /// Dropshot configuration for internal API server.
     pub dropshot_internal: ConfigDropshot,
     /// Portion of the IP space to be managed by the Rack.
@@ -251,6 +252,10 @@ impl Default for Tunables {
     }
 }
 
+fn default_https_port() -> u16 {
+    443
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -260,6 +265,9 @@ pub struct PackageConfig {
     pub log: ConfigLogging,
     /// Authentication-related configuration
     pub authn: AuthnConfig,
+    /// Port Nexus should use for launching HTTPS servers
+    #[serde(default = "default_https_port")]
+    pub nexus_https_port: u16,
     /// Timeseries database configuration.
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
@@ -460,7 +468,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [[deployment.dropshot_external]]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -482,12 +490,12 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
-                    dropshot_external: vec![ConfigDropshot {
+                    dropshot_external: ConfigDropshot {
                         bind_address: "10.1.2.3:4567"
                             .parse::<SocketAddr>()
                             .unwrap(),
                         ..Default::default()
-                    },],
+                    },
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
                             .parse::<SocketAddr>()
@@ -505,6 +513,7 @@ mod test {
                         session_absolute_timeout_minutes: 480
                     },
                     authn: AuthnConfig { schemes_external: Vec::new() },
+                    nexus_https_port: 443,
                     log: ConfigLogging::File {
                         level: ConfigLoggingLevel::Debug,
                         if_exists: ConfigLoggingIfExists::Fail,
@@ -542,7 +551,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [[deployment.dropshot_external]]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -584,7 +593,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [[deployment.dropshot_external]]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -603,7 +612,7 @@ mod test {
                     .to_string()
                     .starts_with("unsupported authn scheme: \"trust-me\""),
                 "error = {}",
-                error.to_string()
+                error
             );
         } else {
             panic!(
@@ -640,7 +649,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [[deployment.dropshot_external]]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]

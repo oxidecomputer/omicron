@@ -16,6 +16,7 @@ use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -45,20 +46,12 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn silos_list_by_name(
+    pub async fn silos_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore.silos_list_by_name(opctx, pagparams).await
-    }
-
-    pub async fn silos_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore.silos_list_by_id(opctx, pagparams).await
+        self.db_datastore.silos_list(opctx, pagparams).await
     }
 
     pub async fn silo_fetch(
@@ -746,14 +739,17 @@ impl super::Nexus {
             }
 
             params::IdpMetadataSource::Base64EncodedXml { data } => {
-                let bytes =
-                    base64::decode(data).map_err(|e| Error::InvalidValue {
-                        label: String::from("data"),
-                        message: format!(
-                            "error getting decoding base64 data: {}",
-                            e
-                        ),
-                    })?;
+                let bytes = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    data,
+                )
+                .map_err(|e| Error::InvalidValue {
+                    label: String::from("data"),
+                    message: format!(
+                        "error getting decoding base64 data: {}",
+                        e
+                    ),
+                })?;
                 String::from_utf8_lossy(&bytes).into_owned()
             }
         };

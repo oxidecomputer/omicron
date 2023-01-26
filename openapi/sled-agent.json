@@ -1545,8 +1545,7 @@
             "type": "string"
           },
           "version": {
-            "type": "integer",
-            "format": "int64"
+            "type": "string"
           }
         },
         "required": [

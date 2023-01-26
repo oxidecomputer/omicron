@@ -20,7 +20,6 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
@@ -55,7 +54,7 @@ pub fn api() -> SledApiDescription {
     path = "/services",
 }]
 async fn services_put(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     body: TypedBody<ServiceEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
@@ -69,7 +68,7 @@ async fn services_put(
     path = "/zpools",
 }]
 async fn zpools_get(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.zpools_get().await.map_err(|e| Error::from(e))?))
@@ -80,7 +79,7 @@ async fn zpools_get(
     path = "/filesystem",
 }]
 async fn filesystem_put(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     body: TypedBody<DatasetEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
@@ -106,7 +105,7 @@ struct InstancePathParam {
     path = "/instances/{instance_id}",
 }]
 async fn instance_put(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
 ) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
@@ -136,7 +135,7 @@ struct DiskPathParam {
     path = "/disks/{disk_id}",
 }]
 async fn disk_put(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     path_params: Path<DiskPathParam>,
     body: TypedBody<DiskEnsureBody>,
 ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
@@ -159,7 +158,7 @@ async fn disk_put(
     path = "/update"
 }]
 async fn update_artifact(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     artifact: TypedBody<UpdateArtifact>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
@@ -172,7 +171,7 @@ async fn update_artifact(
     path = "/instances/{instance_id}/serial",
 }]
 async fn instance_serial_get(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     path_params: Path<InstancePathParam>,
     query: Query<InstanceSerialConsoleRequest>,
 ) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
@@ -234,7 +233,7 @@ pub struct InstanceIssueDiskSnapshotRequestResponse {
     path = "/instances/{instance_id}/disks/{disk_id}/snapshot",
 }]
 async fn instance_issue_disk_snapshot_request(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     path_params: Path<InstanceIssueDiskSnapshotRequestPathParam>,
     body: TypedBody<InstanceIssueDiskSnapshotRequestBody>,
 ) -> Result<HttpResponseOk<InstanceIssueDiskSnapshotRequestResponse>, HttpError>
@@ -266,7 +265,7 @@ struct VpcPathParam {
     path = "/vpc/{vpc_id}/firewall/rules",
 }]
 async fn vpc_firewall_rules_put(
-    rqctx: Arc<RequestContext<SledAgent>>,
+    rqctx: RequestContext<SledAgent>,
     path_params: Path<VpcPathParam>,
     body: TypedBody<VpcFirewallRulesEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

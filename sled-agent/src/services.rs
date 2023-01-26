@@ -245,6 +245,36 @@ struct SledAgentInfo {
     rack_id: Uuid,
 }
 
+fn is_char_device(name: impl Into<PathBuf>) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+
+    match std::fs::metadata(name.into()) {
+        Ok(metadata) => metadata.file_type().is_char_device(),
+        Err(_) => false,
+    }
+}
+
+// Depending on the kernel version, a tofino device can be found at either
+// /dev/tofino or /dev/tofino/<instance#>.  This method examines each in
+// turn, returning the first character device it finds in either of those
+// locations.
+fn find_tofino(root: &str) -> Result<String, Error> {
+    if is_char_device(root) {
+        return Ok(root.to_string());
+    }
+
+    for entry in std::fs::read_dir(root)
+        .map_err(|e| Error::Io { path: root.into(), err: e })?
+    {
+        let entry =
+            entry.map_err(|e| Error::Io { path: root.into(), err: e })?;
+        if is_char_device(&entry.path()) {
+            return Ok(entry.path().into_os_string().into_string().unwrap());
+        }
+    }
+    Err(Error::MissingDevice { device: "tofino".to_string() })
+}
+
 #[derive(Clone)]
 pub struct ServiceManager {
     inner: Arc<ServiceManagerInner>,
@@ -373,7 +403,7 @@ impl ServiceManager {
                 ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
                     // When running on a real sidecar, we need the /dev/tofino
                     // device to talk to the tofino ASIC.
-                    devices.push("/dev/tofino".to_string());
+                    devices.push(find_tofino("/dev/tofino")?);
                 }
                 _ => (),
             }
@@ -597,35 +627,17 @@ impl ServiceManager {
                         }
                     }
 
-                    let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
-                    let key_file = PathBuf::from("/var/nexus/certs/key.pem");
-
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
                         id: request.id,
                         rack_id: sled_info.rack_id,
 
-                        // Request two dropshot servers: One for HTTP (port 80),
-                        // one for HTTPS (port 443).
-                        dropshot_external: vec![
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(
-                                    *external_ip,
-                                    443,
-                                ),
-                                request_body_max_bytes: 1048576,
-                                tls: Some(dropshot::ConfigTls::AsFile {
-                                    cert_file,
-                                    key_file,
-                                }),
-                            },
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(*external_ip, 80),
-                                request_body_max_bytes: 1048576,
-                                ..Default::default()
-                            },
-                        ],
+                        dropshot_external: dropshot::ConfigDropshot {
+                            bind_address: SocketAddr::new(*external_ip, 80),
+                            request_body_max_bytes: 1048576,
+                            ..Default::default()
+                        },
                         dropshot_internal: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(
                                 IpAddr::V6(*internal_ip),
@@ -713,12 +725,21 @@ impl ServiceManager {
                 ServiceType::ManagementGatewayService => {
                     info!(self.inner.log, "Setting up MGS service");
                     smfh.setprop("config/id", request.id)?;
+
+                    // Always tell MGS to listen on localhost so wicketd can
+                    // contact it even before we have an underlay network.
+                    smfh.addpropvalue(
+                        "config/address",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )?;
+
                     if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
+                        smfh.addpropvalue(
                             "config/address",
-                            &format!("[{}]:{}", address, MGS_PORT),
+                            &format!("[{address}]:{MGS_PORT}"),
                         )?;
                     }
+
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {
@@ -983,14 +1004,24 @@ impl ServiceManager {
 
                     match service {
                         ServiceType::ManagementGatewayService => {
+                            // Remove any existing `config/address` values
+                            // without deleting the property itself.
+                            smfh.delpropvalue("config/address", "*")?;
+
+                            // Restore the localhost address that we always add
+                            // when setting up MGS.
+                            smfh.addpropvalue(
+                                "config/address",
+                                &format!("[::1]:{MGS_PORT}"),
+                            )?;
+
+                            // Add the underlay address.
                             smfh.setprop(
                                 "config/address",
-                                &format!("[{}]:{}", address, MGS_PORT),
+                                &format!("[{address}]:{MGS_PORT}"),
                             )?;
+
                             smfh.refresh()?;
-                            // TODO: For this restart to be optional, MGS must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
                         }
                         ServiceType::Dendrite { .. } => {
                             smfh.setprop(

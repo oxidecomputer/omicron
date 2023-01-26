@@ -108,19 +108,17 @@ impl<'a> InternalServer<'a> {
     }
 }
 
+pub type DropshotServer = dropshot::HttpServer<Arc<ServerContext>>;
+
 /// Packages up a [`Nexus`], running both external and internal HTTP API servers
 /// wired up to Nexus
 pub struct Server {
     /// shared state used by API request handlers
-    pub apictx: Arc<ServerContext>,
-    /// dropshot servers for external API
-    pub http_servers_external: Vec<dropshot::HttpServer<Arc<ServerContext>>>,
-    /// dropshot server for internal API
-    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+    apictx: Arc<ServerContext>,
 }
 
 impl Server {
-    pub async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
+    async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
         let log = internal.log;
@@ -130,26 +128,44 @@ impl Server {
         let opctx = apictx.nexus.opctx_for_service_balancer();
         apictx.nexus.await_rack_initialization(&opctx).await;
 
-        // Launch the external server(s).
-        let http_servers_external = config
-            .deployment
-            .dropshot_external
-            .iter()
-            .map(|cfg| {
-                let server_starter_external = dropshot::HttpServerStarter::new(
-                    &cfg,
-                    external_api(),
-                    Arc::clone(&apictx),
-                    &log.new(o!("component" => "dropshot_external")),
-                )
-                .map_err(|error| {
-                    format!("initializing external server: {}", error)
-                })?;
-                Ok(server_starter_external.start())
-            })
-            .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?;
+        // Launch the external server.
+        let http_server_external = {
+            let server_starter_external = dropshot::HttpServerStarter::new(
+                &config.deployment.dropshot_external,
+                external_api(),
+                Arc::clone(&apictx),
+                &log.new(o!("component" => "dropshot_external")),
+            )
+            .map_err(|error| {
+                format!("initializing external server: {}", error)
+            })?;
+            server_starter_external.start()
+        };
 
-        Ok(Server { apictx, http_servers_external, http_server_internal })
+        // Transfer control of the external server to Nexus
+        let mut http_servers_external = crate::app::ExternalServers::new(
+            config.deployment.dropshot_external.clone(),
+            config.pkg.nexus_https_port,
+        );
+        http_servers_external.set_http(http_server_external);
+        apictx
+            .nexus
+            .set_servers(http_servers_external, http_server_internal)
+            .await;
+
+        // If Nexus has TLS certificates, launch the HTTPS server.
+        apictx
+            .nexus
+            .refresh_tls_config(&opctx)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let server = Server { apictx: apictx.clone() };
+        Ok(server)
+    }
+
+    pub fn apictx(&self) -> &Arc<ServerContext> {
+        &self.apictx
     }
 
     /// Wait for the given server to shut down
@@ -158,34 +174,17 @@ impl Server {
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        let mut errors = vec![];
-        for server in self.http_servers_external {
-            errors.push(server.await.map_err(|e| format!("external: {}", e)));
-        }
-        errors.push(
-            self.http_server_internal
-                .await
-                .map_err(|e| format!("internal: {}", e)),
-        );
-        let errors = errors
-            .into_iter()
-            .filter(Result::is_err)
-            .map(|r| r.unwrap_err())
-            .collect::<Vec<String>>();
-
-        if errors.len() > 0 {
-            let msg = format!("errors shutting down: ({})", errors.join(", "));
-            Err(msg)
-        } else {
-            Ok(())
-        }
+        self.apictx.nexus.wait_for_shutdown().await
     }
 
-    /// Register the Nexus server as a metric producer with `oximeter.
+    /// Register the Nexus server as a metric producer with oximeter.
     pub async fn register_as_producer(&self) {
-        self.apictx
-            .nexus
-            .register_as_producer(self.http_server_internal.local_addr())
+        let nexus = &self.apictx.nexus;
+
+        nexus
+            .register_as_producer(
+                nexus.get_internal_server_address().await.unwrap(),
+            )
             .await;
     }
 }
@@ -213,6 +212,7 @@ impl nexus_test_interface::NexusServer for Server {
                 internal_api::params::RackInitializationRequest {
                     services: vec![],
                     datasets: vec![],
+                    certs: vec![],
                 },
             )
             .await
@@ -222,15 +222,16 @@ impl nexus_test_interface::NexusServer for Server {
         Server::start(internal_server).await.unwrap()
     }
 
-    fn get_http_servers_external(&self) -> Vec<SocketAddr> {
-        self.http_servers_external
-            .iter()
-            .map(|server| server.local_addr())
-            .collect()
+    async fn get_http_server_external_address(&self) -> Option<SocketAddr> {
+        self.apictx.nexus.get_http_external_server_address().await
     }
 
-    fn get_http_server_internal(&self) -> SocketAddr {
-        self.http_server_internal.local_addr()
+    async fn get_https_server_external_address(&self) -> Option<SocketAddr> {
+        self.apictx.nexus.get_https_external_server_address().await
+    }
+
+    async fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.apictx.nexus.get_internal_server_address().await.unwrap()
     }
 
     async fn set_resolver(
@@ -259,10 +260,12 @@ impl nexus_test_interface::NexusServer for Server {
     }
 
     async fn close(mut self) {
-        for server in self.http_servers_external {
-            server.close().await.unwrap();
-        }
-        self.http_server_internal.close().await.unwrap();
+        self.apictx
+            .nexus
+            .close_servers()
+            .await
+            .expect("failed to close servers during test cleanup");
+        self.wait_for_finish().await.unwrap()
     }
 }
 

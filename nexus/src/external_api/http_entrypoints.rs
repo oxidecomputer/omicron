@@ -9,9 +9,9 @@ use super::views::IpPoolRange;
 use super::{
     console_api, device_auth, params, views,
     views::{
-        GlobalImage, Group, IdentityProvider, Image, Organization, Project,
-        Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc,
-        VpcRouter, VpcSubnet,
+        Certificate, GlobalImage, Group, IdentityProvider, Image, Organization,
+        Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin,
+        Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -58,6 +58,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -146,6 +147,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
 
+        api.register(disk_list_v1)?;
+        api.register(disk_create_v1)?;
+        api.register(disk_view_v1)?;
+        api.register(disk_delete_v1)?;
+
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
@@ -155,6 +161,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
+        api.register(instance_disk_list)?;
+        api.register(instance_disk_attach)?;
+        api.register(instance_disk_detach)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
 
@@ -166,6 +175,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_reboot_v1)?;
         api.register(instance_start_v1)?;
         api.register(instance_stop_v1)?;
+        api.register(instance_disk_list_v1)?;
+        api.register(instance_disk_attach_v1)?;
+        api.register(instance_disk_detach_v1)?;
         api.register(instance_serial_console_v1)?;
         api.register(instance_serial_console_stream_v1)?;
 
@@ -175,10 +187,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_view)?;
         api.register(image_view_by_id)?;
         api.register(image_delete)?;
-
-        api.register(instance_disk_list)?;
-        api.register(instance_disk_attach)?;
-        api.register(instance_disk_detach)?;
 
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
@@ -265,12 +273,18 @@ pub fn external_api() -> NexusApiDescription {
         api.register(local_idp_user_delete)?;
         api.register(local_idp_user_set_password)?;
 
+        api.register(certificate_list)?;
+        api.register(certificate_create)?;
+        api.register(certificate_view)?;
+        api.register(certificate_delete)?;
+
         api.register(system_image_list)?;
         api.register(system_image_create)?;
         api.register(system_image_view)?;
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
+        api.register(system_metric)?;
         api.register(updates_refresh)?;
 
         api.register(user_list)?;
@@ -362,7 +376,7 @@ pub fn external_api() -> NexusApiDescription {
     tags = ["policy"],
 }]
 async fn system_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -388,7 +402,7 @@ struct ByIdPathParams {
     tags = ["policy"],
 }]
 async fn system_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -413,7 +427,7 @@ async fn system_policy_update(
     tags = ["silos"],
  }]
 pub async fn policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -438,7 +452,7 @@ pub async fn policy_view(
     tags = ["silos"],
 }]
 async fn policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -471,31 +485,23 @@ async fn policy_update(
     tags = ["system"],
 }]
 async fn silo_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Silo>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let pag_params = data_page_params_for(&rqctx, &query)?;
-        let silos = match name_or_id_pagination(&query, &pag_params)? {
-            PaginatedBy::Id(page_selector, ..) => {
-                nexus.silos_list_by_id(&opctx, &page_selector).await?
-            }
-            PaginatedBy::Name(page_selector, ..) => {
-                nexus
-                    .silos_list_by_name(
-                        &opctx,
-                        &page_selector.map_name(|n| Name::ref_cast(n)),
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.try_into())
-        .collect::<Result<Vec<_>, Error>>()?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let silos = nexus
+            .silos_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             silos,
@@ -512,7 +518,7 @@ async fn silo_list(
     tags = ["system"],
 }]
 async fn silo_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_silo_params: TypedBody<params::SiloCreate>,
 ) -> Result<HttpResponseCreated<Silo>, HttpError> {
     let apictx = rqctx.context();
@@ -542,7 +548,7 @@ struct SiloPathParam {
     tags = ["system"],
 }]
 async fn silo_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseOk<Silo>, HttpError> {
     let apictx = rqctx.context();
@@ -564,7 +570,7 @@ async fn silo_view(
     tags = ["system"]
 }]
 async fn silo_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Silo>, HttpError> {
     let apictx = rqctx.context();
@@ -588,7 +594,7 @@ async fn silo_view_by_id(
     tags = ["system"],
 }]
 async fn silo_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -610,7 +616,7 @@ async fn silo_delete(
     tags = ["system"],
 }]
 async fn silo_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -634,7 +640,7 @@ async fn silo_policy_view(
     tags = ["system"],
 }]
 async fn silo_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
@@ -666,16 +672,16 @@ async fn silo_policy_update(
     tags = ["system"],
 }]
 async fn silo_users_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let silo_name = path_params.into_inner().silo_name;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let silo_name = path_params.into_inner().silo_name;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
             .silo_list_users(&opctx, &silo_name, &pagparams)
@@ -708,7 +714,7 @@ struct UserPathParam {
     tags = ["system"],
 }]
 async fn silo_user_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserPathParam>,
 ) -> Result<HttpResponseOk<User>, HttpError> {
     let apictx = rqctx.context();
@@ -737,7 +743,7 @@ async fn silo_user_view(
     tags = ["system"],
 }]
 async fn silo_identity_provider_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
@@ -774,7 +780,7 @@ async fn silo_identity_provider_list(
     tags = ["system"],
 }]
 async fn saml_identity_provider_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
 ) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
@@ -811,7 +817,7 @@ struct SiloSamlPathParam {
     tags = ["system"],
 }]
 async fn saml_identity_provider_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloSamlPathParam>,
 ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
@@ -849,7 +855,7 @@ async fn saml_identity_provider_view(
     tags = ["system"],
 }]
 async fn local_idp_user_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     new_user_params: TypedBody<params::UserCreate>,
 ) -> Result<HttpResponseCreated<User>, HttpError> {
@@ -877,7 +883,7 @@ async fn local_idp_user_create(
     tags = ["system"],
 }]
 async fn local_idp_user_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -907,7 +913,7 @@ async fn local_idp_user_delete(
     tags = ["system"],
 }]
 async fn local_idp_user_set_password(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserPathParam>,
     update: TypedBody<params::UserPassword>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -936,31 +942,23 @@ async fn local_idp_user_set_password(
     tags = ["organizations"]
 }]
 async fn organization_list_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let pag_params = data_page_params_for(&rqctx, &query)?;
-        let organizations = match name_or_id_pagination(&query, &pag_params)? {
-            PaginatedBy::Id(page_selector, ..) => {
-                nexus.organizations_list_by_id(&opctx, &page_selector).await?
-            }
-            PaginatedBy::Name(page_selector, ..) => {
-                nexus
-                    .organizations_list_by_name(
-                        &opctx,
-                        &page_selector.map_name(|n| Name::ref_cast(n)),
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organizations = nexus
+            .organizations_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             organizations,
@@ -979,31 +977,23 @@ async fn organization_list_v1(
     deprecated = true
 }]
 async fn organization_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let pag_params = data_page_params_for(&rqctx, &query)?;
-        let organizations = match name_or_id_pagination(&query, &pag_params)? {
-            PaginatedBy::Id(page_selector, ..) => {
-                nexus.organizations_list_by_id(&opctx, &page_selector).await?
-            }
-            PaginatedBy::Name(page_selector, ..) => {
-                nexus
-                    .organizations_list_by_name(
-                        &opctx,
-                        &page_selector.map_name(|n| Name::ref_cast(n)),
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organizations = nexus
+            .organizations_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             organizations,
@@ -1020,7 +1010,7 @@ async fn organization_list(
     tags = ["organizations"],
 }]
 async fn organization_create_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_organization: TypedBody<params::OrganizationCreate>,
 ) -> Result<HttpResponseCreated<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1044,7 +1034,7 @@ async fn organization_create_v1(
     deprecated = true
 }]
 async fn organization_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_organization: TypedBody<params::OrganizationCreate>,
 ) -> Result<HttpResponseCreated<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1066,7 +1056,7 @@ async fn organization_create(
     tags = ["organizations"],
 }]
 async fn organization_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1104,7 +1094,7 @@ struct OrganizationPathParam {
     deprecated = true
 }]
 async fn organization_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1135,7 +1125,7 @@ async fn organization_view(
     deprecated = true
 }]
 async fn organization_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1162,7 +1152,7 @@ async fn organization_view_by_id(
     tags = ["organizations"],
 }]
 async fn organization_delete_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -1189,7 +1179,7 @@ async fn organization_delete_v1(
     deprecated = true
 }]
 async fn organization_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -1215,7 +1205,7 @@ async fn organization_delete(
     tags = ["organizations"],
 }]
 async fn organization_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
     updated_organization: TypedBody<params::OrganizationUpdate>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
@@ -1254,7 +1244,7 @@ async fn organization_update_v1(
     deprecated = true
 }]
 async fn organization_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
     updated_organization: TypedBody<params::OrganizationUpdate>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
@@ -1287,7 +1277,7 @@ async fn organization_update(
     tags = ["organizations"],
 }]
 async fn organization_policy_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
@@ -1317,7 +1307,7 @@ async fn organization_policy_view_v1(
     deprecated = true
 }]
 async fn organization_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
@@ -1347,7 +1337,7 @@ async fn organization_policy_view(
     tags = ["organizations"],
 }]
 async fn organization_policy_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
     new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
@@ -1386,7 +1376,7 @@ async fn organization_policy_update_v1(
     deprecated = true
 }]
 async fn organization_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
     new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
@@ -1424,42 +1414,25 @@ async fn organization_policy_update(
     tags = ["projects"],
 }]
 async fn project_list_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::OrganizationSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let projects = match name_or_id_pagination(&query, &pag_params)? {
-            PaginatedBy::Id(pagparams, selector) => {
-                let organization_lookup =
-                    nexus.organization_lookup(&opctx, &selector)?;
-                nexus
-                    .projects_list_by_id(
-                        &opctx,
-                        &organization_lookup,
-                        &pagparams,
-                    )
-                    .await?
-            }
-            PaginatedBy::Name(pagparams, selector) => {
-                let organization_lookup =
-                    nexus.organization_lookup(&opctx, &selector)?;
-                nexus
-                    .projects_list_by_name(
-                        &opctx,
-                        &organization_lookup,
-                        &pagparams.map_name(|n| Name::ref_cast(n)),
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+        let organization_lookup =
+            nexus.organization_lookup(&opctx, &scan_params.selector)?;
+        let projects = nexus
+            .project_list(&opctx, &organization_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             projects,
@@ -1478,45 +1451,30 @@ async fn project_list_v1(
     deprecated = true,
 }]
 async fn project_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let organization_selector = &params::OrganizationSelector {
             organization: path.organization_name.into(),
         };
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
-        let projects = match name_or_id_pagination(&query, &pag_params)? {
-            PaginatedBy::Id(page_selector, ..) => {
-                nexus
-                    .projects_list_by_id(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector,
-                    )
-                    .await?
-            }
-            PaginatedBy::Name(page_selector, ..) => {
-                nexus
-                    .projects_list_by_name(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector.map_name(|n| Name::ref_cast(n)),
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+        let projects = nexus
+            .project_list(&opctx, &organization_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             projects,
@@ -1533,7 +1491,7 @@ async fn project_list(
     tags = ["projects"],
 }]
 async fn project_create_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OrganizationSelector>,
     new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
@@ -1567,7 +1525,7 @@ async fn project_create_v1(
     deprecated = true
 }]
 async fn project_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
     new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
@@ -1600,7 +1558,7 @@ async fn project_create(
     tags = ["projects"],
 }]
 async fn project_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
@@ -1639,7 +1597,7 @@ struct ProjectPathParam {
     deprecated = true
 }]
 async fn project_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1667,7 +1625,7 @@ async fn project_view(
     deprecated = true
 }]
 async fn project_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1691,7 +1649,7 @@ async fn project_view_by_id(
     tags = ["projects"],
 }]
 async fn project_delete_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -1721,7 +1679,7 @@ async fn project_delete_v1(
     deprecated = true
 }]
 async fn project_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -1747,7 +1705,7 @@ async fn project_delete(
     tags = ["projects"],
 }]
 async fn project_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
     updated_project: TypedBody<params::ProjectUpdate>,
@@ -1786,7 +1744,7 @@ async fn project_update_v1(
     deprecated = true
 }]
 async fn project_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     updated_project: TypedBody<params::ProjectUpdate>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
@@ -1819,7 +1777,7 @@ async fn project_update(
     tags = ["projects"],
 }]
 async fn project_policy_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
@@ -1850,7 +1808,7 @@ async fn project_policy_view_v1(
     deprecated = true
 }]
 async fn project_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -1877,7 +1835,7 @@ async fn project_policy_view(
     tags = ["projects"],
 }]
 async fn project_policy_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
@@ -1909,7 +1867,7 @@ async fn project_policy_update_v1(
     tags = ["projects"],
 }]
 async fn project_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
@@ -1949,31 +1907,23 @@ pub struct IpPoolPathParam {
     tags = ["system"],
 }]
 async fn ip_pool_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let pools = match name_or_id_pagination(&query, &pag_params)? {
-            PaginatedBy::Id(page_selector, ..) => {
-                nexus.ip_pools_list_by_id(&opctx, &page_selector).await?
-            }
-            PaginatedBy::Name(page_selector, ..) => {
-                nexus
-                    .ip_pools_list_by_name(
-                        &opctx,
-                        &page_selector.map_name(|n| Name::ref_cast(n)),
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(IpPool::from)
-        .collect();
+        let pools = nexus
+            .ip_pools_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(IpPool::from)
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             pools,
@@ -1990,7 +1940,7 @@ async fn ip_pool_list(
     tags = ["system"],
 }]
 async fn ip_pool_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     pool_params: TypedBody<params::IpPoolCreate>,
 ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
@@ -2011,7 +1961,7 @@ async fn ip_pool_create(
     tags = ["system"],
 }]
 async fn ip_pool_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
@@ -2033,7 +1983,7 @@ async fn ip_pool_view(
     tags = ["system"],
 }]
 async fn ip_pool_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
@@ -2055,7 +2005,7 @@ async fn ip_pool_view_by_id(
     tags = ["system"],
 }]
 async fn ip_pool_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -2077,7 +2027,7 @@ async fn ip_pool_delete(
     tags = ["system"],
 }]
 async fn ip_pool_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     updates: TypedBody<params::IpPoolUpdate>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
@@ -2101,7 +2051,7 @@ async fn ip_pool_update(
     tags = ["system"],
 }]
 async fn ip_pool_service_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -2124,7 +2074,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
     tags = ["system"],
 }]
 async fn ip_pool_range_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     query_params: Query<IpPoolRangePaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
@@ -2168,7 +2118,7 @@ async fn ip_pool_range_list(
     tags = ["system"],
 }]
 async fn ip_pool_range_add(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
@@ -2192,7 +2142,7 @@ async fn ip_pool_range_add(
     tags = ["system"],
 }]
 async fn ip_pool_range_remove(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -2218,7 +2168,7 @@ async fn ip_pool_range_remove(
     tags = ["system"],
 }]
 async fn ip_pool_service_range_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<IpPoolRangePaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
     let apictx = rqctx.context();
@@ -2259,7 +2209,7 @@ async fn ip_pool_service_range_list(
     tags = ["system"],
 }]
 async fn ip_pool_service_range_add(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
@@ -2280,7 +2230,7 @@ async fn ip_pool_service_range_add(
     tags = ["system"],
 }]
 async fn ip_pool_service_range_remove(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = &rqctx.context();
@@ -2299,29 +2249,67 @@ async fn ip_pool_service_range_remove(
 /// List disks
 #[endpoint {
     method = GET,
+    path = "/v1/disks",
+    tags = ["disks"],
+}]
+async fn disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, &scan_params.selector)?;
+        let disks = nexus
+            .disk_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|disk| disk.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            disks,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List disks
+/// Use `GET /v1/disks` instead
+#[endpoint {
+    method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"]
+    tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_project = nexus.project_lookup(&opctx, &project_selector)?;
         let disks = nexus
-            .project_list_disks(
+            .disk_list(
                 &opctx,
-                organization_name,
-                project_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &authz_project,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -2337,34 +2325,86 @@ async fn disk_list(
 }
 
 /// Create a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks",
+    tags = ["disks"]
+}]
+async fn disk_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    new_disk: TypedBody<params::DiskCreate>,
+) -> Result<HttpResponseCreated<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let params = new_disk.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
+        let disk =
+            nexus.project_create_disk(&opctx, &project_lookup, &params).await?;
+        Ok(HttpResponseCreated(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // TODO-correctness See note about instance create.  This should be async.
+/// Use `POST /v1/disks` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"]
+    tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_disk: TypedBody<params::DiskCreate>,
 ) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let new_disk_params = &new_disk.into_inner();
+    let project_selector = params::ProjectSelector::new(
+        Some(path.organization_name.into()),
+        path.project_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let disk = nexus
-            .project_create_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &new_disk_params,
-            )
+            .project_create_disk(&opctx, &project_lookup, &new_disk_params)
             .await?;
         Ok(HttpResponseCreated(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a disk
+#[endpoint {
+    method = GET,
+    path = "/v1/disks/{disk}",
+    tags = ["disks"]
+}]
+async fn disk_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
+        Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2378,48 +2418,54 @@ struct DiskPathParam {
 }
 
 /// Fetch a disk
+/// Use `GET /v1/disks/{disk}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
     tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
+    let disk_selector = params::DiskSelector::new(
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.disk_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus
-            .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
-            .await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch a disk by id
+/// Use `GET /v1/disks/{disk}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/disks/{id}",
     tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
+    let disk_selector = params::DiskSelector::new(None, None, path.id.into());
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus.disk_fetch_by_id(&opctx, id).await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2428,29 +2474,54 @@ async fn disk_view_by_id(
 /// Delete a disk
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
+    path = "/v1/disks/{disk}",
     tags = ["disks"],
 }]
+async fn disk_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
+        nexus.project_delete_disk(&opctx, &disk_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Use `DELETE /v1/disks/{disk}` instead
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
+    tags = ["disks"],
+    deprecated = true
+}]
 async fn disk_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
+    let disk_selector = params::DiskSelector::new(
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.disk_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &disk_name,
-            )
-            .await?;
+        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
+        nexus.project_delete_disk(&opctx, &disk_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2475,36 +2546,33 @@ pub enum DiskMetricName {
     tags = ["disks"],
 }]
 async fn disk_metrics_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<MetricsPathParam<DiskPathParam, DiskMetricName>>,
     query_params: Query<
         PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
     >,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-
-    let path = path_params.into_inner();
-    let organization_name = &path.inner.organization_name;
-    let project_name = &path.inner.project_name;
-    let disk_name = &path.inner.disk_name;
-    let metric_name = path.metric_name;
-
-    let query = query_params.into_inner();
-    let limit = rqctx.page_limit(&query)?;
-
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let limit = rqctx.page_limit(&query)?;
+        let disk_selector = params::DiskSelector::new(
+            Some(path.inner.organization_name.into()),
+            Some(path.inner.project_name.into()),
+            path.inner.disk_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
-
-        // This ensures the user is authorized on Action::Read for this disk
-        let disk = nexus
-            .disk_fetch(&opctx, organization_name, project_name, disk_name)
+        let (.., authz_disk) = nexus
+            .disk_lookup(&opctx, &disk_selector)?
+            .lookup_for(authz::Action::Read)
             .await?;
-        let upstairs_uuid = disk.id();
+
         let result = nexus
             .select_timeseries(
-                &format!("crucible_upstairs:{}", metric_name),
-                &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                &format!("crucible_upstairs:{}", path.metric_name),
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
             )
@@ -2524,40 +2592,25 @@ async fn disk_metrics_list(
     tags = ["instances"],
 }]
 async fn instance_list_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pag_params = data_page_params_for(&rqctx, &query)?;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let instances = match name_or_id_pagination(&query, &pag_params)? {
-            PaginatedBy::Id(pag_params, selector) => {
-                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
-                nexus
-                    .project_list_instances_by_id(
-                        &opctx,
-                        &project_lookup,
-                        &pag_params,
-                    )
-                    .await?
-            }
-            PaginatedBy::Name(pag_params, selector) => {
-                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
-                nexus
-                    .project_list_instances_by_name(
-                        &opctx,
-                        &project_lookup,
-                        &pag_params.map_name(|n| Name::ref_cast(n)),
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|i| i.into())
-        .collect();
+        let project_lookup =
+            nexus.project_lookup(&opctx, &scan_params.selector)?;
+        let instances = nexus
+            .instance_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             instances,
@@ -2574,28 +2627,25 @@ async fn instance_list_v1(
     tags = ["instances"],
 }]
 async fn instance_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let project_selector = params::ProjectSelector::new(
-        Some(path.organization_name.into()),
-        path.project_name.into(),
-    );
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let paginated_by = PaginatedBy::Name(pag_params);
+        let path = path_params.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let instances = nexus
-            .project_list_instances_by_name(
-                &opctx,
-                &project_lookup,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
+            .instance_list(&opctx, &project_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -2616,7 +2666,7 @@ async fn instance_list(
     tags = ["instances"],
 }]
 async fn instance_create_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
@@ -2655,7 +2705,7 @@ async fn instance_create_v1(
     deprecated = true,
 }]
 async fn instance_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
@@ -2689,7 +2739,7 @@ async fn instance_create(
     tags = ["instances"],
 }]
 async fn instance_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
@@ -2728,7 +2778,7 @@ struct InstancePathParam {
     deprecated = true,
 }]
 async fn instance_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2756,7 +2806,7 @@ async fn instance_view(
     tags = ["instances"],
 }]
 async fn instance_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2783,7 +2833,7 @@ async fn instance_view_by_id(
     tags = ["instances"],
 }]
 async fn instance_delete_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2813,7 +2863,7 @@ async fn instance_delete_v1(
     deprecated = true,
 }]
 async fn instance_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -2842,7 +2892,7 @@ async fn instance_delete(
     tags = ["instances"],
 }]
 async fn instance_migrate_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
     migrate_params: TypedBody<params::InstanceMigrate>,
@@ -2882,7 +2932,7 @@ async fn instance_migrate_v1(
     deprecated = true,
 }]
 async fn instance_migrate(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     migrate_params: TypedBody<params::InstanceMigrate>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
@@ -2918,7 +2968,7 @@ async fn instance_migrate(
     tags = ["instances"],
 }]
 async fn instance_reboot_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
@@ -2949,7 +2999,7 @@ async fn instance_reboot_v1(
     deprecated = true,
 }]
 async fn instance_reboot(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2977,7 +3027,7 @@ async fn instance_reboot(
     tags = ["instances"],
 }]
 async fn instance_start_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
@@ -3008,7 +3058,7 @@ async fn instance_start_v1(
     deprecated = true,
 }]
 async fn instance_start(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -3036,7 +3086,7 @@ async fn instance_start(
     tags = ["instances"],
 }]
 async fn instance_stop_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
@@ -3067,7 +3117,7 @@ async fn instance_stop_v1(
     deprecated = true,
 }]
 async fn instance_stop(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -3095,7 +3145,7 @@ async fn instance_stop(
     tags = ["instances"],
 }]
 async fn instance_serial_console_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::InstanceSerialConsoleRequest>,
     selector_params: Query<params::OptionalProjectSelector>,
@@ -3130,7 +3180,7 @@ async fn instance_serial_console_v1(
     deprecated = true,
 }]
 async fn instance_serial_console(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     query_params: Query<params::InstanceSerialConsoleRequest>,
 ) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
@@ -3164,10 +3214,10 @@ async fn instance_serial_console(
     tags = ["instances"],
 }]
 async fn instance_serial_console_stream_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    conn: WebsocketConnection,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::OptionalProjectSelector>,
+    conn: WebsocketConnection,
 ) -> WebsocketChannelResult {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -3192,9 +3242,9 @@ async fn instance_serial_console_stream_v1(
     deprecated = true,
 }]
 async fn instance_serial_console_stream(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    conn: WebsocketConnection,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
+    conn: WebsocketConnection,
 ) -> WebsocketChannelResult {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -3210,35 +3260,78 @@ async fn instance_serial_console_stream(
     Ok(())
 }
 
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/disks",
+    tags = ["instances"],
+}]
+async fn instance_disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+    path_params: Path<params::InstancePath>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: scan_params.selector.project_selector.clone(),
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disks = nexus
+            .instance_list_disks(&opctx, &instance_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            disks,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List an instance's disks
-// TODO-scalability needs to be paginated
+/// Use `GET /v1/instances/{instance}/disks` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_disk_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let path = path_params.into_inner();
+        let instance_selector = params::InstanceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.instance_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disks = nexus
             .instance_list_disks(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &instance_lookup,
+                &PaginatedBy::Name(pag_params),
             )
             .await?
             .into_iter()
@@ -3253,68 +3346,254 @@ async fn instance_disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/disks/attach",
+    tags = ["instances"],
+}]
+async fn instance_disk_attach_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    disk_to_attach: TypedBody<params::DiskPath>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk = disk_to_attach.into_inner().disk;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disk =
+            nexus.instance_attach_disk(&opctx, &instance_lookup, disk).await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Attach a disk to an instance
+/// Use `POST /v1/instances/{instance}/disks/attach` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_disk_attach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     disk_to_attach: TypedBody<params::DiskIdentifier>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let disk = disk_to_attach.into_inner();
+    let instance_selector = params::InstanceSelector::new(
+        Some(path.organization_name.clone().into()),
+        Some(path.project_name.clone().into()),
+        path.instance_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disk = nexus
-            .instance_attach_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_attach.into_inner().name.into(),
-            )
+            .instance_attach_disk(&opctx, &instance_lookup, disk.name.into())
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/disks/detach",
+    tags = ["instances"],
+}]
+async fn instance_disk_detach_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    disk_to_detach: TypedBody<params::DiskPath>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk = disk_to_detach.into_inner().disk;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disk =
+            nexus.instance_detach_disk(&opctx, &instance_lookup, disk).await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Detach a disk from an instance
+/// Use `POST /v1/disks/{disk}/detach` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_disk_detach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     disk_to_detach: TypedBody<params::DiskIdentifier>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let disk = disk_to_detach.into_inner();
+    let instance_selector = params::InstanceSelector::new(
+        Some(path.organization_name.clone().into()),
+        Some(path.project_name.clone().into()),
+        path.instance_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disk = nexus
-            .instance_detach_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_detach.into_inner().name.into(),
-            )
+            .instance_detach_disk(&opctx, &instance_lookup, disk.name.into())
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Certificates
+
+/// List system-wide certificates
+///
+/// Returns a list of all the system-wide certificates. System-wide certificates
+/// are returned sorted by creation date, with the most recent certificates
+/// appearing first.
+#[endpoint {
+    method = GET,
+    path = "/system/certificates",
+    tags = ["system"],
+}]
+async fn certificate_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let certs = nexus
+            .certificates_list(
+                &opctx,
+                &data_page_params_for(&rqctx, &query)?
+                    .map_name(|n| Name::ref_cast(n)),
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            certs,
+            &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new system-wide x.509 certificate.
+///
+/// This certificate is automatically used by the Oxide Control plane to serve
+/// external connections.
+#[endpoint {
+    method = POST,
+    path = "/system/certificates",
+    tags = ["system"]
+}]
+async fn certificate_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_cert: TypedBody<params::CertificateCreate>,
+) -> Result<HttpResponseCreated<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let new_cert_params = new_cert.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
+        Ok(HttpResponseCreated(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Certificate requests
+#[derive(Deserialize, JsonSchema)]
+struct CertificatePathParam {
+    certificate: NameOrId,
+}
+
+/// Fetch a certificate
+///
+/// Returns the details of a specific certificate
+#[endpoint {
+    method = GET,
+    path = "/system/certificates/{certificate}",
+    tags = ["system"],
+}]
+async fn certificate_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseOk<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., cert) =
+            nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
+        Ok(HttpResponseOk(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a certificate
+///
+/// Permanently delete a certificate. This operation cannot be undone.
+#[endpoint {
+    method = DELETE,
+    path = "/system/certificates/{certificate}",
+    tags = ["system"],
+}]
+async fn certificate_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .certificate_delete(
+                &opctx,
+                nexus.certificate_lookup(&opctx, &path.certificate),
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3331,7 +3610,7 @@ async fn instance_disk_detach(
     tags = ["system"],
 }]
 async fn system_image_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<GlobalImage>>, HttpError> {
     let apictx = rqctx.context();
@@ -3368,7 +3647,7 @@ async fn system_image_list(
     tags = ["system"]
 }]
 async fn system_image_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
@@ -3397,7 +3676,7 @@ struct GlobalImagePathParam {
     tags = ["system"],
 }]
 async fn system_image_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
@@ -3419,7 +3698,7 @@ async fn system_image_view(
     tags = ["system"],
 }]
 async fn system_image_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
@@ -3445,7 +3724,7 @@ async fn system_image_view_by_id(
     tags = ["system"],
 }]
 async fn system_image_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -3470,7 +3749,7 @@ async fn system_image_delete(
     tags = ["images"],
 }]
 async fn image_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
@@ -3512,7 +3791,7 @@ async fn image_list(
     tags = ["images"]
 }]
 async fn image_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_image: TypedBody<params::ImageCreate>,
 ) -> Result<HttpResponseCreated<Image>, HttpError> {
@@ -3554,7 +3833,7 @@ struct ImagePathParam {
     tags = ["images"],
 }]
 async fn image_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
     let apictx = rqctx.context();
@@ -3585,7 +3864,7 @@ async fn image_view(
     tags = ["images"],
 }]
 async fn image_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
     let apictx = rqctx.context();
@@ -3611,7 +3890,7 @@ async fn image_view_by_id(
     tags = ["images"],
 }]
 async fn image_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -3646,7 +3925,7 @@ async fn image_delete(
     tags = ["instances"],
 }]
 async fn instance_network_interface_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
@@ -3688,7 +3967,7 @@ async fn instance_network_interface_list(
     tags = ["instances"],
 }]
 async fn instance_network_interface_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     interface_params: TypedBody<params::NetworkInterfaceCreate>,
 ) -> Result<HttpResponseCreated<NetworkInterface>, HttpError> {
@@ -3734,7 +4013,7 @@ pub struct NetworkInterfacePathParam {
     tags = ["instances"],
 }]
 async fn instance_network_interface_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -3767,7 +4046,7 @@ async fn instance_network_interface_delete(
     tags = ["instances"],
 }]
 async fn instance_network_interface_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
@@ -3800,7 +4079,7 @@ async fn instance_network_interface_view(
     tags = ["instances"],
 }]
 async fn instance_network_interface_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
@@ -3823,7 +4102,7 @@ async fn instance_network_interface_view_by_id(
     tags = ["instances"],
 }]
 async fn instance_network_interface_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<NetworkInterfacePathParam>,
     updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
@@ -3861,7 +4140,7 @@ async fn instance_network_interface_update(
     tags = ["instances"],
 }]
 async fn instance_external_ip_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
@@ -3894,7 +4173,7 @@ async fn instance_external_ip_list(
     tags = ["snapshots"],
 }]
 async fn snapshot_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Snapshot>>, HttpError> {
@@ -3936,7 +4215,7 @@ async fn snapshot_list(
     tags = ["snapshots"],
 }]
 async fn snapshot_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_snapshot: TypedBody<params::SnapshotCreate>,
 ) -> Result<HttpResponseCreated<Snapshot>, HttpError> {
@@ -3976,7 +4255,7 @@ struct SnapshotPathParam {
     tags = ["snapshots"],
 }]
 async fn snapshot_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SnapshotPathParam>,
 ) -> Result<HttpResponseOk<Snapshot>, HttpError> {
     let apictx = rqctx.context();
@@ -4007,7 +4286,7 @@ async fn snapshot_view(
     tags = ["snapshots"],
 }]
 async fn snapshot_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Snapshot>, HttpError> {
     let apictx = rqctx.context();
@@ -4029,7 +4308,7 @@ async fn snapshot_view_by_id(
     tags = ["snapshots"],
 }]
 async fn snapshot_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SnapshotPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -4062,7 +4341,7 @@ async fn snapshot_delete(
     tags = ["vpcs"],
 }]
 async fn vpc_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
@@ -4111,7 +4390,7 @@ struct VpcPathParam {
     tags = ["vpcs"],
 }]
 async fn vpc_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<Vpc>, HttpError> {
     let apictx = rqctx.context();
@@ -4137,7 +4416,7 @@ async fn vpc_view(
     tags = ["vpcs"],
 }]
 async fn vpc_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Vpc>, HttpError> {
     let apictx = rqctx.context();
@@ -4159,7 +4438,7 @@ async fn vpc_view_by_id(
     tags = ["vpcs"],
 }]
 async fn vpc_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_vpc: TypedBody<params::VpcCreate>,
 ) -> Result<HttpResponseCreated<Vpc>, HttpError> {
@@ -4189,7 +4468,7 @@ async fn vpc_create(
     tags = ["vpcs"],
 }]
 async fn vpc_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<params::VpcUpdate>,
 ) -> Result<HttpResponseOk<Vpc>, HttpError> {
@@ -4219,7 +4498,7 @@ async fn vpc_update(
     tags = ["vpcs"],
 }]
 async fn vpc_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -4250,7 +4529,7 @@ async fn vpc_delete(
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
@@ -4298,7 +4577,7 @@ struct VpcSubnetPathParam {
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
@@ -4327,7 +4606,7 @@ async fn vpc_subnet_view(
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
@@ -4349,7 +4628,7 @@ async fn vpc_subnet_view_by_id(
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
     create_params: TypedBody<params::VpcSubnetCreate>,
 ) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
@@ -4379,7 +4658,7 @@ async fn vpc_subnet_create(
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -4408,7 +4687,7 @@ async fn vpc_subnet_delete(
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcSubnetPathParam>,
     subnet_params: TypedBody<params::VpcSubnetUpdate>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
@@ -4439,7 +4718,7 @@ async fn vpc_subnet_update(
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_list_network_interfaces(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
@@ -4482,7 +4761,7 @@ async fn vpc_subnet_list_network_interfaces(
     tags = ["vpcs"],
 }]
 async fn vpc_firewall_rules_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
     // TODO: Check If-Match and fail if the ETag doesn't match anymore.
@@ -4515,7 +4794,7 @@ async fn vpc_firewall_rules_view(
     tags = ["vpcs"],
 }]
 async fn vpc_firewall_rules_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
 ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
@@ -4551,7 +4830,7 @@ async fn vpc_firewall_rules_update(
     tags = ["vpcs"],
 }]
 async fn vpc_router_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
@@ -4599,7 +4878,7 @@ struct VpcRouterPathParam {
     tags = ["vpcs"],
 }]
 async fn vpc_router_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
@@ -4628,7 +4907,7 @@ async fn vpc_router_view(
     tags = ["vpcs"],
 }]
 async fn vpc_router_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
@@ -4650,7 +4929,7 @@ async fn vpc_router_view_by_id(
     tags = ["vpcs"],
 }]
 async fn vpc_router_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
     create_params: TypedBody<params::VpcRouterCreate>,
 ) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
@@ -4681,7 +4960,7 @@ async fn vpc_router_create(
     tags = ["vpcs"],
 }]
 async fn vpc_router_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -4710,7 +4989,7 @@ async fn vpc_router_delete(
     tags = ["vpcs"],
 }]
 async fn vpc_router_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcRouterPathParam>,
     router_params: TypedBody<params::VpcRouterUpdate>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
@@ -4745,7 +5024,7 @@ async fn vpc_router_update(
     tags = ["vpcs"],
 }]
 async fn vpc_router_route_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
@@ -4795,7 +5074,7 @@ struct RouterRoutePathParam {
     tags = ["vpcs"],
 }]
 async fn vpc_router_route_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
@@ -4825,7 +5104,7 @@ async fn vpc_router_route_view(
     tags = ["vpcs"]
 }]
 async fn vpc_router_route_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
@@ -4847,7 +5126,7 @@ async fn vpc_router_route_view_by_id(
     tags = ["vpcs"],
 }]
 async fn vpc_router_route_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcRouterPathParam>,
     create_params: TypedBody<RouterRouteCreateParams>,
 ) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
@@ -4879,7 +5158,7 @@ async fn vpc_router_route_create(
     tags = ["vpcs"],
 }]
 async fn vpc_router_route_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -4909,7 +5188,7 @@ async fn vpc_router_route_delete(
     tags = ["vpcs"],
 }]
 async fn vpc_router_route_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RouterRoutePathParam>,
     router_params: TypedBody<RouterRouteUpdateParams>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
@@ -4943,7 +5222,7 @@ async fn vpc_router_route_update(
     tags = ["system"],
 }]
 async fn rack_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
     let apictx = rqctx.context();
@@ -4980,7 +5259,7 @@ struct RackPathParam {
     tags = ["system"],
 }]
 async fn rack_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOk<Rack>, HttpError> {
     let apictx = rqctx.context();
@@ -5003,7 +5282,7 @@ async fn rack_view(
     tags = ["system"],
 }]
 async fn sled_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
     let apictx = rqctx.context();
@@ -5040,7 +5319,7 @@ struct SledPathParam {
     tags = ["system"],
 }]
 async fn sled_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SledPathParam>,
 ) -> Result<HttpResponseOk<Sled>, HttpError> {
     let apictx = rqctx.context();
@@ -5063,7 +5342,7 @@ async fn sled_view(
      tags = ["system"],
 }]
 async fn updates_refresh(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -5071,6 +5350,64 @@ async fn updates_refresh(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus.updates_refresh_metadata(&opctx).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Metrics
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SystemMetricParams {
+    #[serde(flatten)]
+    pub pagination: dropshot::PaginationParams<
+        params::ResourceMetrics,
+        params::ResourceMetrics,
+    >,
+
+    /// The UUID of the container being queried
+    // TODO: I might want to force the caller to specify type here?
+    pub id: Uuid,
+}
+
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMetricName {
+    VirtualDiskSpaceProvisioned,
+    CpusProvisioned,
+    RamProvisioned,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SystemMetricsPathParam {
+    metric_name: SystemMetricName,
+}
+
+/// Access metrics data
+#[endpoint {
+     method = GET,
+     path = "/system/metrics/{metric_name}",
+     tags = ["system"],
+}]
+async fn system_metric(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SystemMetricsPathParam>,
+    query_params: Query<SystemMetricParams>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let metric_name = path_params.into_inner().metric_name;
+
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query.pagination)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let result = nexus
+            .system_metric_lookup(&opctx, metric_name, query, limit)
+            .await?;
+
+        Ok(HttpResponseOk(result))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5084,7 +5421,7 @@ async fn updates_refresh(
     tags = ["system"],
 }]
 async fn saga_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
     let apictx = rqctx.context();
@@ -5117,7 +5454,7 @@ struct SagaPathParam {
     tags = ["system"],
 }]
 async fn saga_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SagaPathParam>,
 ) -> Result<HttpResponseOk<Saga>, HttpError> {
     let apictx = rqctx.context();
@@ -5140,7 +5477,7 @@ async fn saga_view(
     tags = ["silos"],
 }]
 async fn user_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
     let apictx = rqctx.context();
@@ -5173,7 +5510,7 @@ async fn user_list(
     tags = ["silos"],
 }]
 async fn group_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
     let apictx = rqctx.context();
@@ -5206,7 +5543,7 @@ async fn group_list(
     tags = ["system"],
 }]
 async fn system_user_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
     let apictx = rqctx.context();
@@ -5245,7 +5582,7 @@ struct BuiltinUserPathParam {
     tags = ["system"],
 }]
 async fn system_user_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<BuiltinUserPathParam>,
 ) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
     let apictx = rqctx.context();
@@ -5267,7 +5604,7 @@ async fn system_user_view(
     tags = ["metrics"],
 }]
 async fn timeseries_schema_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<oximeter_db::TimeseriesSchemaPaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>, HttpError>
 {
@@ -5299,7 +5636,7 @@ struct RolePage {
     tags = ["roles"],
 }]
 async fn role_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
 ) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
     let apictx = rqctx.context();
@@ -5353,7 +5690,7 @@ struct RolePathParam {
     tags = ["roles"],
 }]
 async fn role_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RolePathParam>,
 ) -> Result<HttpResponseOk<Role>, HttpError> {
     let apictx = rqctx.context();
@@ -5379,7 +5716,7 @@ async fn role_view(
     tags = ["session"],
 }]
 async fn session_sshkey_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
     let apictx = rqctx.context();
@@ -5417,7 +5754,7 @@ async fn session_sshkey_list(
     tags = ["session"],
 }]
 async fn session_sshkey_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_key: TypedBody<params::SshKeyCreate>,
 ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
     let apictx = rqctx.context();
@@ -5451,7 +5788,7 @@ struct SshKeyPathParams {
     tags = ["session"],
 }]
 async fn session_sshkey_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
     let apictx = rqctx.context();
@@ -5480,7 +5817,7 @@ async fn session_sshkey_view(
     tags = ["session"],
 }]
 async fn session_sshkey_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();

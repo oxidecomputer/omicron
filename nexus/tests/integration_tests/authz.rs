@@ -252,8 +252,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         &"otheruser".parse().unwrap(),
         params::UserPassword::InvalidPassword,
     )
-    .await
-    .id;
+    .await;
 
     // Listing users should work
     let users: ResultsPage<views::User> =

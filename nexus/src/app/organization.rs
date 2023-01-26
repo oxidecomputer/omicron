@@ -13,8 +13,8 @@ use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -22,7 +22,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
-use uuid::Uuid;
 
 impl super::Nexus {
     pub fn organization_lookup<'a>(
@@ -53,20 +52,12 @@ impl super::Nexus {
         self.db_datastore.organization_create(opctx, new_organization).await
     }
 
-    pub async fn organizations_list_by_name(
+    pub async fn organizations_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_name(opctx, pagparams).await
-    }
-
-    pub async fn organizations_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_id(opctx, pagparams).await
+        self.db_datastore.organizations_list(opctx, pagparams).await
     }
 
     pub async fn organization_delete(

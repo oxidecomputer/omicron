@@ -6,31 +6,57 @@
 
 use super::SpIdentifier;
 use super::SwitchPort;
-use crate::error::ConfigError;
+use crate::error::StartupError;
 use futures::stream::FuturesUnordered;
 use futures::Stream;
 use futures::StreamExt;
 use gateway_messages::SpPort;
 use gateway_sp_comms::SingleSp;
-use gateway_sp_comms::SwitchPortConfig;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::debug;
 use slog::info;
-use slog::warn;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::convert::TryFrom;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Description of the network interface for a single switch port.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SwitchPortConfig {
+    SwitchZoneInterface {
+        interface: String,
+    },
+    #[serde(rename_all = "kebab-case")]
+    Simulated {
+        fake_interface: String,
+        addr: SocketAddrV6,
+    },
+}
+
+impl SwitchPortConfig {
+    pub fn interface(&self) -> &str {
+        match self {
+            SwitchPortConfig::SwitchZoneInterface { interface } => interface,
+            SwitchPortConfig::Simulated { fake_interface, .. } => {
+                fake_interface
+            }
+        }
+    }
+}
+
+/// Description of the network interface and location of a single switch port.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+// We can't use `#[serde(deny_unknown_fields)]` with `flatten`? Sad
+#[serde(rename_all = "kebab-case")]
 pub struct SwitchPortDescription {
     #[serde(flatten)]
     pub config: SwitchPortConfig,
+    pub ignition_target: u8,
 
     /// Map defining the logical identifier of the SP connected to this port for
     /// each of the possible locations where MGS is running (see
@@ -41,6 +67,7 @@ pub struct SwitchPortDescription {
 /// Configure the topology of the rack where MGS is running, and describe how we
 /// can determine our own location.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocationConfig {
     /// List of human-readable location names; the actual strings don't matter,
     /// but they're used in log messages and to sync with the refined locations
@@ -53,18 +80,19 @@ pub struct LocationConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocationDeterminationConfig {
-    /// Which port to contact.
-    pub switch_port: usize,
+    /// Interfaces of one or more  SPs to use for determining our location.
+    pub interfaces: Vec<String>,
 
-    /// If the SP on `switch_port` communicates with us on its port 1, we must
-    /// be one of this set of locations (which should be a subset of our parent
-    /// [`LocationConfig`]'s `names).
+    /// If the SP on one of the `interfaces` communicates with us on its port 1,
+    /// we must be one of this set of locations (which should be a subset of our
+    /// parent [`LocationConfig`]'s `names).
     pub sp_port_1: Vec<String>,
 
-    /// If the SP on `switch_port` communicates with us on its port 2, we must
-    /// be one of this set of locations (which should be a subset of our parent
-    /// [`LocationConfig`]'s `names).
+    /// If the SP on one of the `interfaces` communicates with us on its port 2,
+    /// we must be one of this set of locations (which should be a subset of our
+    /// parent [`LocationConfig`]'s `names).
     pub sp_port_2: Vec<String>,
 }
 
@@ -78,8 +106,8 @@ pub(super) struct LocationMap {
 impl LocationMap {
     pub(super) async fn run_discovery(
         config: ValidatedLocationConfig,
-        ports: HashMap<SwitchPort, SwitchPortDescription>,
-        sockets: Arc<HashMap<SwitchPort, SingleSp>>,
+        ports: Vec<SwitchPortDescription>,
+        sockets: Arc<Vec<SingleSp>>,
         log: &Logger,
     ) -> Result<Self, String> {
         // Spawn a task that will send discovery packets on every switch port
@@ -91,11 +119,9 @@ impl LocationMap {
         let (refined_locations_tx, refined_locations) = mpsc::channel(8);
         {
             let log = log.clone();
-            let ports = ports.clone();
             tokio::spawn(async move {
                 discover_sps(
                     &sockets,
-                    ports,
                     location_determination,
                     refined_locations_tx,
                     &log,
@@ -116,7 +142,8 @@ impl LocationMap {
         // map of port <-> logical ID
         let mut port_to_id = HashMap::with_capacity(ports.len());
         let mut id_to_port = HashMap::with_capacity(ports.len());
-        for (port, mut port_config) in ports {
+        for (i, mut port_config) in ports.into_iter().enumerate() {
+            let port = SwitchPort(i);
             // construction of `ValidatedLocationConfig` checked that all port
             // configs have entries for all locations, allowing us to unwrap
             // this `remove()`.
@@ -177,17 +204,12 @@ struct ValidatedLocationDeterminationConfig {
     sp_port_2: HashSet<String>,
 }
 
-impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortDescription>, LocationConfig)>
-    for ValidatedLocationConfig
-{
-    type Error = ConfigError;
-
-    fn try_from(
-        (ports, config): (
-            &HashMap<SwitchPort, SwitchPortDescription>,
-            LocationConfig,
-        ),
-    ) -> Result<Self, Self::Error> {
+impl ValidatedLocationConfig {
+    pub(super) fn validate(
+        ports: &[SwitchPortDescription],
+        interface_to_port: &HashMap<String, SwitchPort>,
+        config: LocationConfig,
+    ) -> Result<Self, StartupError> {
         // Helper function to convert a vec into a hashset, recording an error
         // string in `reasons` if the lengths don't match (i.e., the vec
         // contained at least one duplicate)
@@ -211,25 +233,25 @@ impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortDescription>, LocationConfig)>
         let mut reasons = Vec::new();
 
         let names = vec_to_hashset(config.names, &mut reasons, || {
-            String::from("location names contains at least one duplicate entry")
+            String::from("location names contain at least one duplicate entry")
         });
 
         // make sure every port has a defined ID for any element of `names`, and
         // no extras
-        for (port, port_config) in ports {
+        for port_desc in ports {
             for name in &names {
-                if !port_config.location.contains_key(name) {
+                if !port_desc.location.contains_key(name) {
                     reasons.push(format!(
-                        "port {} is missing an ID for location {:?}",
-                        port.0, name
+                        "port {:?} is missing an ID for location {name:?}",
+                        port_desc.config.interface()
                     ));
                 }
             }
-            for name in port_config.location.keys() {
+            for name in port_desc.location.keys() {
                 if !names.contains(name) {
                     reasons.push(format!(
-                        "port {} contains unknown name {:?}",
-                        port.0, name
+                        "port {:?} contains unknown location {name:?}",
+                        port_desc.config.interface()
                     ));
                 }
             }
@@ -239,41 +261,28 @@ impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortDescription>, LocationConfig)>
             .determination
             .into_iter()
             .enumerate()
-            .map(|(i, det)| {
-                // make sure this determination's switch port exists
-                let switch_port = SwitchPort(det.switch_port);
-                if !ports.contains_key(&switch_port) {
-                    reasons.push(format!(
-                        "determination {} references a nonexistent switch port ({})",
-                        i, det.switch_port
-                    ));
-                }
-
+            .flat_map(|(i, det)| {
                 // convert names into hash sets
                 let sp_port_1 = vec_to_hashset(det.sp_port_1, &mut reasons, ||
                     format!(
-                        "determination `{}.sp_port_1` contains duplicate names",
-                        i
+                        "determination `{i}.sp_port_1` contains duplicate names",
                     )
                 );
                 let sp_port_2 = vec_to_hashset(det.sp_port_2, &mut reasons, ||
                     format!(
-                        "determination `{}.sp_port_2` contains duplicate names",
-                        i
+                        "determination `{i}.sp_port_2` contains duplicate names",
                     )
                 );
 
                 // make sure these hash sets only reference known names
                 if !sp_port_1.is_subset(&names) {
                     reasons.push(format!(
-                        "determination `{}.sp_port_1` contains unknown names",
-                        i
+                        "determination `{i}.sp_port_1` contains unknown names",
                     ));
                 }
                 if !sp_port_2.is_subset(&names) {
                     reasons.push(format!(
-                        "determination `{}.sp_port_2` contains unknown names",
-                        i
+                        "determination `{i}.sp_port_2` contains unknown names",
                     ));
                 }
 
@@ -281,29 +290,39 @@ impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortDescription>, LocationConfig)>
                 // immediate failure of our location resolution
                 if sp_port_1.is_empty() {
                     reasons.push(format!(
-                        "determination `{}.sp_port_1` is empty",
-                        i
+                        "determination `{i}.sp_port_1` is empty",
                     ));
                 }
                 if sp_port_2.is_empty() {
                     reasons.push(format!(
-                        "determination `{}.sp_port_2` is empty",
-                        i
+                        "determination `{i}.sp_port_2` is empty",
                     ));
                 }
 
-                ValidatedLocationDeterminationConfig {
-                    switch_port,
-                    sp_port_1,
-                    sp_port_2,
-                }
+                det.interfaces.into_iter().filter_map(|interface| {
+                    if let Some(switch_port) = interface_to_port
+                        .get(&interface)
+                        .copied()
+                    {
+                        Some(ValidatedLocationDeterminationConfig {
+                            switch_port,
+                            sp_port_1: sp_port_1.clone(),
+                            sp_port_2: sp_port_2.clone(),
+                        })
+                    } else {
+                        reasons.push(format!(
+                            "determination {i} references unknown interface {interface:?}"
+                        ));
+                        None
+                    }
+                }).collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
 
         if reasons.is_empty() {
             Ok(Self { names, determination })
         } else {
-            Err(ConfigError::InvalidConfig { reasons })
+            Err(StartupError::InvalidConfig { reasons })
         }
     }
 }
@@ -316,43 +335,27 @@ impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortDescription>, LocationConfig)>
 /// and the list of locations we could be in based on the SP's response on that
 /// port. Our spawner is responsible for collecting/using those messages.
 async fn discover_sps(
-    sockets: &HashMap<SwitchPort, SingleSp>,
-    port_config: HashMap<SwitchPort, SwitchPortDescription>,
+    sockets: &[SingleSp],
     mut location_determination: Vec<ValidatedLocationDeterminationConfig>,
-    refined_locations: mpsc::Sender<(SwitchPort, HashSet<String>)>,
+    refined_locations: mpsc::Sender<(String, HashSet<String>)>,
     log: &Logger,
 ) {
     // Build a collection of futures representing the results of discovering the
     // SP address for each switch port in `sockets`.
     let mut futs = FuturesUnordered::new();
-    for (switch_port, _config) in port_config {
-        let log = log.clone();
+    for (i, sp) in sockets.iter().enumerate() {
         futs.push(async move {
-            // all ports in `port_config` also get sockets bound to them;
-            // unwrapping this lookup is fine
-            let sp = sockets.get(&switch_port).unwrap();
-
-            // Wait for local startup to complete (finding our interface,
-            // binding a socket, etc.).
-            if let Err(err) = sp.wait_for_startup_completion().await {
-                warn!(
-                    log,
-                    "SP communicator startup failed; giving up on this port";
-                    "switch_port" => ?switch_port,
-                    "err" => %err,
-                );
-                return (switch_port, None);
-            }
-
-            // `sp_addr_watch()` can only fail if startup fails, which we just
-            // checked; this is safe to unwrap.
-            let mut addr_watch = sp.sp_addr_watch().unwrap().clone();
+            let mut addr_watch = sp.sp_addr_watch().clone();
 
             loop {
                 let current = *addr_watch.borrow();
                 match current {
                     Some((_addr, sp_port)) => {
-                        return (switch_port, Some(sp_port))
+                        return (
+                            SwitchPort(i),
+                            sp.interface().to_string(),
+                            sp_port,
+                        )
                     }
                     None => {
                         addr_watch.changed().await.unwrap();
@@ -363,23 +366,25 @@ async fn discover_sps(
     }
 
     // Wait for responses.
-    while let Some((switch_port, sp_port)) = futs.next().await {
-        // Skip switch ports where we failed to start our communicator.
-        let sp_port = match sp_port {
-            Some(sp_port) => sp_port,
-            None => continue,
-        };
-
+    while let Some((switch_port, interface, sp_port)) = futs.next().await {
         // See if this port can participate in location determination.
         let pos = match location_determination
             .iter()
             .position(|d| d.switch_port == switch_port)
         {
-            Some(pos) => pos,
+            Some(pos) => {
+                info!(
+                    log, "received discovery response (used for location)";
+                    "interface" => &interface,
+                    "sp_port" => ?sp_port,
+                    "pos" => pos,
+                );
+                pos
+            }
             None => {
                 info!(
                     log, "received discovery response (not used for location)";
-                    "switch_port" => ?switch_port,
+                    "interface" => interface,
                     "sp_port" => ?sp_port,
                 );
                 continue;
@@ -395,12 +400,8 @@ async fn discover_sps(
         // the only failure possible here is that the receiver is gone; that's
         // harmless for us (e.g., maybe it's already fully determined the
         // location and doesn't care about more messages)
-        let _ = refined_locations.send((switch_port, refined)).await;
+        let _ = refined_locations.send((interface, refined)).await;
     }
-
-    // TODO If we're exiting, we've now heard from an SP on every port. Is there
-    // any reason to continue pinging ports with discovery packets? This is TBD
-    // on how we handle sleds being power cycled, replaced, etc.
 }
 
 /// Given a list of possible location names (`locations`) and a stream of
@@ -425,15 +426,16 @@ async fn resolve_location<S>(
     log: &Logger,
 ) -> Result<String, String>
 where
-    S: Stream<Item = (SwitchPort, HashSet<String>)>,
+    S: Stream<Item = (String, HashSet<String>)>,
 {
     tokio::pin!(determinations);
-    while let Some((port, refined_locations)) = determinations.next().await {
+    while let Some((interface, refined_locations)) = determinations.next().await
+    {
         // we got a successful response from an SP; restrict `locations` to only
         // locations that could be possible given that response.
         debug!(
-            log, "received location deterimination response";
-            "port" => ?port,
+            log, "received location determination response";
+            "interface" => interface,
             "refined_locations" => ?refined_locations,
         );
         locations.retain(|name| refined_locations.contains(name));
@@ -473,21 +475,18 @@ mod tests {
 
     #[test]
     fn test_config_validation() {
-        let bad_ports = HashMap::from([(
-            SwitchPort(0),
-            SwitchPortDescription {
-                config: SwitchPortConfig {
-                    listen_addr: "[::1]:0".parse().unwrap(),
-                    discovery_addr: "[::1]:0".parse().unwrap(),
-                    interface: None,
-                },
-                location: HashMap::from([
-                    (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),
-                    // missing "b", has extraneous "c"
-                    (String::from("c"), SpIdentifier::new(SpType::Sled, 1)),
-                ]),
+        let bad_ports = vec![SwitchPortDescription {
+            config: SwitchPortConfig::Simulated {
+                fake_interface: "fake".to_string(),
+                addr: "[::1]:0".parse().unwrap(),
             },
-        )]);
+            ignition_target: 0,
+            location: HashMap::from([
+                (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),
+                // missing "b", has extraneous "c"
+                (String::from("c"), SpIdentifier::new(SpType::Sled, 1)),
+            ]),
+        }];
         let bad_config = LocationConfig {
             names: vec![
                 String::from("a"),
@@ -496,7 +495,7 @@ mod tests {
             ],
             determination: vec![
                 LocationDeterminationConfig {
-                    switch_port: 7, // nonexistent port
+                    interfaces: vec!["nonexistent-interface".to_string()],
                     sp_port_1: vec![
                         String::from("a"),
                         String::from("b"),
@@ -506,7 +505,7 @@ mod tests {
                     sp_port_2: vec![], // empty
                 },
                 LocationDeterminationConfig {
-                    switch_port: 0,
+                    interfaces: vec!["fake".to_string()],
                     sp_port_1: vec![], // empty
                     sp_port_2: vec![
                         String::from("a"),
@@ -518,22 +517,31 @@ mod tests {
             ],
         };
 
-        let err = ValidatedLocationConfig::try_from((&bad_ports, bad_config))
-            .unwrap_err();
+        let mut interface_to_port = HashMap::new();
+        interface_to_port.insert("fake".to_string(), SwitchPort(0));
+        assert_eq!(bad_ports.len(), interface_to_port.len());
+
+        let err = ValidatedLocationConfig::validate(
+            &bad_ports,
+            &interface_to_port,
+            bad_config,
+        )
+        .unwrap_err();
         let reasons = match err {
-            ConfigError::InvalidConfig { reasons } => reasons,
+            StartupError::InvalidConfig { reasons } => reasons,
+            StartupError::BindError(err) => panic!("expected error: {err}"),
         };
 
         assert_eq!(
             reasons,
             &[
-                "location names contains at least one duplicate entry",
-                "port 0 is missing an ID for location \"b\"",
-                "port 0 contains unknown name \"c\"",
-                "determination 0 references a nonexistent switch port (7)",
+                "location names contain at least one duplicate entry",
+                "port \"fake\" is missing an ID for location \"b\"",
+                "port \"fake\" contains unknown location \"c\"",
                 "determination `0.sp_port_1` contains duplicate names",
                 "determination `0.sp_port_1` contains unknown names",
                 "determination `0.sp_port_2` is empty",
+                "determination 0 references unknown interface \"nonexistent-interface\"",
                 "determination `1.sp_port_2` contains duplicate names",
                 "determination `1.sp_port_2` contains unknown names",
                 "determination `1.sp_port_1` is empty",
@@ -543,39 +551,39 @@ mod tests {
         // repeat the config from above but with all errors fixed; note that
         // this config is still logically nonsense, but it doesn't contain any
         // of the errors we check for (mismatched / typo'd names, etc.).
-        let good_ports = HashMap::from([(
-            SwitchPort(0),
-            SwitchPortDescription {
-                config: SwitchPortConfig {
-                    listen_addr: "[::1]:0".parse().unwrap(),
-                    discovery_addr: "[::1]:0".parse().unwrap(),
-                    interface: None,
-                },
-                location: HashMap::from([
-                    (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),
-                    (String::from("b"), SpIdentifier::new(SpType::Sled, 1)),
-                ]),
+        let good_ports = vec![SwitchPortDescription {
+            config: SwitchPortConfig::Simulated {
+                fake_interface: "fake".to_string(),
+                addr: "[::1]:0".parse().unwrap(),
             },
-        )]);
+            ignition_target: 0,
+            location: HashMap::from([
+                (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),
+                (String::from("b"), SpIdentifier::new(SpType::Sled, 1)),
+            ]),
+        }];
         let good_config = LocationConfig {
             names: vec![String::from("a"), String::from("b")],
             determination: vec![
                 LocationDeterminationConfig {
-                    switch_port: 0,
+                    interfaces: vec!["fake".to_string()],
                     sp_port_1: vec![String::from("a")],
                     sp_port_2: vec![String::from("b")],
                 },
                 LocationDeterminationConfig {
-                    switch_port: 0,
+                    interfaces: vec!["fake".to_string()],
                     sp_port_1: vec![String::from("b")],
                     sp_port_2: vec![String::from("a")],
                 },
             ],
         };
 
-        let config =
-            ValidatedLocationConfig::try_from((&good_ports, good_config))
-                .unwrap();
+        let config = ValidatedLocationConfig::validate(
+            &good_ports,
+            &interface_to_port,
+            good_config,
+        )
+        .unwrap();
 
         assert_eq!(
             config,
@@ -599,23 +607,21 @@ mod tests {
 
     struct Harness {
         names: HashSet<String>,
-        determinations:
-            stream::Iter<vec::IntoIter<(SwitchPort, HashSet<String>)>>,
+        determinations: stream::Iter<vec::IntoIter<(String, HashSet<String>)>>,
     }
 
     impl Harness {
         fn new(names: &[&str], determinations: &[&[&str]]) -> Self {
-            let determinations: Vec<(SwitchPort, HashSet<String>)> =
-                determinations
-                    .iter()
-                    .enumerate()
-                    .map(|(i, names)| {
-                        (
-                            SwitchPort(i),
-                            names.iter().copied().map(String::from).collect(),
-                        )
-                    })
-                    .collect();
+            let determinations: Vec<(String, HashSet<String>)> = determinations
+                .iter()
+                .enumerate()
+                .map(|(i, names)| {
+                    (
+                        format!("harness-interface-{i}"),
+                        names.iter().copied().map(String::from).collect(),
+                    )
+                })
+                .collect();
             Self {
                 names: names.iter().copied().map(String::from).collect(),
                 determinations: stream::iter(determinations),

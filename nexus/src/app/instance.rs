@@ -24,6 +24,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
 use nexus_db_model::Name;
 use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -228,30 +229,15 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
-    pub async fn project_list_instances_by_id(
+    pub async fn instance_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Instance> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_instances_by_id(opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn project_list_instances_by_name(
-        &self,
-        opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Instance> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .project_list_instances_by_name(opctx, &authz_project, pagparams)
-            .await
+        self.db_datastore.instance_list(opctx, &authz_project, pagparams).await
     }
 
     // This operation may only occur on stopped instances, which implies that
@@ -265,12 +251,13 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Delete).await?;
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(authz::Action::Delete).await?;
 
         let saga_params = sagas::instance_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             authz_instance,
+            instance,
         };
         self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
             saga_params,
@@ -481,12 +468,12 @@ impl super::Nexus {
             .instance_list_disks(
                 &opctx,
                 &authz_instance,
-                &DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
                         .unwrap(),
-                },
+                }),
             )
             .await?;
 
@@ -612,7 +599,8 @@ impl super::Nexus {
             external_ips,
             firewall_rules,
             disks: disk_reqs,
-            cloud_init_bytes: Some(base64::encode(
+            cloud_init_bytes: Some(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&public_keys)?,
             )),
         };
@@ -703,17 +691,11 @@ impl super::Nexus {
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .instance_list_disks(opctx, &authz_instance, pagparams)
             .await
@@ -723,24 +705,34 @@ impl super::Nexus {
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_project_disk, authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        // TODO-v1: Write test to verify this case
+        // Because both instance and disk can be provided by ID it's possible for someone
+        // to specify resources from different projects. The lookups would resolve the resources
+        // (assuming the user had sufficient permissions on both) without verifying the shared hierarchy.
+        // To mitigate that we verify that their parent projects have the same ID.
+        if authz_project.id() != authz_project_disk.id() {
+            return Err(Error::InvalidRequest {
+                message: "disk must be in the same project as the instance"
+                    .to_string(),
+            });
+        }
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
@@ -771,25 +763,22 @@ impl super::Nexus {
     pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
-
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk detach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively

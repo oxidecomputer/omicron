@@ -69,7 +69,7 @@ struct SledAgentPathParam {
      path = "/sled-agents/{sled_id}",
  }]
 async fn sled_agent_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<SledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -99,7 +99,7 @@ struct RackPathParam {
      path = "/racks/{rack_id}/initialization-complete",
  }]
 async fn rack_initialization_complete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RackPathParam>,
     info: TypedBody<RackInitializationRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -127,7 +127,7 @@ struct ZpoolPathParam {
      path = "/sled-agents/{sled_id}/zpools/{zpool_id}",
  }]
 async fn zpool_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ZpoolPathParam>,
     pool_info: TypedBody<ZpoolPutRequest>,
 ) -> Result<HttpResponseOk<ZpoolPutResponse>, HttpError> {
@@ -151,7 +151,7 @@ struct InstancePathParam {
      path = "/instances/{instance_id}",
  }]
 async fn cpapi_instances_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     new_runtime_state: TypedBody<InstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -178,7 +178,7 @@ struct DiskPathParam {
      path = "/disks/{disk_id}",
  }]
 async fn cpapi_disks_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<DiskPathParam>,
     new_runtime_state: TypedBody<DiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -213,7 +213,7 @@ struct VolumePathParam {
      path = "/volume/{volume_id}/remove-read-only-parent",
  }]
 async fn cpapi_volume_remove_read_only_parent(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VolumePathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -221,7 +221,8 @@ async fn cpapi_volume_remove_read_only_parent(
     let path = path_params.into_inner();
 
     let handler = async {
-        nexus.volume_remove_read_only_parent(path.volume_id).await?;
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.volume_remove_read_only_parent(&opctx, path.volume_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -237,7 +238,7 @@ async fn cpapi_volume_remove_read_only_parent(
      path = "/disk/{disk_id}/remove-read-only-parent",
  }]
 async fn cpapi_disk_remove_read_only_parent(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -258,7 +259,7 @@ async fn cpapi_disk_remove_read_only_parent(
      path = "/metrics/producers",
  }]
 async fn cpapi_producers_post(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    request_context: RequestContext<Arc<ServerContext>>,
     producer_info: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
@@ -280,7 +281,7 @@ async fn cpapi_producers_post(
      path = "/metrics/collectors",
  }]
 async fn cpapi_collectors_post(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    request_context: RequestContext<Arc<ServerContext>>,
     oximeter_info: TypedBody<OximeterInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
@@ -302,7 +303,7 @@ async fn cpapi_collectors_post(
     path = "/metrics/collect/{producer_id}",
 }]
 async fn cpapi_metrics_collect(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    request_context: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProducerIdPathParams>,
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     let context = request_context.context();
@@ -321,7 +322,7 @@ async fn cpapi_metrics_collect(
     path = "/artifacts/{kind}/{name}/{version}",
 }]
 async fn cpapi_artifact_download(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    request_context: RequestContext<Arc<ServerContext>>,
     path_params: Path<UpdateArtifact>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();

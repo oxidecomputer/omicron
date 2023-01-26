@@ -5,7 +5,7 @@
 //! Dropshot server for configuring DNS namespace
 
 use crate::dns_data::{self, DnsKV, DnsRecordKey};
-use dropshot::endpoint;
+use dropshot::{endpoint, RequestContext};
 use std::sync::Arc;
 
 pub struct Context {
@@ -32,7 +32,7 @@ pub fn api() -> dropshot::ApiDescription<Arc<Context>> {
     path = "/records",
 )]
 async fn dns_records_list(
-    rqctx: Arc<dropshot::RequestContext<Arc<Context>>>,
+    rqctx: RequestContext<Arc<Context>>,
 ) -> Result<dropshot::HttpResponseOk<Vec<DnsKV>>, dropshot::HttpError> {
     let apictx = rqctx.context();
     // XXX record key
@@ -47,7 +47,7 @@ async fn dns_records_list(
     path = "/records",
 )]
 async fn dns_records_create(
-    rqctx: Arc<dropshot::RequestContext<Arc<Context>>>,
+    rqctx: RequestContext<Arc<Context>>,
     rq: dropshot::TypedBody<Vec<DnsKV>>,
 ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError> {
     let apictx = rqctx.context();
@@ -62,7 +62,7 @@ async fn dns_records_create(
     path = "/records",
 )]
 async fn dns_records_delete(
-    rqctx: Arc<dropshot::RequestContext<Arc<Context>>>,
+    rqctx: RequestContext<Arc<Context>>,
     rq: dropshot::TypedBody<Vec<DnsRecordKey>>,
 ) -> Result<dropshot::HttpResponseDeleted, dropshot::HttpError> {
     let apictx = rqctx.context();
