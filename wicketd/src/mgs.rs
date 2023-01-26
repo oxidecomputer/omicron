@@ -11,7 +11,7 @@ use futures::StreamExt;
 use gateway_client::types::{SpComponentList, SpIdentifier, SpInfo};
 use schemars::JsonSchema;
 use serde::Serialize;
-use slog::{debug, info, o, warn, Logger};
+use slog::{info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use tokio::sync::{mpsc, oneshot};
@@ -136,18 +136,23 @@ impl MgsManager {
         loop {
             tokio::select! {
                 // Poll MGS inventory
-                Some((inventory, instant)) = inventory_rx.recv() => {
-                    self.inventory = Some((inventory, instant));
+                Some(PollSps { changed_inventory, mgs_received }) = inventory_rx.recv() => {
+                    let inventory = match (changed_inventory, self.inventory.take()) {
+                        (Some(inventory), _) => inventory,
+                        (None, Some((inventory, _))) => inventory,
+                        (None, None) => continue,
+                    };
+                    self.inventory = Some((inventory, mgs_received));
                 }
 
                 // Handle requests from clients
                 Some(request) = self.rx.recv() => {
-                    debug!(self.log, "{:?}", request);
-                     match request {
-                         MgsRequest::GetInventory {reply_tx, ..} => {
-                            let _ = reply_tx.send(GetInventoryResponse::new(self.inventory.clone()));
-                         }
-                     }
+                    match request {
+                        MgsRequest::GetInventory {reply_tx, ..} => {
+                        let response = GetInventoryResponse::new(self.inventory.clone());
+                        let _ = reply_tx.send(response);
+                        }
+                    }
                 }
             }
         }
@@ -243,7 +248,7 @@ async fn update_inventory(
 async fn poll_sps(
     log: &Logger,
     client: gateway_client::Client,
-) -> mpsc::Receiver<(RackV1Inventory, Instant)> {
+) -> mpsc::Receiver<PollSps> {
     let log = log.clone();
 
     // We only want one outstanding inventory request at a time
@@ -260,19 +265,23 @@ async fn poll_sps(
             ticker.tick().await;
             match client.sp_list().await {
                 Ok(val) => {
-                    if update_inventory(
+                    let changed_inventory = update_inventory(
                         &log,
                         &mut inventory,
                         val.into_inner(),
                         &client,
                     )
                     .await
-                    {
-                        let inventory = RackV1Inventory {
-                            sps: inventory.values().cloned().collect(),
-                        };
-                        let _ = tx.send((inventory, Instant::now())).await;
-                    }
+                    .then(|| RackV1Inventory {
+                        sps: inventory.values().cloned().collect(),
+                    });
+
+                    let _ = tx
+                        .send(PollSps {
+                            changed_inventory,
+                            mgs_received: Instant::now(),
+                        })
+                        .await;
                 }
                 Err(e) => {
                     warn!(log, "{e}");
@@ -282,4 +291,10 @@ async fn poll_sps(
     });
 
     rx
+}
+
+#[derive(Debug)]
+struct PollSps {
+    changed_inventory: Option<RackV1Inventory>,
+    mgs_received: Instant,
 }
