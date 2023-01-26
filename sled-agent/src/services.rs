@@ -760,7 +760,7 @@ impl ServiceManager {
                     smfh.refresh()?;
                 }
                 ServiceType::CruciblePantry => {
-                    info!(self.inner.log, "Setting up crucible-pantry service");
+                    info!(self.inner.log, "Setting up Crucible pantry service");
 
                     if let Some(address) = request.addresses.get(0) {
                         smfh.setprop(

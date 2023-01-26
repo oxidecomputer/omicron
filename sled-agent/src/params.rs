@@ -393,7 +393,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
-            ServiceType::CruciblePantry => write!(f, "crucible-pantry"),
+            ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
         }
     }
 }
