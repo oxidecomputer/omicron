@@ -4,14 +4,16 @@
 
 //! Code for talking to wicketd
 
-use slog::{debug, o, warn, Logger};
+use slog::{o, warn, Logger};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicketd_client::types::GetInventoryResponse;
+use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
+use wicketd_client::types::RackV1Inventory;
+use wicketd_client::GetInventoryResponse;
 
 use crate::wizard::Event;
+use crate::InventoryEvent;
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const WICKETD_TIMEOUT_MS: u32 = 1000;
@@ -68,10 +70,10 @@ impl WicketdManager {
 
         // TODO: Eventually there will be a tokio::select! here that also
         // allows issuing updates.
-        while let Some(inventory) = inventory_rx.recv().await {
+        while let Some(event) = inventory_rx.recv().await {
             // XXX: Should we log an error and exit here? This means the wizard
             // died and the process is exiting.
-            let _ = self.wizard_tx.send(Event::Inventory(inventory));
+            let _ = self.wizard_tx.send(Event::Inventory(event));
         }
     }
 }
@@ -95,7 +97,7 @@ pub(crate) fn create_wicketd_client(
 async fn poll_inventory(
     log: &Logger,
     client: wicketd_client::Client,
-) -> mpsc::Receiver<GetInventoryResponse> {
+) -> mpsc::Receiver<InventoryEvent> {
     let log = log.clone();
 
     // We only want one oustanding request at a time
@@ -111,7 +113,7 @@ async fn poll_inventory(
             match client.get_inventory().await {
                 Ok(val) => {
                     let new_inventory = val.into_inner();
-                    state.send_if_changed(new_inventory).await;
+                    state.send_if_changed(new_inventory.into()).await;
                 }
                 Err(e) => {
                     warn!(log, "{e}");
@@ -123,24 +125,63 @@ async fn poll_inventory(
     rx
 }
 
+#[derive(Debug)]
 struct InventoryState {
     log: Logger,
-    current_inventory: GetInventoryResponse,
-    tx: mpsc::Sender<GetInventoryResponse>,
+    current_inventory: Option<RackV1Inventory>,
+    tx: mpsc::Sender<InventoryEvent>,
 }
 
 impl InventoryState {
-    fn new(log: &Logger, tx: mpsc::Sender<GetInventoryResponse>) -> Self {
+    fn new(log: &Logger, tx: mpsc::Sender<InventoryEvent>) -> Self {
         let log = log.new(o!("component" => "InventoryState"));
-        Self { log, current_inventory: GetInventoryResponse::Unavailable, tx }
+        Self { log, current_inventory: None, tx }
     }
 
     async fn send_if_changed(&mut self, new_inventory: GetInventoryResponse) {
-        if new_inventory != self.current_inventory {
-            self.current_inventory = new_inventory;
-            let _ = self.tx.send(self.current_inventory.clone()).await;
-        } else {
-            debug!(self.log, "No change to inventory");
-        }
+        match (self.current_inventory.take(), new_inventory) {
+            (
+                current_inventory,
+                GetInventoryResponse::Response {
+                    inventory: new_inventory,
+                    received_ago: mgs_received_ago,
+                },
+            ) => {
+                let changed_inventory = (current_inventory.as_ref()
+                    != Some(&new_inventory))
+                .then(|| {
+                    self.current_inventory = Some(new_inventory.clone());
+                    new_inventory
+                });
+
+                let _ = self
+                    .tx
+                    .send(InventoryEvent::Inventory {
+                        changed_inventory,
+                        wicketd_received: Instant::now(),
+                        mgs_received: libsw::Stopwatch::with_elapsed_started(
+                            mgs_received_ago,
+                        ),
+                    })
+                    .await;
+            }
+            (Some(_), GetInventoryResponse::Unavailable) => {
+                // This is an illegal state transition -- wicketd can never return Unavailable after
+                // returning a response.
+                slog::error!(
+                    self.log,
+                    "Illegal state transition from response to unavailable"
+                );
+            }
+            (None, GetInventoryResponse::Unavailable) => {
+                // No response received by wicketd from MGS yet.
+                let _ = self
+                    .tx
+                    .send(InventoryEvent::Unavailable {
+                        wicketd_received: Instant::now(),
+                    })
+                    .await;
+            }
+        };
     }
 }

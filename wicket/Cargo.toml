@@ -24,6 +24,7 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 snafu.workspace = true
+libsw.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true

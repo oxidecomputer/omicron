@@ -15,7 +15,7 @@ use slog::{debug, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const MGS_TIMEOUT_MS: u32 = 3000;
@@ -49,14 +49,17 @@ pub struct MgsHandle {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory },
+    Response { inventory: RackV1Inventory, received_ago: Duration },
     Unavailable,
 }
 
 impl GetInventoryResponse {
-    fn new(inventory: Option<RackV1Inventory>) -> Self {
+    fn new(inventory: Option<(RackV1Inventory, Instant)>) -> Self {
         match inventory {
-            Some(inventory) => GetInventoryResponse::Response { inventory },
+            Some((inventory, received_at)) => GetInventoryResponse::Response {
+                inventory,
+                received_ago: received_at.elapsed(),
+            },
             None => GetInventoryResponse::Unavailable,
         }
     }
@@ -95,7 +98,8 @@ pub struct MgsManager {
     tx: mpsc::Sender<MgsRequest>,
     rx: mpsc::Receiver<MgsRequest>,
     mgs_client: gateway_client::Client,
-    inventory: Option<RackV1Inventory>,
+    // The Instant indicates the moment at which the inventory was received.
+    inventory: Option<(RackV1Inventory, Instant)>,
 }
 
 impl MgsManager {
@@ -132,8 +136,8 @@ impl MgsManager {
         loop {
             tokio::select! {
                 // Poll MGS inventory
-                Some(inventory) = inventory_rx.recv() => {
-                    self.inventory = Some(inventory);
+                Some((inventory, instant)) = inventory_rx.recv() => {
+                    self.inventory = Some((inventory, instant));
                 }
 
                 // Handle requests from clients
@@ -239,7 +243,7 @@ async fn update_inventory(
 async fn poll_sps(
     log: &Logger,
     client: gateway_client::Client,
-) -> mpsc::Receiver<RackV1Inventory> {
+) -> mpsc::Receiver<(RackV1Inventory, Instant)> {
     let log = log.clone();
 
     // We only want one outstanding inventory request at a time
@@ -267,7 +271,7 @@ async fn poll_sps(
                         let inventory = RackV1Inventory {
                             sps: inventory.values().cloned().collect(),
                         };
-                        let _ = tx.send(inventory).await;
+                        let _ = tx.send((inventory, Instant::now())).await;
                     }
                 }
                 Err(e) => {
