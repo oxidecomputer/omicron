@@ -10,7 +10,7 @@
 use std::fs::OpenOptions;
 use std::io;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Minimal subset of the NVMe ID Controller data structure used to identify a WDC device.
 #[derive(Debug, Clone)]
@@ -84,7 +84,7 @@ const NVME_IOC_IDENTIFY_CTRL: i32 = NVME_IOC | 1;
 const NVME_IDENTIFY_CTRL: u64 = 1;
 
 fn ioctl(
-    dev: &PathBuf,
+    dev: &Path,
     cmd: i32,
     buffer: &mut [u8],
     arg: u64,
@@ -108,7 +108,7 @@ fn ioctl(
 
 /// Run the NVMe Identify Controller command for the given device.
 pub(crate) fn identify_controller(
-    dev: &PathBuf,
+    dev: &Path,
 ) -> Result<ControllerId, io::Error> {
     let mut buffer = vec![0u8; NVME_ID_CTRL_BUFSIZE];
     ioctl(dev, NVME_IOC_IDENTIFY_CTRL, &mut buffer, NVME_IDENTIFY_CTRL)?;

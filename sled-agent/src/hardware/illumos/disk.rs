@@ -8,7 +8,7 @@ use crate::hardware::illumos::gpt;
 use crate::hardware::{DiskError, DiskPaths, DiskVariant, Partition};
 use crate::illumos::zpool::ZpoolName;
 use slog::Logger;
-use std::path::PathBuf;
+use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -37,13 +37,13 @@ static U2_EXPECTED_PARTITIONS: [Partition; U2_EXPECTED_PARTITION_COUNT] =
     [Partition::ZfsPool];
 
 fn parse_partition_types<const N: usize>(
-    path: &PathBuf,
+    path: &Path,
     partitions: &Vec<impl gpt::LibEfiPartition>,
     expected_partitions: &[Partition; N],
 ) -> Result<Vec<Partition>, DiskError> {
     if partitions.len() != N {
         return Err(DiskError::BadPartitionLayout {
-            path: path.clone(),
+            path: path.to_path_buf(),
             why: format!(
                 "Expected {} partitions, only saw {}",
                 partitions.len(),
@@ -54,7 +54,7 @@ fn parse_partition_types<const N: usize>(
     for i in 0..N {
         if partitions[i].index() != i {
             return Err(DiskError::BadPartitionLayout {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 why: format!(
                     "The {i}-th partition has index {}",
                     partitions[i].index()
@@ -170,7 +170,7 @@ mod test {
     use crate::hardware::DiskPaths;
     use crate::illumos::zpool::MockZpool;
     use omicron_test_utils::dev::test_setup_log;
-    use std::path::Path;
+    use std::path::PathBuf;
 
     struct FakePartition {
         index: usize,

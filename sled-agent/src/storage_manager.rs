@@ -951,9 +951,11 @@ impl StorageManager {
                 // This treats a disk changing in an unexpected way as a
                 // "removal and re-insertion".
                 if let Some(new_disk) = new_disks.get(*key) {
+                    // Changed Disk -> Disk should be removed.
                     new_disk != *old_disk
                 } else {
-                    false
+                    // Not in the new set -> Disk should be removed.
+                    true
                 }
             })
             .map(|(key, _)| key);
