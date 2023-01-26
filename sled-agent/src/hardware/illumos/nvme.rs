@@ -31,19 +31,17 @@ pub(crate) const NVME_ID_CTRL_BUFSIZE: usize = 4096;
 impl From<&[u8]> for ControllerId {
     fn from(buf: &[u8]) -> ControllerId {
         assert!(buf.len() >= NVME_ID_CTRL_BUFSIZE);
-        let vendor_id = u16::from_le_bytes(buf[..2].try_into().unwrap());
+        let vendor_id = u16::from_ne_bytes(buf[..2].try_into().unwrap());
         let subsystem_vendor_id =
-            u16::from_le_bytes(buf[2..4].try_into().unwrap());
-        let serial =
-            String::from_utf8(buf[4..24].to_vec()).unwrap().trim().to_string();
-        let model =
-            String::from_utf8(buf[24..64].to_vec()).unwrap().trim().to_string();
+            u16::from_ne_bytes(buf[2..4].try_into().unwrap());
+        let serial = String::from_utf8_lossy(&buf[4..24]).trim().to_string();
+        let model = String::from_utf8_lossy(&buf[24..64]).trim().to_string();
         let firmware_rev =
-            String::from_utf8(buf[64..72].to_vec()).unwrap().trim().to_string();
+            String::from_utf8_lossy(&buf[64..72]).trim().to_string();
         let oui = buf[73..76].try_into().unwrap();
         let unique_controller_id =
-            u16::from_le_bytes(buf[78..80].try_into().unwrap());
-        let version = u32::from_le_bytes(buf[80..84].try_into().unwrap());
+            u16::from_ne_bytes(buf[78..80].try_into().unwrap());
+        let version = u32::from_ne_bytes(buf[80..84].try_into().unwrap());
         let major = (version & 0xFFFF_0000) >> 16;
         let minor = (version & 0x0000_FF00) >> 8;
         let tertiary = version & 0x0000_00FF;
@@ -74,7 +72,7 @@ struct Ioctl {
     // Length of `n_buf`
     n_len: libc::size_t,
     // Data buffer for command
-    n_buf: *mut libc::c_void,
+    n_buf: usize,
     // The command flag or other data
     n_arg: u64,
 }
@@ -88,7 +86,7 @@ const NVME_IDENTIFY_CTRL: u64 = 1;
 fn ioctl(
     dev: &PathBuf,
     cmd: i32,
-    buffer: &[u8],
+    buffer: &mut [u8],
     arg: u64,
 ) -> Result<(), io::Error> {
     let mut ioc =
@@ -112,7 +110,7 @@ fn ioctl(
 pub(crate) fn identify_controller(
     dev: &PathBuf,
 ) -> Result<ControllerId, io::Error> {
-    let buffer = vec![0u8; NVME_ID_CTRL_BUFSIZE];
-    ioctl(dev, NVME_IOC_IDENTIFY_CTRL, &buffer, NVME_IDENTIFY_CTRL)?;
+    let mut buffer = vec![0u8; NVME_ID_CTRL_BUFSIZE];
+    ioctl(dev, NVME_IOC_IDENTIFY_CTRL, &mut buffer, NVME_IDENTIFY_CTRL)?;
     Ok(ControllerId::from(&buffer[..]))
 }

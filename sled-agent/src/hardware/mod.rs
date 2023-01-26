@@ -47,8 +47,10 @@ pub enum DiskError {
     NotFound { path: PathBuf, partition: Partition },
     #[error(transparent)]
     ZpoolCreate(#[from] crate::illumos::zpool::CreateError),
-    #[error("Cannot format {path}: missing a '/dev/ path")]
+    #[error("Cannot format {path}: missing a '/dev' path")]
     CannotFormatMissingDevPath { path: PathBuf },
+    #[error("Formatting M.2 devices is not yet implemented")]
+    CannotFormatM2NotImplemented,
 }
 
 /// A partition (or 'slice') of a disk.
@@ -108,7 +110,7 @@ impl DiskPaths {
     // Finds the first 'variant' partition, and returns the path to it.
     fn partition_device_path(
         &self,
-        partitions: &Vec<Partition>,
+        partitions: &[Partition],
         expected_partition: Partition,
     ) -> Result<PathBuf, DiskError> {
         for (index, partition) in partitions.iter().enumerate() {
@@ -303,7 +305,7 @@ mod test {
         assert_eq!(
             paths
                 .partition_device_path(
-                    &vec![Partition::ZfsPool,],
+                    &[Partition::ZfsPool,],
                     Partition::ZfsPool,
                 )
                 .expect("Should have found partition"),
@@ -313,7 +315,7 @@ mod test {
         assert_eq!(
             paths
                 .partition_device_path(
-                    &vec![
+                    &[
                         Partition::BootImage,
                         Partition::Reserved,
                         Partition::ZfsPool,
@@ -327,7 +329,7 @@ mod test {
 
         assert!(matches!(
             paths
-                .partition_device_path(&vec![], Partition::ZfsPool,)
+                .partition_device_path(&[], Partition::ZfsPool,)
                 .expect_err("Should not have found partition"),
             DiskError::NotFound { .. },
         ));

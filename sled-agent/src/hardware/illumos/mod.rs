@@ -172,6 +172,9 @@ fn node_name(subsystem_vid: i32, subsystem_id: i32) -> String {
 
 fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
     match slot {
+        // For the source of these values, refer to:
+        //
+        // https://github.com/oxidecomputer/illumos-gate/blob/87a8bbb8edfb89ad5012beb17fa6f685c7795416/usr/src/uts/oxide/milan/milan_dxio_data.c#L823-L847
         0x00..=0x09 => Some(DiskVariant::U2),
         0x11..=0x12 => Some(DiskVariant::M2),
         _ => None,
@@ -258,68 +261,66 @@ fn poll_blkdev_node(
     disks: &mut HashSet<UnparsedDisk>,
     mut node: Node<'_>,
 ) -> Result<(), Error> {
-    if let Some(driver_name) = node.driver_name() {
-        if driver_name == "blkdev" {
-            let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
-            let dev_path = get_dev_path_of_whole_disk(&node)?;
+    let Some(driver_name) = node.driver_name() else {
+        return Ok(());
+    };
 
-            // For some reason, libdevfs doesn't prepend "/devices" when
-            // referring to the path, but it still returns an absolute path.
-            //
-            // Validate that we're still using this leading slash, but make the
-            // path "real".
-            assert!(devfs_path.starts_with('/'));
-            let devfs_path = format!("/devices{devfs_path}");
-            let mut device_id = None;
-            while let Some(parent) = node.parent().map_err(Error::DevInfo)? {
-                node = parent;
+    if driver_name != "blkdev" {
+        return Ok(());
+    }
 
-                if let Some(driver_name) = node.driver_name() {
-                    if driver_name == "nvme" {
-                        device_id = Some(blkdev_device_identity(&format!(
-                            "/devices{}:devctl",
-                            node.devfs_path().map_err(Error::DevInfo)?
-                        ))?);
-                    }
-                }
-                let slot_prop_name = "physical-slot#".to_string();
-                if let Some(Ok(slot_prop)) =
-                    node.props().into_iter().find(|prop| {
-                        if let Ok(prop) = prop {
-                            prop.name() == slot_prop_name
-                        } else {
-                            false
-                        }
-                    })
-                {
-                    let slot = slot_prop.as_i64().ok_or_else(|| {
-                        Error::UnexpectedPropertyType {
-                            name: slot_prop_name,
-                            ty: "i64".to_string(),
-                        }
-                    })?;
+    let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
+    let dev_path = get_dev_path_of_whole_disk(&node)?;
 
-                    let variant = if let Some(variant) =
-                        slot_to_disk_variant(slot)
-                    {
-                        variant
-                    } else {
-                        warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
-                        break;
-                    };
-                    let disk = UnparsedDisk::new(
-                        PathBuf::from(&devfs_path),
-                        dev_path,
-                        slot,
-                        variant,
-                        device_id.ok_or_else(|| {
-                            Error::NotAnNVMEDevice(PathBuf::from(devfs_path))
-                        })?,
-                    );
-                    disks.insert(disk);
-                    break;
-                }
+    // For some reason, libdevfs doesn't prepend "/devices" when
+    // referring to the path, but it still returns an absolute path.
+    //
+    // Validate that we're still using this leading slash, but make the
+    // path "real".
+    assert!(devfs_path.starts_with('/'));
+    let devfs_path = format!("/devices{devfs_path}");
+    let mut device_id = None;
+    while let Some(parent) = node.parent().map_err(Error::DevInfo)? {
+        node = parent;
+
+        if let Some(driver_name) = node.driver_name() {
+            if driver_name == "nvme" {
+                device_id = Some(blkdev_device_identity(&format!(
+                    "/devices{}:devctl",
+                    node.devfs_path().map_err(Error::DevInfo)?
+                ))?);
             }
+        }
+        let slot_prop_name = "physical-slot#".to_string();
+        if let Some(Ok(slot_prop)) = node.props().into_iter().find(|prop| {
+            if let Ok(prop) = prop {
+                prop.name() == slot_prop_name
+            } else {
+                false
+            }
+        }) {
+            let slot = slot_prop.as_i64().ok_or_else(|| {
+                Error::UnexpectedPropertyType {
+                    name: slot_prop_name,
+                    ty: "i64".to_string(),
+                }
+            })?;
+
+            let Some(variant) = slot_to_disk_variant(slot) else {
+                warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
+                break;
+            };
+            let disk = UnparsedDisk::new(
+                PathBuf::from(&devfs_path),
+                dev_path,
+                slot,
+                variant,
+                device_id.ok_or_else(|| {
+                    Error::NotAnNVMEDevice(PathBuf::from(devfs_path))
+                })?,
+            );
+            disks.insert(disk);
+            break;
         }
     }
     Ok(())
