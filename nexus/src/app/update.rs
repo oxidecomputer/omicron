@@ -283,16 +283,16 @@ impl super::Nexus {
         Ok(body)
     }
 
-    pub async fn system_update_create(
+    pub async fn create_system_update(
         &self,
         opctx: &OpContext,
         create_update: params::SystemUpdateCreate,
     ) -> CreateResult<db::model::SystemUpdate> {
         let update = db::model::SystemUpdate::new(create_update.version)?;
-        self.db_datastore.system_update_create(opctx, update).await
+        self.db_datastore.create_system_update(opctx, update).await
     }
 
-    pub async fn component_update_create(
+    pub async fn create_component_update(
         &self,
         opctx: &OpContext,
         create_update: params::ComponentUpdateCreate,
@@ -311,7 +311,7 @@ impl super::Nexus {
         // TODO: make sure system update with that ID exists first
 
         self.db_datastore
-            .component_update_create(
+            .create_component_update(
                 opctx,
                 create_update.system_update_id,
                 update,
@@ -362,14 +362,14 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn updateable_component_create(
+    pub async fn create_updateable_component(
         &self,
         opctx: &OpContext,
         create_component: params::UpdateableComponentCreate,
     ) -> CreateResult<db::model::UpdateableComponent> {
         let component =
             db::model::UpdateableComponent::try_from(create_component)?;
-        self.db_datastore.updateable_component_create(opctx, component).await
+        self.db_datastore.create_updateable_component(opctx, component).await
     }
 
     pub async fn updateable_components_list_by_id(
@@ -480,18 +480,18 @@ mod tests {
         let su1_create = SystemUpdateCreate {
             version: external::SemverVersion::new(1, 0, 0),
         };
-        let su1 = nexus.system_update_create(&opctx, su1_create).await.unwrap();
+        let su1 = nexus.create_system_update(&opctx, su1_create).await.unwrap();
 
         // 1,3,2 order is deliberate
         let su3_create = SystemUpdateCreate {
             version: external::SemverVersion::new(3, 0, 0),
         };
-        nexus.system_update_create(&opctx, su3_create).await.unwrap();
+        nexus.create_system_update(&opctx, su3_create).await.unwrap();
 
         let su2_create = SystemUpdateCreate {
             version: external::SemverVersion::new(2, 0, 0),
         };
-        let su2 = nexus.system_update_create(&opctx, su2_create).await.unwrap();
+        let su2 = nexus.create_system_update(&opctx, su2_create).await.unwrap();
 
         // now there should be three system updates, sorted by version descending
         let versions: Vec<String> = nexus
@@ -517,7 +517,7 @@ mod tests {
         // now create two component updates for update 1, one at root, and one
         // hanging off the first
         let _cu1 = nexus
-            .component_update_create(
+            .create_component_update(
                 &opctx,
                 ComponentUpdateCreate {
                     version: external::SemverVersion::new(1, 0, 0),
@@ -528,7 +528,7 @@ mod tests {
             .await
             .unwrap();
         let _cu2 = nexus
-            .component_update_create(
+            .create_component_update(
                 &opctx,
                 ComponentUpdateCreate {
                     version: external::SemverVersion::new(2, 0, 0),
@@ -574,21 +574,21 @@ mod tests {
             version: external::SemverVersion::new(100000000, 0, 0),
         };
         let error =
-            nexus.system_update_create(&opctx, su_create).await.unwrap_err();
+            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
         assert_eq!(error, expected);
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 100000000, 0),
         };
         let error =
-            nexus.system_update_create(&opctx, su_create).await.unwrap_err();
+            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
         assert_eq!(error, expected);
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 0, 100000000),
         };
         let error =
-            nexus.system_update_create(&opctx, su_create).await.unwrap_err();
+            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
         assert_eq!(error, expected);
     }
 
@@ -611,7 +611,7 @@ mod tests {
         // let high = nexus.highest_component_version(&opctx).await.unwrap_err();
 
         nexus
-            .updateable_component_create(
+            .create_updateable_component(
                 &opctx,
                 UpdateableComponentCreate {
                     version: external::SemverVersion::new(0, 2, 0),
@@ -622,7 +622,7 @@ mod tests {
             .await
             .expect("failed to create updateable component");
         nexus
-            .updateable_component_create(
+            .create_updateable_component(
                 &opctx,
                 UpdateableComponentCreate {
                     version: external::SemverVersion::new(3, 0, 0),
@@ -633,7 +633,7 @@ mod tests {
             .await
             .expect("failed to create updateable component");
         nexus
-            .updateable_component_create(
+            .create_updateable_component(
                 &opctx,
                 UpdateableComponentCreate {
                     version: external::SemverVersion::new(10, 0, 0),

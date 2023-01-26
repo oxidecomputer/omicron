@@ -29,7 +29,7 @@ async fn populate_db(cptestctx: &ControlPlaneTestContext) {
     );
 
     nexus
-        .updateable_component_create(
+        .create_updateable_component(
             &opctx,
             params::UpdateableComponentCreate {
                 version: SemverVersion::new(0, 2, 0),
@@ -41,7 +41,7 @@ async fn populate_db(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to create updateable component");
 
     nexus
-        .updateable_component_create(
+        .create_updateable_component(
             &opctx,
             params::UpdateableComponentCreate {
                 version: SemverVersion::new(1, 0, 1),

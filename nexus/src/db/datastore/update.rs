@@ -68,7 +68,7 @@ impl DataStore {
             .internal_context("deleting outdated available artifacts")
     }
 
-    pub async fn system_update_create(
+    pub async fn create_system_update(
         &self,
         opctx: &OpContext,
         update: SystemUpdate,
@@ -95,7 +95,7 @@ impl DataStore {
             })
     }
 
-    pub async fn component_update_create(
+    pub async fn create_component_update(
         &self,
         opctx: &OpContext,
         system_update_id: Uuid,
@@ -181,7 +181,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn updateable_component_create(
+    pub async fn create_updateable_component(
         &self,
         opctx: &OpContext,
         component: UpdateableComponent,
