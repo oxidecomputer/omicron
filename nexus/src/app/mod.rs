@@ -108,7 +108,7 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: Mutex<Option<chrono::Duration>>,
 
-    pub resolver:
+    resolver:
         Arc<tokio::sync::Mutex<internal_dns_client::multiclient::Resolver>>,
 }
 
@@ -483,9 +483,10 @@ impl Nexus {
 
     pub async fn resolver(
         &self,
-    ) -> tokio::sync::MutexGuard<'_, internal_dns_client::multiclient::Resolver>
+    ) -> internal_dns_client::multiclient::Resolver
     {
-        self.resolver.lock().await
+        let resolver = self.resolver.lock().await;
+        resolver.clone()
     }
 }
 
