@@ -135,6 +135,12 @@ CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
 
 -- A physical disk which exists inside the rack.
 CREATE TABLE omicron.public.physical_disk (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
     vendor STRING(63) NOT NULL,
     serial STRING(63) NOT NULL,
     model STRING(63) NOT NULL,
@@ -143,10 +149,25 @@ CREATE TABLE omicron.public.physical_disk (
 
     -- FK into the Sled table
     sled_id UUID NOT NULL,
-    total_size INT NOT NULL,
-
-    PRIMARY KEY (vendor, serial, model)
+    total_size INT NOT NULL
 );
+
+CREATE UNIQUE INDEX ON omicron.public.physical_disk (
+    vendor,
+    serial,
+    model
+) WHERE time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.physical_disk (
+    variant,
+    id
+) WHERE time_deleted IS NULL;
+
+-- Make it efficient to look up physical disks by Sled.
+CREATE INDEX ON omicron.public.physical_disk (
+    sled_id,
+    id
+) WHERE time_deleted IS NULL;
 
 -- x509 certificates which may be used by services
 CREATE TABLE omicron.public.certificate (

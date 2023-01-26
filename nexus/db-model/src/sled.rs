@@ -85,13 +85,10 @@ impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
     type CollectionId = Uuid;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
-    // TODO: This implies that we're using this column as a key.
-    //
-    // We aren't! We're using this column, as *well* as the vendor and model
-    // columns.
-    type CollectionIdColumn = physical_disk::dsl::serial;
+    type CollectionIdColumn = physical_disk::dsl::id;
 }
 
+// TODO: Can we remove this? We have one for physical disks now.
 impl DatastoreCollectionConfig<super::Zpool> for Sled {
     type CollectionId = Uuid;
     type GenerationNumberColumn = sled::dsl::rcgen;

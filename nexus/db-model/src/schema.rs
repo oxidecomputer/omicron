@@ -405,7 +405,13 @@ table! {
 }
 
 table! {
-    physical_disk (vendor, serial, model) {
+    physical_disk (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
         vendor -> Text,
         serial -> Text,
         model -> Text,
