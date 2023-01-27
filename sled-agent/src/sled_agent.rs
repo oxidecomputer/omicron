@@ -401,8 +401,7 @@ impl SledAgent {
             }
         }
 
-        self
-            .inner
+        self.inner
             .storage
             .ensure_using_exactly_these_disks(self.inner.hardware.disks())
             .await;

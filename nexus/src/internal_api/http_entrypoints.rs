@@ -7,11 +7,9 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    OximeterInfo,
-    PhysicalDiskDeleteRequest, PhysicalDiskDeleteResponse,
-    PhysicalDiskPutRequest, PhysicalDiskPutResponse,
-    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
-    ZpoolPutResponse,
+    OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskDeleteResponse,
+    PhysicalDiskPutRequest, PhysicalDiskPutResponse, RackInitializationRequest,
+    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;

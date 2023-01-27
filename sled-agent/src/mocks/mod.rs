@@ -6,11 +6,9 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DiskRuntimeState, InstanceRuntimeState,
-    PhysicalDiskPutRequest, PhysicalDiskDeleteRequest,
-    RackInitializationRequest,
-    SledAgentStartupInfo, UpdateArtifactKind, ZpoolPutRequest,
-    ZpoolPutResponse,
+    DiskRuntimeState, InstanceRuntimeState, PhysicalDiskDeleteRequest,
+    PhysicalDiskPutRequest, RackInitializationRequest, SledAgentStartupInfo,
+    UpdateArtifactKind, ZpoolPutRequest, ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
