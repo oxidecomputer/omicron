@@ -321,15 +321,11 @@ impl super::Nexus {
         opctx: &OpContext,
         version: &external::SemverVersion,
     ) -> LookupResult<db::model::SystemUpdate> {
-        // TODO: I don't think this is the right way to do this auth check
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        let (.., db_system_update) = LookupPath::new(opctx, &self.db_datastore)
-            .system_update_version(version.clone().into())
-            .fetch()
-            .await?;
-
-        Ok(db_system_update)
+        self.db_datastore
+            .system_update_fetch_by_version(opctx, version.clone().into())
+            .await
     }
 
     pub async fn system_updates_list_by_id(
@@ -346,16 +342,15 @@ impl super::Nexus {
         opctx: &OpContext,
         version: &external::SemverVersion,
     ) -> ListResultVec<db::model::ComponentUpdate> {
-        // TODO: I don't think this is the right way to do this auth check
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        let (authz_update, ..) = LookupPath::new(opctx, &self.db_datastore)
-            .system_update_version(version.clone().into())
-            .fetch()
+        let system_update = self
+            .db_datastore
+            .system_update_fetch_by_version(opctx, version.clone().into())
             .await?;
 
         self.db_datastore
-            .system_update_components_list(opctx, &authz_update)
+            .system_update_components_list(opctx, system_update.id())
             .await
     }
 
@@ -460,9 +455,8 @@ impl super::Nexus {
     }
 }
 
-// TODO: should these tests be done as integration tests? the creates would
-// still have to be direct calls to the service functions, but the retrievals
-// could be HTTP requests, which would cover more code
+// TODO: convert system update tests to integration tests now that I know how to
+// call nexus functions in those
 
 #[cfg(test)]
 mod tests {

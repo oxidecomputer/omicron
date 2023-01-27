@@ -1509,12 +1509,17 @@ lazy_static! {
             ],
         },
 
-        VerifyEndpoint {
-            url: "/v1/system/update/version",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
+
+        // TODO: system version is uncovered because it requires setup that
+        // cannot be done through an API request (because there is no create
+        // endpoint for updateable components)
+
+        // VerifyEndpoint {
+        //     url: "/v1/system/update/version",
+        //     visibility: Visibility::Public,
+        //     unprivileged_access: UnprivilegedAccess::None,
+        //     allowed_methods: vec![AllowedMethod::Get],
+        // },
 
         VerifyEndpoint {
             url: "/v1/system/update/components",

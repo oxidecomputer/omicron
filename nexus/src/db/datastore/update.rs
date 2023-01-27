@@ -20,11 +20,9 @@ use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use diesel::prelude::*;
 use nexus_db_model::SystemUpdateComponentUpdate;
 use nexus_types::identity::Asset;
-use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::{
-    CreateResult, DeleteResult, InternalContext, ListResultVec,
+    CreateResult, DataPageParams, DeleteResult, InternalContext, ListResultVec,
+    LookupResult, LookupType, ResourceType,
 };
 use uuid::Uuid;
 
@@ -88,6 +86,34 @@ impl DataStore {
                     ErrorHandler::Conflict(
                         ResourceType::SystemUpdate,
                         &update.version.to_string(),
+                    ),
+                )
+            })
+    }
+
+    // version is unique but not the primary key, so we can't use LookupPath to handle this for us
+    pub async fn system_update_fetch_by_version(
+        &self,
+        opctx: &OpContext,
+        target: SemverVersion,
+    ) -> LookupResult<SystemUpdate> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::system_update::dsl::*;
+
+        let version_string = target.to_string();
+
+        system_update
+            .filter(version.eq(target))
+            .select(SystemUpdate::as_select())
+            .first_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SystemUpdate,
+                        LookupType::ByCompositeId(version_string),
                     ),
                 )
             })
@@ -161,7 +187,7 @@ impl DataStore {
     pub async fn system_update_components_list(
         &self,
         opctx: &OpContext,
-        authz_update: &authz::SystemUpdate,
+        system_update_id: Uuid,
     ) -> ListResultVec<ComponentUpdate> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
@@ -170,7 +196,7 @@ impl DataStore {
 
         component_update::table
             .inner_join(join_table::table)
-            .filter(join_table::columns::system_update_id.eq(authz_update.id()))
+            .filter(join_table::columns::system_update_id.eq(system_update_id))
             .select(ComponentUpdate::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
             .await

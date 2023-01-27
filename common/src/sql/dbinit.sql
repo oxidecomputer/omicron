@@ -1516,26 +1516,22 @@ CREATE INDEX ON omicron.public.update_available_artifact (
  * System updates
  */
 CREATE TABLE omicron.public.system_update (
-    /* Unique semver version */
-    version STRING(64) PRIMARY KEY, -- TODO: length
-    
-    -- version string with maj/min/patch 0-padded to be string sortable
-    version_sort STRING(64) NOT NULL, -- TODO: length
-
-    -- The ID is not strictly necessary here because we're using the version
-    -- string as the PK. However, removing it would make this one of the only
-    -- resources without an ID, which means we'd have to do a bunch of special
-    -- stuff that we get more or less for free with other resources. For
-    -- example, paginating by ID (note this is distinct from sorting by ID).
-
     /* Identity metadata (asset) */
-    id UUID NOT NULL,
+    id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Because the version is unique, it could be the PK, but that would make
+    -- this resource different from every other resource for little benefit.
+
+    -- Unique semver version
+    version STRING(64) NOT NULL, -- TODO: length
+    -- version string with maj/min/patch 0-padded to be string sortable
+    version_sort STRING(64) NOT NULL -- TODO: length
 );
 
 CREATE UNIQUE INDEX ON omicron.public.system_update (
-    id
+    version
 );
 
 CREATE UNIQUE INDEX ON omicron.public.system_update (
