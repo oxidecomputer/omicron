@@ -23,7 +23,6 @@ use dropshot::TypedBody;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
-use gateway_messages::IgnitionCommand;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -119,6 +118,17 @@ pub enum SpIgnition {
     },
     #[serde(rename = "error")]
     CommunicationFailed { message: String },
+}
+
+/// Ignition command.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum IgnitionCommand {
+    PowerOn,
+    PowerOff,
+    PowerReset,
 }
 
 /// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
@@ -336,6 +346,16 @@ struct PathSpComponent {
     /// ID for the component of the SP; this is the internal identifier used by
     /// the SP itself to identify its components.
     component: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct PathSpIgnitionCommand {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    sp: SpIdentifier,
+    /// Ignition command to perform on the targeted SP.
+    command: IgnitionCommand,
 }
 
 /// List SPs
@@ -703,36 +723,6 @@ async fn sp_component_update_abort(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
-/// Power on an SP component
-///
-/// Components whose power state cannot be changed will always return an error.
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power-on",
-}]
-async fn sp_component_power_on(
-    _rqctx: RequestContext<Arc<ServerContext>>,
-    _path: Path<PathSpComponent>,
-    // TODO do we need a timeout?
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    todo!()
-}
-
-/// Power off an SP component
-///
-/// Components whose power state cannot be changed will always return an error.
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power-off",
-}]
-async fn sp_component_power_off(
-    _rqctx: RequestContext<Arc<ServerContext>>,
-    _path: Path<PathSpComponent>,
-    // TODO do we need a timeout?
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    todo!()
-}
-
 /// List SPs via Ignition
 ///
 /// Retreive information for all SPs via the Ignition controller. This is lower
@@ -789,50 +779,30 @@ async fn ignition_get(
     Ok(HttpResponseOk(info))
 }
 
-/// Power on a sled via a request to its SP.
+/// Send an ignition command targeting a specific SP.
 ///
-/// This corresponds to moving the sled into A2.
+/// This endpoint can be used to transition a target between A2 and A3 (via
+/// power-on / power-off) or reset it.
+///
+/// The management network traffic caused by requests to this endpoint is
+/// between this MGS instance and its local ignition controller, _not_ the SP
+/// targeted by the command.
 #[endpoint {
     method = POST,
-    path = "/ignition/{type}/{slot}/power-on",
+    path = "/ignition/{type}/{slot}/{command}",
 }]
-async fn ignition_power_on(
+async fn ignition_command(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path: Path<PathSp>,
+    path: Path<PathSpIgnitionCommand>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
-    let ignition_target =
-        mgmt_switch.ignition_target(path.into_inner().sp.into())?;
+    let PathSpIgnitionCommand { sp, command } = path.into_inner();
+    let ignition_target = mgmt_switch.ignition_target(sp.into())?;
 
     mgmt_switch
         .ignition_controller()
-        .ignition_command(ignition_target, IgnitionCommand::PowerOn)
-        .await
-        .map_err(SpCommsError::from)?;
-
-    Ok(HttpResponseUpdatedNoContent {})
-}
-
-/// Power off a sled via Ignition
-///
-/// This corresponds to moving the sled into A3.
-#[endpoint {
-    method = POST,
-    path = "/ignition/{type}/{slot}/power-off",
-}]
-async fn ignition_power_off(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path: Path<PathSp>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let mgmt_switch = &apictx.mgmt_switch;
-    let ignition_target =
-        mgmt_switch.ignition_target(path.into_inner().sp.into())?;
-
-    mgmt_switch
-        .ignition_controller()
-        .ignition_command(ignition_target, IgnitionCommand::PowerOff)
+        .ignition_command(ignition_target, command.into())
         .await
         .map_err(SpCommsError::from)?;
 
@@ -911,12 +881,9 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_update)?;
         api.register(sp_component_update_status)?;
         api.register(sp_component_update_abort)?;
-        api.register(sp_component_power_on)?;
-        api.register(sp_component_power_off)?;
         api.register(ignition_list)?;
         api.register(ignition_get)?;
-        api.register(ignition_power_on)?;
-        api.register(ignition_power_off)?;
+        api.register(ignition_command)?;
         Ok(())
     }
 
