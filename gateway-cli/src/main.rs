@@ -408,8 +408,16 @@ async fn main() -> Result<()> {
                 )
                 .await?;
         }
-        Command::UploadRecoveryHostPhase2 { .. } => {
-            todo!("missing MGS endpoint");
+        Command::UploadRecoveryHostPhase2 { path } => {
+            let image_stream =
+                tokio::fs::File::open(&path).await.with_context(|| {
+                    format!("failed to open {}", path.display())
+                })?;
+            let info = client
+                .recovery_host_phase2_upload(image_stream)
+                .await?
+                .into_inner();
+            dumper.dump(&info)?;
         }
         Command::Update { sp, component, slot, image } => {
             let image = fs::read(&image).with_context(|| {
