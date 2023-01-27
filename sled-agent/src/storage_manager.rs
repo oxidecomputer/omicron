@@ -931,18 +931,10 @@ impl StorageManager {
 
         let mut disks = self.disks.lock().await;
 
-        // Steal the old contents of `disks`; we'll rebuild it below by
-        // inserting an entry for every element of `new_disks`, so replace it
-        // with a hash map that's already appropriately sized. If we return
-        // before completing the loop over `new_disks` below, we will leave
-        // `self.disks` empty or incomplete.
-        let mut old_disks = HashMap::with_capacity(new_disks.len());
-        std::mem::swap(&mut *disks, &mut old_disks);
-
         // Remove disks that don't appear in the "new_disks" set.
         //
         // This also accounts for zpools and notifies Nexus.
-        let keys_to_be_removed = old_disks
+        let keys_to_be_removed = disks
             .iter()
             .filter(|(key, old_disk)| {
                 // If this disk appears in the "new" and "old" set, it should
@@ -951,14 +943,15 @@ impl StorageManager {
                 // This treats a disk changing in an unexpected way as a
                 // "removal and re-insertion".
                 if let Some(new_disk) = new_disks.get(*key) {
-                    // Changed Disk -> Disk should be removed.
+                    // Changed Disk -> Old disk should be removed.
                     new_disk != *old_disk
                 } else {
                     // Not in the new set -> Disk should be removed.
                     true
                 }
             })
-            .map(|(key, _)| key);
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
         for key in keys_to_be_removed {
             if let Err(e) = self.delete_disk_locked(&mut disks, &key).await {
                 warn!(self.log, "Failed to delete disk: {e}");
@@ -966,18 +959,16 @@ impl StorageManager {
             }
         }
 
-        // Rebuild `self.disks`, adding new disks that appear in the "new_disks"
-        // set.
+        // Add new disks to `self.disks`.
         //
         // This also accounts for zpools and notifies Nexus.
         for (key, new_disk) in new_disks {
-            if let Some(old_disk) = old_disks.remove(&key) {
+            if let Some(old_disk) = disks.get(&key) {
                 // In this case, the disk should be unchanged.
                 //
                 // This assertion should be upheld by the filter above, which
                 // should remove disks that changed.
-                assert!(old_disk == new_disk);
-                disks.insert(key, new_disk);
+                assert!(old_disk == &new_disk);
             } else {
                 if let Err(e) =
                     self.upsert_disk_locked(&mut disks, new_disk).await

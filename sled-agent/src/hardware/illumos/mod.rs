@@ -25,6 +25,15 @@ enum Error {
     #[error("Failed to access devinfo: {0}")]
     DevInfo(anyhow::Error),
 
+    #[error("Device does not appear to be an Oxide Gimlet")]
+    NotAGimlet,
+
+    #[error("Missing device property {name}")]
+    MissingDeviceProperty { name: String },
+
+    #[error("Unrecognized slot for device {slot}")]
+    UnrecognizedSlot { slot: i64 },
+
     #[error("Expected property {name} to have type {ty}")]
     UnexpectedPropertyType { name: String, ty: String },
 
@@ -33,9 +42,6 @@ enum Error {
 
     #[error("Cannot query for NVME identity of {path}: {err}")]
     MissingNVMEIdentity { path: PathBuf, err: std::io::Error },
-
-    #[error("Not an NVME device: {0}")]
-    NotAnNVMEDevice(PathBuf),
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -60,15 +66,38 @@ struct HardwareSnapshot {
 impl HardwareSnapshot {
     // Walk the device tree to capture a view of the current hardware.
     fn new(log: &Logger) -> Result<Self, Error> {
-        let mut device_info = DevInfo::new().map_err(Error::DevInfo)?;
+        let mut device_info =
+            DevInfo::new_force_load().map_err(Error::DevInfo)?;
+
         let mut node_walker = device_info.walk_node();
 
+        // First, check the root node. If we aren't running on a Gimlet, bail.
+        let Some(root) = node_walker.next().transpose().map_err(Error::DevInfo)? else {
+            return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
+        };
+        if root.node_name() != "Oxide,Gimlet" {
+            warn!(
+                log,
+                "Root name indicates this is not a Gimlet: {}",
+                root.node_name()
+            );
+            return Err(Error::NotAGimlet);
+        }
+
+        // Monitor for the Tofino device and driver.
         let mut tofino = TofinoSnapshot::new();
-        let mut disks = HashSet::new();
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
             poll_tofino_node(&log, &mut tofino, &node);
+        }
+
+        // Monitor for block devices.
+        let mut disks = HashSet::new();
+        let mut node_walker = device_info.walk_driver("blkdev");
+        while let Some(node) =
+            node_walker.next().transpose().map_err(Error::DevInfo)?
+        {
             poll_blkdev_node(&log, &mut disks, node)?;
         }
 
@@ -249,8 +278,7 @@ fn blkdev_device_identity(devfs_path: &str) -> Result<DiskIdentity, Error> {
     let ctrl_id = nvme::identify_controller(&path)
         .map_err(|err| Error::MissingNVMEIdentity { path, err })?;
 
-    let vendor =
-        format!("{:x}{:x}", ctrl_id.vendor_id, ctrl_id.subsystem_vendor_id);
+    let vendor = format!("{:x}", ctrl_id.vendor_id);
     let serial = ctrl_id.serial;
     let model = ctrl_id.model;
     Ok(DiskIdentity { vendor, serial, model })
@@ -259,7 +287,7 @@ fn blkdev_device_identity(devfs_path: &str) -> Result<DiskIdentity, Error> {
 fn poll_blkdev_node(
     log: &Logger,
     disks: &mut HashSet<UnparsedDisk>,
-    mut node: Node<'_>,
+    node: Node<'_>,
 ) -> Result<(), Error> {
     let Some(driver_name) = node.driver_name() else {
         return Ok(());
@@ -272,57 +300,79 @@ fn poll_blkdev_node(
     let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
     let dev_path = get_dev_path_of_whole_disk(&node)?;
 
-    // For some reason, libdevfs doesn't prepend "/devices" when
-    // referring to the path, but it still returns an absolute path.
+    // libdevfs doesn't prepend "/devices" when referring to the path, but it
+    // still returns an absolute path. This is the absolute path from the
+    // kernel's perspective, but in userspace, it is typically mounted under
+    // "/devices"
     //
-    // Validate that we're still using this leading slash, but make the
-    // path "real".
+    // Validate that we're still using this leading slash, and also make the
+    // path usable.
     assert!(devfs_path.starts_with('/'));
     let devfs_path = format!("/devices{devfs_path}");
-    let mut device_id = None;
-    while let Some(parent) = node.parent().map_err(Error::DevInfo)? {
-        node = parent;
 
-        if let Some(driver_name) = node.driver_name() {
-            if driver_name == "nvme" {
-                device_id = Some(blkdev_device_identity(&format!(
-                    "/devices{}:devctl",
-                    node.devfs_path().map_err(Error::DevInfo)?
-                ))?);
-            }
-        }
-        let slot_prop_name = "physical-slot#".to_string();
-        if let Some(Ok(slot_prop)) = node.props().into_iter().find(|prop| {
-            if let Ok(prop) = prop {
-                prop.name() == slot_prop_name
-            } else {
-                false
-            }
-        }) {
-            let slot = slot_prop.as_i64().ok_or_else(|| {
-                Error::UnexpectedPropertyType {
-                    name: slot_prop_name,
-                    ty: "i64".to_string(),
-                }
-            })?;
+    //    for (name, prop) in node.string_props().into_iter() {
+    //        info!(log, "blkdev property: {name} = {prop}");
+    //    }
 
-            let Some(variant) = slot_to_disk_variant(slot) else {
-                warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
-                break;
-            };
-            let disk = UnparsedDisk::new(
-                PathBuf::from(&devfs_path),
-                dev_path,
-                slot,
-                variant,
-                device_id.ok_or_else(|| {
-                    Error::NotAnNVMEDevice(PathBuf::from(devfs_path))
-                })?,
-            );
-            disks.insert(disk);
-            break;
-        }
+    // We expect that the parent of the "blkdev" node is an "nvme" driver.
+    let Some(nvme_node) = node.parent().map_err(Error::DevInfo)? else {
+        return Err(Error::DevInfo(anyhow::anyhow!("blkdev has no parent node")));
+    };
+    if nvme_node.driver_name().as_deref() != Some("nvme") {
+        return Err(Error::DevInfo(anyhow::anyhow!(
+            "blkdev has non-nvme parent node"
+        )));
     }
+
+    //    for (name, prop) in nvme_node.string_props().into_iter() {
+    //        info!(log, "nvme property: {name} = {prop}");
+    //    }
+
+    let device_id = blkdev_device_identity(&format!(
+        "/devices{}:devctl",
+        nvme_node.devfs_path().map_err(Error::DevInfo)?
+    ))?;
+
+    // We expect that the parent of the "nvme" device is a "pcieb" driver.
+    let Some(pcieb_node) = nvme_node.parent().map_err(Error::DevInfo)? else {
+        return Err(Error::DevInfo(anyhow::anyhow!("nvme has no parent node")));
+    };
+    if pcieb_node.driver_name().as_deref() != Some("pcieb") {
+        return Err(Error::DevInfo(anyhow::anyhow!(
+            "nvme has non-pcieb parent node"
+        )));
+    }
+
+    // The "pcieb" device needs to have a physical slot for us to understand
+    // what type of disk it is.
+    let slot_prop_name = "physical-slot#".to_string();
+    let Some(Ok(slot_prop)) = pcieb_node.props().into_iter().find(|prop| {
+        if let Ok(prop) = prop {
+            prop.name() == slot_prop_name
+        } else {
+            false
+        }
+    }) else {
+        return Err(Error::MissingDeviceProperty { name: slot_prop_name });
+    };
+    let slot =
+        slot_prop.as_i64().ok_or_else(|| Error::UnexpectedPropertyType {
+            name: slot_prop_name,
+            ty: "i64".to_string(),
+        })?;
+    let Some(variant) = slot_to_disk_variant(slot) else {
+        warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
+        return Err(Error::UnrecognizedSlot { slot } );
+    };
+
+    let disk = UnparsedDisk::new(
+        PathBuf::from(&devfs_path),
+        dev_path,
+        slot,
+        variant,
+        device_id,
+    );
+    disks.insert(disk);
     Ok(())
 }
 
