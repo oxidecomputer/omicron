@@ -94,7 +94,7 @@ source.sha256 = "03b9be079d793ff58839599a421ae29ca915bf5e18a42b308945adb4987bb18
 output.type = "zone"
 
 [package.crucible-pantry]
-service_name = "crucible-pantry"
+service_name = "crucible_pantry"
 source.type = "prebuilt"
 source.repo = "crucible"
 source.commit = "2f700a52e063f2ef6c6e44cd7e4195127484c9b7"
