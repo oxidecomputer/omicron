@@ -298,7 +298,7 @@ enum PowerState {
 }
 
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
-/// the host boom flash.
+/// the host boot flash.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]

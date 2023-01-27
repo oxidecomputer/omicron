@@ -845,7 +845,7 @@
         ]
       },
       "SpComponentFirmwareSlot": {
-        "description": "Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for the host boom flash.",
+        "description": "Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for the host boot flash.",
         "type": "object",
         "properties": {
           "slot": {
