@@ -309,7 +309,18 @@ async fn main() -> Result<()> {
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = Logger::root(drain, o!("component" => "gateway-client"));
 
-    let client = Client::new(&format!("http://{}", args.server), log.clone());
+    // Workaround lack of support for scoped IPv6 addresses
+    // in URLs by adding an override to resolve the given domain
+    // (mgs.localhorse) to the desired address, scope-id and all.
+    // Note the port must still be passed via the URL.
+    let reqwest_client = reqwest::Client::builder()
+        .resolve_to_addrs("mgs.localhorse", &[args.server.into()])
+        .build()?;
+    let client = Client::new_with_client(
+        &format!("http://mgs.localhorse:{}", args.server.port()),
+        reqwest_client,
+        log.clone(),
+    );
 
     let dumper = Dumper { pretty: args.pretty };
 

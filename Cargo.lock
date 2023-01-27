@@ -2084,6 +2084,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "libc",
+ "reqwest",
  "serde",
  "serde_json",
  "slog",
