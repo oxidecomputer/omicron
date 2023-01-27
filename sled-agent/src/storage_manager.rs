@@ -535,7 +535,8 @@ async fn ensure_running_zone(
     }
 }
 
-type NotifyFut = dyn futures::Future<Output = Result<(), String>> + Send;
+// The type of a future which is used to send a notification to Nexus.
+type NotifyFut = Pin<Box<dyn futures::Future<Output = Result<(), String>> + Send>>;
 
 #[derive(Debug)]
 struct NewFilesystemRequest {
@@ -653,7 +654,7 @@ impl StorageWorker {
     // informing it about the addition of `pool_id` to this sled.
     fn add_zpool_notify(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         pool_id: Uuid,
         size: ByteCount,
     ) {
@@ -696,7 +697,7 @@ impl StorageWorker {
 
     async fn ensure_using_exactly_these_disks(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         resources: &StorageResources,
         unparsed_disks: Vec<UnparsedDisk>,
     ) -> Result<(), Error> {
@@ -794,7 +795,7 @@ impl StorageWorker {
 
     async fn upsert_disk(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         resources: &StorageResources,
         disk: UnparsedDisk,
     ) -> Result<(), Error> {
@@ -818,7 +819,7 @@ impl StorageWorker {
 
     async fn upsert_disk_locked(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         resources: &StorageResources,
         disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
         disk: Disk,
@@ -836,7 +837,7 @@ impl StorageWorker {
 
     async fn delete_disk(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         resources: &StorageResources,
         disk: UnparsedDisk,
     ) -> Result<(), Error> {
@@ -853,7 +854,7 @@ impl StorageWorker {
 
     async fn delete_disk_locked(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         resources: &StorageResources,
         disks: &mut tokio::sync::MutexGuard<'_, HashMap<PathBuf, Disk>>,
         key: &PathBuf,
@@ -872,7 +873,7 @@ impl StorageWorker {
     // about the addition/removal of a physical disk to this sled.
     fn physical_disk_notify(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         disk: NotifyDiskRequest,
     ) {
         let sled_id = self.sled_id;
@@ -943,7 +944,7 @@ impl StorageWorker {
 
     async fn upsert_zpool(
         &mut self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
+        nexus_notifications: &mut FuturesOrdered<NotifyFut>,
         resources: &StorageResources,
         pool_name: &ZpoolName,
     ) -> Result<(), Error> {
