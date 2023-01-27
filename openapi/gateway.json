@@ -84,50 +84,21 @@
         }
       }
     },
-    "/ignition/{type}/{slot}/power-off": {
+    "/ignition/{type}/{slot}/{command}": {
       "post": {
-        "summary": "Power off a sled via Ignition",
-        "description": "This corresponds to moving the sled into A3.",
-        "operationId": "ignition_power_off",
+        "summary": "Send an ignition command targeting a specific SP.",
+        "description": "This endpoint can be used to transition a target between A2 and A3 (via power-on / power-off) or reset it.\nThe management network traffic caused by requests to this endpoint is between this MGS instance and its local ignition controller, _not_ the SP targeted by the command.",
+        "operationId": "ignition_command",
         "parameters": [
           {
             "in": "path",
-            "name": "slot",
+            "name": "command",
+            "description": "Ignition command to perform on the targeted SP.",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+              "$ref": "#/components/schemas/IgnitionCommand"
             }
           },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/ignition/{type}/{slot}/power-on": {
-      "post": {
-        "summary": "Power on a sled via a request to its SP.",
-        "description": "This corresponds to moving the sled into A2.",
-        "operationId": "ignition_power_on",
-        "parameters": [
           {
             "in": "path",
             "name": "slot",
@@ -332,11 +303,11 @@
         }
       }
     },
-    "/sp/{type}/{slot}/component/{component}/power-off": {
-      "post": {
-        "summary": "Power off an SP component",
-        "description": "Components whose power state cannot be changed will always return an error.",
-        "operationId": "sp_component_power_off",
+    "/sp/{type}/{slot}/component/{component}/active-slot": {
+      "get": {
+        "summary": "Get the currently-active slot for an SP component",
+        "description": "Note that the meaning of \"current\" in \"currently-active\" may vary depending on the component: for example, it may mean \"the actively-running slot\" or \"the slot that will become active the next time the component is booted\".",
+        "operationId": "sp_component_active_slot_get",
         "parameters": [
           {
             "in": "path",
@@ -367,8 +338,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentFirmwareSlot"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -377,13 +355,11 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/sp/{type}/{slot}/component/{component}/power-on": {
+      },
       "post": {
-        "summary": "Power on an SP component",
-        "description": "Components whose power state cannot be changed will always return an error.",
-        "operationId": "sp_component_power_on",
+        "summary": "Set the currently-active slot for an SP component",
+        "description": "Note that the meaning of \"current\" in \"currently-active\" may vary depending on the component: for example, it may mean \"the actively-running slot\" or \"the slot that will become active the next time the component is booted\".",
+        "operationId": "sp_component_active_slot_set",
         "parameters": [
           {
             "in": "path",
@@ -413,6 +389,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpComponentFirmwareSlot"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -856,6 +842,20 @@
           "A0",
           "A1",
           "A2"
+        ]
+      },
+      "SpComponentFirmwareSlot": {
+        "description": "Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for the host boot flash.",
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "slot"
         ]
       },
       "SpComponentInfo": {
@@ -1415,6 +1415,15 @@
         "required": [
           "current",
           "total"
+        ]
+      },
+      "IgnitionCommand": {
+        "description": "Ignition command.",
+        "type": "string",
+        "enum": [
+          "power_on",
+          "power_off",
+          "power_reset"
         ]
       }
     }

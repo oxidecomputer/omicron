@@ -6,6 +6,7 @@
 
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
+use super::IgnitionCommand;
 use super::PowerState;
 use super::SpComponentInfo;
 use super::SpComponentList;
@@ -176,6 +177,22 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
+        }
+    }
+}
+
+impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
+    fn from(cmd: IgnitionCommand) -> Self {
+        match cmd {
+            IgnitionCommand::PowerOn => {
+                gateway_messages::IgnitionCommand::PowerOn
+            }
+            IgnitionCommand::PowerOff => {
+                gateway_messages::IgnitionCommand::PowerOff
+            }
+            IgnitionCommand::PowerReset => {
+                gateway_messages::IgnitionCommand::PowerReset
+            }
         }
     }
 }
