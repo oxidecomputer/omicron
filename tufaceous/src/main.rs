@@ -1,12 +1,12 @@
 mod date;
 mod hint;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use omicron_common::api::internal::nexus::UpdateArtifactKind;
-use tufaceous_lib::{AddArtifact, Key, OmicronRepo};
+use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -52,6 +52,19 @@ enum Command {
         /// Artifact version.
         version: String,
     },
+    /// Archives this repository to a zip file.
+    Archive {
+        /// The path to write the archive to (must end with .zip).
+        output_path: Utf8PathBuf,
+    },
+    /// Validates and extracts a repository created by the `archive` command.
+    Extract {
+        /// The file to extract.
+        archive_file: Utf8PathBuf,
+
+        /// The destination to extract the file to.
+        dest: Utf8PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -91,6 +104,37 @@ fn main() -> Result<()> {
                 new_artifact.name(),
                 new_artifact.version()
             );
+            Ok(())
+        }
+        Command::Archive { output_path } => {
+            // The filename must end with "zip".
+            if output_path.extension() != Some("zip") {
+                bail!("output path `{output_path}` must end with .zip");
+            }
+
+            let repo = OmicronRepo::load_ignore_expiration(&repo_path)?;
+            repo.archive(&output_path)?;
+
+            Ok(())
+        }
+        Command::Extract { archive_file, dest } => {
+            let mut extractor = ArchiveExtractor::from_path(&archive_file)?;
+            extractor.extract(&dest)?;
+
+            // Now load the repository and ensure it's valid.
+            let repo = OmicronRepo::load(&dest).with_context(|| {
+                format!(
+                    "error loading extracted repository at `{dest}` \
+                     (extracted files are still available)"
+                )
+            })?;
+            repo.read_artifacts().with_context(|| {
+                format!(
+                    "error loading artifacts.json from extracted archive \
+                     at `{dest}`"
+                )
+            })?;
+
             Ok(())
         }
     }
