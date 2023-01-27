@@ -44,6 +44,8 @@ use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::WICKETD_ARTIFACT_PORT;
+use omicron_common::address::WICKETD_PORT;
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -739,6 +741,26 @@ impl ServiceManager {
                         )?;
                     }
 
+                    smfh.refresh()?;
+                }
+                ServiceType::Wicketd => {
+                    info!(self.inner.log, "Setting up wicketd service");
+
+                    smfh.setprop(
+                        "config/address",
+                        &format!("[::1]:{WICKETD_PORT}"),
+                    )?;
+
+                    // TODO: Use bootstrap address
+                    smfh.setprop(
+                        "config/artifact-address",
+                        &format!("[::1]:{WICKETD_ARTIFACT_PORT}"),
+                    )?;
+
+                    smfh.setprop(
+                        "config/mgs-address",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )?;
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {

@@ -2,8 +2,6 @@
 # Example wicketd config file
 #
 
-mgs_addr = "[::1]:9999"
-
 [log]
 # Show log messages of this level and more severe
 level = "debug"

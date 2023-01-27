@@ -18,6 +18,7 @@ pub enum ServiceName {
     Nexus,
     Oximeter,
     ManagementGatewayService,
+    Wicketd,
     Dendrite,
     Tfport,
 }
@@ -31,6 +32,7 @@ impl fmt::Display for ServiceName {
             ServiceName::Nexus => write!(f, "nexus"),
             ServiceName::Oximeter => write!(f, "oximeter"),
             ServiceName::ManagementGatewayService => write!(f, "mgs"),
+            ServiceName::Wicketd => write!(f, "wicketd"),
             ServiceName::Dendrite => write!(f, "dendrite"),
             ServiceName::Tfport => write!(f, "tfport"),
         }
