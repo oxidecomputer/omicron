@@ -84,50 +84,21 @@
         }
       }
     },
-    "/ignition/{type}/{slot}/power-off": {
+    "/ignition/{type}/{slot}/{command}": {
       "post": {
-        "summary": "Power off a sled via Ignition",
-        "description": "This corresponds to moving the sled into A3.",
-        "operationId": "ignition_power_off",
+        "summary": "Send an ignition command targeting a specific SP.",
+        "description": "This endpoint can be used to transition a target between A2 and A3 (via power-on / power-off) or reset it.\nThe management network traffic caused by requests to this endpoint is between this MGS instance and its local ignition controller, _not_ the SP targeted by the command.",
+        "operationId": "ignition_command",
         "parameters": [
           {
             "in": "path",
-            "name": "slot",
+            "name": "command",
+            "description": "Ignition command to perform on the targeted SP.",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+              "$ref": "#/components/schemas/IgnitionCommand"
             }
           },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/ignition/{type}/{slot}/power-on": {
-      "post": {
-        "summary": "Power on a sled via a request to its SP.",
-        "description": "This corresponds to moving the sled into A2.",
-        "operationId": "ignition_power_on",
-        "parameters": [
           {
             "in": "path",
             "name": "slot",
@@ -322,100 +293,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sp/{type}/{slot}/component/{component}/power-off": {
-      "post": {
-        "summary": "Power off an SP component",
-        "description": "Components whose power state cannot be changed will always return an error.",
-        "operationId": "sp_component_power_off",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "component",
-            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sp/{type}/{slot}/component/{component}/power-on": {
-      "post": {
-        "summary": "Power on an SP component",
-        "description": "Components whose power state cannot be changed will always return an error.",
-        "operationId": "sp_component_power_on",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "component",
-            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1415,6 +1292,15 @@
         "required": [
           "current",
           "total"
+        ]
+      },
+      "IgnitionCommand": {
+        "description": "Ignition command.",
+        "type": "string",
+        "enum": [
+          "power_on",
+          "power_off",
+          "power_reset"
         ]
       }
     }

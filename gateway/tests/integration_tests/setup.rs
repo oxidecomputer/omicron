@@ -92,7 +92,7 @@ pub async fn test_setup_with_config(
     test_name: &str,
     sp_port: SpPort,
     mut server_config: omicron_gateway::Config,
-    sp_sim_config: &mut sp_sim::Config,
+    sp_sim_config: &sp_sim::Config,
 ) -> GatewayTestContext {
     // Can't be `const` because `SocketAddrV6::new()` isn't const yet
     let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
