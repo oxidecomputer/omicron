@@ -256,6 +256,31 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    pub async fn create_update_deployment(
+        &self,
+        opctx: &OpContext,
+        deployment: UpdateDeployment,
+    ) -> CreateResult<UpdateDeployment> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use db::schema::update_deployment::dsl::*;
+
+        diesel::insert_into(update_deployment)
+            .values(deployment.clone())
+            .returning(UpdateDeployment::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::UpdateDeployment,
+                        &deployment.id().to_string(),
+                    ),
+                )
+            })
+    }
+
     pub async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,

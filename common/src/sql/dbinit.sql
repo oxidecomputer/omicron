@@ -1640,6 +1640,10 @@ CREATE TABLE omicron.public.update_deployment (
     -- TODO: status reason for update_deployment
 );
 
+CREATE INDEX on omicron.public.update_deployment (
+    time_created
+);
+
 /*******************************************************************/
 
 /*

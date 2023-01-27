@@ -12,7 +12,6 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
 use chrono::Utc;
 use hex;
-use nexus_db_model::SemverVersion;
 use nexus_types::external_api::params;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
@@ -304,7 +303,7 @@ impl super::Nexus {
                 time_created: now,
                 time_modified: now,
             },
-            version: SemverVersion(create_update.version),
+            version: db::model::SemverVersion(create_update.version),
             component_type: create_update.component_type.into(),
         };
 
@@ -382,6 +381,37 @@ impl super::Nexus {
             .await
     }
 
+    pub async fn create_update_deployment(
+        &self,
+        opctx: &OpContext,
+        start: params::SystemUpdateStart,
+    ) -> CreateResult<db::model::UpdateDeployment> {
+        // 404 if specified version doesn't exist
+        // TODO: is 404 the right error for starting an update with a nonexistent version?
+        self.system_update_fetch_by_version(opctx, &start.version).await?;
+
+        // We only need to look at the latest deployment because it's the only
+        // one that could be running
+
+        // let latest_deployment = self.latest_update_deployment(opctx).await;
+        // let status = latest_deployment
+        //     .map_or(db::model::UpdateStatus::Steady, |d| d.status);
+        // if status == db::model::UpdateStatus::Updating {
+        //     // TODO: error if another update is running
+        //     return Err(Error::ObjectAlreadyExists {
+        //         type_name: external::ResourceType::UpdateDeployment,
+        //         object_name: "uh".to_string(), // TODO: id?
+        //     });
+        // }
+
+        let deployment = db::model::UpdateDeployment {
+            identity: db::model::UpdateDeploymentIdentity::new(Uuid::new_v4()),
+            version: db::model::SemverVersion(start.version),
+            status: db::model::UpdateStatus::Updating,
+        };
+        self.db_datastore.create_update_deployment(opctx, deployment).await
+    }
+
     pub async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,
@@ -402,6 +432,13 @@ impl super::Nexus {
             .await?;
         Ok(db_deployment)
     }
+
+    // TODO: pub async fn steady_update_deployment(
+    //     &self,
+    //     opctx: &OpContext,
+    //     deployment_id: Uuid,
+    // ) -> UpdateResult<db::model::UpdateDeployment> {
+    // }
 
     pub async fn latest_update_deployment(
         &self,
@@ -431,14 +468,14 @@ impl super::Nexus {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
+    use std::{assert_matches::assert_matches, num::NonZeroU32};
 
     use crate::context::OpContext;
     use dropshot::PaginationOrder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{
         params::{
-            ComponentUpdateCreate, SystemUpdateCreate,
+            ComponentUpdateCreate, SystemUpdateCreate, SystemUpdateStart,
             UpdateableComponentCreate,
         },
         shared::UpdateableComponentType,
@@ -673,8 +710,43 @@ mod tests {
 
         assert_eq!(deployments.len(), 0);
 
-        // add some
+        // start update fails with nonexistent version
+        let start = SystemUpdateStart {
+            version: external::SemverVersion::new(1, 0, 0),
+        };
+        let not_found = nexus
+            .create_update_deployment(&opctx, start.clone())
+            .await
+            .unwrap_err();
 
-        // test latest_deployment
+        assert_matches!(not_found, external::Error::ObjectNotFound { .. });
+
+        // create system update 1.0.0
+        let create = SystemUpdateCreate {
+            version: external::SemverVersion::new(1, 0, 0),
+        };
+        nexus
+            .create_system_update(&opctx, create)
+            .await
+            .expect("Failed to create system update");
+
+        // start deployment works
+        let d = nexus
+            .create_update_deployment(&opctx, start)
+            .await
+            .expect("Failed to create deployment");
+
+        let deployments = nexus
+            .update_deployments_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap();
+
+        assert_eq!(deployments.len(), 1);
+        assert_eq!(deployments.get(0).unwrap().identity.id, d.identity.id);
+
+        let latest_deployment =
+            nexus.latest_update_deployment(&opctx).await.unwrap();
+
+        assert_eq!(latest_deployment.identity.id, d.identity.id);
     }
 }
