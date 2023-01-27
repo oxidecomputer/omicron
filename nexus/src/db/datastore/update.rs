@@ -79,8 +79,6 @@ impl DataStore {
 
         diesel::insert_into(system_update)
             .values(update.clone())
-            .on_conflict(version)
-            .do_nothing()
             .returning(SystemUpdate::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
@@ -103,6 +101,8 @@ impl DataStore {
     ) -> CreateResult<ComponentUpdate> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
+        // TODO: make sure system update with that ID exists first
+
         use db::schema::component_update;
         use db::schema::system_update_component_update as join_table;
 
@@ -113,8 +113,6 @@ impl DataStore {
             .transaction_async(|conn| async move {
                 let db_update = diesel::insert_into(component_update::table)
                     .values(update.clone())
-                    .on_conflict(component_update::columns::id) // TODO: should also conflict on version
-                    .do_nothing()
                     .returning(ComponentUpdate::as_returning())
                     .get_result_async(&conn)
                     .await?;
@@ -124,8 +122,6 @@ impl DataStore {
                         system_update_id,
                         component_update_id: update.id(),
                     })
-                    .on_conflict(join_table::all_columns)
-                    .do_nothing()
                     .returning(SystemUpdateComponentUpdate::as_returning())
                     .get_result_async(&conn)
                     .await?;
@@ -192,8 +188,6 @@ impl DataStore {
 
         diesel::insert_into(updateable_component)
             .values(component.clone())
-            .on_conflict(id) // TODO: should probably conflict on (component_type, device_id)
-            .do_nothing()
             .returning(UpdateableComponent::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await

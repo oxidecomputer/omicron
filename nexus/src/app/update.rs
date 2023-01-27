@@ -307,8 +307,6 @@ impl super::Nexus {
             component_type: create_update.component_type.into(),
         };
 
-        // TODO: make sure system update with that ID exists first
-
         self.db_datastore
             .create_component_update(
                 opctx,

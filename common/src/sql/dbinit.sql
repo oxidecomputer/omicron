@@ -1535,14 +1535,13 @@ CREATE TABLE omicron.public.system_update (
 );
 
 CREATE UNIQUE INDEX ON omicron.public.system_update (
-    version_sort
-);
- 
--- Used for the join with components. That and pagination is all id is used for
-CREATE UNIQUE INDEX ON omicron.public.system_update (
     id
 );
 
+CREATE UNIQUE INDEX ON omicron.public.system_update (
+    version_sort
+);
+ 
 CREATE TYPE omicron.public.updateable_component_type AS ENUM (
     'bootloader_for_rot',
     'bootloader_for_sp',
@@ -1571,11 +1570,16 @@ CREATE TABLE omicron.public.component_update (
     -- On component updates there's no device ID because the update can apply to
     -- multiple instances of a given device kind
 
-    -- So far we are not implementing fetch component update by (component_type,
-    -- version). If we did, we'd probably want to make that pair the PK.
+    -- The *system* update version associated with this version (this is confusing, will rename)
     version STRING(64) NOT NULL, -- TODO: length
+    -- TODO: add component update version to component_update
 
     component_type omicron.public.updateable_component_type NOT NULL
+);
+
+-- version is unique per component type
+CREATE UNIQUE INDEX ON omicron.public.component_update (
+    component_type, version
 );
 
 /*
@@ -1620,6 +1624,11 @@ CREATE TABLE omicron.public.updateable_component (
     -- TODO: status reason for updateable_component
 );
 
+-- can't have two components of the same type with the same device ID
+CREATE UNIQUE INDEX ON omicron.public.updateable_component (
+    component_type, device_id
+);
+
 CREATE INDEX ON omicron.public.updateable_component (
     version_sort
 );
@@ -1633,7 +1642,9 @@ CREATE TABLE omicron.public.update_deployment (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    /* Unique semver version */
+    -- semver version of corresponding system update
+    -- TODO: this makes sense while version is the PK of system_update, but
+    -- if/when I change that back to ID, this needs to be the ID too
     version STRING(64) NOT NULL,
 
     status update_status NOT NULL
