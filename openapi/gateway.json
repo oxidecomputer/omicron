@@ -303,6 +303,115 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/active-slot": {
+      "get": {
+        "summary": "Get the currently-active slot for an SP component",
+        "description": "Note that the meaning of \"current\" in \"currently-active\" may vary depending on the component: for example, it may mean \"the actively-running slot\" or \"the slot that will become active the next time the component is booted\".",
+        "operationId": "sp_component_active_slot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentFirmwareSlot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the currently-active slot for an SP component",
+        "description": "Note that the meaning of \"current\" in \"currently-active\" may vary depending on the component: for example, it may mean \"the actively-running slot\" or \"the slot that will become active the next time the component is booted\".",
+        "operationId": "sp_component_active_slot_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpComponentFirmwareSlot"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/serial-console/attach": {
       "get": {
         "summary": "Upgrade into a websocket connection attached to the given SP component's",
@@ -733,6 +842,20 @@
           "A0",
           "A1",
           "A2"
+        ]
+      },
+      "SpComponentFirmwareSlot": {
+        "description": "Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for the host boot flash.",
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "slot"
         ]
       },
       "SpComponentInfo": {
