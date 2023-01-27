@@ -866,8 +866,6 @@ impl StorageWorker {
                                 DiskVariant::M2 => PhysicalDiskKind::M2,
                             },
                             sled_id,
-                            // TODO TODO TODO: ??? Maybe remove?
-                            total_size: 0,
                         };
                         nexus.physical_disk_put(&request).await.map_err(
                             |e| backoff::BackoffError::transient(e.to_string()),
@@ -1058,20 +1056,26 @@ impl StorageWorker {
         &mut self,
         resources: StorageResources,
     ) -> Result<(), Error> {
-        self.do_work_internal(resources)
-            .await
-            .map(|()| {
-                info!(self.log, "StorageWorker exited successfully");
-            })
-            .map_err(|e| {
-                warn!(self.log, "StorageWorker exited unexpectedly: {}", e);
-                e
-            })
+        loop {
+            match self.do_work_internal(&resources).await {
+                Ok(()) => {
+                    info!(self.log, "StorageWorker exited successfully");
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(
+                        self.log,
+                        "StorageWorker encountered unexpected error: {}", e
+                    );
+                    // ... for now, keep trying.
+                }
+            }
+        }
     }
 
     async fn do_work_internal(
         &mut self,
-        resources: StorageResources,
+        resources: &StorageResources,
     ) -> Result<(), Error> {
         loop {
             tokio::select! {

@@ -148,8 +148,7 @@ CREATE TABLE omicron.public.physical_disk (
     variant omicron.public.physical_disk_kind NOT NULL,
 
     -- FK into the Sled table
-    sled_id UUID NOT NULL,
-    total_size INT NOT NULL
+    sled_id UUID NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.physical_disk (

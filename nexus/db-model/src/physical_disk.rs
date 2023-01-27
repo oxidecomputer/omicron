@@ -7,6 +7,7 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{physical_disk, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_types::{external_api::views, identity::Asset};
 use uuid::Uuid;
 
 /// Physical disk attached to sled.
@@ -24,7 +25,6 @@ pub struct PhysicalDisk {
 
     pub variant: PhysicalDiskKind,
     pub sled_id: Uuid,
-    pub total_size: i64,
 }
 
 impl PhysicalDisk {
@@ -34,7 +34,6 @@ impl PhysicalDisk {
         model: String,
         variant: PhysicalDiskKind,
         sled_id: Uuid,
-        total_size: i64,
     ) -> Self {
         Self {
             identity: PhysicalDiskIdentity::new(Uuid::new_v4()),
@@ -45,7 +44,18 @@ impl PhysicalDisk {
             model,
             variant,
             sled_id,
-            total_size,
+        }
+    }
+}
+
+impl From<PhysicalDisk> for views::PhysicalDisk {
+    fn from(disk: PhysicalDisk) -> Self {
+        Self {
+            identity: disk.identity(),
+            vendor: disk.vendor,
+            serial: disk.serial,
+            model: disk.model,
+            disk_type: disk.variant.into(),
         }
     }
 }

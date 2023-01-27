@@ -18,7 +18,7 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::upsert::excluded;
+// use diesel::upsert::excluded;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -40,11 +40,7 @@ impl DataStore {
         let sled_id = disk.sled_id;
         Sled::insert_resource(
             sled_id,
-            diesel::insert_into(dsl::physical_disk)
-                .values(disk.clone())
-                .on_conflict((dsl::vendor, dsl::serial, dsl::model))
-                .do_update()
-                .set((dsl::sled_id.eq(excluded(dsl::sled_id)),)),
+            diesel::insert_into(dsl::physical_disk).values(disk.clone()),
         )
         .insert_and_get_result_async(self.pool())
         .await

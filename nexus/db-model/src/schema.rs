@@ -418,7 +418,6 @@ table! {
 
         variant -> crate::PhysicalDiskKindEnum,
         sled_id -> Uuid,
-        total_size -> Int8,
     }
 }
 

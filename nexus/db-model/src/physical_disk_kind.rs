@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::internal_api;
+use nexus_types::{external_api::views, internal_api};
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
@@ -25,6 +25,17 @@ impl From<internal_api::params::PhysicalDiskKind> for PhysicalDiskKind {
         match k {
             internal_api::params::PhysicalDiskKind::M2 => PhysicalDiskKind::M2,
             internal_api::params::PhysicalDiskKind::U2 => PhysicalDiskKind::U2,
+        }
+    }
+}
+
+impl From<PhysicalDiskKind> for views::PhysicalDiskType {
+    fn from(kind: PhysicalDiskKind) -> Self {
+        use views::PhysicalDiskType as api;
+        use PhysicalDiskKind as db;
+        match kind {
+            db::M2 => api::Internal,
+            db::U2 => api::External,
         }
     }
 }

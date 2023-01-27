@@ -1845,10 +1845,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "total_size": {
-            "type": "integer",
-            "format": "int64"
-          },
           "variant": {
             "$ref": "#/components/schemas/PhysicalDiskKind"
           },
@@ -1860,7 +1856,6 @@
           "model",
           "serial",
           "sled_id",
-          "total_size",
           "variant",
           "vendor"
         ]

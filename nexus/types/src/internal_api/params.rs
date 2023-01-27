@@ -56,7 +56,6 @@ pub struct PhysicalDiskPutRequest {
 
     pub variant: PhysicalDiskKind,
     pub sled_id: Uuid,
-    pub total_size: i64,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

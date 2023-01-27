@@ -216,7 +216,7 @@ impl Disk {
                 // To remedy: Let's enforce that the partition exists.
                 info!(
                     log,
-                    "Formatting zpool on disk {}",
+                    "GPT exists without Zpool: formatting zpool on disk {}",
                     paths.devfs_path.display()
                 );
                 // If a zpool does not already exist, create one.

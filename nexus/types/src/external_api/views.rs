@@ -285,12 +285,33 @@ pub struct Rack {
 
 // SLEDS
 
-/// Client view of an [`Sled`]
+/// Client view of a [`Sled`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
+}
+
+// PHYSICAL DISKS
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum PhysicalDiskType {
+    Internal,
+    External,
+}
+
+/// Client view of a [`PhysicalDisk`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PhysicalDisk {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub disk_type: PhysicalDiskType,
 }
 
 // SILO USERS

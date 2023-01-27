@@ -10,8 +10,8 @@ use super::{
     console_api, device_auth, params, views,
     views::{
         Certificate, GlobalImage, Group, IdentityProvider, Image, Organization,
-        Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin,
-        Vpc, VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
+        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -239,6 +239,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
+        api.register(physical_disks_list)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -5329,6 +5330,44 @@ async fn sled_view(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let sled_info = nexus.sled_lookup(&opctx, &path.sled_id).await?;
         Ok(HttpResponseOk(sled_info.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Physical disks
+
+/// List physical disks attached to sleds
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/sleds/{sled_id}/disks",
+    tags = ["system"],
+}]
+async fn physical_disks_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledPathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .physical_disks_list(
+                &opctx,
+                path.sled_id,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
