@@ -11,14 +11,20 @@ struct Args {
     #[clap(subcommand)]
     command: Command,
 
-    #[clap(short = 'k', long = "key", env = "TUFACEOUS_KEY", required = false)]
+    #[clap(
+        short = 'k',
+        long = "key",
+        env = "TUFACEOUS_KEY",
+        required = false,
+        global = true
+    )]
     keys: Vec<Key>,
 
-    #[clap(long, value_parser = parse_duration_or_datetime, default_value = "7d")]
+    #[clap(long, value_parser = parse_duration_or_datetime, default_value = "7d", global = true)]
     expiry: DateTime<Utc>,
 
     /// TUF repository path (default: current working directory)
-    #[clap(short = 'r', long)]
+    #[clap(short = 'r', long, global = true)]
     repo: Option<Utf8PathBuf>,
 }
 
