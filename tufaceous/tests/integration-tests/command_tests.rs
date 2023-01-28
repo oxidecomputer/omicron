@@ -49,7 +49,10 @@ fn test_init_and_add() -> Result<()> {
         ArtifactKind::Known(UpdateArtifactKind::Zone),
         "artifact kind"
     );
-    assert_eq!(artifact.target, "omicron-nexus-42.0.0.tar.gz", "artifact target");
+    assert_eq!(
+        artifact.target, "omicron-nexus-42.0.0.tar.gz",
+        "artifact target"
+    );
 
     Ok(())
 }
