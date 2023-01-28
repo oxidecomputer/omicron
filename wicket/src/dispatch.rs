@@ -38,7 +38,12 @@ impl WicketApp {
     /// Executes the command.
     pub fn exec(self) -> Result<()> {
         // TODO: make this configurable?
-        let wicketd_addr: SocketAddrV6 = "[::1]:8000".parse().unwrap();
+        // To launch within the switch zone, and as part of a login shell,
+        // we likely have to store this in a config file, which may have to be written
+        // by sled-agent.
+        //
+        // We can't just use a command line-arg because we want to act as a login shells
+        let wicketd_addr: SocketAddrV6 = "[::1]:12226".parse().unwrap();
 
         match self.shell_args {
             Some(shell_args) => {
