@@ -445,6 +445,7 @@ pub struct UpdateableComponent {
     pub device_id: String,
     pub component_type: shared::UpdateableComponentType,
     pub version: SemverVersion,
+    pub system_version: SemverVersion,
     pub status: UpdateStatus,
 }
 

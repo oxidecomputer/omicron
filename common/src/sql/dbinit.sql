@@ -1608,13 +1608,20 @@ CREATE TABLE omicron.public.updateable_component (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    -- free-form string that comes from the device
+    -- Free-form string that comes from the device
     device_id STRING(40) NOT NULL,
+
     component_type omicron.public.updateable_component_type NOT NULL,
 
-    version STRING(64) NOT NULL,
+    -- The semver version of this component's own software
+    version STRING(64) NOT NULL, -- TODO: length
+
+    -- The version of the system update this component's software came from.
+    -- This may need to be nullable if we are registering components before we
+    -- know about system versions at all
+    system_version STRING(64) NOT NULL, -- TODO: length
     -- version string with maj/min/patch 0-padded to be string sortable
-    version_sort STRING(64) NOT NULL, -- TODO: length
+    system_version_sort STRING(64) NOT NULL, -- TODO: length
 
     status update_status NOT NULL
     -- TODO: status reason for updateable_component
@@ -1626,7 +1633,7 @@ CREATE UNIQUE INDEX ON omicron.public.updateable_component (
 );
 
 CREATE INDEX ON omicron.public.updateable_component (
-    version_sort
+    system_version_sort
 );
 
 /*

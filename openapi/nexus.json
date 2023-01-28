@@ -13986,6 +13986,9 @@
           "status": {
             "$ref": "#/components/schemas/UpdateStatus"
           },
+          "system_version": {
+            "$ref": "#/components/schemas/SemverVersion"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -14005,6 +14008,7 @@
           "device_id",
           "id",
           "status",
+          "system_version",
           "time_created",
           "time_modified",
           "version"

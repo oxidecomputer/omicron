@@ -720,7 +720,8 @@ table! {
 
         device_id -> Text,
         version -> Text,
-        version_sort -> Text,
+        system_version -> Text,
+        system_version_sort -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
         status -> crate::UpdateStatusEnum,
         // TODO: status reason for updateable_component

@@ -5448,8 +5448,8 @@ async fn system_version(
         // Updateable components, however, are populated at rack setup before
         // the external API is even started, so if we get here and there are no
         // components, that's a real issue and the 500 we throw is appropriate.
-        let low = nexus.lowest_component_version(&opctx).await?.into();
-        let high = nexus.highest_component_version(&opctx).await?.into();
+        let low = nexus.lowest_component_system_version(&opctx).await?.into();
+        let high = nexus.highest_component_system_version(&opctx).await?.into();
 
         Ok(HttpResponseOk(views::SystemVersion {
             version_range: views::VersionRange { low, high },

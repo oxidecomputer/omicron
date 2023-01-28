@@ -440,18 +440,18 @@ impl super::Nexus {
         self.db_datastore.latest_update_deployment(opctx).await
     }
 
-    pub async fn lowest_component_version(
+    pub async fn lowest_component_system_version(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::SemverVersion> {
-        self.db_datastore.lowest_component_version(opctx).await
+        self.db_datastore.lowest_component_system_version(opctx).await
     }
 
-    pub async fn highest_component_version(
+    pub async fn highest_component_system_version(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::SemverVersion> {
-        self.db_datastore.highest_component_version(opctx).await
+        self.db_datastore.highest_component_system_version(opctx).await
     }
 }
 
@@ -634,27 +634,57 @@ mod tests {
 
         assert_eq!(components.len(), 0);
 
-        // TODO: test high and low version with no updateable components
-        // with no components these should both 404 (currently they 500)
-        // let low = nexus.lowest_component_version(&opctx).await.unwrap_err();
-        // let high = nexus.highest_component_version(&opctx).await.unwrap_err();
+        // with no components these should both 500. as discussed in the
+        // implementation, this is appropriate because we should never be
+        // running the external API without components populated
+        let low =
+            nexus.lowest_component_system_version(&opctx).await.unwrap_err();
+        assert_matches!(low, external::Error::InternalError { .. });
+        let high =
+            nexus.highest_component_system_version(&opctx).await.unwrap_err();
+        assert_matches!(high, external::Error::InternalError { .. });
 
+        // creating a component if its system_version doesn't exist is a 404
+        let uc_create = UpdateableComponentCreate {
+            version: external::SemverVersion::new(0, 4, 1),
+            system_version: external::SemverVersion::new(0, 2, 0),
+            component_type: UpdateableComponentType::BootloaderForSp,
+            device_id: "look-a-device".to_string(),
+        };
+        let uc_404 = nexus
+            .create_updateable_component(&opctx, uc_create.clone())
+            .await
+            .unwrap_err();
+        assert_matches!(uc_404, external::Error::ObjectNotFound { .. });
+
+        // create system updates for the component updates to hang off of
+        let v020 = external::SemverVersion::new(0, 2, 0);
         nexus
-            .create_updateable_component(
-                &opctx,
-                UpdateableComponentCreate {
-                    version: external::SemverVersion::new(0, 2, 0),
-                    component_type: UpdateableComponentType::BootloaderForSp,
-                    device_id: "look-a-device".to_string(),
-                },
-            )
+            .create_system_update(&opctx, SystemUpdateCreate { version: v020 })
+            .await
+            .expect("Failed to create system update");
+        let v3 = external::SemverVersion::new(3, 0, 0);
+        nexus
+            .create_system_update(&opctx, SystemUpdateCreate { version: v3 })
+            .await
+            .expect("Failed to create system update");
+        let v10 = external::SemverVersion::new(10, 0, 0);
+        nexus
+            .create_system_update(&opctx, SystemUpdateCreate { version: v10 })
+            .await
+            .expect("Failed to create system update");
+
+        // now uc_create and friends will work
+        nexus
+            .create_updateable_component(&opctx, uc_create)
             .await
             .expect("failed to create updateable component");
         nexus
             .create_updateable_component(
                 &opctx,
                 UpdateableComponentCreate {
-                    version: external::SemverVersion::new(3, 0, 0),
+                    version: external::SemverVersion::new(0, 4, 1),
+                    system_version: external::SemverVersion::new(3, 0, 0),
                     component_type: UpdateableComponentType::HeliosHostPhase2,
                     device_id: "another-device".to_string(),
                 },
@@ -665,7 +695,8 @@ mod tests {
             .create_updateable_component(
                 &opctx,
                 UpdateableComponentCreate {
-                    version: external::SemverVersion::new(10, 0, 0),
+                    version: external::SemverVersion::new(0, 4, 1),
+                    system_version: external::SemverVersion::new(10, 0, 0),
                     component_type: UpdateableComponentType::HeliosHostPhase1,
                     device_id: "a-third-device".to_string(),
                 },
@@ -681,9 +712,10 @@ mod tests {
 
         assert_eq!(components.len(), 3);
 
-        let low = nexus.lowest_component_version(&opctx).await.unwrap();
+        let low = nexus.lowest_component_system_version(&opctx).await.unwrap();
         assert_eq!(&low.to_string(), "0.2.0");
-        let high = nexus.highest_component_version(&opctx).await.unwrap();
+        let high =
+            nexus.highest_component_system_version(&opctx).await.unwrap();
         assert_eq!(&high.to_string(), "10.0.0");
 
         // TODO: update the version of a component

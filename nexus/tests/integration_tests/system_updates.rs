@@ -28,11 +28,26 @@ async fn populate_db(cptestctx: &ControlPlaneTestContext) {
         cptestctx.server.apictx().nexus.datastore().clone(),
     );
 
+    // system updates have to exist first
+    let create_su =
+        params::SystemUpdateCreate { version: SemverVersion::new(0, 2, 0) };
+    nexus
+        .create_system_update(&opctx, create_su)
+        .await
+        .expect("Failed to create system update");
+    let create_su =
+        params::SystemUpdateCreate { version: SemverVersion::new(1, 0, 1) };
+    nexus
+        .create_system_update(&opctx, create_su)
+        .await
+        .expect("Failed to create system update");
+
     nexus
         .create_updateable_component(
             &opctx,
             params::UpdateableComponentCreate {
-                version: SemverVersion::new(0, 2, 0),
+                version: SemverVersion::new(0, 4, 1),
+                system_version: SemverVersion::new(0, 2, 0),
                 component_type: UpdateableComponentType::BootloaderForSp,
                 device_id: "look-a-device".to_string(),
             },
@@ -44,7 +59,8 @@ async fn populate_db(cptestctx: &ControlPlaneTestContext) {
         .create_updateable_component(
             &opctx,
             params::UpdateableComponentCreate {
-                version: SemverVersion::new(1, 0, 1),
+                version: SemverVersion::new(0, 4, 1),
+                system_version: SemverVersion::new(1, 0, 1),
                 component_type: UpdateableComponentType::HubrisForGimletSp,
                 device_id: "another-device".to_string(),
             },

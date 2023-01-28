@@ -1152,18 +1152,22 @@ pub struct SystemUpdateStart {
     pub version: SemverVersion,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SystemUpdateCreate {
     pub version: SemverVersion,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ComponentUpdateCreate {
     pub version: SemverVersion,
     pub component_type: shared::UpdateableComponentType,
     pub system_update_id: Uuid,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpdateableComponentCreate {
     pub version: SemverVersion,
+    pub system_version: SemverVersion,
     pub component_type: shared::UpdateableComponentType,
     pub device_id: String,
 }

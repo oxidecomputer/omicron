@@ -247,9 +247,10 @@ pub struct UpdateableComponent {
     pub device_id: String,
     pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
+    pub system_version: SemverVersion,
     /// Semver version string with 0-padding on the numeric parts to make it
     /// DB-sortable. See `to_sortable_string` on `SemverVersion`
-    pub version_sort: String,
+    pub system_version_sort: String,
     pub status: UpdateStatus,
     // TODO: point to the actual update artifact
 }
@@ -260,11 +261,12 @@ impl TryFrom<params::UpdateableComponentCreate> for UpdateableComponent {
     fn try_from(
         create: params::UpdateableComponentCreate,
     ) -> Result<Self, Self::Error> {
-        let version = SemverVersion(create.version);
+        let system_version = SemverVersion(create.system_version);
         Ok(Self {
             identity: UpdateableComponentIdentity::new(Uuid::new_v4()),
-            version: version.clone(),
-            version_sort: version.to_sortable_string()?,
+            version: SemverVersion(create.version),
+            system_version: system_version.clone(),
+            system_version_sort: system_version.to_sortable_string()?,
             component_type: create.component_type.into(),
             device_id: create.device_id,
             status: UpdateStatus::Steady,
@@ -279,6 +281,7 @@ impl From<UpdateableComponent> for views::UpdateableComponent {
             device_id: component.device_id,
             component_type: component.component_type.into(),
             version: component.version.into(),
+            system_version: component.system_version.into(),
             status: component.status.into(),
         }
     }
