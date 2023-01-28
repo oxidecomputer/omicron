@@ -13,7 +13,7 @@ pub struct AddZone {
 }
 
 impl AddZone {
-    /// Creates a [`NewZone`] from the path.
+    /// Creates an [`AddZone`] from the path, name and version.
     ///
     /// If the name is `None`, it is derived from the filename of the path
     /// without matching extensions.
