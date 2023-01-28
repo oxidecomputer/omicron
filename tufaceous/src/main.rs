@@ -62,15 +62,13 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::AddZone { name, zone, version } => {
-            let repo = OmicronRepo::load(&repo_path)?;
+            let repo = OmicronRepo::load_ignore_expiration(&repo_path)?;
             let mut editor = repo.into_editor()?;
 
             let add_zone = AddZone::new(zone, name, version)?;
 
-            editor
-                .add_zone(&add_zone, args.expiry)
-                .context("error adding zone")?;
-            editor.sign_and_finish(args.keys)?;
+            editor.add_zone(&add_zone).context("error adding zone")?;
+            editor.sign_and_finish(args.keys, args.expiry)?;
             println!(
                 "added zone {}, version {}",
                 add_zone.name(),
