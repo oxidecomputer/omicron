@@ -8,7 +8,6 @@ publish = false
 anyhow = { workspace = true, features = ["backtrace"] }
 camino.workspace = true
 chrono.workspace = true
-console = { version = "0.15.5", default-features = false }
 fs-err.workspace = true
 hex.workspace = true
 humantime = "2.1.0"

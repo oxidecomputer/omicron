@@ -6993,7 +6993,6 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "console",
  "fs-err",
  "hex",
  "humantime",
