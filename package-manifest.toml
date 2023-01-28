@@ -77,7 +77,7 @@ service_name = "wicketd"
 source.type = "local"
 source.rust.binary_names = ["wicketd"]
 source.rust.release = true
-#source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
 output.type = "zone"
 output.intermediate_only = true
 
