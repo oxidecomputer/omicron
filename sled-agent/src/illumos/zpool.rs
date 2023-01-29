@@ -163,6 +163,8 @@ pub struct Zpool {}
 impl Zpool {
     pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("create");
         cmd.arg(&name.to_string());
         cmd.arg(vdev);

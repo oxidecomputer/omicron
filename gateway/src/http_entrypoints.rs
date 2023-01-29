@@ -297,6 +297,15 @@ enum PowerState {
     A2,
 }
 
+/// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
+/// the host boot flash.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+pub struct SpComponentFirmwareSlot {
+    pub slot: u16,
+}
+
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
 // because it's embedded in other structs via `serde(flatten)`, which does not
 // play well with the way dropshot parses HTTP queries/paths. serde ends up
@@ -533,6 +542,59 @@ async fn sp_component_get(
     _path: Path<PathSpComponent>,
 ) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
     todo!()
+}
+
+/// Get the currently-active slot for an SP component
+///
+/// Note that the meaning of "current" in "currently-active" may vary depending
+/// on the component: for example, it may mean "the actively-running slot" or
+/// "the slot that will become active the next time the component is booted".
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/active-slot",
+}]
+async fn sp_component_active_slot_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SpComponentFirmwareSlot>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let slot = sp
+        .component_active_slot(component)
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(SpComponentFirmwareSlot { slot }))
+}
+
+/// Set the currently-active slot for an SP component
+///
+/// Note that the meaning of "current" in "currently-active" may vary depending
+/// on the component: for example, it may mean "the actively-running slot" or
+/// "the slot that will become active the next time the component is booted".
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/active-slot",
+}]
+async fn sp_component_active_slot_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+    body: TypedBody<SpComponentFirmwareSlot>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+    let slot = body.into_inner().slot;
+
+    sp.set_component_active_slot(component, slot)
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// Upgrade into a websocket connection attached to the given SP component's
@@ -876,6 +938,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_power_state_set)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_active_slot_get)?;
+        api.register(sp_component_active_slot_set)?;
         api.register(sp_component_serial_console_attach)?;
         api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
