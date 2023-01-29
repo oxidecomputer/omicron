@@ -13,6 +13,9 @@ const FSTYP: &str = "/usr/sbin/fstyp";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("fstype output is not valid UTF-8: {0}")]
+    NotValidUtf8(#[from] std::string::FromUtf8Error),
+
     #[error("fstyp execution error: {0}")]
     Execution(#[from] crate::illumos::ExecutionError),
 
@@ -38,7 +41,7 @@ impl Fstyp {
         let cmd = cmd.arg(FSTYP).arg("-a").arg(path);
 
         let output = execute(cmd).map_err(Error::from)?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = String::from_utf8(output.stdout)?;
 
         let mut seen_zfs_marker = false;
         for line in stdout.lines() {

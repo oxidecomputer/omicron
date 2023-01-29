@@ -311,7 +311,7 @@ fn find_properties<'a, const N: usize>(
     // them into a HashMap of "property name -> property".
     let name_set = HashSet::from(property_names);
     let mut properties = HashMap::new();
-    for property in node.props().into_iter() {
+    for property in node.props() {
         let property = property.map_err(Error::DevInfo)?;
         if let Some(name) = name_set.get(property.name().as_str()) {
             properties.insert(*name, property);
