@@ -422,11 +422,11 @@ fn poll_device_tree(
     log: &Logger,
     inner: &Arc<Mutex<HardwareView>>,
     tx: &broadcast::Sender<HardwareUpdate>,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
     let polled_hw = HardwareSnapshot::new(log).map_err(|e| {
         warn!(log, "Failed to poll device tree: {e}");
-        e.to_string()
+        e
     })?;
 
     // After inspecting the device tree, diff with the old view, and provide
@@ -505,8 +505,14 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        poll_device_tree(&log, &inner, &tx)
-            .map_err(|err| format!("Failed to poll device tree: {err}"))?;
+        match poll_device_tree(&log, &inner, &tx) {
+            // Allow non-gimlet devices to proceed with a "null" view of
+            // hardware, otherwise they won't be able to start.
+            Ok(_) | Err(Error::NotAGimlet) => (),
+            Err(err) => {
+                return Err(format!("Failed to poll device tree: {err}"))
+            }
+        };
 
         let log2 = log.clone();
         let inner2 = inner.clone();
