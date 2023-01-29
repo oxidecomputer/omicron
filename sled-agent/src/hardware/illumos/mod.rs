@@ -5,9 +5,9 @@
 use crate::hardware::{
     DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
 };
-use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node};
+use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use slog::Logger;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -16,7 +16,6 @@ use tokio::task::JoinHandle;
 
 mod disk;
 mod gpt;
-mod nvme;
 
 pub use disk::ensure_partition_layout;
 
@@ -28,8 +27,8 @@ enum Error {
     #[error("Device does not appear to be an Oxide Gimlet")]
     NotAGimlet,
 
-    #[error("Missing device property {name}")]
-    MissingDeviceProperty { name: String },
+    #[error("Node {node} missing device property {name}")]
+    MissingDeviceProperty { node: String, name: String },
 
     #[error("Unrecognized slot for device {slot}")]
     UnrecognizedSlot { slot: i64 },
@@ -39,9 +38,6 @@ enum Error {
 
     #[error("Could not translate {0} to '/dev' path: no links")]
     NoDevLinks(PathBuf),
-
-    #[error("Cannot query for NVME identity of {path}: {err}")]
-    MissingNVMEIdentity { path: PathBuf, err: std::io::Error },
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -272,16 +268,72 @@ fn get_dev_path_of_whole_disk(
     Ok(None)
 }
 
-// Gather a notion of "device identity".
-fn blkdev_device_identity(devfs_path: &str) -> Result<DiskIdentity, Error> {
-    let path = PathBuf::from(devfs_path);
-    let ctrl_id = nvme::identify_controller(&path)
-        .map_err(|err| Error::MissingNVMEIdentity { path, err })?;
+fn get_parent_node<'a>(
+    node: &Node<'a>,
+    expected_parent_driver_name: &'static str,
+) -> Result<Node<'a>, Error> {
+    let Some(parent) = node.parent().map_err(Error::DevInfo)? else {
+        return Err(Error::DevInfo(anyhow::anyhow!("{} has no parent node", node.node_name())));
+    };
+    if parent.driver_name().as_deref() != Some(expected_parent_driver_name) {
+        return Err(Error::DevInfo(anyhow::anyhow!(
+            "{} has non-{} parent node",
+            node.node_name(),
+            expected_parent_driver_name
+        )));
+    }
+    Ok(parent)
+}
 
-    let vendor = format!("{:x}", ctrl_id.vendor_id);
-    let serial = ctrl_id.serial;
-    let model = ctrl_id.model;
-    Ok(DiskIdentity { vendor, serial, model })
+fn i64_from_property(prop: &Property<'_>) -> Result<i64, Error> {
+    prop.as_i64().ok_or_else(|| Error::UnexpectedPropertyType {
+        name: prop.name(),
+        ty: "i64".to_string(),
+    })
+}
+
+fn string_from_property(prop: &Property<'_>) -> Result<String, Error> {
+    prop.to_str().ok_or_else(|| Error::UnexpectedPropertyType {
+        name: prop.name(),
+        ty: "String".to_string(),
+    })
+}
+
+// Looks up multiple property names on a devinfo node.
+//
+// Returns all the properties in the same order of the input names.
+// Returns an error if any of the properties are missing.
+fn find_properties<'a, const N: usize>(
+    node: &'a Node<'_>,
+    property_names: [&'static str; N],
+) -> Result<[Property<'a>; N], Error> {
+    // The properties could show up in any order, so first we place
+    // them into a HashMap of "property name -> property".
+    let name_set = HashSet::from(property_names);
+    let mut properties = HashMap::new();
+    for property in node.props().into_iter() {
+        let property = property.map_err(Error::DevInfo)?;
+        if let Some(name) = name_set.get(property.name().as_str()) {
+            properties.insert(*name, property);
+        }
+    }
+
+    // Next, we convert the properties back to an array, with values in the same
+    // indices as the input.
+    let mut output = Vec::with_capacity(N);
+    for name in &property_names {
+        let Some(property) = properties.remove(name) else {
+            return Err(Error::MissingDeviceProperty {
+                node: node.node_name(),
+                name: name.to_string(),
+            });
+        };
+        output.push(property);
+    }
+
+    // Unwrap safety: the "output" vec should have one entry for each of the
+    // "property_names", so they should have the same length (N).
+    Ok(output.try_into().map_err(|_| "Unexpected output size").unwrap())
 }
 
 fn poll_blkdev_node(
@@ -310,56 +362,44 @@ fn poll_blkdev_node(
     assert!(devfs_path.starts_with('/'));
     let devfs_path = format!("/devices{devfs_path}");
 
-    //    for (name, prop) in node.string_props().into_iter() {
-    //        info!(log, "blkdev property: {name} = {prop}");
-    //    }
+    let properties = find_properties(
+        &node,
+        ["inquiry-serial-no", "inquiry-product-id", "inquiry-vendor-id"],
+    )?;
+    let inquiry_serial_no = string_from_property(&properties[0])?;
+    let inquiry_product_id = string_from_property(&properties[1])?;
+    let inquiry_vendor_id = string_from_property(&properties[2])?;
 
     // We expect that the parent of the "blkdev" node is an "nvme" driver.
-    let Some(nvme_node) = node.parent().map_err(Error::DevInfo)? else {
-        return Err(Error::DevInfo(anyhow::anyhow!("blkdev has no parent node")));
+    let nvme_node = get_parent_node(&node, "nvme")?;
+
+    let vendor_id =
+        i64_from_property(&find_properties(&nvme_node, ["vendor-id"])?[0])?;
+
+    // The model is generally equal to "inquiry-vendor-id" plus
+    // "inquiry-product-id", separated by a space.
+    //
+    // However, libdevfs may emit a placeholder value for the
+    // "inquiry-vendor-id", in which case it should be omitted.
+    let model = match inquiry_vendor_id.as_str() {
+        "" | "NVMe" => inquiry_product_id,
+        _ => format!("{inquiry_vendor_id} {inquiry_product_id}"),
     };
-    if nvme_node.driver_name().as_deref() != Some("nvme") {
-        return Err(Error::DevInfo(anyhow::anyhow!(
-            "blkdev has non-nvme parent node"
-        )));
-    }
 
-    //    for (name, prop) in nvme_node.string_props().into_iter() {
-    //        info!(log, "nvme property: {name} = {prop}");
-    //    }
-
-    let device_id = blkdev_device_identity(&format!(
-        "/devices{}:devctl",
-        nvme_node.devfs_path().map_err(Error::DevInfo)?
-    ))?;
+    let device_id = DiskIdentity {
+        vendor: format!("{:x}", vendor_id),
+        serial: inquiry_serial_no,
+        model,
+    };
 
     // We expect that the parent of the "nvme" device is a "pcieb" driver.
-    let Some(pcieb_node) = nvme_node.parent().map_err(Error::DevInfo)? else {
-        return Err(Error::DevInfo(anyhow::anyhow!("nvme has no parent node")));
-    };
-    if pcieb_node.driver_name().as_deref() != Some("pcieb") {
-        return Err(Error::DevInfo(anyhow::anyhow!(
-            "nvme has non-pcieb parent node"
-        )));
-    }
+    let pcieb_node = get_parent_node(&nvme_node, "pcieb")?;
 
     // The "pcieb" device needs to have a physical slot for us to understand
     // what type of disk it is.
-    let slot_prop_name = "physical-slot#".to_string();
-    let Some(Ok(slot_prop)) = pcieb_node.props().into_iter().find(|prop| {
-        if let Ok(prop) = prop {
-            prop.name() == slot_prop_name
-        } else {
-            false
-        }
-    }) else {
-        return Err(Error::MissingDeviceProperty { name: slot_prop_name });
-    };
-    let slot =
-        slot_prop.as_i64().ok_or_else(|| Error::UnexpectedPropertyType {
-            name: slot_prop_name,
-            ty: "i64".to_string(),
-        })?;
+    let slot = i64_from_property(
+        &find_properties(&pcieb_node, ["physical-slot#"])?[0],
+    )?;
     let Some(variant) = slot_to_disk_variant(slot) else {
         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
         return Err(Error::UnrecognizedSlot { slot } );
