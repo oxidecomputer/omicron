@@ -12,6 +12,7 @@ use clap::Parser;
 use clap::Subcommand;
 use gateway_client::types::IgnitionCommand;
 use gateway_client::types::PowerState;
+use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
@@ -336,8 +337,25 @@ async fn main() -> Result<()> {
         Command::IgnitionCommand { sp, command } => {
             client.ignition_command(sp.type_, sp.slot, command).await?;
         }
-        Command::ComponentActiveSlot { .. }
-        | Command::StartupOptions { .. } => {
+        Command::ComponentActiveSlot { sp, component, set_slot } => {
+            if let Some(slot) = set_slot {
+                client
+                    .sp_component_active_slot_set(
+                        sp.type_,
+                        sp.slot,
+                        &component,
+                        &SpComponentFirmwareSlot { slot },
+                    )
+                    .await?;
+            } else {
+                let info = client
+                    .sp_component_active_slot_get(sp.type_, sp.slot, &component)
+                    .await?
+                    .into_inner();
+                dumper.dump(&info)?;
+            }
+        }
+        Command::StartupOptions { .. } => {
             todo!("missing MGS endpoint");
         }
         Command::Inventory { sp } => {
