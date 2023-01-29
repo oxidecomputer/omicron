@@ -31,8 +31,11 @@ impl Fstyp {
     /// Executes the 'fstyp' command and parses the name of a zpool from it, if
     /// one exists.
     pub fn get_zpool(path: &Path) -> Result<ZpoolName, Error> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.arg(FSTYP).arg("-a").arg(path);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+
+        let cmd = cmd.arg(FSTYP).arg("-a").arg(path);
 
         let output = execute(cmd).map_err(Error::from)?;
         let stdout = String::from_utf8_lossy(&output.stdout);
