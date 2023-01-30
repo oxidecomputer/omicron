@@ -5348,10 +5348,10 @@ async fn physical_disks_list(
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disks = nexus
             .physical_disks_list(
