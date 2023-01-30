@@ -293,14 +293,6 @@ pub struct Baseboard {
     pub revision: i64,
 }
 
-/// Describes properties that should uniquely identify a Gimlet.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Baseboard {
-    pub serial: String,
-    pub part: String,
-    pub revision: i64,
-}
-
 /// Client view of a [`Sled`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
