@@ -1623,7 +1623,7 @@ CREATE TABLE omicron.public.updateable_component (
     -- version string with maj/min/patch 0-padded to be string sortable
     system_version_sort STRING(64) NOT NULL, -- TODO: length
 
-    status update_status NOT NULL
+    status omicron.public.update_status NOT NULL
     -- TODO: status reason for updateable_component
 );
 
@@ -1650,7 +1650,7 @@ CREATE TABLE omicron.public.update_deployment (
     -- if/when I change that back to ID, this needs to be the ID too
     version STRING(64) NOT NULL,
 
-    status update_status NOT NULL
+    status omicron.public.update_status NOT NULL
     -- TODO: status reason for update_deployment
 );
 
