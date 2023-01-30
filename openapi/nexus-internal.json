@@ -1786,6 +1786,10 @@
           "serial": {
             "type": "string"
           },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "vendor": {
             "type": "string"
           }
@@ -1793,6 +1797,7 @@
         "required": [
           "model",
           "serial",
+          "sled_id",
           "vendor"
         ]
       },

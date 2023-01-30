@@ -876,6 +876,7 @@ impl StorageWorker {
                             model: disk_identity.model.clone(),
                             serial: disk_identity.serial.clone(),
                             vendor: disk_identity.vendor.clone(),
+                            sled_id,
                         };
                         nexus.physical_disk_delete(&request).await.map_err(
                             |e| backoff::BackoffError::transient(e.to_string()),
@@ -913,7 +914,7 @@ impl StorageWorker {
         let pool = match pools.entry(pool_name.clone()) {
             hash_map::Entry::Occupied(mut entry) => {
                 // The pool already exists.
-                entry.get_mut().info = zpool.info.clone();
+                entry.get_mut().info = zpool.info;
                 return Ok(());
             }
             hash_map::Entry::Vacant(entry) => entry.insert(zpool),
