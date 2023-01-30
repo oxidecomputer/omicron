@@ -46,6 +46,10 @@ impl PhysicalDisk {
             sled_id,
         }
     }
+
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.time_deleted
+    }
 }
 
 impl From<PhysicalDisk> for views::PhysicalDisk {

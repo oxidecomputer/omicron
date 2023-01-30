@@ -296,6 +296,7 @@ pub struct Sled {
 // PHYSICAL DISKS
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskType {
     Internal,
     External,

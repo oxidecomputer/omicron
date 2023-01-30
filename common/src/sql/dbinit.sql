@@ -148,14 +148,14 @@ CREATE TABLE omicron.public.physical_disk (
     variant omicron.public.physical_disk_kind NOT NULL,
 
     -- FK into the Sled table
-    sled_id UUID NOT NULL
-);
+    sled_id UUID NOT NULL,
 
-CREATE UNIQUE INDEX ON omicron.public.physical_disk (
-    vendor,
-    serial,
-    model
-) WHERE time_deleted IS NULL;
+    -- This constraint should be upheld, even for deleted disks
+    -- in the fleet.
+    CONSTRAINT vendor_serial_model_unique UNIQUE (
+      vendor, serial, model
+    )
+);
 
 CREATE INDEX ON omicron.public.physical_disk (
     variant,

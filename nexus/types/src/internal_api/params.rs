@@ -66,6 +66,8 @@ pub struct PhysicalDiskDeleteRequest {
     pub vendor: String,
     pub serial: String,
     pub model: String,
+
+    pub sled_id: Uuid,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

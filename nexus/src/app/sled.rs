@@ -121,6 +121,7 @@ impl super::Nexus {
     /// Upserts a physical disk into the database, updating it if it already exists.
     pub async fn upsert_physical_disk(
         &self,
+        opctx: &OpContext,
         request: PhysicalDiskPutRequest,
     ) -> Result<(), Error> {
         info!(
@@ -137,23 +138,31 @@ impl super::Nexus {
             request.variant.into(),
             request.sled_id,
         );
-        self.db_datastore.physical_disk_upsert(disk).await?;
+        self.db_datastore.physical_disk_upsert(&opctx, disk).await?;
         Ok(())
     }
 
     /// Upserts a physical disk into the database, updating it if it already exists.
     pub async fn delete_physical_disk(
         &self,
+        opctx: &OpContext,
         request: PhysicalDiskDeleteRequest,
     ) -> Result<(), Error> {
         info!(
             self.log, "deleting physical disk";
+            "sled_id" => request.sled_id.to_string(),
             "vendor" => request.vendor.to_string(),
             "serial" => request.serial.to_string(),
             "model" => request.model.to_string()
         );
         self.db_datastore
-            .physical_disk_delete(request.vendor, request.serial, request.model)
+            .physical_disk_delete(
+                &opctx,
+                request.vendor,
+                request.serial,
+                request.model,
+                request.sled_id,
+            )
             .await?;
         Ok(())
     }

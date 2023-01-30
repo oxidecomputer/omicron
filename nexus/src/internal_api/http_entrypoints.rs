@@ -129,8 +129,12 @@ async fn physical_disk_put(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let disk = body.into_inner();
-    nexus.upsert_physical_disk(disk).await?;
-    Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.upsert_physical_disk(&opctx, disk).await?;
+        Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Report that a physical disk for the specified sled has gone offline.
@@ -145,8 +149,13 @@ async fn physical_disk_delete(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let disk = body.into_inner();
-    nexus.delete_physical_disk(disk).await?;
-    Ok(HttpResponseOk(PhysicalDiskDeleteResponse {}))
+
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.delete_physical_disk(&opctx, disk).await?;
+        Ok(HttpResponseOk(PhysicalDiskDeleteResponse {}))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Path parameters for Zpool requests (internal API)
