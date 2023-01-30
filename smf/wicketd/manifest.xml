@@ -23,7 +23,7 @@
 
   <property_group name='config' type='application'>
     <propval name='address' type='astring' value='unknown' />
-    <propval name='artifact-address" type='astring' value='unknown'
+    <propval name='artifact-address' type='astring' value='unknown' />
     <propval name='mgs-address' type='astring' value='unknown' />
   </property_group>
 
