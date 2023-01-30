@@ -10,7 +10,9 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use gateway_client::types::IgnitionCommand;
 use gateway_client::types::PowerState;
+use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
@@ -263,13 +265,6 @@ fn sp_identifier_from_str(s: &str) -> Result<SpIdentifier> {
     })
 }
 
-#[derive(Debug, Clone, Copy)]
-enum IgnitionCommand {
-    PowerOn,
-    PowerOff,
-    PowerReset,
-}
-
 fn ignition_command_from_str(s: &str) -> Result<IgnitionCommand> {
     match s {
         "power-on" => Ok(IgnitionCommand::PowerOn),
@@ -339,17 +334,28 @@ async fn main() -> Result<()> {
                 dumper.dump(&info)?;
             }
         }
-        Command::IgnitionCommand { sp, command } => match command {
-            IgnitionCommand::PowerOn => {
-                client.ignition_power_on(sp.type_, sp.slot).await?;
+        Command::IgnitionCommand { sp, command } => {
+            client.ignition_command(sp.type_, sp.slot, command).await?;
+        }
+        Command::ComponentActiveSlot { sp, component, set_slot } => {
+            if let Some(slot) = set_slot {
+                client
+                    .sp_component_active_slot_set(
+                        sp.type_,
+                        sp.slot,
+                        &component,
+                        &SpComponentFirmwareSlot { slot },
+                    )
+                    .await?;
+            } else {
+                let info = client
+                    .sp_component_active_slot_get(sp.type_, sp.slot, &component)
+                    .await?
+                    .into_inner();
+                dumper.dump(&info)?;
             }
-            IgnitionCommand::PowerOff => {
-                client.ignition_power_off(sp.type_, sp.slot).await?;
-            }
-            IgnitionCommand::PowerReset => todo!("missing MGS endpoint"),
-        },
-        Command::ComponentActiveSlot { .. }
-        | Command::StartupOptions { .. } => {
+        }
+        Command::StartupOptions { .. } => {
             todo!("missing MGS endpoint");
         }
         Command::Inventory { sp } => {
