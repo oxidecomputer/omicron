@@ -1744,7 +1744,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "russh",
- "russh-keys",
+ "russh-keys 0.24.0",
  "tokio",
 ]
 
@@ -5280,7 +5280,7 @@ dependencies = [
  "poly1305 0.8.0",
  "rand 0.8.5",
  "russh-cryptovec",
- "russh-keys",
+ "russh-keys 0.23.0-beta.1",
  "sha1",
  "sha2 0.10.6",
  "subtle",
@@ -5291,9 +5291,9 @@ dependencies = [
 
 [[package]]
 name = "russh-cryptovec"
-version = "0.7.0-beta.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89fd30a2ef98dfa621409d5bc56a2479d5810bf13a5eea3de89d859437b7e2e"
+checksum = "c3fdf036c2216b554053d19d4af45c1722d13b00ac494ea19825daf4beac034e"
 dependencies = [
  "libc",
  "winapi",
@@ -5304,6 +5304,42 @@ name = "russh-keys"
 version = "0.23.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "583adc8a2d6a70b86abb6fb9b0564b85df58198586a7665920d46ffaf7ac383d"
+dependencies = [
+ "aes",
+ "bcrypt-pbkdf",
+ "bit-vec",
+ "block-padding",
+ "byteorder",
+ "cbc",
+ "ctr",
+ "data-encoding",
+ "dirs",
+ "ed25519-dalek",
+ "futures",
+ "hmac 0.12.1",
+ "inout",
+ "log",
+ "md5",
+ "num-bigint",
+ "num-integer",
+ "pbkdf2",
+ "rand 0.7.3",
+ "rand_core 0.5.1",
+ "russh-cryptovec",
+ "serde",
+ "serde_derive",
+ "sha2 0.10.6",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "yasna",
+]
+
+[[package]]
+name = "russh-keys"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "599475db29aa4edb88ed552be752d642f6d78e3a58da0eb9d8953fdc24b028e1"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",
