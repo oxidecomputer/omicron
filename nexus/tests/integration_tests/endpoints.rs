@@ -1459,7 +1459,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: &HARDWARE_DISK_URL,
-            visibility: Visibility::Protected,
+            visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
