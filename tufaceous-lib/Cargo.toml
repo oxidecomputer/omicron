@@ -10,7 +10,6 @@ camino.workspace = true
 chrono.workspace = true
 fs-err.workspace = true
 hex.workspace = true
-humantime = "2.1.0"
 omicron-common.workspace = true
 rand.workspace = true
 ring = { workspace = true, features = ["std"] }

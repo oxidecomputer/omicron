@@ -80,12 +80,12 @@ async fn test_update_end_to_end() {
     .await;
     let client = &cptestctx.external_client;
 
-    // call /system/updates/refresh on nexus
+    // call /v1/system/update/refresh on nexus
     // - download and verify the repo
     // - return 204 Non Content
     // - tells sled agent to do the thing
     NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/system/updates/refresh")
+        RequestBuilder::new(client, Method::POST, "/v1/system/update/refresh")
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

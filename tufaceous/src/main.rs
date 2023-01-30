@@ -1,10 +1,11 @@
+mod date;
 mod hint;
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use tufaceous_lib::{parse_duration_or_datetime, AddZone, Key, OmicronRepo};
+use tufaceous_lib::{AddZone, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -20,7 +21,7 @@ struct Args {
     )]
     keys: Vec<Key>,
 
-    #[clap(long, value_parser = parse_duration_or_datetime, default_value = "7d", global = true)]
+    #[clap(long, value_parser = crate::date::parse_duration_or_datetime, default_value = "7d", global = true)]
     expiry: DateTime<Utc>,
 
     /// TUF repository path (default: current working directory)
