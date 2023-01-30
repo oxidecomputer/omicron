@@ -20,6 +20,7 @@ use dropshot::Path;
 use dropshot::RawRequest;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use dropshot::UntypedBody;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -304,6 +305,12 @@ enum PowerState {
 )]
 pub struct SpComponentFirmwareSlot {
     pub slot: u16,
+}
+
+/// Identity of a host phase2 recovery image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HostPhase2RecoveryImageId {
+    pub sha256_hash: String,
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -913,6 +920,41 @@ async fn sp_power_state_set(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Upload a host phase2 image that can be served to recovering hosts via the
+/// host/SP control uart.
+///
+/// MGS caches this image in memory and is limited to a small, fixed number of
+/// images (potentially 1). Uploading a new image may evict the
+/// least-recently-requested image if our cache is already full.
+#[endpoint {
+    method = POST,
+    path = "/recovery/host-phase2",
+}]
+async fn recovery_host_phase2_upload(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: UntypedBody,
+) -> Result<HttpResponseOk<HostPhase2RecoveryImageId>, HttpError> {
+    let apictx = rqctx.context();
+
+    // TODO: this makes a full copy of the host image, potentially unnecessarily
+    // if it's malformed.
+    let image = body.as_bytes().to_vec();
+
+    let sha2 =
+        apictx.host_phase2_provider.insert(image).await.map_err(|err| {
+            // Any cache-insertion failure indicates a malformed image; map them
+            // to bad requests.
+            HttpError::for_bad_request(
+                Some("BadHostPhase2Image".to_string()),
+                err.to_string(),
+            )
+        })?;
+
+    Ok(HttpResponseOk(HostPhase2RecoveryImageId {
+        sha256_hash: hex::encode(&sha2),
+    }))
+}
+
 // TODO
 // The gateway service will get asynchronous notifications both from directly
 // SPs over the management network and indirectly from Ignition via the Sidecar
@@ -948,6 +990,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(ignition_list)?;
         api.register(ignition_get)?;
         api.register(ignition_command)?;
+        api.register(recovery_host_phase2_upload)?;
         Ok(())
     }
 

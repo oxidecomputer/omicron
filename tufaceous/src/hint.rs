@@ -1,10 +1,12 @@
+use tufaceous_lib::Key;
+
 fn print_hint(hint: &str) {
     for line in hint.trim().lines() {
         eprintln!("{}", console::style(format!("hint: {}", line)).yellow());
     }
 }
 
-pub(crate) fn generated_key(key: &crate::key::Key) {
+pub(crate) fn generated_key(key: &Key) {
     print_hint(&format!(
         r#"
 Generated a random key:

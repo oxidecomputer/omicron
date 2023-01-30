@@ -40,6 +40,8 @@ mod organization;
 mod oximeter_info;
 mod producer_endpoint;
 mod project;
+mod semver_version;
+mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -119,6 +121,7 @@ pub use region::*;
 pub use region_snapshot::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
+pub use semver_version::*;
 pub use service::*;
 pub use service_kind::*;
 pub use silo::*;
@@ -128,6 +131,7 @@ pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use snapshot::*;
 pub use ssh_key::*;
+pub use system_update::*;
 pub use update_artifact::*;
 pub use user_builtin::*;
 pub use virtual_provisioning_collection::*;
