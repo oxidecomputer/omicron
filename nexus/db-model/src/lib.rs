@@ -38,6 +38,8 @@ mod name;
 mod network_interface;
 mod organization;
 mod oximeter_info;
+mod physical_disk;
+mod physical_disk_kind;
 mod producer_endpoint;
 mod project;
 // These actually represent subqueries, not real table.
@@ -112,6 +114,8 @@ pub use name::*;
 pub use network_interface::*;
 pub use organization::*;
 pub use oximeter_info::*;
+pub use physical_disk::*;
+pub use physical_disk_kind::*;
 pub use producer_endpoint::*;
 pub use project::*;
 pub use rack::*;

@@ -263,7 +263,7 @@ impl Disk {
                 // To remedy: Let's enforce that the partition exists.
                 info!(
                     log,
-                    "Formatting zpool on disk {}",
+                    "GPT exists without Zpool: formatting zpool on disk {}",
                     paths.devfs_path.display()
                 );
                 // If a zpool does not already exist, create one.
@@ -281,6 +281,14 @@ impl Disk {
             partitions,
             zpool_name,
         })
+    }
+
+    pub fn identity(&self) -> &DiskIdentity {
+        &self.identity
+    }
+
+    pub fn variant(&self) -> DiskVariant {
+        self.variant
     }
 
     pub fn devfs_path(&self) -> &PathBuf {

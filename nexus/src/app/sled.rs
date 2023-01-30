@@ -11,7 +11,8 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::ServiceKind;
 use crate::internal_api::params::{
-    SledAgentStartupInfo, SledRole, ZpoolPutRequest,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
+    SledRole, ZpoolPutRequest,
 };
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -105,6 +106,68 @@ impl super::Nexus {
             .random_sled(&self.opctx_alloc)
             .await?
             .map(|sled| sled.id()))
+    }
+
+    // Physical disks
+
+    pub async fn physical_disks_list(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::PhysicalDisk> {
+        self.db_datastore
+            .sled_list_physical_disks(&opctx, sled_id, pagparams)
+            .await
+    }
+
+    /// Upserts a physical disk into the database, updating it if it already exists.
+    pub async fn upsert_physical_disk(
+        &self,
+        opctx: &OpContext,
+        request: PhysicalDiskPutRequest,
+    ) -> Result<(), Error> {
+        info!(
+            self.log, "upserting physical disk";
+            "sled_id" => request.sled_id.to_string(),
+            "vendor" => request.vendor.to_string(),
+            "serial" => request.serial.to_string(),
+            "model" => request.model.to_string()
+        );
+        let disk = db::model::PhysicalDisk::new(
+            request.vendor,
+            request.serial,
+            request.model,
+            request.variant.into(),
+            request.sled_id,
+        );
+        self.db_datastore.physical_disk_upsert(&opctx, disk).await?;
+        Ok(())
+    }
+
+    /// Upserts a physical disk into the database, updating it if it already exists.
+    pub async fn delete_physical_disk(
+        &self,
+        opctx: &OpContext,
+        request: PhysicalDiskDeleteRequest,
+    ) -> Result<(), Error> {
+        info!(
+            self.log, "deleting physical disk";
+            "sled_id" => request.sled_id.to_string(),
+            "vendor" => request.vendor.to_string(),
+            "serial" => request.serial.to_string(),
+            "model" => request.model.to_string()
+        );
+        self.db_datastore
+            .physical_disk_delete(
+                &opctx,
+                request.vendor,
+                request.serial,
+                request.model,
+                request.sled_id,
+            )
+            .await?;
+        Ok(())
     }
 
     // Zpools (contained within sleds)

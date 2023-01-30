@@ -133,6 +133,46 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
+  'm2',
+  'u2'
+);
+
+-- A physical disk which exists inside the rack.
+CREATE TABLE omicron.public.physical_disk (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    vendor STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
+    -- FK into the Sled table
+    sled_id UUID NOT NULL,
+
+    -- This constraint should be upheld, even for deleted disks
+    -- in the fleet.
+    CONSTRAINT vendor_serial_model_unique UNIQUE (
+      vendor, serial, model
+    )
+);
+
+CREATE INDEX ON omicron.public.physical_disk (
+    variant,
+    id
+) WHERE time_deleted IS NULL;
+
+-- Make it efficient to look up physical disks by Sled.
+CREATE INDEX ON omicron.public.physical_disk (
+    sled_id,
+    id
+) WHERE time_deleted IS NULL;
+
 -- x509 certificates which may be used by services
 CREATE TABLE omicron.public.certificate (
     -- Identity metadata (resource)

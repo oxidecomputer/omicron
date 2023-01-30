@@ -31,6 +31,7 @@ use omicron_nexus::external_api::views::User;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
+use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -67,6 +68,24 @@ where
         .unwrap_or_else(|_| {
             panic!("failed to make \"create\" request to {path}")
         })
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn object_put<InputType, OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_put(client, path, Some(input))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|_| panic!("failed to make \"PUT\" request to {path}"))
         .parsed_body()
         .unwrap()
 }
@@ -154,6 +173,55 @@ pub async fn create_certificate(
 pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
     let url = format!("/system/certificates/{}", cert_name);
     object_delete(client, &url).await
+}
+
+pub async fn create_physical_disk(
+    client: &ClientTestContext,
+    vendor: &str,
+    serial: &str,
+    model: &str,
+    variant: internal_params::PhysicalDiskKind,
+    sled_id: Uuid,
+) -> internal_params::PhysicalDiskPutResponse {
+    object_put(
+        client,
+        "/physical-disk",
+        &internal_params::PhysicalDiskPutRequest {
+            vendor: vendor.to_string(),
+            serial: serial.to_string(),
+            model: model.to_string(),
+            variant,
+            sled_id,
+        },
+    )
+    .await
+}
+
+pub async fn delete_physical_disk(
+    client: &ClientTestContext,
+    vendor: &str,
+    serial: &str,
+    model: &str,
+    sled_id: Uuid,
+) {
+    let body = internal_params::PhysicalDiskDeleteRequest {
+        vendor: vendor.to_string(),
+        serial: serial.to_string(),
+        model: model.to_string(),
+        sled_id,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, "/physical-disk")
+            .body(Some(&body))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|_| {
+        panic!("failed to make \"delete\" request of physical disk")
+    });
 }
 
 pub async fn create_silo(

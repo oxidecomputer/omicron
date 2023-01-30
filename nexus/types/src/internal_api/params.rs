@@ -49,6 +49,38 @@ pub struct SledAgentStartupInfo {
     pub baseboard: Baseboard,
 }
 
+/// Describes the type of physical disk.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "content")]
+pub enum PhysicalDiskKind {
+    M2,
+    U2,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskPutRequest {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub variant: PhysicalDiskKind,
+    pub sled_id: Uuid,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskPutResponse {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskDeleteRequest {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub sled_id: Uuid,
+}
+
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
