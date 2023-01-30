@@ -806,18 +806,11 @@ impl super::Nexus {
     pub async fn instance_create_network_interface(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
         let (.., authz_project, authz_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .lookup_for(authz::Action::Modify)
-                .await?;
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
         // IDs for creating the network interface.
@@ -882,17 +875,11 @@ impl super::Nexus {
     pub async fn instance_list_network_interfaces(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::NetworkInterface> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
             .await
