@@ -678,6 +678,70 @@ table! {
     }
 }
 
+table! {
+    system_update (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+        version_sort -> Text,
+    }
+}
+
+table! {
+    update_deployment (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+        status -> crate::UpdateStatusEnum,
+        // TODO: status reason for updateable_component
+    }
+}
+
+table! {
+    component_update (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+        component_type -> crate::UpdateableComponentTypeEnum,
+    }
+}
+
+table! {
+    updateable_component (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        device_id -> Text,
+        version -> Text,
+        system_version -> Text,
+        system_version_sort -> Text,
+        component_type -> crate::UpdateableComponentTypeEnum,
+        status -> crate::UpdateStatusEnum,
+        // TODO: status reason for updateable_component
+    }
+}
+
+table! {
+    system_update_component_update (system_update_id, component_update_id) {
+        system_update_id -> Uuid,
+        component_update_id -> Uuid,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    system_update,
+    component_update,
+    system_update_component_update,
+);
+joinable!(system_update_component_update -> component_update (component_update_id));
+
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
