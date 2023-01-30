@@ -10,11 +10,11 @@ default-run = "wicket"
 anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
-crossterm = { version = "0.25.0", features = ["event-stream"] }
+crossterm = { version = "0.26.0", features = ["event-stream"] }
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
 reqwest.workspace = true
-semver = { version = "1.0.16", features = ["std", "serde"] }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha3.workspace = true

@@ -15,6 +15,9 @@ use thiserror::Error;
 /// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
+    /// Maximum number of host phase2 recover images we're willing to keep
+    /// cached.
+    pub host_phase2_recovery_image_cache_max_images: usize,
     /// Partial configuration for our dropshot server.
     pub dropshot: PartialDropshotConfig,
     /// Configuration of the management switch.

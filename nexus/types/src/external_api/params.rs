@@ -9,7 +9,7 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -1138,4 +1138,36 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
+}
+
+// SYSTEM UPDATE
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdatePath {
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdateStart {
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdateCreate {
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ComponentUpdateCreate {
+    pub version: SemverVersion,
+    pub component_type: shared::UpdateableComponentType,
+    pub system_update_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateableComponentCreate {
+    pub version: SemverVersion,
+    pub system_version: SemverVersion,
+    pub component_type: shared::UpdateableComponentType,
+    pub device_id: String,
 }
