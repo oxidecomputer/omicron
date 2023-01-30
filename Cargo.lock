@@ -313,6 +313,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b645a089122eccb6111b4f81cbc1a49f5900ac4666bb93ac027feaecf15607bf"
 
 [[package]]
+name = "basic-toml"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e819b667739967cd44d308b8c7b71305d8bb0729ac44a248aa08f33d01950b4"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bb8"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -790,9 +799,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.1.1"
+version = "4.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ec7a4128863c188deefe750ac1d1dfe66c236909f845af04beed823638dc1b2"
+checksum = "f13b9c79b5d1dd500d20ef541215a6423c75829ef43117e1b4d17fd8af0b5d76"
 dependencies = [
  "bitflags",
  "clap_derive 4.1.0",
@@ -1415,9 +1424,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.0.2"
+version = "2.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68c186a7418a2aac330bb76cde82f16c36b03a66fb91db32d20214311f9f6545"
+checksum = "4391a22b19c916e50bec4d6140f29bdda3e3bb187223fe6e3ea0b6e4d1021c04"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -2080,7 +2089,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.1",
+ "clap 4.1.4",
  "futures",
  "gateway-client",
  "libc",
@@ -2699,7 +2708,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.1.1",
+ "clap 4.1.4",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -2737,7 +2746,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.1.1",
+ "clap 4.1.4",
  "dropshot",
  "expectorate",
  "hyper",
@@ -2767,7 +2776,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.1",
+ "clap 4.1.4",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3627,7 +3636,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.1",
+ "clap 4.1.4",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -3644,7 +3653,7 @@ name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "clap 4.1.1",
+ "clap 4.1.4",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -3688,7 +3697,7 @@ dependencies = [
  "base64 0.21.0",
  "bb8",
  "chrono",
- "clap 4.1.1",
+ "clap 4.1.4",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3778,7 +3787,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.1",
+ "clap 4.1.4",
  "futures",
  "hex",
  "indicatif",
@@ -3816,7 +3825,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.1.1",
+ "clap 4.1.4",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -3876,7 +3885,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.1",
+ "clap 4.1.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -4136,7 +4145,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.1.1",
+ "clap 4.1.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -4168,7 +4177,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.1.1",
+ "clap 4.1.4",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4758,7 +4767,7 @@ source = "git+https://github.com/oxidecomputer/progenitor?branch=main#b04c54d792
 dependencies = [
  "anyhow",
  "built",
- "clap 4.1.1",
+ "clap 4.1.4",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -6187,7 +6196,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.1.1",
+ "clap 4.1.4",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -6667,9 +6676,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.24.2"
+version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "597a12a59981d9e3c38d216785b0c37399f6e415e8d0712047620f189371b0bb"
+checksum = "c8e00990ebabbe4c14c08aca901caed183ecd5c09562a12c824bb53d3c3fd3af"
 dependencies = [
  "autocfg",
  "bytes",
@@ -6961,17 +6970,17 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "trybuild"
-version = "1.0.76"
+version = "1.0.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ed2c57956f91546d4d33614265a85d55c8e1ab91484853a10335894786d7db6"
+checksum = "a44da5a6f2164c8e14d3bbc0657d69c5966af9f5f6930d4f600b1f5c4a673413"
 dependencies = [
+ "basic-toml",
  "glob",
  "once_cell",
  "serde",
  "serde_derive",
  "serde_json",
  "termcolor",
- "toml",
 ]
 
 [[package]]
@@ -6982,7 +6991,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.1.1",
+ "clap 4.1.4",
  "console",
  "fs-err",
  "humantime",
@@ -7489,7 +7498,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "camino",
- "clap 4.1.1",
+ "clap 4.1.4",
  "crossterm",
  "futures",
  "hex",
@@ -7520,7 +7529,7 @@ dependencies = [
  "async-trait",
  "buf-list",
  "bytes",
- "clap 4.1.1",
+ "clap 4.1.4",
  "debug-ignore",
  "dropshot",
  "expectorate",

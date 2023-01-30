@@ -26,7 +26,7 @@ pub struct OmicronRepo {
 }
 
 impl OmicronRepo {
-    /// Initializes a new repository at the given path, writing it to disl.
+    /// Initializes a new repository at the given path, writing it to disk.
     pub fn initialize(
         repo_path: &Utf8Path,
         keys: Vec<Key>,
