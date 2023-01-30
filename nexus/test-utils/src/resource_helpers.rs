@@ -72,6 +72,26 @@ where
         .unwrap()
 }
 
+pub async fn object_put<InputType, OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_put(client, path, Some(input))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("failed to make \"PUT\" request to {path}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
 pub async fn object_delete(client: &ClientTestContext, path: &str) {
     NexusRequest::object_delete(client, path)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -165,7 +185,7 @@ pub async fn create_physical_disk(
     variant: internal_params::PhysicalDiskKind,
     sled_id: Uuid,
 ) -> internal_params::PhysicalDiskPutResponse {
-    object_create(
+    object_put(
         client,
         "/physical-disk",
         &internal_params::PhysicalDiskPutRequest {

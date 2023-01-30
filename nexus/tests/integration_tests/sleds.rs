@@ -80,7 +80,7 @@ async fn test_physical_disk_create_list_delete(
     assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
 
     // Verify that there are no disks.
-    let disks_url = format!("/system/hardware/sleds/{SLED_AGENT_UUID}");
+    let disks_url = format!("/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
     assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
 
     // Insert a new disk using the internal API, observe it in the external API
