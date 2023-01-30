@@ -24,6 +24,7 @@ use futures::stream::StreamExt;
 use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
+use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -373,6 +374,38 @@ impl JsonSchema for NameOrId {
     }
 }
 
+// TODO: remove wrapper for semver::Version once this PR goes through
+// https://github.com/GREsau/schemars/pull/195
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[display("{0}")]
+pub struct SemverVersion(pub semver::Version);
+
+impl SemverVersion {
+    pub fn new(major: u64, minor: u64, patch: u64) -> Self {
+        Self(semver::Version::new(major, minor, patch))
+    }
+}
+
+impl JsonSchema for SemverVersion {
+    fn schema_name() -> String {
+        "SemverVersion".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(r"^\d+\.\d+\.\d+([\-\+].+)?$".to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// Name for a built-in role
 #[derive(
     Clone,
@@ -668,6 +701,11 @@ pub enum ResourceType {
     MetricProducer,
     RoleBuiltin,
     UpdateAvailableArtifact,
+    SystemUpdate,
+    ComponentUpdate,
+    SystemUpdateComponentUpdate,
+    UpdateDeployment,
+    UpdateableComponent,
     UserBuiltin,
     Zpool,
 }

@@ -185,15 +185,24 @@ silo_view                                /system/silos/{silo_name}
 silo_view_by_id                          /system/by-id/silos/{id}
 sled_list                                /system/hardware/sleds
 sled_view                                /system/hardware/sleds/{sled_id}
+system_component_version_list            /v1/system/update/components
 system_image_create                      /system/images
 system_image_delete                      /system/images/{image_name}
 system_image_list                        /system/images
 system_image_view                        /system/images/{image_name}
 system_image_view_by_id                  /system/by-id/images/{id}
 system_metric                            /system/metrics/{metric_name}
+system_update_components_list            /v1/system/update/updates/{version}/components
+system_update_list                       /v1/system/update/updates
+system_update_refresh                    /v1/system/update/refresh
+system_update_start                      /v1/system/update/start
+system_update_stop                       /v1/system/update/stop
+system_update_view                       /v1/system/update/updates/{version}
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
-updates_refresh                          /system/updates/refresh
+system_version                           /v1/system/update/version
+update_deployment_view                   /v1/system/update/deployments/{id}
+update_deployments_list                  /v1/system/update/deployments
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH

@@ -29,6 +29,7 @@ mod sleds;
 mod snapshots;
 mod ssh_keys;
 mod subnet_allocation;
+mod system_updates;
 mod timeseries;
 mod unauthorized;
 mod unauthorized_coverage;

@@ -56,6 +56,7 @@ impl From<PhysicalDisk> for views::PhysicalDisk {
     fn from(disk: PhysicalDisk) -> Self {
         Self {
             identity: disk.identity(),
+            sled_id: Some(disk.sled_id),
             vendor: disk.vendor,
             serial: disk.serial,
             model: disk.model,
