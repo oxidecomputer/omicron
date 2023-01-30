@@ -131,6 +131,42 @@
         }
       }
     },
+    "/recovery/host-phase2": {
+      "post": {
+        "summary": "Upload a host phase2 image that can be served to recovering hosts via the",
+        "description": "host/SP control uart.\nMGS caches this image in memory and is limited to a small, fixed number of images (potentially 1). Uploading a new image may evict the least-recently-requested image if our cache is already full.",
+        "operationId": "recovery_host_phase2_upload",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp": {
       "get": {
         "summary": "List SPs",
@@ -833,6 +869,18 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "HostPhase2RecoveryImageId": {
+        "description": "Identity of a host phase2 recovery image.",
+        "type": "object",
+        "properties": {
+          "sha256_hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256_hash"
         ]
       },
       "PowerState": {
