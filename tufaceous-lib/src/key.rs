@@ -13,7 +13,7 @@ pub(crate) fn boxed_keys(keys: Vec<Key>) -> Vec<Box<dyn KeySource>> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Key {
+pub enum Key {
     Ed25519(
         // We could store this as a `ring::signature::Ed25519KeyPair`, but that
         // doesn't impl `Clone`.
@@ -22,7 +22,7 @@ pub(crate) enum Key {
 }
 
 impl Key {
-    pub(crate) fn generate_ed25519() -> Key {
+    pub fn generate_ed25519() -> Key {
         let mut key = [0; 32];
         OsRng.fill_bytes(&mut key);
         Key::Ed25519(key)
