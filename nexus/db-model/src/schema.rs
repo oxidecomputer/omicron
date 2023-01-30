@@ -386,9 +386,9 @@ table! {
 
         rack_id -> Uuid,
         is_scrimlet -> Bool,
-        baseboard_identifier -> Text,
-        baseboard_model -> Text,
-        baseboard_revision -> Int8,
+        serial_number -> Text,
+        part_number -> Text,
+        revision -> Int8,
 
         ip -> Inet,
         port -> Int4,

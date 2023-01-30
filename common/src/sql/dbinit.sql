@@ -82,9 +82,9 @@ CREATE TABLE omicron.public.sled (
     is_scrimlet BOOL NOT NULL,
 
     /* Baseboard information about the sled */
-    baseboard_identifier STRING(63) NOT NULL,
-    baseboard_model STRING(63) NOT NULL,
-    baseboard_revision INT8 NOT NULL,
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+    revision INT8 NOT NULL,
 
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,

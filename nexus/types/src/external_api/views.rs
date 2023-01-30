@@ -288,8 +288,8 @@ pub struct Rack {
 /// Describes properties that should uniquely identify a Gimlet.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
-    pub identifier: String,
-    pub model: String,
+    pub serial: String,
+    pub part: String,
     pub revision: i64,
 }
 

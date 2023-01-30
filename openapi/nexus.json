@@ -9195,21 +9195,21 @@
         "description": "Describes properties that should uniquely identify a Gimlet.",
         "type": "object",
         "properties": {
-          "identifier": {
-            "type": "string"
-          },
-          "model": {
+          "part": {
             "type": "string"
           },
           "revision": {
             "type": "integer",
             "format": "int64"
+          },
+          "serial": {
+            "type": "string"
           }
         },
         "required": [
-          "identifier",
-          "model",
-          "revision"
+          "part",
+          "revision",
+          "serial"
         ]
       },
       "BinRangedouble": {
