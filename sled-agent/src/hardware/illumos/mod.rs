@@ -85,11 +85,11 @@ impl HardwareSnapshot {
             &root,
             ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
         )?;
-        let baseboard = Baseboard {
-            identifier: string_from_property(&properties[0])?,
-            model: string_from_property(&properties[1])?,
-            revision: i64_from_property(&properties[2])?,
-        };
+        let baseboard = Baseboard::new(
+            string_from_property(&properties[0])?,
+            string_from_property(&properties[1])?,
+            i64_from_property(&properties[2])?,
+        );
 
         // Monitor for the Tofino device and driver.
         let mut tofino = TofinoSnapshot::new();
@@ -548,7 +548,13 @@ impl HardwareManager {
     }
 
     pub fn baseboard(&self) -> Baseboard {
-        self.inner.lock().unwrap().baseboard.as_ref().unwrap().clone()
+        self.inner
+            .lock()
+            .unwrap()
+            .baseboard
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| Baseboard::unknown())
     }
 
     pub fn disks(&self) -> HashSet<UnparsedDisk> {
