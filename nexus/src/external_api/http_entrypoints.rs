@@ -3270,6 +3270,7 @@ async fn instance_serial_console_stream(
     Ok(())
 }
 
+/// List an instance's disks
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/disks",
@@ -3356,6 +3357,7 @@ async fn instance_disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Attach a disk to an instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/disks/attach",
@@ -3421,6 +3423,7 @@ async fn instance_disk_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Detach a disk from an instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/disks/detach",

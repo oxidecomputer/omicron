@@ -8001,6 +8001,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "List an instance's disks",
         "operationId": "instance_disk_list_v1",
         "parameters": [
           {
@@ -8079,6 +8080,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Attach a disk to an instance",
         "operationId": "instance_disk_attach_v1",
         "parameters": [
           {
@@ -8139,6 +8141,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Detach a disk from an instance",
         "operationId": "instance_disk_detach_v1",
         "parameters": [
           {
