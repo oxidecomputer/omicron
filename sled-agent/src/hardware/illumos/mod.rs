@@ -2,14 +2,46 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use illumos_devinfo::DevInfo;
+use crate::hardware::{
+    DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
+};
+use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use slog::Logger;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+mod disk;
+mod gpt;
+
+pub use disk::ensure_partition_layout;
+
+#[derive(thiserror::Error, Debug)]
+enum Error {
+    #[error("Failed to access devinfo: {0}")]
+    DevInfo(anyhow::Error),
+
+    #[error("Device does not appear to be an Oxide Gimlet")]
+    NotAGimlet,
+
+    #[error("Node {node} missing device property {name}")]
+    MissingDeviceProperty { node: String, name: String },
+
+    #[error("Unrecognized slot for device {slot}")]
+    UnrecognizedSlot { slot: i64 },
+
+    #[error("Expected property {name} to have type {ty}")]
+    UnexpectedPropertyType { name: String, ty: String },
+
+    #[error("Could not translate {0} to '/dev' path: no links")]
+    NoDevLinks(PathBuf),
+}
+
 // A snapshot of information about the underlying Tofino device
+#[derive(Copy, Clone)]
 struct TofinoSnapshot {
     exists: bool,
     driver_loaded: bool,
@@ -24,11 +56,48 @@ impl TofinoSnapshot {
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
+    disks: HashSet<UnparsedDisk>,
 }
 
 impl HardwareSnapshot {
-    fn new() -> Self {
-        Self { tofino: TofinoSnapshot::new() }
+    // Walk the device tree to capture a view of the current hardware.
+    fn new(log: &Logger) -> Result<Self, Error> {
+        let mut device_info =
+            DevInfo::new_force_load().map_err(Error::DevInfo)?;
+
+        let mut node_walker = device_info.walk_node();
+
+        // First, check the root node. If we aren't running on a Gimlet, bail.
+        let Some(root) = node_walker.next().transpose().map_err(Error::DevInfo)? else {
+            return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
+        };
+        if root.node_name() != "Oxide,Gimlet" {
+            warn!(
+                log,
+                "Root name indicates this is not a Gimlet: {}",
+                root.node_name()
+            );
+            return Err(Error::NotAGimlet);
+        }
+
+        // Monitor for the Tofino device and driver.
+        let mut tofino = TofinoSnapshot::new();
+        while let Some(node) =
+            node_walker.next().transpose().map_err(Error::DevInfo)?
+        {
+            poll_tofino_node(&log, &mut tofino, &node);
+        }
+
+        // Monitor for block devices.
+        let mut disks = HashSet::new();
+        let mut node_walker = device_info.walk_driver("blkdev");
+        while let Some(node) =
+            node_walker.next().transpose().map_err(Error::DevInfo)?
+        {
+            poll_blkdev_node(&log, &mut disks, node)?;
+        }
+
+        Ok(Self { tofino, disks })
     }
 }
 
@@ -53,57 +122,30 @@ enum TofinoView {
 // which services are currently executing.
 struct HardwareView {
     tofino: TofinoView,
-    // TODO: Add U.2s, M.2s, other devices.
+    disks: HashSet<UnparsedDisk>,
 }
 
 impl HardwareView {
     fn new() -> Self {
-        Self { tofino: TofinoView::Real(TofinoSnapshot::new()) }
-    }
-
-    fn new_stub_tofino(active: bool) -> Self {
-        Self { tofino: TofinoView::Stub { active } }
-    }
-}
-
-const TOFINO_SUBSYSTEM_VID: i32 = 0x1d1c;
-const TOFINO_SUBSYSTEM_ID: i32 = 0x100;
-
-fn node_name(subsystem_vid: i32, subsystem_id: i32) -> String {
-    format!("pci{subsystem_vid:x},{subsystem_id:x}")
-}
-
-// Performs a single walk of the device info tree, updating our view of hardware
-// and sending notifications to any subscribers.
-fn poll_device_tree(
-    log: &Logger,
-    inner: &Arc<Mutex<HardwareView>>,
-    tx: &broadcast::Sender<super::HardwareUpdate>,
-) -> Result<(), String> {
-    // Construct a view of hardware by walking the device tree.
-    let mut device_info = DevInfo::new().map_err(|e| e.to_string())?;
-    let mut node_walker = device_info.walk_node();
-    let mut polled_hw = HardwareSnapshot::new();
-    while let Some(node) =
-        node_walker.next().transpose().map_err(|e| e.to_string())?
-    {
-        if node.node_name()
-            == node_name(TOFINO_SUBSYSTEM_VID, TOFINO_SUBSYSTEM_ID)
-        {
-            polled_hw.tofino.exists = true;
-            polled_hw.tofino.driver_loaded =
-                node.driver_name().as_deref() == Some("tofino");
+        Self {
+            tofino: TofinoView::Real(TofinoSnapshot::new()),
+            disks: HashSet::new(),
         }
     }
 
-    // After inspecting the device tree, diff with the old view, and provide
-    // necessary updates.
-    let mut updates = vec![];
-    {
-        let mut inner = inner.lock().unwrap();
-        match inner.tofino {
+    fn new_stub_tofino(active: bool) -> Self {
+        Self { tofino: TofinoView::Stub { active }, disks: HashSet::new() }
+    }
+
+    // Updates our view of the Tofino switch against a snapshot.
+    fn update_tofino(
+        &mut self,
+        polled_hw: &HardwareSnapshot,
+        updates: &mut Vec<HardwareUpdate>,
+    ) {
+        match self.tofino {
             TofinoView::Real(TofinoSnapshot { driver_loaded, exists }) => {
-                use super::HardwareUpdate::*;
+                use HardwareUpdate::*;
                 // Identify if the Tofino device changed power states.
                 if exists != polled_hw.tofino.exists {
                     updates.push(TofinoDeviceChange);
@@ -117,11 +159,288 @@ fn poll_device_tree(
                 };
 
                 // Update our view of the underlying hardware
-                inner.tofino = TofinoView::Real(polled_hw.tofino);
+                self.tofino = TofinoView::Real(polled_hw.tofino);
             }
             TofinoView::Stub { .. } => (),
         }
+    }
+
+    // Updates our view of block devices against a snapshot.
+    fn update_blkdev(
+        &mut self,
+        polled_hw: &HardwareSnapshot,
+        updates: &mut Vec<HardwareUpdate>,
+    ) {
+        // In old set, not in new set.
+        let removed = self.disks.difference(&polled_hw.disks);
+        // In new set, not in old set.
+        let added = polled_hw.disks.difference(&self.disks);
+
+        use HardwareUpdate::*;
+        for disk in removed {
+            updates.push(DiskRemoved(disk.clone()));
+        }
+        for disk in added {
+            updates.push(DiskAdded(disk.clone()));
+        }
+
+        self.disks = polled_hw.disks.clone();
+    }
+}
+
+const TOFINO_SUBSYSTEM_VID: i32 = 0x1d1c;
+const TOFINO_SUBSYSTEM_ID: i32 = 0x100;
+
+fn node_name(subsystem_vid: i32, subsystem_id: i32) -> String {
+    format!("pci{subsystem_vid:x},{subsystem_id:x}")
+}
+
+fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
+    match slot {
+        // For the source of these values, refer to:
+        //
+        // https://github.com/oxidecomputer/illumos-gate/blob/87a8bbb8edfb89ad5012beb17fa6f685c7795416/usr/src/uts/oxide/milan/milan_dxio_data.c#L823-L847
+        0x00..=0x09 => Some(DiskVariant::U2),
+        0x11..=0x12 => Some(DiskVariant::M2),
+        _ => None,
+    }
+}
+
+fn poll_tofino_node(
+    log: &Logger,
+    tofino: &mut TofinoSnapshot,
+    node: &Node<'_>,
+) {
+    if node.node_name() == node_name(TOFINO_SUBSYSTEM_VID, TOFINO_SUBSYSTEM_ID)
+    {
+        tofino.exists = true;
+        tofino.driver_loaded = node.driver_name().as_deref() == Some("tofino");
+        debug!(
+            log,
+            "Found tofino node, with driver {}loaded",
+            if tofino.driver_loaded { "" } else { "not " }
+        );
+    }
+}
+
+fn get_dev_path_of_whole_disk(
+    node: &Node<'_>,
+) -> Result<Option<PathBuf>, Error> {
+    let mut wm = node.minors();
+    while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
+        // "wd" stands for "whole disk"
+        if m.name() != "wd" {
+            continue;
+        }
+        let links = {
+            match DevLinks::new(true) {
+                Ok(links) => links,
+                Err(_) => DevLinks::new(false).map_err(Error::DevInfo)?,
+            }
+        };
+        let devfs_path = m.devfs_path().map_err(Error::DevInfo)?;
+
+        let paths = links
+            .links_for_path(&devfs_path)
+            .map_err(Error::DevInfo)?
+            .into_iter()
+            .filter(|l| {
+                // Devices in "/dev/dsk" have names that denote their purpose,
+                // of the form "controller, disk, slice" or "controller, disk,
+                // partition".
+                //
+                // The suffix of "d0" is typical of an individual disk, and is
+                // the expected device to correspond with the "wd" device in
+                // the "/devices" hierarchy.
+                l.linktype() == DevLinkType::Primary
+                    && l.path()
+                        .file_name()
+                        .map(|f| f.to_string_lossy().ends_with("d0"))
+                        .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+
+        if paths.is_empty() {
+            return Err(Error::NoDevLinks(PathBuf::from(devfs_path)));
+        }
+        return Ok(Some(paths[0].path().to_path_buf()));
+    }
+    Ok(None)
+}
+
+fn get_parent_node<'a>(
+    node: &Node<'a>,
+    expected_parent_driver_name: &'static str,
+) -> Result<Node<'a>, Error> {
+    let Some(parent) = node.parent().map_err(Error::DevInfo)? else {
+        return Err(Error::DevInfo(anyhow::anyhow!("{} has no parent node", node.node_name())));
     };
+    if parent.driver_name().as_deref() != Some(expected_parent_driver_name) {
+        return Err(Error::DevInfo(anyhow::anyhow!(
+            "{} has non-{} parent node",
+            node.node_name(),
+            expected_parent_driver_name
+        )));
+    }
+    Ok(parent)
+}
+
+fn i64_from_property(prop: &Property<'_>) -> Result<i64, Error> {
+    prop.as_i64().ok_or_else(|| Error::UnexpectedPropertyType {
+        name: prop.name(),
+        ty: "i64".to_string(),
+    })
+}
+
+fn string_from_property(prop: &Property<'_>) -> Result<String, Error> {
+    prop.to_str().ok_or_else(|| Error::UnexpectedPropertyType {
+        name: prop.name(),
+        ty: "String".to_string(),
+    })
+}
+
+// Looks up multiple property names on a devinfo node.
+//
+// Returns all the properties in the same order of the input names.
+// Returns an error if any of the properties are missing.
+fn find_properties<'a, const N: usize>(
+    node: &'a Node<'_>,
+    property_names: [&'static str; N],
+) -> Result<[Property<'a>; N], Error> {
+    // The properties could show up in any order, so first we place
+    // them into a HashMap of "property name -> property".
+    let name_set = HashSet::from(property_names);
+    let mut properties = HashMap::new();
+    for property in node.props() {
+        let property = property.map_err(Error::DevInfo)?;
+        if let Some(name) = name_set.get(property.name().as_str()) {
+            properties.insert(*name, property);
+        }
+    }
+
+    // Next, we convert the properties back to an array, with values in the same
+    // indices as the input.
+    let mut output = Vec::with_capacity(N);
+    for name in &property_names {
+        let Some(property) = properties.remove(name) else {
+            return Err(Error::MissingDeviceProperty {
+                node: node.node_name(),
+                name: name.to_string(),
+            });
+        };
+        output.push(property);
+    }
+
+    // Unwrap safety: the "output" vec should have one entry for each of the
+    // "property_names", so they should have the same length (N).
+    Ok(output.try_into().map_err(|_| "Unexpected output size").unwrap())
+}
+
+fn poll_blkdev_node(
+    log: &Logger,
+    disks: &mut HashSet<UnparsedDisk>,
+    node: Node<'_>,
+) -> Result<(), Error> {
+    let Some(driver_name) = node.driver_name() else {
+        return Ok(());
+    };
+
+    if driver_name != "blkdev" {
+        return Ok(());
+    }
+
+    let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
+    let dev_path = get_dev_path_of_whole_disk(&node)?;
+
+    // libdevfs doesn't prepend "/devices" when referring to the path, but it
+    // still returns an absolute path. This is the absolute path from the
+    // kernel's perspective, but in userspace, it is typically mounted under
+    // "/devices"
+    //
+    // Validate that we're still using this leading slash, and also make the
+    // path usable.
+    assert!(devfs_path.starts_with('/'));
+    let devfs_path = format!("/devices{devfs_path}");
+
+    let properties = find_properties(
+        &node,
+        ["inquiry-serial-no", "inquiry-product-id", "inquiry-vendor-id"],
+    )?;
+    let inquiry_serial_no = string_from_property(&properties[0])?;
+    let inquiry_product_id = string_from_property(&properties[1])?;
+    let inquiry_vendor_id = string_from_property(&properties[2])?;
+
+    // We expect that the parent of the "blkdev" node is an "nvme" driver.
+    let nvme_node = get_parent_node(&node, "nvme")?;
+
+    let vendor_id =
+        i64_from_property(&find_properties(&nvme_node, ["vendor-id"])?[0])?;
+
+    // The model is generally equal to "inquiry-vendor-id" plus
+    // "inquiry-product-id", separated by a space.
+    //
+    // However, libdevfs may emit a placeholder value for the
+    // "inquiry-vendor-id", in which case it should be omitted.
+    let model = match inquiry_vendor_id.as_str() {
+        "" | "NVMe" => inquiry_product_id,
+        _ => format!("{inquiry_vendor_id} {inquiry_product_id}"),
+    };
+
+    let device_id = DiskIdentity {
+        vendor: format!("{:x}", vendor_id),
+        serial: inquiry_serial_no,
+        model,
+    };
+
+    // We expect that the parent of the "nvme" device is a "pcieb" driver.
+    let pcieb_node = get_parent_node(&nvme_node, "pcieb")?;
+
+    // The "pcieb" device needs to have a physical slot for us to understand
+    // what type of disk it is.
+    let slot = i64_from_property(
+        &find_properties(&pcieb_node, ["physical-slot#"])?[0],
+    )?;
+    let Some(variant) = slot_to_disk_variant(slot) else {
+        warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
+        return Err(Error::UnrecognizedSlot { slot } );
+    };
+
+    let disk = UnparsedDisk::new(
+        PathBuf::from(&devfs_path),
+        dev_path,
+        slot,
+        variant,
+        device_id,
+    );
+    disks.insert(disk);
+    Ok(())
+}
+
+// Performs a single walk of the device info tree, updating our view of hardware
+// and sending notifications to any subscribers.
+fn poll_device_tree(
+    log: &Logger,
+    inner: &Arc<Mutex<HardwareView>>,
+    tx: &broadcast::Sender<HardwareUpdate>,
+) -> Result<(), Error> {
+    // Construct a view of hardware by walking the device tree.
+    let polled_hw = HardwareSnapshot::new(log).map_err(|e| {
+        warn!(log, "Failed to poll device tree: {e}");
+        e
+    })?;
+
+    // After inspecting the device tree, diff with the old view, and provide
+    // necessary updates.
+    let mut updates = vec![];
+    {
+        let mut inner = inner.lock().unwrap();
+        inner.update_tofino(&polled_hw, &mut updates);
+        inner.update_blkdev(&polled_hw, &mut updates);
+    };
+
+    if updates.is_empty() {
+        debug!(log, "No updates from polling device tree");
+    }
 
     for update in updates.into_iter() {
         info!(log, "Update from polling device tree: {:?}", update);
@@ -134,7 +453,7 @@ fn poll_device_tree(
 async fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<super::HardwareUpdate>,
+    tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
         if let Err(err) = poll_device_tree(&log, &inner, &tx) {
@@ -151,7 +470,7 @@ async fn hardware_tracking_task(
 pub struct HardwareManager {
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<super::HardwareUpdate>,
+    tx: broadcast::Sender<HardwareUpdate>,
     _worker: JoinHandle<()>,
 }
 
@@ -169,6 +488,7 @@ impl HardwareManager {
         stub_scrimlet: Option<bool>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
+        info!(log, "Creating HardwareManager");
 
         // The size of the broadcast channel is arbitrary, but bounded.
         // If the channel fills up, old notifications will be dropped, and the
@@ -185,8 +505,14 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        poll_device_tree(&log, &inner, &tx)
-            .map_err(|err| format!("Failed to poll device tree: {err}"))?;
+        match poll_device_tree(&log, &inner, &tx) {
+            // Allow non-gimlet devices to proceed with a "null" view of
+            // hardware, otherwise they won't be able to start.
+            Ok(_) | Err(Error::NotAGimlet) => (),
+            Err(err) => {
+                return Err(format!("Failed to poll device tree: {err}"))
+            }
+        };
 
         let log2 = log.clone();
         let inner2 = inner.clone();
@@ -196,6 +522,10 @@ impl HardwareManager {
         });
 
         Ok(Self { log, inner, tx, _worker })
+    }
+
+    pub fn disks(&self) -> HashSet<UnparsedDisk> {
+        self.inner.lock().unwrap().disks.clone()
     }
 
     pub fn is_scrimlet(&self) -> bool {
@@ -216,7 +546,7 @@ impl HardwareManager {
         }
     }
 
-    pub fn monitor(&self) -> broadcast::Receiver<super::HardwareUpdate> {
+    pub fn monitor(&self) -> broadcast::Receiver<HardwareUpdate> {
         info!(self.log, "Monitoring for hardware updates");
         self.tx.subscribe()
         // TODO: Do we want to send initial messages, based on the existing

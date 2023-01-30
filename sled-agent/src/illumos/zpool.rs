@@ -4,8 +4,9 @@
 
 //! Utilities for managing Zpools.
 
-use crate::illumos::execute;
+use crate::illumos::{execute, PFEXEC};
 use serde::{Deserialize, Deserializer};
+use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -26,10 +27,16 @@ enum Error {
 }
 
 #[derive(thiserror::Error, Debug)]
+#[error("Failed to create zpool: {err}")]
+pub struct CreateError {
+    #[from]
+    err: Error,
+}
+
+#[derive(thiserror::Error, Debug)]
 #[error("Failed to list zpools: {err}")]
 pub struct ListError {
     #[from]
-    #[source]
     err: Error,
 }
 
@@ -154,6 +161,17 @@ pub struct Zpool {}
 
 #[cfg_attr(test, mockall::automock)]
 impl Zpool {
+    pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("create");
+        cmd.arg(&name.to_string());
+        cmd.arg(vdev);
+        execute(&mut cmd).map_err(Error::from)?;
+        Ok(())
+    }
+
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&["list", "-Hpo", "name"]);

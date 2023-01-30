@@ -1,0 +1,15 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= illumos hardware
+
+This directory contains APIs for accessing information about the underlying
+hardware of an illumos system. Some of these integrations rely on linking
+against native illumos libraries, and therefore cannot be universally compiled
+on all OSes.
+
+As a consequence, this directory hierarchy is split into the "illumos" and
+"non_illumos" targets. It's expected that the "non_illumos" target will remain
+stub-only, but enable compilation (and code completion) on non-illumos editor
+environments for the rest of the Sled Agent.
