@@ -35,6 +35,35 @@ pub enum HardwareUpdate {
     DiskRemoved(UnparsedDisk),
 }
 
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug)]
+pub struct Baseboard {
+    pub identifier: String,
+    pub model: String,
+    pub revision: i64,
+}
+
+impl Baseboard {
+    #[allow(dead_code)]
+    fn new() -> Self {
+        Self {
+            identifier: "Unknown".to_string(),
+            model: "Unknown".to_string(),
+            revision: 0,
+        }
+    }
+}
+
+impl From<Baseboard> for nexus_client::types::Baseboard {
+    fn from(b: Baseboard) -> nexus_client::types::Baseboard {
+        nexus_client::types::Baseboard {
+            identifier: b.identifier,
+            model: b.model,
+            revision: b.revision,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DiskError {
     #[error("Cannot open {path} due to {error}")]

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::hardware::{
-    DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
+    Baseboard, DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
 };
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use slog::Logger;
@@ -57,6 +57,7 @@ impl TofinoSnapshot {
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
     disks: HashSet<UnparsedDisk>,
+    baseboard: Baseboard,
 }
 
 impl HardwareSnapshot {
@@ -80,6 +81,16 @@ impl HardwareSnapshot {
             return Err(Error::NotAGimlet);
         }
 
+        let properties = find_properties(
+            &root,
+            ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
+        )?;
+        let baseboard = Baseboard {
+            identifier: string_from_property(&properties[0])?,
+            model: string_from_property(&properties[1])?,
+            revision: i64_from_property(&properties[2])?,
+        };
+
         // Monitor for the Tofino device and driver.
         let mut tofino = TofinoSnapshot::new();
         while let Some(node) =
@@ -97,7 +108,7 @@ impl HardwareSnapshot {
             poll_blkdev_node(&log, &mut disks, node)?;
         }
 
-        Ok(Self { tofino, disks })
+        Ok(Self { tofino, disks, baseboard })
     }
 }
 
@@ -123,18 +134,29 @@ enum TofinoView {
 struct HardwareView {
     tofino: TofinoView,
     disks: HashSet<UnparsedDisk>,
+    baseboard: Option<Baseboard>,
 }
 
 impl HardwareView {
+    // TODO: We should populate these constructors with real data from the
+    // first attempt at polling hardware.
+    //
+    // Otherwise, values that we really expect to be static will need to be
+    // nullable.
     fn new() -> Self {
         Self {
             tofino: TofinoView::Real(TofinoSnapshot::new()),
             disks: HashSet::new(),
+            baseboard: None,
         }
     }
 
     fn new_stub_tofino(active: bool) -> Self {
-        Self { tofino: TofinoView::Stub { active }, disks: HashSet::new() }
+        Self {
+            tofino: TofinoView::Stub { active },
+            disks: HashSet::new(),
+            baseboard: None,
+        }
     }
 
     // Updates our view of the Tofino switch against a snapshot.
@@ -436,6 +458,7 @@ fn poll_device_tree(
         let mut inner = inner.lock().unwrap();
         inner.update_tofino(&polled_hw, &mut updates);
         inner.update_blkdev(&polled_hw, &mut updates);
+        inner.baseboard = Some(polled_hw.baseboard);
     };
 
     if updates.is_empty() {
@@ -522,6 +545,10 @@ impl HardwareManager {
         });
 
         Ok(Self { log, inner, tx, _worker })
+    }
+
+    pub fn baseboard(&self) -> Baseboard {
+        self.inner.lock().unwrap().baseboard.as_ref().unwrap().clone()
     }
 
     pub fn disks(&self) -> HashSet<UnparsedDisk> {

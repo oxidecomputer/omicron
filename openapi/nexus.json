@@ -9191,6 +9191,27 @@
       }
     },
     "schemas": {
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "identifier",
+          "model",
+          "revision"
+        ]
+      },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
@@ -13058,6 +13079,9 @@
         "description": "Client view of an [`Sled`]",
         "type": "object",
         "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -13078,6 +13102,7 @@
           }
         },
         "required": [
+          "baseboard",
           "id",
           "service_address",
           "time_created",

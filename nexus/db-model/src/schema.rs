@@ -386,6 +386,10 @@ table! {
 
         rack_id -> Uuid,
         is_scrimlet -> Bool,
+        baseboard_identifier -> Text,
+        baseboard_model -> Text,
+        baseboard_revision -> Int8,
+
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,

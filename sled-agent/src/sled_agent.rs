@@ -487,6 +487,9 @@ impl SledAgent {
         let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = nexus_client::types::Baseboard::from(
+            self.inner.hardware.baseboard(),
+        );
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
@@ -498,7 +501,9 @@ impl SledAgent {
             let notify_nexus = || async {
                 info!(
                     log,
-                    "contacting server nexus, registering sled: {}", sled_id
+                    "contacting server nexus, registering sled";
+                    "id" => ?sled_id,
+                    "baseboard" => ?baseboard,
                 );
                 let role = if is_scrimlet {
                     nexus_client::types::SledRole::Scrimlet
@@ -516,6 +521,7 @@ impl SledAgent {
                         &nexus_client::types::SledAgentStartupInfo {
                             sa_address: sled_address.to_string(),
                             role,
+                            baseboard: baseboard.clone(),
                         },
                     )
                     .await

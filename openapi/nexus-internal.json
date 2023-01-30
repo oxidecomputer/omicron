@@ -431,6 +431,27 @@
       }
     },
     "schemas": {
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "identifier",
+          "model",
+          "revision"
+        ]
+      },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
@@ -1962,6 +1983,14 @@
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
         "properties": {
+          "baseboard": {
+            "description": "Describes the sled's identity",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
           "role": {
             "description": "Describes the responsibilities of the sled",
             "allOf": [
@@ -1976,6 +2005,7 @@
           }
         },
         "required": [
+          "baseboard",
           "role",
           "sa_address"
         ]

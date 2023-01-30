@@ -473,7 +473,19 @@ mod test {
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
         let is_scrimlet = false;
-        let sled = Sled::new(sled_id, bogus_addr, is_scrimlet, rack_id);
+
+        let bb_identifier = String::from("identifier");
+        let bb_model = String::from("model");
+        let bb_revision = 0;
+        let sled = Sled::new(
+            sled_id,
+            bogus_addr,
+            is_scrimlet,
+            bb_identifier,
+            bb_model,
+            bb_revision,
+            rack_id,
+        );
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }
@@ -859,12 +871,34 @@ mod test {
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
         let is_scrimlet = false;
-        let sled1 = db::model::Sled::new(sled1_id, addr1, is_scrimlet, rack_id);
+        let bb_identifier = String::from("identifier");
+        let bb_model = String::from("model");
+        let bb_revision = 0;
+        let sled1 = db::model::Sled::new(
+            sled1_id,
+            addr1,
+            is_scrimlet,
+            bb_identifier,
+            bb_model,
+            bb_revision,
+            rack_id,
+        );
         datastore.sled_upsert(sled1).await.unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::Sled::new(sled2_id, addr2, is_scrimlet, rack_id);
+        let bb_identifier = String::from("other-identifier");
+        let bb_model = String::from("model");
+        let bb_revision = 0;
+        let sled2 = db::model::Sled::new(
+            sled2_id,
+            addr2,
+            is_scrimlet,
+            bb_identifier,
+            bb_model,
+            bb_revision,
+            rack_id,
+        );
         datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();

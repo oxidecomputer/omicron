@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::hardware::{
-    DiskError, DiskPaths, DiskVariant, Partition, UnparsedDisk,
+    Baseboard, DiskError, DiskPaths, DiskVariant, Partition, UnparsedDisk,
 };
 use slog::Logger;
 use std::collections::HashSet;
@@ -24,6 +24,10 @@ impl HardwareManager {
         _log: Logger,
         _stub_scrimlet: Option<bool>,
     ) -> Result<Self, String> {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn baseboard(&self) -> Baseboard {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
