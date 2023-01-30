@@ -85,9 +85,7 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"PUT\" request to {path}")
-        })
+        .unwrap_or_else(|_| panic!("failed to make \"PUT\" request to {path}"))
         .parsed_body()
         .unwrap()
 }

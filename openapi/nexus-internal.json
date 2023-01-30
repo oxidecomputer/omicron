@@ -303,15 +303,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhysicalDiskDeleteResponse"
-                }
-              }
-            }
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1800,9 +1793,6 @@
           "sled_id",
           "vendor"
         ]
-      },
-      "PhysicalDiskDeleteResponse": {
-        "type": "object"
       },
       "PhysicalDiskKind": {
         "description": "Describes the type of physical disk.",

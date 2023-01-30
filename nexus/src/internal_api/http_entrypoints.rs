@@ -7,14 +7,15 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskDeleteResponse,
-    PhysicalDiskPutRequest, PhysicalDiskPutResponse, RackInitializationRequest,
-    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
+    OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
+    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentStartupInfo,
+    ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
@@ -145,7 +146,7 @@ async fn physical_disk_put(
 async fn physical_disk_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     body: TypedBody<PhysicalDiskDeleteRequest>,
-) -> Result<HttpResponseOk<PhysicalDiskDeleteResponse>, HttpError> {
+) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let disk = body.into_inner();
@@ -153,7 +154,7 @@ async fn physical_disk_delete(
     let handler = async {
         let opctx = OpContext::for_internal_api(&rqctx).await;
         nexus.delete_physical_disk(&opctx, disk).await?;
-        Ok(HttpResponseOk(PhysicalDiskDeleteResponse {}))
+        Ok(HttpResponseDeleted())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

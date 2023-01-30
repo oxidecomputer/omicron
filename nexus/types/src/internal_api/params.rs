@@ -70,9 +70,6 @@ pub struct PhysicalDiskDeleteRequest {
     pub sled_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskDeleteResponse {}
-
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
