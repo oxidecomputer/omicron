@@ -2,6 +2,12 @@
 # Oxide API: example configuration file
 #
 
+# Maximum number of host phase2 trampoline images we're willing to cache. Note
+# that this value is specified in terms of _number of images_, not bytes, and
+# our cache is in-memory. We expect this value to be small in production,
+# potentially even 1 (i.e., only keep the most-recently-uploaded image).
+host_phase2_recovery_image_cache_max_images = 1
+
 [dropshot]
 request_body_max_bytes = 131072
 

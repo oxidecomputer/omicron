@@ -18,15 +18,10 @@ pub struct ServerContext {
 
 impl ServerContext {
     pub async fn new(
+        host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
         switch_config: SwitchConfig,
         log: &Logger,
     ) -> Result<Arc<Self>, StartupError> {
-        // The capacity here is the maximum number of recovery images we're
-        // willing to keep in memory - we only ever expect to be serving one
-        // (whatever the most recent one is).
-        let host_phase2_provider =
-            Arc::new(InMemoryHostPhase2Provider::with_capacity(1));
-
         let mgmt_switch =
             ManagementSwitch::new(switch_config, &host_phase2_provider, log)
                 .await?;
