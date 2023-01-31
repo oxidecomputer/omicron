@@ -107,10 +107,10 @@ impl OmicronRepo {
     /// not.
     ///
     /// In principle it should be possible to read the repository out of a zip
-    /// file from memory, but we ran into
-    /// https://github.com/awslabs/tough/pull/563 while implementing it. Once
-    /// that is resolved (or we write our own TUF crate) it should be possible
-    /// to do that.
+    /// file from memory, but we ran into [this
+    /// issue](https://github.com/awslabs/tough/pull/563) while implementing it.
+    /// Once that is resolved (or we write our own TUF crate) it should be
+    /// possible to do that.
     ///
     /// Regardless of this roadblock, we don't want to foreclose that option
     /// forever, so this code uses zip rather than having to deal with a

@@ -86,8 +86,8 @@ impl ArchiveBuilder {
 ///
 /// Ideally we'd just be able to read the TUF repo out of a zip archive in
 /// memory, but sadly that isn't possible today due to a missing lifetime
-/// parameter on `Transport::fetch`. See
-/// https://github.com/awslabs/tough/pull/563.
+/// parameter on `Transport::fetch`. See [this
+/// issue](https://github.com/awslabs/tough/pull/563).
 #[derive(Debug)]
 pub struct ArchiveExtractor<R> {
     archive: ZipArchive<R>,
@@ -154,8 +154,9 @@ where
 
     /// Extracts this archive into the specified directory.
     ///
-    /// Once this is completed, use [`OmicronRepo::load`] to load the archive
-    /// from `output_dir`.
+    /// Once this is completed, use
+    /// [`OmicronRepo::load`](crate::OmicronRepo::load) to load the archive from
+    /// `output_dir`.
     ///
     /// `ZIP_BASE_DIR` will be stripped from the path.
     pub fn extract(&mut self, output_dir: &Utf8Path) -> Result<()> {
