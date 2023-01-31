@@ -13,7 +13,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/oximeter/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-port %{config/mgs-port}  &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address}  &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
