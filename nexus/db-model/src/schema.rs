@@ -386,6 +386,10 @@ table! {
 
         rack_id -> Uuid,
         is_scrimlet -> Bool,
+        serial_number -> Text,
+        part_number -> Text,
+        revision -> Int8,
+
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,

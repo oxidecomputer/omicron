@@ -44,6 +44,9 @@ impl super::Nexus {
             id,
             info.sa_address,
             is_scrimlet,
+            info.baseboard.identifier,
+            info.baseboard.model,
+            info.baseboard.revision,
             self.rack_id,
         );
         self.db_datastore.sled_upsert(sled).await?;

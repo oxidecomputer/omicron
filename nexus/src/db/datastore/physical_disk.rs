@@ -134,7 +134,18 @@ mod test {
         let is_scrimlet = false;
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
         let rack_id = Uuid::new_v4();
-        let sled = Sled::new(sled_id, addr, is_scrimlet, rack_id);
+        let identifier = String::from("identifier");
+        let model = String::from("model");
+        let revision = 0;
+        let sled = Sled::new(
+            sled_id,
+            addr,
+            is_scrimlet,
+            identifier,
+            model,
+            revision,
+            rack_id,
+        );
         db.sled_upsert(sled)
             .await
             .expect("Could not upsert sled during test prep")

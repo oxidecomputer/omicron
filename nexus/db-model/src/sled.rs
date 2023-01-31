@@ -25,6 +25,9 @@ pub struct Sled {
     pub rack_id: Uuid,
 
     is_scrimlet: bool,
+    serial_number: String,
+    part_number: String,
+    revision: i64,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
@@ -39,6 +42,9 @@ impl Sled {
         id: Uuid,
         addr: SocketAddrV6,
         is_scrimlet: bool,
+        serial_number: String,
+        part_number: String,
+        revision: i64,
         rack_id: Uuid,
     ) -> Self {
         let last_used_address = {
@@ -52,6 +58,9 @@ impl Sled {
             rcgen: Generation::new(),
             rack_id,
             is_scrimlet,
+            serial_number,
+            part_number,
+            revision,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,
@@ -77,7 +86,15 @@ impl Sled {
 
 impl From<Sled> for views::Sled {
     fn from(sled: Sled) -> Self {
-        Self { identity: sled.identity(), service_address: sled.address() }
+        Self {
+            identity: sled.identity(),
+            service_address: sled.address(),
+            baseboard: views::Baseboard {
+                serial: sled.serial_number,
+                part: sled.part_number,
+                revision: sled.revision,
+            },
+        }
     }
 }
 

@@ -285,12 +285,21 @@ pub struct Rack {
 
 // SLEDS
 
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Baseboard {
+    pub serial: String,
+    pub part: String,
+    pub revision: i64,
+}
+
 /// Client view of a [`Sled`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
+    pub baseboard: Baseboard,
 }
 
 // PHYSICAL DISKS

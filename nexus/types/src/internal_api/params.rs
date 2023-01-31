@@ -28,6 +28,14 @@ pub enum SledRole {
     Scrimlet,
 }
 
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Baseboard {
+    pub identifier: String,
+    pub model: String,
+    pub revision: i64,
+}
+
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentStartupInfo {
@@ -36,6 +44,9 @@ pub struct SledAgentStartupInfo {
 
     /// Describes the responsibilities of the sled
     pub role: SledRole,
+
+    /// Describes the sled's identity
+    pub baseboard: Baseboard,
 }
 
 /// Describes the type of physical disk.
