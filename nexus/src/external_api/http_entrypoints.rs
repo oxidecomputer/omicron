@@ -239,7 +239,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
-        api.register(physical_disks_list)?;
+        api.register(sled_physical_disk_list)?;
+        api.register(physical_disk_list)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -5349,13 +5350,43 @@ async fn sled_view(
 
 // Physical disks
 
+/// List physical disks
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/disks",
+    tags = ["system"],
+}]
+async fn physical_disk_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .physical_disk_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List physical disks attached to sleds
 #[endpoint {
     method = GET,
     path = "/system/hardware/sleds/{sled_id}/disks",
     tags = ["system"],
 }]
-async fn physical_disks_list(
+async fn sled_physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SledPathParam>,
     query_params: Query<PaginatedById>,
@@ -5367,7 +5398,7 @@ async fn physical_disks_list(
         let query = query_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let disks = nexus
-            .physical_disks_list(
+            .sled_list_physical_disks(
                 &opctx,
                 path.sled_id,
                 &data_page_params_for(&rqctx, &query)?,

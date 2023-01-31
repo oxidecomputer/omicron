@@ -110,7 +110,7 @@ impl super::Nexus {
 
     // Physical disks
 
-    pub async fn physical_disks_list(
+    pub async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
         sled_id: Uuid,
@@ -119,6 +119,14 @@ impl super::Nexus {
         self.db_datastore
             .sled_list_physical_disks(&opctx, sled_id, pagparams)
             .await
+    }
+
+    pub async fn physical_disk_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::PhysicalDisk> {
+        self.db_datastore.physical_disk_list(&opctx, pagparams).await
     }
 
     /// Upserts a physical disk into the database, updating it if it already exists.

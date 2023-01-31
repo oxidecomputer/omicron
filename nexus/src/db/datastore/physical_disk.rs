@@ -75,6 +75,21 @@ impl DataStore {
         Ok(disk_in_db)
     }
 
+    pub async fn physical_disk_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<PhysicalDisk> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+        paginated(dsl::physical_disk, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(PhysicalDisk::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     pub async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
