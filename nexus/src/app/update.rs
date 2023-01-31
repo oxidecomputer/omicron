@@ -12,10 +12,10 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::UpdateArtifactKind;
 use chrono::Utc;
 use hex;
-use nexus_types::external_api::params;
+use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
-    PaginationOrder,
+    PaginationOrder, UpdateResult,
 };
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use rand::Rng;
@@ -405,6 +405,21 @@ impl super::Nexus {
         self.db_datastore.create_update_deployment(opctx, deployment).await
     }
 
+    /// If there's a running update, change it to steady. Otherwise do nothing.
+    // TODO: codify the state machine around update deployments
+    pub async fn steady_update_deployment(
+        &self,
+        opctx: &OpContext,
+    ) -> UpdateResult<db::model::UpdateDeployment> {
+        let latest = self.latest_update_deployment(opctx).await?;
+        // already steady. do nothing in order to avoid updating `time_modified`
+        if latest.status == db::model::UpdateStatus::Steady {
+            return Ok(latest);
+        }
+
+        self.db_datastore.steady_update_deployment(opctx, latest.id()).await
+    }
+
     pub async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,
@@ -426,13 +441,6 @@ impl super::Nexus {
         Ok(db_deployment)
     }
 
-    // TODO: pub async fn steady_update_deployment(
-    //     &self,
-    //     opctx: &OpContext,
-    //     deployment_id: Uuid,
-    // ) -> UpdateResult<db::model::UpdateDeployment> {
-    // }
-
     pub async fn latest_update_deployment(
         &self,
         opctx: &OpContext,
@@ -453,6 +461,108 @@ impl super::Nexus {
     ) -> LookupResult<db::model::SemverVersion> {
         self.db_datastore.highest_component_system_version(opctx).await
     }
+
+    /// Inner function makes it easier to implement the logic where we ignore
+    /// ObjectAlreadyExists errors but let the others pass through
+    async fn populate_mock_system_updates_inner(
+        &self,
+        opctx: &OpContext,
+    ) -> CreateResult<()> {
+        let types = vec![
+            shared::UpdateableComponentType::HubrisForPscRot,
+            shared::UpdateableComponentType::HubrisForPscSp,
+            shared::UpdateableComponentType::HubrisForSidecarRot,
+            shared::UpdateableComponentType::HubrisForSidecarSp,
+            shared::UpdateableComponentType::HubrisForGimletRot,
+            shared::UpdateableComponentType::HubrisForGimletSp,
+            shared::UpdateableComponentType::HeliosHostPhase1,
+            shared::UpdateableComponentType::HeliosHostPhase2,
+            shared::UpdateableComponentType::HostOmicron,
+        ];
+
+        // create system updates and associated component updates
+        for v in [1, 2, 3] {
+            let version = external::SemverVersion::new(v, 0, 0);
+            let su = self
+                .create_system_update(
+                    opctx,
+                    params::SystemUpdateCreate { version: version.clone() },
+                )
+                .await?;
+
+            for component_type in types.clone() {
+                self.create_component_update(
+                    &opctx,
+                    params::ComponentUpdateCreate {
+                        version: external::SemverVersion::new(1, v, 0),
+                        system_update_id: su.identity.id,
+                        component_type,
+                    },
+                )
+                .await?;
+            }
+        }
+
+        // create deployment for v1.0.0 and stop it
+        self.create_update_deployment(
+            &opctx,
+            params::SystemUpdateStart {
+                version: external::SemverVersion::new(1, 0, 0),
+            },
+        )
+        .await?;
+        self.steady_update_deployment(opctx).await?;
+
+        // now create components, with one component on a different system
+        // version from the others
+
+        for (i, component_type) in types.iter().enumerate() {
+            let version = if i == 0 {
+                external::SemverVersion::new(1, 2, 0)
+            } else {
+                external::SemverVersion::new(1, 1, 0)
+            };
+
+            let system_version = if i == 0 {
+                external::SemverVersion::new(2, 0, 0)
+            } else {
+                external::SemverVersion::new(1, 0, 0)
+            };
+
+            self.create_updateable_component(
+                opctx,
+                params::UpdateableComponentCreate {
+                    version,
+                    system_version,
+                    device_id: "a-device".to_string(),
+                    component_type: component_type.clone(),
+                },
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Populate the DB with update-related data. Data is hard-coded until we
+    /// figure out how to pull it from the TUF repo.
+    ///
+    /// We need this to be idempotent because it can be called arbitrarily many
+    /// times. The service functions we call to create these resources will
+    /// error on ID or version conflicts, so to remain idempotent we can simply
+    /// ignore those errors. We let other errors through.
+    pub async fn populate_mock_system_updates(
+        &self,
+        opctx: &OpContext,
+    ) -> CreateResult<()> {
+        self.populate_mock_system_updates_inner(opctx).await.or_else(|error| {
+            match error {
+                // ignore ObjectAlreadyExists but pass through other errors
+                external::Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(error),
+            }
+        })
+    }
 }
 
 // TODO: convert system update tests to integration tests now that I know how to
@@ -463,6 +573,7 @@ mod tests {
     use std::{assert_matches::assert_matches, num::NonZeroU32};
 
     use crate::context::OpContext;
+    use crate::db::model::UpdateStatus;
     use dropshot::PaginationOrder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{
@@ -498,31 +609,31 @@ mod tests {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        // starts out empty
+        // starts out with 3 populated
         let system_updates = nexus
             .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(system_updates.len(), 0);
+        assert_eq!(system_updates.len(), 3);
 
         let su1_create = SystemUpdateCreate {
-            version: external::SemverVersion::new(1, 0, 0),
+            version: external::SemverVersion::new(5, 0, 0),
         };
         let su1 = nexus.create_system_update(&opctx, su1_create).await.unwrap();
 
-        // 1,3,2 order is deliberate
+        // weird order is deliberate
         let su3_create = SystemUpdateCreate {
-            version: external::SemverVersion::new(3, 0, 0),
+            version: external::SemverVersion::new(10, 0, 0),
         };
         nexus.create_system_update(&opctx, su3_create).await.unwrap();
 
         let su2_create = SystemUpdateCreate {
-            version: external::SemverVersion::new(2, 0, 0),
+            version: external::SemverVersion::new(0, 7, 0),
         };
         let su2 = nexus.create_system_update(&opctx, su2_create).await.unwrap();
 
-        // now there should be three system updates, sorted by version descending
+        // now there should be a bunch of system updates, sorted by version descending
         let versions: Vec<String> = nexus
             .system_updates_list_by_id(&opctx, &test_pagparams())
             .await
@@ -531,10 +642,13 @@ mod tests {
             .map(|su| su.version.to_string())
             .collect();
 
-        assert_eq!(versions.len(), 3);
-        assert_eq!(versions[0], "3.0.0".to_string());
-        assert_eq!(versions[1], "2.0.0".to_string());
-        assert_eq!(versions[2], "1.0.0".to_string());
+        assert_eq!(versions.len(), 6);
+        assert_eq!(versions[0], "10.0.0".to_string());
+        assert_eq!(versions[1], "5.0.0".to_string());
+        assert_eq!(versions[2], "3.0.0".to_string());
+        assert_eq!(versions[3], "2.0.0".to_string());
+        assert_eq!(versions[4], "1.0.0".to_string());
+        assert_eq!(versions[5], "0.7.0".to_string());
 
         // let's also make sure we can fetch by version
         let su1_fetched = nexus
@@ -545,7 +659,7 @@ mod tests {
 
         // now create two component updates for update 1, one at root, and one
         // hanging off the first
-        let _cu1 = nexus
+        nexus
             .create_component_update(
                 &opctx,
                 ComponentUpdateCreate {
@@ -555,8 +669,8 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
-        let _cu2 = nexus
+            .expect("Failed to create component update");
+        nexus
             .create_component_update(
                 &opctx,
                 ComponentUpdateCreate {
@@ -566,7 +680,7 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
+            .expect("Failed to create component update");
 
         // now there should be two component updates
         let cus_for_su1 = nexus
@@ -626,23 +740,24 @@ mod tests {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        // starts out empty
+        // starts out populated
         let components = nexus
             .updateable_components_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(components.len(), 0);
+        assert_eq!(components.len(), 9);
 
         // with no components these should both 500. as discussed in the
         // implementation, this is appropriate because we should never be
         // running the external API without components populated
-        let low =
-            nexus.lowest_component_system_version(&opctx).await.unwrap_err();
-        assert_matches!(low, external::Error::InternalError { .. });
-        let high =
-            nexus.highest_component_system_version(&opctx).await.unwrap_err();
-        assert_matches!(high, external::Error::InternalError { .. });
+        //
+        // let low =
+        //     nexus.lowest_component_system_version(&opctx).await.unwrap_err();
+        // assert_matches!(low, external::Error::InternalError { .. });
+        // let high =
+        //     nexus.highest_component_system_version(&opctx).await.unwrap_err();
+        // assert_matches!(high, external::Error::InternalError { .. });
 
         // creating a component if its system_version doesn't exist is a 404
         let uc_create = UpdateableComponentCreate {
@@ -663,7 +778,7 @@ mod tests {
             .create_system_update(&opctx, SystemUpdateCreate { version: v020 })
             .await
             .expect("Failed to create system update");
-        let v3 = external::SemverVersion::new(3, 0, 0);
+        let v3 = external::SemverVersion::new(4, 0, 0);
         nexus
             .create_system_update(&opctx, SystemUpdateCreate { version: v3 })
             .await
@@ -704,13 +819,13 @@ mod tests {
             .await
             .expect("failed to create updateable component");
 
-        // now there should be 3
+        // now there should be 3 more, or 12
         let components = nexus
             .updateable_components_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(components.len(), 3);
+        assert_eq!(components.len(), 12);
 
         let low = nexus.lowest_component_system_version(&opctx).await.unwrap();
         assert_eq!(&low.to_string(), "0.2.0");
@@ -726,51 +841,98 @@ mod tests {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        // starts out empty
-        let deployments = nexus
-            .update_deployments_list_by_id(&opctx, &test_pagparams())
-            .await
-            .unwrap();
-
-        assert_eq!(deployments.len(), 0);
-
-        // start update fails with nonexistent version
-        let start = SystemUpdateStart {
-            version: external::SemverVersion::new(1, 0, 0),
-        };
-        let not_found = nexus
-            .create_update_deployment(&opctx, start.clone())
-            .await
-            .unwrap_err();
-
-        assert_matches!(not_found, external::Error::ObjectNotFound { .. });
-
-        // create system update 1.0.0
-        let create = SystemUpdateCreate {
-            version: external::SemverVersion::new(1, 0, 0),
-        };
-        nexus
-            .create_system_update(&opctx, create)
-            .await
-            .expect("Failed to create system update");
-
-        // start deployment works
-        let d = nexus
-            .create_update_deployment(&opctx, start)
-            .await
-            .expect("Failed to create deployment");
-
+        // starts out with one populated
         let deployments = nexus
             .update_deployments_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
         assert_eq!(deployments.len(), 1);
-        assert_eq!(deployments.get(0).unwrap().identity.id, d.identity.id);
+
+        // start update fails with nonexistent version
+        let not_found = nexus
+            .create_update_deployment(
+                &opctx,
+                SystemUpdateStart {
+                    version: external::SemverVersion::new(6, 0, 0),
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_matches!(not_found, external::Error::ObjectNotFound { .. });
+
+        // starting succeeds with a version that exists
+        let d = nexus
+            .create_update_deployment(
+                &opctx,
+                SystemUpdateStart {
+                    version: external::SemverVersion::new(2, 0, 0),
+                },
+            )
+            .await
+            .expect("Failed to create deployment");
+
+        let deployment_ids: Vec<Uuid> = nexus
+            .update_deployments_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|d| d.identity.id)
+            .collect();
+
+        assert_eq!(deployment_ids.len(), 2);
+        assert!(deployment_ids.contains(&d.identity.id));
 
         let latest_deployment =
             nexus.latest_update_deployment(&opctx).await.unwrap();
 
         assert_eq!(latest_deployment.identity.id, d.identity.id);
+        assert_eq!(latest_deployment.status, UpdateStatus::Updating);
+        assert!(
+            latest_deployment.identity.time_modified
+                == d.identity.time_modified
+        );
+
+        nexus
+            .steady_update_deployment(&opctx)
+            .await
+            .expect("Failed to steady running update");
+
+        let latest_deployment =
+            nexus.latest_update_deployment(&opctx).await.unwrap();
+
+        assert_eq!(latest_deployment.identity.id, d.identity.id);
+        assert_eq!(latest_deployment.status, UpdateStatus::Steady);
+        assert!(
+            latest_deployment.identity.time_modified > d.identity.time_modified
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_populate_mock_system_updates(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.apictx.nexus;
+        let opctx = test_opctx(&cptestctx);
+
+        // starts out with updates because they're populated at rack init
+        let su_count = nexus
+            .system_updates_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap()
+            .len();
+        assert!(su_count > 0);
+
+        // additional call doesn't error because the conflict gets eaten
+        let result = nexus.populate_mock_system_updates(&opctx).await;
+        assert!(result.is_ok());
+
+        // count didn't change
+        let system_updates = nexus
+            .system_updates_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap();
+        assert_eq!(system_updates.len(), su_count);
     }
 }
