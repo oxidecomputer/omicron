@@ -15,7 +15,7 @@ use hex;
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
-    PaginationOrder,
+    PaginationOrder, UpdateResult,
 };
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use rand::Rng;
@@ -405,6 +405,21 @@ impl super::Nexus {
         self.db_datastore.create_update_deployment(opctx, deployment).await
     }
 
+    /// If there's a running update, change it to steady. Otherwise do nothing.
+    // TODO: codify the state machine around update deployments
+    pub async fn steady_update_deployment(
+        &self,
+        opctx: &OpContext,
+    ) -> UpdateResult<db::model::UpdateDeployment> {
+        let latest = self.latest_update_deployment(opctx).await?;
+        // already steady. do nothing in order to avoid updating `time_modified`
+        if latest.status == db::model::UpdateStatus::Steady {
+            return Ok(latest);
+        }
+
+        self.db_datastore.steady_update_deployment(opctx, latest.id()).await
+    }
+
     pub async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,
@@ -425,13 +440,6 @@ impl super::Nexus {
             .await?;
         Ok(db_deployment)
     }
-
-    // TODO: pub async fn steady_update_deployment(
-    //     &self,
-    //     opctx: &OpContext,
-    //     deployment_id: Uuid,
-    // ) -> UpdateResult<db::model::UpdateDeployment> {
-    // }
 
     pub async fn latest_update_deployment(
         &self,
@@ -495,6 +503,16 @@ impl super::Nexus {
             }
         }
 
+        // create deployment for v1.0.0 and stop it
+        self.create_update_deployment(
+            &opctx,
+            params::SystemUpdateStart {
+                version: external::SemverVersion::new(1, 0, 0),
+            },
+        )
+        .await?;
+        self.steady_update_deployment(opctx).await?;
+
         Ok(())
     }
 
@@ -527,6 +545,7 @@ mod tests {
     use std::{assert_matches::assert_matches, num::NonZeroU32};
 
     use crate::context::OpContext;
+    use crate::db::model::UpdateStatus;
     use dropshot::PaginationOrder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{
@@ -793,52 +812,72 @@ mod tests {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        // starts out empty
-        let deployments = nexus
-            .update_deployments_list_by_id(&opctx, &test_pagparams())
-            .await
-            .unwrap();
-
-        assert_eq!(deployments.len(), 0);
-
-        // start update fails with nonexistent version
-        let start = SystemUpdateStart {
-            version: external::SemverVersion::new(6, 0, 0),
-        };
-        let not_found = nexus
-            .create_update_deployment(&opctx, start.clone())
-            .await
-            .unwrap_err();
-
-        assert_matches!(not_found, external::Error::ObjectNotFound { .. });
-
-        // create the missing update
-        let create = SystemUpdateCreate {
-            version: external::SemverVersion::new(6, 0, 0),
-        };
-        nexus
-            .create_system_update(&opctx, create)
-            .await
-            .expect("Failed to create system update");
-
-        // start deployment works
-        let d = nexus
-            .create_update_deployment(&opctx, start)
-            .await
-            .expect("Failed to create deployment");
-
+        // starts out with one populated
         let deployments = nexus
             .update_deployments_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
         assert_eq!(deployments.len(), 1);
-        assert_eq!(deployments.get(0).unwrap().identity.id, d.identity.id);
+
+        // start update fails with nonexistent version
+        let not_found = nexus
+            .create_update_deployment(
+                &opctx,
+                SystemUpdateStart {
+                    version: external::SemverVersion::new(6, 0, 0),
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_matches!(not_found, external::Error::ObjectNotFound { .. });
+
+        // starting succeeds with a version that exists
+        let d = nexus
+            .create_update_deployment(
+                &opctx,
+                SystemUpdateStart {
+                    version: external::SemverVersion::new(2, 0, 0),
+                },
+            )
+            .await
+            .expect("Failed to create deployment");
+
+        let deployment_ids: Vec<Uuid> = nexus
+            .update_deployments_list_by_id(&opctx, &test_pagparams())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|d| d.identity.id)
+            .collect();
+
+        assert_eq!(deployment_ids.len(), 2);
+        assert!(deployment_ids.contains(&d.identity.id));
 
         let latest_deployment =
             nexus.latest_update_deployment(&opctx).await.unwrap();
 
         assert_eq!(latest_deployment.identity.id, d.identity.id);
+        assert_eq!(latest_deployment.status, UpdateStatus::Updating);
+        assert!(
+            latest_deployment.identity.time_modified
+                == d.identity.time_modified
+        );
+
+        nexus
+            .steady_update_deployment(&opctx)
+            .await
+            .expect("Failed to steady running update");
+
+        let latest_deployment =
+            nexus.latest_update_deployment(&opctx).await.unwrap();
+
+        assert_eq!(latest_deployment.identity.id, d.identity.id);
+        assert_eq!(latest_deployment.status, UpdateStatus::Steady);
+        assert!(
+            latest_deployment.identity.time_modified > d.identity.time_modified
+        );
     }
 
     #[nexus_test(server = crate::Server)]

@@ -190,15 +190,25 @@ async fn test_list_update_components(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_list_deployments(cptestctx: &ControlPlaneTestContext) {
+async fn test_update_deployments(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let component_updates =
+    let deployments =
         NexusRequest::object_get(&client, &"/v1/system/update/deployments")
             .authn_as(AuthnMode::PrivilegedUser)
             .execute_and_parse_unwrap::<ResultsPage<views::UpdateDeployment>>()
             .await;
 
-    assert_eq!(component_updates.items.len(), 0);
-    assert_eq!(component_updates.next_page, None);
+    assert_eq!(deployments.items.len(), 1);
+
+    // TODO: test fetch deployment by ID
+    //
+    // let deployment_id = dbg!(deployments.items.get(0).unwrap().identity.id);
+    // let deployment = NexusRequest::object_get(
+    //     &client,
+    //     &format!("/v1/system/update/deployments/{}", deployment_id.to_string()),
+    // )
+    // .authn_as(AuthnMode::PrivilegedUser)
+    // .execute_and_parse_unwrap::<views::UpdateDeployment>()
+    // .await;
 }
