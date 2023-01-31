@@ -5802,6 +5802,73 @@
         }
       }
     },
+    "/system/hardware/sleds/{sled_id}/disks": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List physical disks attached to sleds",
+        "operationId": "physical_disks_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "The sled's unique ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/system/images": {
       "get": {
         "tags": [
@@ -12417,6 +12484,82 @@
         "type": "string",
         "maxLength": 512
       },
+      "PhysicalDisk": {
+        "description": "Client view of a [`PhysicalDisk`]",
+        "type": "object",
+        "properties": {
+          "disk_type": {
+            "$ref": "#/components/schemas/PhysicalDiskType"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "sled_id": {
+            "nullable": true,
+            "description": "The sled to which this disk is attached, if any.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disk_type",
+          "id",
+          "model",
+          "serial",
+          "time_created",
+          "time_modified",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhysicalDisk"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "PhysicalDiskType": {
+        "type": "string",
+        "enum": [
+          "internal",
+          "external"
+        ]
+      },
       "Project": {
         "description": "Client view of a [`Project`]",
         "type": "object",
@@ -13503,7 +13646,7 @@
         ]
       },
       "Sled": {
-        "description": "Client view of an [`Sled`]",
+        "description": "Client view of a [`Sled`]",
         "type": "object",
         "properties": {
           "baseboard": {
