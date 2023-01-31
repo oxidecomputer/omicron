@@ -733,6 +733,50 @@ impl SpHandler for Handler {
         Ok(())
     }
 
+    fn serial_console_break(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received serial console break";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        let component = self
+            .attached_mgs
+            .lock()
+            .unwrap()
+            .map(|(component, _port, _addr)| component)
+            .ok_or(SpError::SerialConsoleNotAttached)?;
+
+        let incoming_serial_console = self
+            .incoming_serial_console
+            .get(&component)
+            .ok_or(SpError::RequestUnsupportedForComponent)?;
+
+        // if the receiving half is gone, we're in the process of shutting down;
+        // ignore errors here
+        _ = incoming_serial_console.send(b"*** serial break ***".to_vec());
+
+        Ok(())
+    }
+
+    fn send_host_nmi(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received host NMI request; not supported by simulated gimlet";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
     fn sp_state(
         &mut self,
         sender: SocketAddrV6,

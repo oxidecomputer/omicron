@@ -6,8 +6,10 @@
 
 //! HTTP entrypoint functions for the gateway service
 
+mod component_details;
 mod conversions;
 
+use self::component_details::SpComponentDetails;
 use self::conversions::component_from_str;
 use crate::error::SpCommsError;
 use crate::ServerContext;
@@ -605,10 +607,18 @@ async fn sp_component_list(
     path = "/sp/{type}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
-    _rqctx: RequestContext<Arc<ServerContext>>,
-    _path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
-    todo!()
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<Vec<SpComponentDetails>>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let details =
+        sp.component_details(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
 }
 
 /// Get the currently-active slot for an SP component

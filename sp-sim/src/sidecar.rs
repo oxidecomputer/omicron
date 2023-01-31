@@ -535,6 +535,34 @@ impl SpHandler for Handler {
         Err(SpError::RequestUnsupportedForSp)
     }
 
+    fn serial_console_break(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received serial console break; not supported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn send_host_nmi(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received host NMI request; not supported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
     fn sp_state(
         &mut self,
         sender: SocketAddrV6,
