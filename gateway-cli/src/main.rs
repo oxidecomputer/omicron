@@ -435,8 +435,10 @@ async fn main() -> Result<()> {
                 .into_inner();
             dumper.dump(&info)?;
         }
-        Command::ComponentClearStatus { .. } => {
-            todo!("missing MGS endpoint");
+        Command::ComponentClearStatus { sp, component } => {
+            client
+                .sp_component_clear_status(sp.type_, sp.slot, &component)
+                .await?;
         }
         Command::UsartAttach {
             sp,
