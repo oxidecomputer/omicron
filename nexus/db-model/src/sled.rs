@@ -5,7 +5,7 @@
 use super::{Generation, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::schema::{service, sled, zpool};
+use crate::schema::{physical_disk, service, sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
@@ -81,6 +81,14 @@ impl From<Sled> for views::Sled {
     }
 }
 
+impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = sled::dsl::rcgen;
+    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
+    type CollectionIdColumn = physical_disk::dsl::id;
+}
+
+// TODO: Can we remove this? We have one for physical disks now.
 impl DatastoreCollectionConfig<super::Zpool> for Sled {
     type CollectionId = Uuid;
     type GenerationNumberColumn = sled::dsl::rcgen;
