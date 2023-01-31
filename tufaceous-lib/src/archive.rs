@@ -112,8 +112,7 @@ impl<'a> ArchiveExtractor<Cursor<&'a [u8]>> {
     /// Loads an archived repository from memory as borrowed bytes.
     pub fn from_borrowed_bytes(archive: &'a [u8]) -> Result<Self> {
         let reader = Cursor::new(archive);
-        Self::new(reader)
-            .with_context(|| format!("error opening zip archive from memory"))
+        Self::new(reader).context("error opening zip archive from memory")
     }
 }
 
@@ -121,8 +120,7 @@ impl ArchiveExtractor<Cursor<Bytes>> {
     /// Loads an archived repository from memory as owned bytes.
     pub fn from_owned_bytes(archive: impl Into<Bytes>) -> Result<Self> {
         let reader = Cursor::new(archive.into());
-        Self::new(reader)
-            .with_context(|| format!("error opening zip archive from memory"))
+        Self::new(reader).context("error opening zip archive from memory")
     }
 }
 
