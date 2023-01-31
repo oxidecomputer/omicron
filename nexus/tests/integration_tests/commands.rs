@@ -137,6 +137,15 @@ fn test_nexus_openapi() {
             op.tags.len()
         );
 
+        // Every non-hidden endpoint must have a summary
+        if !op.tags.contains(&"hidden".to_string()) {
+            assert!(
+                op.summary.is_some(),
+                "operation '{}' is missing a summary doc comment",
+                op.operation_id.as_ref().unwrap()
+            );
+        }
+
         ops_by_tag
             .entry(op.tags.first().unwrap().to_string())
             .or_default()

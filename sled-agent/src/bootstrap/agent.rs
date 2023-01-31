@@ -205,6 +205,7 @@ impl Agent {
 
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
+        info!(log, "Bootstrap Agent monitoring for hardware");
         let hardware_monitor = HardwareMonitor::new(
             &ba_log,
             &sled_config,

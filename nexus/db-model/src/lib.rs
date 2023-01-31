@@ -38,8 +38,12 @@ mod name;
 mod network_interface;
 mod organization;
 mod oximeter_info;
+mod physical_disk;
+mod physical_disk_kind;
 mod producer_endpoint;
 mod project;
+mod semver_version;
+mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -112,6 +116,8 @@ pub use name::*;
 pub use network_interface::*;
 pub use organization::*;
 pub use oximeter_info::*;
+pub use physical_disk::*;
+pub use physical_disk_kind::*;
 pub use producer_endpoint::*;
 pub use project::*;
 pub use rack::*;
@@ -119,6 +125,7 @@ pub use region::*;
 pub use region_snapshot::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
+pub use semver_version::*;
 pub use service::*;
 pub use service_kind::*;
 pub use silo::*;
@@ -128,6 +135,7 @@ pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use snapshot::*;
 pub use ssh_key::*;
+pub use system_update::*;
 pub use update_artifact::*;
 pub use user_builtin::*;
 pub use virtual_provisioning_collection::*;

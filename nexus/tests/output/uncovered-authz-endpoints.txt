@@ -33,6 +33,7 @@ vpc_router_route_list                    (get    "/organizations/{organization_n
 vpc_router_route_view                    (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}")
 vpc_subnet_list                          (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets")
 vpc_subnet_view                          (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}")
+system_version                           (get    "/v1/system/update/version")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")

@@ -318,7 +318,7 @@ impl SledAgent {
                     "Sled Agent upserting zpool to Storage Manager: {}",
                     pool.to_string()
                 );
-                storage.upsert_zpool(pool).await?;
+                storage.upsert_zpool(pool.clone()).await;
             }
         }
         let instances = InstanceManager::new(
@@ -374,7 +374,7 @@ impl SledAgent {
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
         tokio::spawn(async move {
-            sa.monitor_task(log).await;
+            sa.hardware_monitor_task(log).await;
         });
 
         Ok(sled_agent)
@@ -400,9 +400,14 @@ impl SledAgent {
                 warn!(log, "Failed to deactivate switch: {e}");
             }
         }
+
+        self.inner
+            .storage
+            .ensure_using_exactly_these_disks(self.inner.hardware.disks())
+            .await;
     }
 
-    async fn monitor_task(&self, log: Logger) {
+    async fn hardware_monitor_task(&self, log: Logger) {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.inner.hardware.monitor();
 
@@ -412,17 +417,18 @@ impl SledAgent {
 
         // Rely on monitoring for tracking all future updates.
         loop {
+            use crate::hardware::HardwareUpdate;
             use tokio::sync::broadcast::error::RecvError;
             match hardware_updates.recv().await {
                 Ok(update) => match update {
-                    crate::hardware::HardwareUpdate::TofinoDeviceChange => {
+                    HardwareUpdate::TofinoDeviceChange => {
                         // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
                         //
                         // This won't block on Nexus responding; it may take while before
                         // Nexus actually comes online.
                         self.notify_nexus_about_self(&log);
                     }
-                    crate::hardware::HardwareUpdate::TofinoLoaded => {
+                    HardwareUpdate::TofinoLoaded => {
                         let switch_zone_ip = Some(self.inner.switch_zone_ip());
                         if let Err(e) = self
                             .inner
@@ -433,12 +439,18 @@ impl SledAgent {
                             warn!(log, "Failed to activate switch: {e}");
                         }
                     }
-                    crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                    HardwareUpdate::TofinoUnloaded => {
                         if let Err(e) =
                             self.inner.services.deactivate_switch().await
                         {
                             warn!(log, "Failed to deactivate switch: {e}");
                         }
+                    }
+                    HardwareUpdate::DiskAdded(disk) => {
+                        self.inner.storage.upsert_disk(disk).await;
+                    }
+                    HardwareUpdate::DiskRemoved(disk) => {
+                        self.inner.storage.delete_disk(disk).await;
                     }
                 },
                 Err(RecvError::Lagged(count)) => {
@@ -463,6 +475,9 @@ impl SledAgent {
         let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = nexus_client::types::Baseboard::from(
+            self.inner.hardware.baseboard(),
+        );
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
@@ -474,7 +489,9 @@ impl SledAgent {
             let notify_nexus = || async {
                 info!(
                     log,
-                    "contacting server nexus, registering sled: {}", sled_id
+                    "contacting server nexus, registering sled";
+                    "id" => ?sled_id,
+                    "baseboard" => ?baseboard,
                 );
                 let role = if is_scrimlet {
                     nexus_client::types::SledRole::Scrimlet
@@ -492,6 +509,7 @@ impl SledAgent {
                         &nexus_client::types::SledAgentStartupInfo {
                             sa_address: sled_address.to_string(),
                             role,
+                            baseboard: baseboard.clone(),
                         },
                     )
                     .await

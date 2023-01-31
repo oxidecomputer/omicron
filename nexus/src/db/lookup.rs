@@ -378,6 +378,11 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type PhysicalDisk, identified by its id
+    pub fn physical_disk_id(self, id: Uuid) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type UpdateAvailableArtifact, identified by its
     /// `(name, version, kind)` tuple
     pub fn update_available_artifact_tuple(
@@ -392,6 +397,11 @@ impl<'a> LookupPath<'a> {
             version.to_string(),
             kind,
         )
+    }
+
+    /// Select a resource of type UpdateDeployment, identified by its id
+    pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
+        UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -691,6 +701,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "PhysicalDisk",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "UpdateAvailableArtifact",
     ancestors = [],
     children = [],
@@ -701,6 +720,24 @@ lookup_resource! {
         { column_name = "version", rust_type = String },
         { column_name = "kind", rust_type = UpdateArtifactKind }
     ]
+}
+
+lookup_resource! {
+    name = "SystemUpdate",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "UpdateDeployment",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
