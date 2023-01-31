@@ -6,9 +6,9 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DiskRuntimeState, InstanceRuntimeState, RackInitializationRequest,
-    SledAgentStartupInfo, UpdateArtifactKind, ZpoolPutRequest,
-    ZpoolPutResponse,
+    DiskRuntimeState, InstanceRuntimeState, PhysicalDiskDeleteRequest,
+    PhysicalDiskPutRequest, RackInitializationRequest, SledAgentStartupInfo,
+    UpdateArtifactKind, ZpoolPutRequest, ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -27,6 +27,14 @@ mock! {
             &self,
             id: &Uuid,
             info: &SledAgentStartupInfo,
+        ) -> Result<()>;
+        pub async fn physical_disk_put(
+            &self,
+            request: &PhysicalDiskPutRequest,
+        ) -> Result<()>;
+        pub async fn physical_disk_delete(
+            &self,
+            request: &PhysicalDiskDeleteRequest,
         ) -> Result<()>;
         pub async fn cpapi_instances_put(
             &self,

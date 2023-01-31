@@ -54,6 +54,7 @@ mod ip_pool;
 mod network_interface;
 mod organization;
 mod oximeter;
+mod physical_disk;
 mod project;
 mod rack;
 mod region;
