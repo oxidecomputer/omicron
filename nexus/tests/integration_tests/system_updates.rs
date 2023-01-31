@@ -101,7 +101,7 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
         views::SystemVersion {
             version_range: views::VersionRange {
                 low: SemverVersion::new(0, 2, 0),
-                high: SemverVersion::new(1, 0, 1),
+                high: SemverVersion::new(2, 0, 0),
             },
             status: views::UpdateStatus::Steady,
         }
@@ -131,8 +131,7 @@ async fn test_list_components(cptestctx: &ControlPlaneTestContext) {
             .execute_and_parse_unwrap::<ResultsPage<views::ComponentUpdate>>()
             .await;
 
-    assert_eq!(component_updates.items.len(), 0);
-    assert_eq!(component_updates.next_page, None);
+    assert_eq!(component_updates.items.len(), 9);
 }
 
 #[nexus_test]

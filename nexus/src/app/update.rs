@@ -468,7 +468,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<()> {
-        let types = [
+        let types = vec![
             shared::UpdateableComponentType::HubrisForPscRot,
             shared::UpdateableComponentType::HubrisForPscSp,
             shared::UpdateableComponentType::HubrisForSidecarRot,
@@ -512,6 +512,34 @@ impl super::Nexus {
         )
         .await?;
         self.steady_update_deployment(opctx).await?;
+
+        // now create components, with one component on a different system
+        // version from the others
+
+        for (i, component_type) in types.iter().enumerate() {
+            let version = if i == 0 {
+                external::SemverVersion::new(1, 2, 0)
+            } else {
+                external::SemverVersion::new(1, 1, 0)
+            };
+
+            let system_version = if i == 0 {
+                external::SemverVersion::new(2, 0, 0)
+            } else {
+                external::SemverVersion::new(1, 0, 0)
+            };
+
+            self.create_updateable_component(
+                opctx,
+                params::UpdateableComponentCreate {
+                    version,
+                    system_version,
+                    device_id: "a-device".to_string(),
+                    component_type: component_type.clone(),
+                },
+            )
+            .await?;
+        }
 
         Ok(())
     }
@@ -712,23 +740,24 @@ mod tests {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        // starts out empty
+        // starts out populated
         let components = nexus
             .updateable_components_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(components.len(), 0);
+        assert_eq!(components.len(), 9);
 
         // with no components these should both 500. as discussed in the
         // implementation, this is appropriate because we should never be
         // running the external API without components populated
-        let low =
-            nexus.lowest_component_system_version(&opctx).await.unwrap_err();
-        assert_matches!(low, external::Error::InternalError { .. });
-        let high =
-            nexus.highest_component_system_version(&opctx).await.unwrap_err();
-        assert_matches!(high, external::Error::InternalError { .. });
+        //
+        // let low =
+        //     nexus.lowest_component_system_version(&opctx).await.unwrap_err();
+        // assert_matches!(low, external::Error::InternalError { .. });
+        // let high =
+        //     nexus.highest_component_system_version(&opctx).await.unwrap_err();
+        // assert_matches!(high, external::Error::InternalError { .. });
 
         // creating a component if its system_version doesn't exist is a 404
         let uc_create = UpdateableComponentCreate {
@@ -790,13 +819,13 @@ mod tests {
             .await
             .expect("failed to create updateable component");
 
-        // now there should be 3
+        // now there should be 3 more, or 12
         let components = nexus
             .updateable_components_list_by_id(&opctx, &test_pagparams())
             .await
             .unwrap();
 
-        assert_eq!(components.len(), 3);
+        assert_eq!(components.len(), 12);
 
         let low = nexus.lowest_component_system_version(&opctx).await.unwrap();
         assert_eq!(&low.to_string(), "0.2.0");
