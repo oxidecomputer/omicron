@@ -12,7 +12,7 @@ use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use futures::StreamExt;
-use installinator_artifact_client::ClientError;
+use installinator_artifact_client::{types::UpdateArtifactKind, ClientError};
 use itertools::Itertools;
 use tokio::{sync::mpsc, time::Instant};
 
@@ -371,9 +371,16 @@ impl ArtifactClient {
     }
 
     async fn fetch(&self, artifact_id: ArtifactId, sender: FetchSender) {
+        // TODO: should the installinator try and handle artifact kinds that are
+        // currently unknown to it? (Maybe if a destination is also specified?)
+        // If so, we'll want to change this to a string.
         let artifact_bytes = match self
             .client
-            .get_artifact(&artifact_id.name, &artifact_id.version)
+            .get_artifact(
+                artifact_id.kind,
+                &artifact_id.name,
+                &artifact_id.version,
+            )
             .await
         {
             Ok(artifact_bytes) => artifact_bytes,
@@ -403,12 +410,17 @@ impl ArtifactClient {
 pub(crate) struct ArtifactId {
     name: String,
     version: String,
+    kind: UpdateArtifactKind,
 }
 
 impl ArtifactId {
     #[cfg(test)]
     pub(crate) fn dummy() -> Self {
-        Self { name: "dummy".to_owned(), version: "0.1.0".to_owned() }
+        Self {
+            name: "dummy".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind: UpdateArtifactKind::Zone,
+        }
     }
 }
 
@@ -422,13 +434,25 @@ impl FromStr for ArtifactId {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.rsplit_once(':') {
-            Some((name, version)) => {
-                Ok(Self { name: name.to_owned(), version: version.to_owned() })
+        let mut split = s.splitn(3, ':');
+        let kind = split.next();
+        let name = split.next();
+        let version = split.next();
+
+        let (kind, name, version) = match (kind, name, version) {
+            (Some(kind), Some(name), Some(version)) => (kind, name, version),
+            _ => {
+                bail!("invalid format for input `{s}`: expected 'kind:name:version'")
             }
-            None => {
-                bail!("input `{s}` did not contain `:`");
+        };
+
+        let kind = match kind {
+            "zone" => UpdateArtifactKind::Zone,
+            other => {
+                bail!("unknown update artifact kind: `{other}`");
             }
-        }
+        };
+
+        Ok(Self { name: name.to_owned(), version: version.to_owned(), kind })
     }
 }

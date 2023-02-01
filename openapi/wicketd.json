@@ -10,15 +10,40 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts/{name}/{version}": {
+    "/inventory": {
+      "get": {
+        "summary": "A status endpoint used to report high level information known to wicketd.",
+        "description": "This endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
+        "operationId": "get_inventory",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetInventoryResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/repositories/{name}/{version}": {
       "put": {
-        "summary": "An endpoint used to upload artifacts to the server.",
-        "operationId": "put_artifact",
+        "summary": "An endpoint used to upload TUF repositories to the server.",
+        "operationId": "put_repository",
         "parameters": [
           {
             "in": "path",
             "name": "name",
-            "description": "The artifact's name.",
+            "description": "The repository's name.",
             "required": true,
             "schema": {
               "type": "string"
@@ -27,7 +52,7 @@
           {
             "in": "path",
             "name": "version",
-            "description": "The version of the artifact.",
+            "description": "The version of the repository.",
             "required": true,
             "schema": {
               "type": "string"
@@ -48,31 +73,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/inventory": {
-      "get": {
-        "summary": "A status endpoint used to report high level information known to wicketd.",
-        "description": "This endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
-        "operationId": "get_inventory",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetInventoryResponse"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

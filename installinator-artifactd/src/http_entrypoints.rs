@@ -8,8 +8,9 @@ use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
     RequestContext,
 };
+use omicron_common::api::internal::nexus::UpdateArtifactId;
 
-use crate::{context::ServerContext, store::ArtifactId};
+use crate::context::ServerContext;
 
 type ArtifactServerApiDesc = ApiDescription<ServerContext>;
 
@@ -32,11 +33,11 @@ pub fn api() -> ArtifactServerApiDesc {
 /// Fetch an artifact from the in-memory cache.
 #[endpoint {
     method = GET,
-    path = "/artifacts/{name}/{version}"
+    path = "/artifacts/{kind}/{name}/{version}"
 }]
 async fn get_artifact(
     rqctx: RequestContext<ServerContext>,
-    path: Path<ArtifactId>,
+    path: Path<UpdateArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     match rqctx.context().artifact_store.get_artifact(&path.into_inner()).await
     {

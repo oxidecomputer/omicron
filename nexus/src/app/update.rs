@@ -17,7 +17,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
     PaginationOrder, UpdateResult,
 };
-use omicron_common::api::internal::nexus::UpdateArtifact;
+use omicron_common::api::internal::nexus::UpdateArtifactId;
 use rand::Rng;
 use ring::digest;
 use std::convert::TryFrom;
@@ -119,7 +119,7 @@ impl super::Nexus {
                 );
                 client
                     .update_artifact(
-                        &sled_agent_client::types::UpdateArtifact {
+                        &sled_agent_client::types::UpdateArtifactId {
                             name: artifact.name.clone(),
                             version: artifact.version.clone(),
                             kind: artifact.kind.0.into(),
@@ -136,7 +136,7 @@ impl super::Nexus {
     pub async fn download_artifact(
         &self,
         opctx: &OpContext,
-        artifact: UpdateArtifact,
+        artifact: UpdateArtifactId,
     ) -> Result<Vec<u8>, Error> {
         let mut base_url =
             self.tuf_base_url(opctx).await?.ok_or_else(|| {

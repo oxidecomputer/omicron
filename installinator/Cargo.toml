@@ -16,6 +16,7 @@ futures.workspace = true
 installinator-artifact-client.workspace = true
 itertools.workspace = true
 once_cell.workspace = true
+omicron-common.workspace = true
 progenitor-client.workspace = true
 reqwest.workspace = true
 serde.workspace = true
