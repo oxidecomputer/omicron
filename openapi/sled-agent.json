@@ -325,7 +325,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateArtifact"
+                "$ref": "#/components/schemas/UpdateArtifactId"
               }
             }
           },
@@ -1595,17 +1595,24 @@
           "last_port"
         ]
       },
-      "UpdateArtifact": {
-        "description": "Description of a single update artifact.",
+      "UpdateArtifactId": {
+        "description": "An identifier for a single update artifact.",
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/components/schemas/UpdateArtifactKind"
+            "description": "The kind of update artifact this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateArtifactKind"
+              }
+            ]
           },
           "name": {
+            "description": "The artifact's name.",
             "type": "string"
           },
           "version": {
+            "description": "The artifact's version.",
             "type": "string"
           }
         },

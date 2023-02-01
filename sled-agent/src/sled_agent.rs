@@ -29,7 +29,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifact,
+    internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -601,7 +601,7 @@ impl SledAgent {
     /// Downloads and applies an artifact.
     pub async fn update_artifact(
         &self,
-        artifact: UpdateArtifact,
+        artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
         let nexus_client = self.inner.lazy_nexus_client.get().await?;
         crate::updates::download_artifact(artifact, &nexus_client).await?;
