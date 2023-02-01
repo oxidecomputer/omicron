@@ -13717,6 +13717,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "service_address": {
             "type": "string"
           },
@@ -13734,6 +13738,7 @@
         "required": [
           "baseboard",
           "id",
+          "rack_id",
           "service_address",
           "time_created",
           "time_modified"
