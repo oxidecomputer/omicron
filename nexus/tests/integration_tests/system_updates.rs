@@ -101,19 +101,12 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
         views::SystemVersion {
             version_range: views::VersionRange {
                 low: SemverVersion::new(0, 2, 0),
-                high: SemverVersion::new(1, 0, 1),
+                high: SemverVersion::new(2, 0, 0),
             },
             status: views::UpdateStatus::Steady,
         }
     );
 }
-
-// TODO: Figure out how to create system updates, update components, and
-// updateable components for these tests in light of the fact that there are no
-// create endpoints for those resources. We can call the Nexus functions
-// directly here, but that requires nexus::app::update to be public so we can
-// import SystemUpdateCreate from it. A test-only helper function that lives in
-// a different file might let us avoid over-exporting.
 
 #[nexus_test]
 async fn test_list_updates(cptestctx: &ControlPlaneTestContext) {
@@ -125,8 +118,7 @@ async fn test_list_updates(cptestctx: &ControlPlaneTestContext) {
             .execute_and_parse_unwrap::<ResultsPage<views::SystemUpdate>>()
             .await;
 
-    assert_eq!(updates.items.len(), 0);
-    assert_eq!(updates.next_page, None);
+    assert_eq!(updates.items.len(), 3);
 }
 
 #[nexus_test]
@@ -139,35 +131,56 @@ async fn test_list_components(cptestctx: &ControlPlaneTestContext) {
             .execute_and_parse_unwrap::<ResultsPage<views::ComponentUpdate>>()
             .await;
 
-    assert_eq!(component_updates.items.len(), 0);
-    assert_eq!(component_updates.next_page, None);
+    assert_eq!(component_updates.items.len(), 9);
 }
 
 #[nexus_test]
 async fn test_get_update(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    // existing update works
+    let update =
+        NexusRequest::object_get(&client, &"/v1/system/update/updates/1.0.0")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::SystemUpdate>()
+            .await;
+
+    assert_eq!(update.version, SemverVersion::new(1, 0, 0));
+
+    // non-existent update 404s
     NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/v1/system/update/updates/1.0.0",
+        "/v1/system/update/updates/1.0.1",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request");
+    .expect("Failed to 404 on non-existent update");
 }
 
 #[nexus_test]
 async fn test_list_update_components(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    // listing components of an existing update works
+    let components = NexusRequest::object_get(
+        &client,
+        &"/v1/system/update/updates/1.0.0/components",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<ResultsPage<views::ComponentUpdate>>()
+    .await;
+
+    assert_eq!(components.items.len(), 9);
+
+    // non existent 404s
     NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/v1/system/update/updates/1.0.0/components",
+        "/v1/system/update/updates/1.0.1/components",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -176,15 +189,25 @@ async fn test_list_update_components(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_list_deployments(cptestctx: &ControlPlaneTestContext) {
+async fn test_update_deployments(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let component_updates =
+    let deployments =
         NexusRequest::object_get(&client, &"/v1/system/update/deployments")
             .authn_as(AuthnMode::PrivilegedUser)
             .execute_and_parse_unwrap::<ResultsPage<views::UpdateDeployment>>()
             .await;
 
-    assert_eq!(component_updates.items.len(), 0);
-    assert_eq!(component_updates.next_page, None);
+    assert_eq!(deployments.items.len(), 1);
+
+    // TODO: test fetch deployment by ID
+    //
+    // let deployment_id = dbg!(deployments.items.get(0).unwrap().identity.id);
+    // let deployment = NexusRequest::object_get(
+    //     &client,
+    //     &format!("/v1/system/update/deployments/{}", deployment_id.to_string()),
+    // )
+    // .authn_as(AuthnMode::PrivilegedUser)
+    // .execute_and_parse_unwrap::<views::UpdateDeployment>()
+    // .await;
 }

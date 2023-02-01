@@ -119,6 +119,9 @@ impl super::Nexus {
             })
             .collect::<Result<_, Error>>()?;
 
+        // internally ignores ObjectAlreadyExists, so will not error on repeat runs
+        let _ = self.populate_mock_system_updates(&opctx).await?;
+
         self.db_datastore
             .rack_set_initialized(
                 opctx,

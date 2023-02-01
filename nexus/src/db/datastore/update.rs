@@ -13,7 +13,7 @@ use crate::db::error::{
 };
 use crate::db::model::{
     ComponentUpdate, SemverVersion, SystemUpdate, UpdateAvailableArtifact,
-    UpdateDeployment, UpdateableComponent,
+    UpdateDeployment, UpdateStatus, UpdateableComponent,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
@@ -22,7 +22,7 @@ use nexus_db_model::SystemUpdateComponentUpdate;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, InternalContext, ListResultVec,
-    LookupResult, LookupType, ResourceType,
+    LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use uuid::Uuid;
 
@@ -301,6 +301,37 @@ impl DataStore {
                     ErrorHandler::Conflict(
                         ResourceType::UpdateDeployment,
                         &deployment.id().to_string(),
+                    ),
+                )
+            })
+    }
+
+    pub async fn steady_update_deployment(
+        &self,
+        opctx: &OpContext,
+        deployment_id: Uuid,
+    ) -> UpdateResult<UpdateDeployment> {
+        // TODO: use authz::UpdateDeployment as the input so we can check Modify
+        // on that instead
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use db::schema::update_deployment::dsl::*;
+
+        diesel::update(update_deployment)
+            .filter(id.eq(deployment_id))
+            .set((
+                status.eq(UpdateStatus::Steady),
+                time_modified.eq(diesel::dsl::now),
+            ))
+            .returning(UpdateDeployment::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::UpdateDeployment,
+                        LookupType::ById(deployment_id),
                     ),
                 )
             })
