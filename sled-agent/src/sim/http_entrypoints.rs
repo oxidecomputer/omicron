@@ -20,7 +20,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::UpdateArtifact;
+use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -141,7 +141,7 @@ async fn disk_poke_post(
 }]
 async fn update_artifact(
     rqctx: RequestContext<Arc<SledAgent>>,
-    artifact: TypedBody<UpdateArtifact>,
+    artifact: TypedBody<UpdateArtifactId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     crate::updates::download_artifact(
         artifact.into_inner(),
