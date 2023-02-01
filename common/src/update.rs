@@ -15,7 +15,7 @@ pub struct ArtifactsDocument {
 /// Describes an artifact available in the repository.
 ///
 /// See also [`crate::api::internal::nexus::UpdateArtifactId`], which is used
-/// internally between Nexus and Sled Agent.
+/// internally in Nexus, Sled Agent, Wicketd and Installinator.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
     pub name: String,
