@@ -152,6 +152,9 @@ mod test {
         let identifier = String::from("identifier");
         let model = String::from("model");
         let revision = 0;
+        let cpu_count = 4;
+        let physical_ram =
+            crate::db::model::ByteCount::try_from(1 << 30).unwrap();
         let sled = Sled::new(
             sled_id,
             addr,
@@ -159,6 +162,8 @@ mod test {
             identifier,
             model,
             revision,
+            cpu_count,
+            physical_ram,
             rack_id,
         );
         db.sled_upsert(sled)

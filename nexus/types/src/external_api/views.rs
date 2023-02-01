@@ -301,6 +301,8 @@ pub struct Sled {
     pub service_address: SocketAddrV6,
     pub baseboard: Baseboard,
     pub rack_id: Uuid,
+    pub cpus: i64,
+    pub physical_ram: ByteCount,
 }
 
 // PHYSICAL DISKS

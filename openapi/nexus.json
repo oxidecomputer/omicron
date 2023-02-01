@@ -13712,10 +13712,17 @@
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
           },
+          "cpus": {
+            "type": "integer",
+            "format": "int64"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
+          },
+          "physical_ram": {
+            "$ref": "#/components/schemas/ByteCount"
           },
           "rack_id": {
             "type": "string",
@@ -13737,7 +13744,9 @@
         },
         "required": [
           "baseboard",
+          "cpus",
           "id",
+          "physical_ram",
           "rack_id",
           "service_address",
           "time_created",

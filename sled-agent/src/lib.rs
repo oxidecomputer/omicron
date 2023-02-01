@@ -37,6 +37,7 @@ mod sled_agent;
 mod smf_helper;
 pub mod sp;
 mod storage_manager;
+mod system;
 mod updates;
 
 pub use illumos::zfs;

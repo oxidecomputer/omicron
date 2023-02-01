@@ -2138,6 +2138,19 @@
               }
             ]
           },
+          "cpus": {
+            "description": "Number of CPUs online on the sled.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "physical_ram": {
+            "description": "Amount of RAM used by the sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
           "role": {
             "description": "Describes the responsibilities of the sled",
             "allOf": [
@@ -2153,6 +2166,8 @@
         },
         "required": [
           "baseboard",
+          "cpus",
+          "physical_ram",
           "role",
           "sa_address"
         ]

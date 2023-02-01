@@ -390,6 +390,9 @@ table! {
         part_number -> Text,
         revision -> Int8,
 
+        cpus -> Int8,
+        physical_ram -> Int8,
+
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,

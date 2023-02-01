@@ -47,6 +47,8 @@ impl super::Nexus {
             info.baseboard.identifier,
             info.baseboard.model,
             info.baseboard.revision,
+            info.cpus,
+            info.physical_ram.into(),
             self.rack_id,
         );
         self.db_datastore.sled_upsert(sled).await?;

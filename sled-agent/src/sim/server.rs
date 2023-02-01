@@ -73,14 +73,16 @@ impl Server {
             (nexus_client
                 .sled_agent_put(
                     &config.id,
-                    &nexus_client::types::SledAgentStartupInfo {
+                    &NexusTypes::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
-                        role: nexus_client::types::SledRole::Gimlet,
-                        baseboard: nexus_client::types::Baseboard {
+                        role: NexusTypes::SledRole::Gimlet,
+                        baseboard: NexusTypes::Baseboard {
                             identifier: String::from("Unknown"),
                             model: String::from("Unknown"),
                             revision: 0,
                         },
+                        cpus: 4,
+                        physical_ram: NexusTypes::ByteCount(1 << 30),
                     },
                 )
                 .await)

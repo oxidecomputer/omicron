@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, SqlU16};
+use super::{ByteCount, Generation, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
@@ -29,6 +29,9 @@ pub struct Sled {
     part_number: String,
     revision: i64,
 
+    cpus: i64,
+    physical_ram: ByteCount,
+
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
@@ -45,6 +48,8 @@ impl Sled {
         serial_number: String,
         part_number: String,
         revision: i64,
+        cpus: i64,
+        physical_ram: ByteCount,
         rack_id: Uuid,
     ) -> Self {
         let last_used_address = {
@@ -61,6 +66,8 @@ impl Sled {
             serial_number,
             part_number,
             revision,
+            cpus,
+            physical_ram,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,
@@ -95,6 +102,8 @@ impl From<Sled> for views::Sled {
                 part: sled.part_number,
                 revision: sled.revision,
             },
+            cpus: sled.cpus,
+            physical_ram: *sled.physical_ram,
         }
     }
 }

@@ -473,6 +473,9 @@ mod test {
         let bb_identifier = String::from("identifier");
         let bb_model = String::from("model");
         let bb_revision = 0;
+        let cpu_count = 4;
+        let physical_ram =
+            crate::db::model::ByteCount::try_from(1 << 30).unwrap();
         let sled = Sled::new(
             sled_id,
             bogus_addr,
@@ -480,6 +483,8 @@ mod test {
             bb_identifier,
             bb_model,
             bb_revision,
+            cpu_count,
+            physical_ram,
             rack_id,
         );
         datastore.sled_upsert(sled).await.unwrap();
@@ -870,6 +875,9 @@ mod test {
         let bb_identifier = String::from("identifier");
         let bb_model = String::from("model");
         let bb_revision = 0;
+        let cpu_count = 4;
+        let physical_ram =
+            crate::db::model::ByteCount::try_from(1 << 30).unwrap();
         let sled1 = db::model::Sled::new(
             sled1_id,
             addr1,
@@ -877,6 +885,8 @@ mod test {
             bb_identifier,
             bb_model,
             bb_revision,
+            cpu_count,
+            physical_ram,
             rack_id,
         );
         datastore.sled_upsert(sled1).await.unwrap();
@@ -893,6 +903,8 @@ mod test {
             bb_identifier,
             bb_model,
             bb_revision,
+            cpu_count,
+            physical_ram,
             rack_id,
         );
         datastore.sled_upsert(sled2).await.unwrap();
