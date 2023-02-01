@@ -59,8 +59,8 @@ mod tests {
     #[test]
     fn serde_artifact_kind() {
         assert_eq!(
-            serde_json::from_str::<ArtifactKind>("\"zone\"").unwrap(),
-            ArtifactKind::Known(UpdateArtifactKind::Zone)
+            serde_json::from_str::<ArtifactKind>("\"gimlet_sp\"").unwrap(),
+            ArtifactKind::Known(UpdateArtifactKind::GimletSp)
         );
         assert_eq!(
             serde_json::from_str::<ArtifactKind>("\"fhqwhgads\"").unwrap(),
@@ -70,10 +70,10 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&ArtifactKind::Known(
-                UpdateArtifactKind::Zone
+                UpdateArtifactKind::GimletSp
             ))
             .unwrap(),
-            "\"zone\""
+            "\"gimlet_sp\""
         );
         assert_eq!(
             serde_json::to_string(&ArtifactKind::Unknown(
