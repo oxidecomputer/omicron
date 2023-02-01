@@ -10083,6 +10083,21 @@
             ]
           },
           {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
             "description": "Disk is being attached to the given Instance",
             "type": "object",
             "properties": {

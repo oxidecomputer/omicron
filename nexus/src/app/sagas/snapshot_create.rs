@@ -133,9 +133,6 @@ pub struct Params {
     pub create_params: params::SnapshotCreate,
 }
 
-static PANTRY_SENTINEL_ID: Uuid =
-    Uuid::from_u128(0x00000000_0000_0000_0000_000000000000);
-
 // snapshot create saga: actions
 declare_saga_actions! {
     snapshot_create;
@@ -163,12 +160,12 @@ declare_saga_actions! {
         + ssc_send_snapshot_request_to_sled_agent
         - ssc_send_snapshot_request_to_sled_agent_undo
     }
+    GET_PANTRY_ADDRESS -> "pantry_address" {
+        + ssc_get_pantry_address
+    }
     ATTACH_DISK_TO_PANTRY -> "attach_disk_to_pantry" {
         + ssc_attach_disk_to_pantry
         - ssc_attach_disk_to_pantry_undo
-    }
-    GET_PANTRY_ADDRESS -> "pantry_address" {
-        + ssc_get_pantry_address
     }
     CALL_PANTRY_ATTACH_FOR_DISK -> "call_pantry_attach_for_disk" {
         + ssc_call_pantry_attach_for_disk
@@ -251,12 +248,12 @@ impl NexusSaga for SagaSnapshotCreate {
             // snapshot request to sled-agent to create a ZFS snapshot.
             builder.append(send_snapshot_request_to_sled_agent_action());
         } else {
+            // (Pantry) Record the address of a Pantry service
+            builder.append(get_pantry_address_action());
+
             // (Pantry) If the disk is _not_ attached to an instance:
             // "attach" the disk to the pantry
             builder.append(attach_disk_to_pantry_action());
-
-            // (Pantry) Record the address of a Pantry service
-            builder.append(get_pantry_address_action());
 
             // (Pantry) Call the Pantry's /attach
             builder.append(call_pantry_attach_for_disk_action());
@@ -710,6 +707,26 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     Ok(())
 }
 
+async fn ssc_get_pantry_address(
+    sagactx: NexusActionContext,
+) -> Result<SocketAddrV6, ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+
+    let pantry_address = osagactx
+        .nexus()
+        .resolver()
+        .await
+        .lookup_socket_v6(SRV::Service(ServiceName::CruciblePantry))
+        .await
+        .map_err(|e| e.to_string())
+        .map_err(ActionError::action_failed)?;
+
+    info!(log, "using pantry at {}", pantry_address);
+
+    Ok(pantry_address)
+}
+
 async fn ssc_attach_disk_to_pantry(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -725,33 +742,16 @@ async fn ssc_attach_disk_to_pantry(
             .await
             .map_err(ActionError::action_failed)?;
 
-    // Query the fetched disk's runtime to see if it was attached to an instance
-    // after the saga was constructed. If it was, then bail out. If it wasn't,
-    // then try to update the runtime and attach it to the Pantry. In the case
-    // where the disk is attached to an instance after this lookup, the
-    // "runtime().attach(...)" call below should fail because the generation
-    // number is too low.
+    // Query the fetched disk's runtime to see if changed after the saga
+    // execution started. This can happen if it's attached to an instance, or if
+    // it's undergoing other maintenance. If it was, then bail out. If it
+    // wasn't, then try to update the runtime and attach it to the Pantry. In
+    // the case where the disk is attached to an instance after this lookup, the
+    // "runtime().maintenance(...)" call below should fail because the
+    // generation number is too low.
     match db_disk.state().into() {
         external::DiskState::Detached => {
             // Ok
-        }
-
-        external::DiskState::Attached(instance_id) => {
-            if instance_id == PANTRY_SENTINEL_ID {
-                // A previous run of ssc_attach_disk_to_pantry already attached
-                // this to the Pantry
-            } else {
-                // This disk is attached to another instance
-                //
-                // XXX this is a race condition, as the DAG was constructed with
-                // use_the_pantry = True.
-                //
-                return Err(ActionError::action_failed(
-                    "disk attached to instance after saga was \
-                    constructed"
-                        .to_string(),
-                ));
-            }
         }
 
         _ => {
@@ -762,11 +762,13 @@ async fn ssc_attach_disk_to_pantry(
         }
     }
 
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
     info!(
         log,
-        "attaching disk {} to pantry with id {:?}",
+        "attaching disk {} to pantry at {:?}, setting state to maintenance",
         params.disk_id,
-        PANTRY_SENTINEL_ID.to_string(),
+        pantry_address,
     );
 
     osagactx
@@ -774,7 +776,7 @@ async fn ssc_attach_disk_to_pantry(
         .disk_update_runtime(
             &opctx,
             &authz_disk,
-            &db_disk.runtime().attach(PANTRY_SENTINEL_ID),
+            &db_disk.runtime().maintenance(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -797,59 +799,35 @@ async fn ssc_attach_disk_to_pantry_undo(
             .await
             .map_err(ActionError::action_failed)?;
 
-    match db_disk.runtime().attach_instance_id {
-        Some(attach_instance_id) => {
-            if attach_instance_id == PANTRY_SENTINEL_ID {
-                info!(
-                    log,
-                    "undo: detaching disk {} from the pantry", params.disk_id
-                );
+    match db_disk.state().into() {
+        external::DiskState::Maintenance => {
+            info!(
+                log,
+                "undo: setting disk {} state from maintenance to detached",
+                params.disk_id
+            );
 
-                osagactx
-                    .datastore()
-                    .disk_update_runtime(
-                        &opctx,
-                        &authz_disk,
-                        &db_disk.runtime().detach(),
-                    )
-                    .await
-                    .map_err(ActionError::action_failed)?;
-            } else {
-                warn!(
-                    log,
-                    "undo: disk {} attached to {}, not the pantry as expected!",
-                    params.disk_id,
-                    attach_instance_id,
-                );
-            }
+            osagactx
+                .datastore()
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &db_disk.runtime().detach(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
         }
 
-        None => {
+        external::DiskState::Detached => {
             info!(log, "undo: disk {} already detached", params.disk_id);
+        }
+
+        _ => {
+            warn!(log, "undo: disk is in state {:?}", db_disk.state());
         }
     }
 
     Ok(())
-}
-
-async fn ssc_get_pantry_address(
-    sagactx: NexusActionContext,
-) -> Result<SocketAddrV6, ActionError> {
-    let log = sagactx.user_data().log();
-    let osagactx = sagactx.user_data();
-
-    let pantry_address = osagactx
-        .nexus()
-        .resolver()
-        .await
-        .lookup_socket_v6(SRV::Service(ServiceName::CruciblePantry))
-        .await
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)?;
-
-    info!(log, "using pantry at {}", pantry_address);
-
-    Ok(pantry_address)
 }
 
 #[macro_export]
@@ -1107,44 +1085,35 @@ async fn ssc_detach_disk_from_pantry(
             .await
             .map_err(ActionError::action_failed)?;
 
-    match db_disk.runtime().attach_instance_id {
-        Some(attach_instance_id) => {
-            if attach_instance_id == PANTRY_SENTINEL_ID {
-                info!(log, "detaching disk {} from the pantry", params.disk_id);
+    match db_disk.state().into() {
+        external::DiskState::Maintenance => {
+            info!(
+                log,
+                "setting disk {} state from maintenance to detached",
+                params.disk_id
+            );
 
-                osagactx
-                    .datastore()
-                    .disk_update_runtime(
-                        &opctx,
-                        &authz_disk,
-                        &db_disk.runtime().detach(),
-                    )
-                    .await
-                    .map_err(ActionError::action_failed)?;
-                Ok(())
-            } else {
-                error!(
-                    log,
-                    "disk {} not attached to pantry, it's attached to {}!",
-                    params.disk_id,
-                    attach_instance_id,
-                );
-                Err(ActionError::action_failed(
-                    "disk not attached to pantry after snapshot_create saga started!"
-                    .to_string(),
-                ))
-            }
+            osagactx
+                .datastore()
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &db_disk.runtime().detach(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
         }
-        None => {
-            // We expect the disk to be attached to the pantry (it was in
-            // prior steps) but now it is not!  This means something is
-            // changing under us.  We can't continue in this situation.
-            error!(log, "disk {} already detached", params.disk_id);
-            Err(ActionError::action_failed(
-                "disk detached after snapshot_create saga started!".to_string(),
-            ))
+
+        external::DiskState::Detached => {
+            info!(log, "disk {} already detached", params.disk_id);
+        }
+
+        _ => {
+            warn!(log, "disk is in state {:?}", db_disk.state());
         }
     }
+
+    Ok(())
 }
 
 async fn ssc_start_running_snapshot(
