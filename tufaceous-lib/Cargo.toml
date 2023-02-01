@@ -6,10 +6,8 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
-bytes.workspace = true
 camino.workspace = true
 chrono.workspace = true
-debug-ignore.workspace = true
 fs-err.workspace = true
 hex.workspace = true
 omicron-common.workspace = true
@@ -20,4 +18,3 @@ sha2 = "0.10.6"
 tempfile.workspace = true
 tough.workspace = true
 url = "2.3.1"
-zip.workspace = true

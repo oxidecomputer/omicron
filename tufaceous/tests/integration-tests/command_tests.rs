@@ -54,22 +54,6 @@ fn test_init_and_add() -> Result<()> {
         "artifact target"
     );
 
-    // Create an archive from the given path.
-    let archive_path = tempdir.path().join("archive.zip");
-    let mut cmd = make_cmd(tempdir.path(), &key);
-    cmd.arg("archive");
-    cmd.arg(&archive_path);
-    cmd.assert().success();
-
-    // Extract the archive to a new directory.
-    let dest_path = tempdir.path().join("dest");
-    let mut cmd = make_cmd(tempdir.path(), &key);
-    cmd.arg("extract");
-    cmd.arg(&archive_path);
-    cmd.arg(&dest_path);
-
-    cmd.assert().success();
-
     Ok(())
 }
 

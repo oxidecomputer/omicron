@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{archive::ArchiveBuilder, key::Key, target::TargetWriter, AddZone};
+use crate::{key::Key, target::TargetWriter, AddZone};
 use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
@@ -14,7 +14,7 @@ use omicron_common::{
 use std::num::NonZeroU64;
 use tough::{
     editor::{signed::SignedRole, RepositoryEditor},
-    schema::{Root, Target},
+    schema::Root,
     ExpirationEnforcement, Repository, RepositoryLoader, TargetName,
 };
 use url::Url;
@@ -99,81 +99,10 @@ impl OmicronRepo {
             .context("error deserializing artifacts.json")
     }
 
-    /// Archives the repository to the given path as a zip file.
-    ///
-    /// ## Why zip and not tar?
-    ///
-    /// The main reason is that zip supports random access to files and tar does
-    /// not.
-    ///
-    /// In principle it should be possible to read the repository out of a zip
-    /// file from memory, but we ran into [this
-    /// issue](https://github.com/awslabs/tough/pull/563) while implementing it.
-    /// Once that is resolved (or we write our own TUF crate) it should be
-    /// possible to do that.
-    ///
-    /// Regardless of this roadblock, we don't want to foreclose that option
-    /// forever, so this code uses zip rather than having to deal with a
-    /// migration in the future.
-    pub fn archive(&self, output_path: &Utf8Path) -> Result<()> {
-        let mut builder = ArchiveBuilder::new(output_path.to_owned())?;
-
-        let metadata_dir = self.repo_path.join("metadata");
-
-        // Gather metadata files.
-        for entry in metadata_dir.read_dir_utf8().with_context(|| {
-            format!("error reading entries from {metadata_dir}")
-        })? {
-            let entry =
-                entry.context("error reading entry from {metadata_dir}")?;
-            let file_name = entry.file_name();
-            if file_name.ends_with(".root.json")
-                || file_name == "timestamp.json"
-                || file_name.ends_with(".snapshot.json")
-                || file_name.ends_with(".targets.json")
-            {
-                // This is a valid metadata file.
-                builder.write_file(
-                    entry.path(),
-                    &Utf8Path::new("metadata").join(file_name),
-                )?;
-            }
-        }
-
-        let targets_dir = self.repo_path.join("targets");
-
-        // Gather all targets.
-        for (name, target) in self.repo.targets().signed.targets_iter() {
-            let target_filename = self.target_filename(target, name);
-            let target_path = targets_dir.join(&target_filename);
-            builder.write_file(
-                &target_path,
-                &Utf8Path::new("targets").join(&target_filename),
-            )?;
-        }
-
-        builder.finish()?;
-
-        Ok(())
-    }
-
     /// Converts `self` into an `OmicronRepoEditor`, which can be used to perform
     /// modifications to the repository.
     pub fn into_editor(self) -> Result<OmicronRepoEditor> {
         OmicronRepoEditor::new(self)
-    }
-
-    /// Prepends the target digest to the name if using consistent snapshots. Returns both the
-    /// digest and the filename.
-    ///
-    /// Adapted from tough's source.
-    fn target_filename(&self, target: &Target, name: &TargetName) -> String {
-        let sha256 = &target.hashes.sha256.clone().into_vec();
-        if self.repo.root().signed.consistent_snapshot {
-            format!("{}.{}", hex::encode(sha256), name.resolved())
-        } else {
-            name.resolved().to_owned()
-        }
     }
 }
 

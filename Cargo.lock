@@ -7039,10 +7039,8 @@ name = "tufaceous-lib"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytes",
  "camino",
  "chrono",
- "debug-ignore",
  "fs-err",
  "hex",
  "omicron-common",
@@ -7053,7 +7051,6 @@ dependencies = [
  "tempfile",
  "tough",
  "url",
- "zip",
 ]
 
 [[package]]

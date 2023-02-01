@@ -386,16 +386,16 @@ impl super::Nexus {
         // We only need to look at the latest deployment because it's the only
         // one that could be running
 
-        // let latest_deployment = self.latest_update_deployment(opctx).await;
-        // let status = latest_deployment
-        //     .map_or(db::model::UpdateStatus::Steady, |d| d.status);
-        // if status == db::model::UpdateStatus::Updating {
-        //     // TODO: error if another update is running
-        //     return Err(Error::ObjectAlreadyExists {
-        //         type_name: external::ResourceType::UpdateDeployment,
-        //         object_name: "uh".to_string(), // TODO: id?
-        //     });
-        // }
+        let latest_deployment = self.latest_update_deployment(opctx).await;
+        if let Ok(dep) = latest_deployment {
+            if dep.status == db::model::UpdateStatus::Updating {
+                // TODO: should "already updating" conflict be a new kind of error?
+                return Err(Error::ObjectAlreadyExists {
+                    type_name: external::ResourceType::UpdateDeployment,
+                    object_name: dep.id().to_string(),
+                });
+            }
+        }
 
         let deployment = db::model::UpdateDeployment {
             identity: db::model::UpdateDeploymentIdentity::new(Uuid::new_v4()),
@@ -503,7 +503,8 @@ impl super::Nexus {
             }
         }
 
-        // create deployment for v1.0.0 and stop it
+        // create deployment for v1.0.0, stop it, then create one for v2.0.0.
+        // This makes plausible the state of the components: all v1 except for one v2
         self.create_update_deployment(
             &opctx,
             params::SystemUpdateStart {
@@ -512,6 +513,14 @@ impl super::Nexus {
         )
         .await?;
         self.steady_update_deployment(opctx).await?;
+
+        self.create_update_deployment(
+            &opctx,
+            params::SystemUpdateStart {
+                version: external::SemverVersion::new(2, 0, 0),
+            },
+        )
+        .await?;
 
         // now create components, with one component on a different system
         // version from the others
@@ -847,7 +856,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(deployments.len(), 1);
+        assert_eq!(deployments.len(), 2);
 
         // start update fails with nonexistent version
         let not_found = nexus
@@ -862,14 +871,30 @@ mod tests {
 
         assert_matches!(not_found, external::Error::ObjectNotFound { .. });
 
-        // starting succeeds with a version that exists
+        // starting with existing version fails because there's already an
+        // update running
+        let start_v3 = SystemUpdateStart {
+            version: external::SemverVersion::new(3, 0, 0),
+        };
+        let already_updating = nexus
+            .create_update_deployment(&opctx, start_v3.clone())
+            .await
+            .unwrap_err();
+
+        assert_matches!(
+            already_updating,
+            external::Error::ObjectAlreadyExists { .. }
+        );
+
+        // stop the running update
+        nexus
+            .steady_update_deployment(&opctx)
+            .await
+            .expect("Failed to stop running update");
+
+        // now starting an update succeeds
         let d = nexus
-            .create_update_deployment(
-                &opctx,
-                SystemUpdateStart {
-                    version: external::SemverVersion::new(2, 0, 0),
-                },
-            )
+            .create_update_deployment(&opctx, start_v3)
             .await
             .expect("Failed to create deployment");
 
@@ -881,9 +906,10 @@ mod tests {
             .map(|d| d.identity.id)
             .collect();
 
-        assert_eq!(deployment_ids.len(), 2);
+        assert_eq!(deployment_ids.len(), 3);
         assert!(deployment_ids.contains(&d.identity.id));
 
+        // latest deployment returns the one just created
         let latest_deployment =
             nexus.latest_update_deployment(&opctx).await.unwrap();
 
@@ -894,6 +920,7 @@ mod tests {
                 == d.identity.time_modified
         );
 
+        // stopping update updates both its status and its time_modified
         nexus
             .steady_update_deployment(&opctx)
             .await
