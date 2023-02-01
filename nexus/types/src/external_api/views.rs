@@ -300,6 +300,7 @@ pub struct Sled {
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
     pub baseboard: Baseboard,
+    pub rack_id: Uuid,
 }
 
 // PHYSICAL DISKS
