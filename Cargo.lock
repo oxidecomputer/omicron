@@ -2730,6 +2730,7 @@ dependencies = [
  "futures",
  "installinator-artifact-client",
  "itertools",
+ "omicron-common",
  "once_cell",
  "progenitor-client",
  "proptest",
@@ -7565,11 +7566,14 @@ dependencies = [
 name = "wicketd"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "buf-list",
  "bytes",
+ "camino",
  "clap 4.1.4",
  "debug-ignore",
+ "display-error-chain",
  "dropshot",
  "expectorate",
  "futures",
@@ -7589,8 +7593,12 @@ dependencies = [
  "slog-dtrace",
  "snafu",
  "subprocess",
+ "tempfile",
+ "thiserror",
  "tokio",
  "toml",
+ "tough",
+ "tufaceous-lib",
  "uuid",
 ]
 
