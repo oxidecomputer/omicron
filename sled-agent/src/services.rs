@@ -1125,7 +1125,10 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::illumos::{
-        dladm::{Etherstub, MockDladm, ETHERSTUB_NAME, ETHERSTUB_VNIC_NAME},
+        dladm::{
+            Etherstub, MockDladm, UNDERLAY_ETHERSTUB_NAME,
+            UNDERLAY_ETHERSTUB_VNIC_NAME,
+        },
         svc,
         zone::MockZones,
     };
@@ -1142,7 +1145,7 @@ mod test {
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
             |physical_link: &Etherstub, _, _, _| {
-                assert_eq!(&physical_link.0, &ETHERSTUB_NAME);
+                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
                 Ok(())
             },
         );
@@ -1281,8 +1284,8 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1316,8 +1319,8 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1353,8 +1356,8 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1379,8 +1382,8 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1413,8 +1416,8 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1441,8 +1444,8 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
