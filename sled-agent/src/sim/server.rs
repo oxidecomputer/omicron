@@ -199,7 +199,10 @@ impl Server {
             ));
 
         let dns_client = internal_dns_client::multiclient::Updater::new(
-            &dns_dropshot_server.local_addr(),
+            &internal_dns_client::multiclient::ServerAddresses {
+                dropshot_server_addrs: vec![dns_dropshot_server.local_addr()],
+                dns_server_addrs: vec![],
+            },
             log.new(o!("kind" => "dns-client")),
         );
 

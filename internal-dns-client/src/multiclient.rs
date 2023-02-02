@@ -54,13 +54,18 @@ impl DnsAddressLookup for Ipv6Subnet<AZ_PREFIX> {
     }
 }
 
-impl DnsAddressLookup for SocketAddr {
+pub struct ServerAddresses {
+    pub dropshot_server_addrs: Vec<SocketAddr>,
+    pub dns_server_addrs: Vec<SocketAddr>,
+}
+
+impl DnsAddressLookup for ServerAddresses {
     fn dropshot_server_addrs(&self) -> Vec<SocketAddr> {
-        vec![*self]
+        self.dropshot_server_addrs.clone()
     }
 
     fn dns_server_addrs(&self) -> Vec<SocketAddr> {
-        vec![*self]
+        self.dns_server_addrs.clone()
     }
 }
 
