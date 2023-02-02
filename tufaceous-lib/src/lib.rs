@@ -6,8 +6,8 @@ mod key;
 mod repository;
 mod root;
 mod target;
-mod zone;
+mod artifact;
 
 pub use key::*;
 pub use repository::*;
-pub use zone::*;
+pub use artifact::*;

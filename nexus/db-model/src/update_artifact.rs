@@ -22,7 +22,15 @@ impl_enum_wrapper!(
     pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
 
     // Enum values
-    Zone => b"zone"
+    GimletSp => b"gimlet_sp"
+    GimletRot => b"gimlet_rot"
+    HostPhase1 => b"host_phase_1"
+    HostPhase2 => b"host_phase_2"
+    ControlPlane => b"control_plane"
+    PscSp => b"psc_sp"
+    PscRot => b"psc_rot"
+    SwitchSp => b"switch_sp"
+    SwitchRot => b"switch_rot"
 );
 
 #[derive(

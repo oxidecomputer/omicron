@@ -39,7 +39,7 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/omicron-test-component";
+const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/control-plane/omicron-test-component";
 
 #[tokio::test]
 async fn test_update_end_to_end() {
@@ -239,7 +239,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
         artifacts: vec![Artifact {
             name: "omicron-test-component".into(),
             version: "0.0.0".into(),
-            kind: ArtifactKind::Known(UpdateArtifactKind::Zone),
+            kind: ArtifactKind::Known(UpdateArtifactKind::ControlPlane),
             target: "omicron-test-component-1".into(),
         }],
     };

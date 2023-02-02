@@ -8,11 +8,12 @@ use crate::api::external::{
     ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState,
 };
 use chrono::{DateTime, Utc};
-use parse_display::Display;
+use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
+use strum::EnumIter;
 use uuid::Uuid;
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
@@ -101,6 +102,31 @@ pub struct UpdateArtifactId {
     pub kind: UpdateArtifactKind,
 }
 
+// Adding a new UpdateArtifactKind
+// ===============================
+//
+// Adding a new update artifact kind is a tricky process. To do so:
+//
+// 1. Add it here.
+//
+// 2. Add it by hand to <repo root>/openapi/{nexus-internal.json,sled_agent.json}
+//    (search for `"UpdateArtifactKind"` with double-quotes).
+//
+//    TODO: is there a better way to do this? Rain couldn't figure out how to run
+//    the command to regenerate the API: the nexus build kept failing. There
+//    might be a circular dependency here, which is worrisome.
+//
+// 3. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
+//
+// 4. Add it to <repo root>/common/src/sql/dbinit.sql under (CREATE TYPE
+//    omicron.public.update_artifact_kind).
+//
+//    TODO: After omicron ships this would likely involve a DB migration.
+//
+// See PR (to fill in) as an example.
+//
+// NOTE: UpdateArtifactKind has to be in snake_case due to openapi-lint requirements.
+
 /// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
 /// sled-agent to determine how to apply an update when asked.
 #[derive(
@@ -113,12 +139,44 @@ pub struct UpdateArtifactId {
     Ord,
     PartialOrd,
     Display,
+    FromStr,
     Deserialize,
     Serialize,
     JsonSchema,
+    EnumIter,
 )]
-#[display(style = "kebab-case")]
-#[serde(rename_all = "kebab-case")]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum UpdateArtifactKind {
-    Zone,
+    // Sled Artifacts
+    GimletSp,
+    GimletRot,
+    HostPhase1,
+    HostPhase2,
+    ControlPlane,
+
+    // PSC Artifacts
+    PscSp,
+    PscRot,
+
+    // Switch Artifacts
+    SwitchSp,
+    SwitchRot,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn update_artifact_kind_roundtrip() {
+        for kind in UpdateArtifactKind::iter() {
+            let as_string = kind.to_string();
+            let kind2 = as_string.parse::<UpdateArtifactKind>().unwrap_or_else(
+                |error| panic!("kind {as_string} parsed successfully: {error}"),
+            );
+            assert_eq!(kind, kind2);
+        }
+    }
 }
