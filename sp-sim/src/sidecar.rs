@@ -910,6 +910,24 @@ impl SpHandler for Handler {
             "data_len" => data.len(),
         );
     }
+
+    fn set_ipcc_key_lookup_value(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        key: u8,
+        value: &[u8],
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received IPCC key/value; not supported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+            "key" => key,
+            "value" => ?value,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
 }
 
 struct FakeIgnition {

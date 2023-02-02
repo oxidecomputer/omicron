@@ -2108,6 +2108,7 @@ dependencies = [
  "clap 4.1.4",
  "futures",
  "gateway-client",
+ "hex",
  "libc",
  "reqwest",
  "serde",
@@ -2138,7 +2139,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a97fa5f1d19aa3062e0dfa433a5040161c5d9113#a97fa5f1d19aa3062e0dfa433a5040161c5d9113"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=installinator-id-plumbing#98af0bb6cae8f5aedb6c2180ea05f9bfc8e18a68"
 dependencies = [
  "bitflags",
  "hubpack 0.1.1",
@@ -2153,7 +2154,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a97fa5f1d19aa3062e0dfa433a5040161c5d9113#a97fa5f1d19aa3062e0dfa433a5040161c5d9113"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=installinator-id-plumbing#98af0bb6cae8f5aedb6c2180ea05f9bfc8e18a68"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2849,6 +2850,14 @@ checksum = "46112a93252b123d31a119a8d1a1ac19deac4fac6e0e8b0df58f0d4e5870e63c"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "ipcc-key-value"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "serde",
 ]
 
 [[package]]
@@ -3686,6 +3695,7 @@ name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "ciborium",
  "clap 4.1.4",
  "crucible-smf",
  "dropshot",
@@ -3696,6 +3706,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
+ "ipcc-key-value",
  "omicron-common",
  "omicron-test-utils",
  "once_cell",
