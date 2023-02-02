@@ -452,6 +452,53 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/clear-status": {
+      "post": {
+        "summary": "Clear status of a component",
+        "description": "For components that maintain event counters (e.g., the sidecar `monorail`), this will reset the event counters to zero.",
+        "operationId": "sp_component_clear_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/serial-console/attach": {
       "get": {
         "summary": "Upgrade into a websocket connection attached to the given SP component's",

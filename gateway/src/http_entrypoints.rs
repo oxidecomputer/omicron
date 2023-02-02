@@ -621,6 +621,28 @@ async fn sp_component_get(
     Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
 }
 
+/// Clear status of a component
+///
+/// For components that maintain event counters (e.g., the sidecar `monorail`),
+/// this will reset the event counters to zero.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/clear-status",
+}]
+async fn sp_component_clear_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    sp.component_clear_status(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// Get the currently-active slot for an SP component
 ///
 /// Note that the meaning of "current" in "currently-active" may vary depending
@@ -1052,6 +1074,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_power_state_set)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_clear_status)?;
         api.register(sp_component_active_slot_get)?;
         api.register(sp_component_active_slot_set)?;
         api.register(sp_component_serial_console_attach)?;
