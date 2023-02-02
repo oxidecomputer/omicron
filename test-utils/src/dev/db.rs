@@ -97,6 +97,8 @@ impl CockroachStarterBuilder {
         // may be overridden by the user if they've set this variable in their
         // environment.
         builder.env("GOTRACEBACK", "crash");
+        // XXX-dap try to workaround AVX issue when actually starting Cockroach
+        builder.env("GODEBUG", "asyncpreemptoff=1");
         for (key, value) in std::env::vars_os() {
             builder.env(key, value);
         }
