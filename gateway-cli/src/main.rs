@@ -16,7 +16,6 @@ use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::UpdateBody;
@@ -31,6 +30,8 @@ use std::io;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio_tungstenite::tungstenite::protocol::Role;
+use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
 
 mod picocom_map;
@@ -504,20 +505,21 @@ async fn main() -> Result<()> {
             omap,
             uart_logfile,
         } => {
-            let type_ = match sp.type_ {
-                SpType::Sled => "sled",
-                SpType::Switch => "switch",
-                SpType::Power => "power",
-            };
-            // TODO should we be able to attach through the openapi client?
-            // Check how propolis-cli does this.
-            let path = format!(
-                "ws://{}/sp/{}/{}/component/{}/serial-console/attach",
-                args.server, type_, sp.slot, SERIAL_CONSOLE_COMPONENT,
-            );
-            let (ws, _response) = tokio_tungstenite::connect_async(path)
+            let upgraded = client
+                .sp_component_serial_console_attach(
+                    sp.type_,
+                    sp.slot,
+                    SERIAL_CONSOLE_COMPONENT,
+                )
                 .await
-                .with_context(|| "failed to create serial websocket stream")?;
+                .map_err(|err| anyhow!("{err}"))?;
+
+            let ws = WebSocketStream::from_raw_socket(
+                upgraded.into_inner(),
+                Role::Client,
+                None,
+            )
+            .await;
             usart::run(
                 ws,
                 raw,
