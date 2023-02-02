@@ -325,7 +325,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpComponentInfo"
+                  "title": "Array_of_SpComponentDetails",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpComponentDetails"
+                  }
                 }
               }
             }
@@ -1017,6 +1021,612 @@
           "verbose"
         ]
       },
+      "LinkStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "down"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "up"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "MeasurementErrorCode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_sensor"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "no_reading"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "not_present"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_error"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_timeout"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_off"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ]
+      },
+      "MeasurementKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "temperature"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "power"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "current"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "voltage"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "input_current"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "input_voltage"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "speed"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "PacketCount": {
+        "type": "object",
+        "properties": {
+          "broadcast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "multicast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "unicast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "broadcast",
+          "multicast",
+          "unicast"
+        ]
+      },
+      "PhyStatus": {
+        "type": "object",
+        "properties": {
+          "mac_link_up": {
+            "$ref": "#/components/schemas/LinkStatus"
+          },
+          "media_link_up": {
+            "$ref": "#/components/schemas/LinkStatus"
+          },
+          "ty": {
+            "$ref": "#/components/schemas/PhyType"
+          }
+        },
+        "required": [
+          "mac_link_up",
+          "media_link_up",
+          "ty"
+        ]
+      },
+      "PhyType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8504"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8522"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8552"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8562"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortConfig": {
+        "type": "object",
+        "properties": {
+          "dev_num": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "dev_type": {
+            "$ref": "#/components/schemas/PortDev"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PortMode"
+          },
+          "serdes_num": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "serdes_type": {
+            "$ref": "#/components/schemas/PortSerdes"
+          }
+        },
+        "required": [
+          "dev_num",
+          "dev_type",
+          "mode",
+          "serdes_num",
+          "serdes_type"
+        ]
+      },
+      "PortCounters": {
+        "type": "object",
+        "properties": {
+          "link_down_sticky": {
+            "type": "boolean"
+          },
+          "phy_link_down_sticky": {
+            "type": "boolean"
+          },
+          "rx": {
+            "$ref": "#/components/schemas/PacketCount"
+          },
+          "tx": {
+            "$ref": "#/components/schemas/PacketCount"
+          }
+        },
+        "required": [
+          "link_down_sticky",
+          "phy_link_down_sticky",
+          "rx",
+          "tx"
+        ]
+      },
+      "PortDev": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev1g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev2g5"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev10g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortMode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sfi"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "base_kr"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sgmii"
+                ]
+              },
+              "speed": {
+                "$ref": "#/components/schemas/Speed"
+              }
+            },
+            "required": [
+              "mode",
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "qsgmii"
+                ]
+              },
+              "speed": {
+                "$ref": "#/components/schemas/Speed"
+              }
+            },
+            "required": [
+              "mode",
+              "speed"
+            ]
+          }
+        ]
+      },
+      "PortSerdes": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes1g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes6g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes10g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortStatusErrorCode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unconfigured"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              },
+              "raw": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "code",
+              "raw"
+            ]
+          }
+        ]
+      },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
         "type": "string",
@@ -1024,6 +1634,127 @@
           "A0",
           "A1",
           "A2"
+        ]
+      },
+      "SpComponentDetails": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cfg": {
+                "$ref": "#/components/schemas/PortConfig"
+              },
+              "counters": {
+                "$ref": "#/components/schemas/PortCounters"
+              },
+              "link_status": {
+                "$ref": "#/components/schemas/LinkStatus"
+              },
+              "phy_status": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PhyStatus"
+                  }
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "port_status"
+                ]
+              }
+            },
+            "required": [
+              "cfg",
+              "counters",
+              "link_status",
+              "port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/PortStatusErrorCode"
+              },
+              "port": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "port_status_error"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurement"
+                ]
+              },
+              "value": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "name",
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/MeasurementErrorCode"
+              },
+              "kind": {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurement_error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "kind",
+              "name",
+              "type"
+            ]
+          }
         ]
       },
       "SpComponentFirmwareSlot": {
@@ -1532,6 +2263,52 @@
               "code",
               "id",
               "state"
+            ]
+          }
+        ]
+      },
+      "Speed": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed100_m"
+                ]
+              }
+            },
+            "required": [
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed1_g"
+                ]
+              }
+            },
+            "required": [
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed10_g"
+                ]
+              }
+            },
+            "required": [
+              "speed"
             ]
           }
         ]
