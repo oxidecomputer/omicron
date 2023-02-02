@@ -39,7 +39,8 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/control-plane/omicron-test-component";
+const UPDATE_IMAGE_PATH: &'static str =
+    "/var/tmp/control-plane/omicron-test-component";
 
 #[tokio::test]
 async fn test_update_end_to_end() {

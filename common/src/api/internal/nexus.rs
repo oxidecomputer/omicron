@@ -123,7 +123,7 @@ pub struct UpdateArtifactId {
 //
 //    TODO: After omicron ships this would likely involve a DB migration.
 //
-// See PR (to fill in) as an example.
+// See https://github.com/oxidecomputer/omicron/pull/2300 as an example.
 //
 // NOTE: UpdateArtifactKind has to be in snake_case due to openapi-lint requirements.
 
