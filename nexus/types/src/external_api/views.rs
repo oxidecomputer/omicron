@@ -285,12 +285,47 @@ pub struct Rack {
 
 // SLEDS
 
-/// Client view of an [`Sled`]
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Baseboard {
+    pub serial: String,
+    pub part: String,
+    pub revision: i64,
+}
+
+/// Client view of a [`Sled`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
+}
+
+// PHYSICAL DISKS
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskType {
+    Internal,
+    External,
+}
+
+/// Client view of a [`PhysicalDisk`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PhysicalDisk {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    /// The sled to which this disk is attached, if any.
+    pub sled_id: Option<Uuid>,
+
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub disk_type: PhysicalDiskType,
 }
 
 // SILO USERS

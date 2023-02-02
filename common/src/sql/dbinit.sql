@@ -81,6 +81,11 @@ CREATE TABLE omicron.public.sled (
     /* Idenfities if this Sled is a Scrimlet */
     is_scrimlet BOOL NOT NULL,
 
+    /* Baseboard information about the sled */
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+    revision INT8 NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -127,6 +132,46 @@ CREATE TABLE omicron.public.service (
 CREATE INDEX ON omicron.public.service (
     sled_id
 );
+
+CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
+  'm2',
+  'u2'
+);
+
+-- A physical disk which exists inside the rack.
+CREATE TABLE omicron.public.physical_disk (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    vendor STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
+    -- FK into the Sled table
+    sled_id UUID NOT NULL,
+
+    -- This constraint should be upheld, even for deleted disks
+    -- in the fleet.
+    CONSTRAINT vendor_serial_model_unique UNIQUE (
+      vendor, serial, model
+    )
+);
+
+CREATE INDEX ON omicron.public.physical_disk (
+    variant,
+    id
+) WHERE time_deleted IS NULL;
+
+-- Make it efficient to look up physical disks by Sled.
+CREATE INDEX ON omicron.public.physical_disk (
+    sled_id,
+    id
+) WHERE time_deleted IS NULL;
 
 -- x509 certificates which may be used by services
 CREATE TABLE omicron.public.certificate (
@@ -1485,7 +1530,20 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
-    'zone'
+    -- Sled artifacts
+    'gimlet_sp',
+    'gimlet_rot',
+    'host_phase_1',
+    'host_phase_2',
+    'control_plane',
+
+    -- PSC artifacts
+    'psc_sp',
+    'psc_rot',
+
+    -- Switch artifacts
+    'switch_sp',
+    'switch_rot'
 );
 
 CREATE TABLE omicron.public.update_available_artifact (

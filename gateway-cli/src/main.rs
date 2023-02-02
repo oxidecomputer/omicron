@@ -10,6 +10,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use gateway_client::types::HostStartupOptions;
 use gateway_client::types::IgnitionCommand;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
@@ -105,7 +106,27 @@ enum Command {
         /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
         #[clap(value_parser = sp_identifier_from_str, action)]
         sp: SpIdentifier,
-        options: Option<u64>,
+        /// Set startup options to the bitwise-OR of all further options
+        #[clap(long)]
+        set: bool,
+        #[clap(long, requires = "set")]
+        phase2_recovery: bool,
+        #[clap(long, requires = "set")]
+        kbm: bool,
+        #[clap(long, requires = "set")]
+        bootrd: bool,
+        #[clap(long, requires = "set")]
+        prom: bool,
+        #[clap(long, requires = "set")]
+        kmdb: bool,
+        #[clap(long, requires = "set")]
+        kmdb_boot: bool,
+        #[clap(long, requires = "set")]
+        boot_ramdisk: bool,
+        #[clap(long, requires = "set")]
+        boot_net: bool,
+        #[clap(long, requires = "set")]
+        startup_verbose: bool,
     },
 
     /// Ask SP for its inventory.
@@ -366,17 +387,58 @@ async fn main() -> Result<()> {
                 dumper.dump(&info)?;
             }
         }
-        Command::StartupOptions { .. } => {
-            todo!("missing MGS endpoint");
+        Command::StartupOptions {
+            sp,
+            set,
+            phase2_recovery,
+            kbm,
+            bootrd,
+            prom,
+            kmdb,
+            kmdb_boot,
+            boot_ramdisk,
+            boot_net,
+            startup_verbose,
+        } => {
+            if set {
+                let options = HostStartupOptions {
+                    phase2_recovery_mode: phase2_recovery,
+                    kbm,
+                    bootrd,
+                    prom,
+                    kmdb,
+                    kmdb_boot,
+                    boot_ramdisk,
+                    boot_net,
+                    verbose: startup_verbose,
+                };
+                client
+                    .sp_startup_options_set(sp.type_, sp.slot, &options)
+                    .await?;
+            } else {
+                let info = client
+                    .sp_startup_options_get(sp.type_, sp.slot)
+                    .await?
+                    .into_inner();
+                dumper.dump(&info)?;
+            }
         }
         Command::Inventory { sp } => {
             let info =
                 client.sp_component_list(sp.type_, sp.slot).await?.into_inner();
             dumper.dump(&info)?;
         }
-        Command::ComponentDetails { .. }
-        | Command::ComponentClearStatus { .. } => {
-            todo!("missing MGS endpoint");
+        Command::ComponentDetails { sp, component } => {
+            let info = client
+                .sp_component_get(sp.type_, sp.slot, &component)
+                .await?
+                .into_inner();
+            dumper.dump(&info)?;
+        }
+        Command::ComponentClearStatus { sp, component } => {
+            client
+                .sp_component_clear_status(sp.type_, sp.slot, &component)
+                .await?;
         }
         Command::UsartAttach {
             sp,

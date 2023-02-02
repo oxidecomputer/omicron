@@ -35,6 +35,7 @@ pub fn run_openapi() -> Result<(), String> {
 pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
+    pub mgs_address: SocketAddrV6,
 }
 
 /// Run an instance of the wicketd server
@@ -63,7 +64,7 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         ..Default::default()
     };
 
-    let mgs_manager = MgsManager::new(&log, config.mgs_addr);
+    let mgs_manager = MgsManager::new(&log, args.mgs_address);
     let mgs_handle = mgs_manager.get_handle();
     tokio::spawn(async move {
         mgs_manager.run().await;

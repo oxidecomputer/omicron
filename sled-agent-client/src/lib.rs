@@ -287,11 +287,11 @@ impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::UpdateArtifact>
-    for types::UpdateArtifact
+impl From<omicron_common::api::internal::nexus::UpdateArtifactId>
+    for types::UpdateArtifactId
 {
-    fn from(s: omicron_common::api::internal::nexus::UpdateArtifact) -> Self {
-        types::UpdateArtifact {
+    fn from(s: omicron_common::api::internal::nexus::UpdateArtifactId) -> Self {
+        types::UpdateArtifactId {
             name: s.name,
             version: s.version,
             kind: s.kind.into(),
@@ -308,7 +308,25 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
         use omicron_common::api::internal::nexus::UpdateArtifactKind;
 
         match s {
-            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+            UpdateArtifactKind::GimletSp => types::UpdateArtifactKind::GimletSp,
+            UpdateArtifactKind::GimletRot => {
+                types::UpdateArtifactKind::GimletRot
+            }
+            UpdateArtifactKind::HostPhase1 => {
+                types::UpdateArtifactKind::HostPhase1
+            }
+            UpdateArtifactKind::HostPhase2 => {
+                types::UpdateArtifactKind::HostPhase2
+            }
+            UpdateArtifactKind::ControlPlane => {
+                types::UpdateArtifactKind::ControlPlane
+            }
+            UpdateArtifactKind::PscSp => types::UpdateArtifactKind::PscSp,
+            UpdateArtifactKind::PscRot => types::UpdateArtifactKind::PscRot,
+            UpdateArtifactKind::SwitchSp => types::UpdateArtifactKind::SwitchSp,
+            UpdateArtifactKind::SwitchRot => {
+                types::UpdateArtifactKind::SwitchRot
+            }
         }
     }
 }

@@ -29,7 +29,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifact,
+    internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -318,7 +318,7 @@ impl SledAgent {
                     "Sled Agent upserting zpool to Storage Manager: {}",
                     pool.to_string()
                 );
-                storage.upsert_zpool(pool).await?;
+                storage.upsert_zpool(pool.clone()).await;
             }
         }
         let instances = InstanceManager::new(
@@ -401,14 +401,10 @@ impl SledAgent {
             }
         }
 
-        if let Err(e) = self
-            .inner
+        self.inner
             .storage
             .ensure_using_exactly_these_disks(self.inner.hardware.disks())
-            .await
-        {
-            warn!(log, "Failed to ensure the set of disks: {e}");
-        }
+            .await;
     }
 
     async fn hardware_monitor_task(&self, log: Logger) {
@@ -451,18 +447,10 @@ impl SledAgent {
                         }
                     }
                     HardwareUpdate::DiskAdded(disk) => {
-                        if let Err(e) =
-                            self.inner.storage.upsert_disk(disk).await
-                        {
-                            warn!(log, "Failed to add disk: {e}");
-                        }
+                        self.inner.storage.upsert_disk(disk).await;
                     }
                     HardwareUpdate::DiskRemoved(disk) => {
-                        if let Err(e) =
-                            self.inner.storage.delete_disk(disk).await
-                        {
-                            warn!(log, "Failed to remove disk: {e}");
-                        }
+                        self.inner.storage.delete_disk(disk).await;
                     }
                 },
                 Err(RecvError::Lagged(count)) => {
@@ -487,6 +475,9 @@ impl SledAgent {
         let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = nexus_client::types::Baseboard::from(
+            self.inner.hardware.baseboard(),
+        );
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
@@ -498,7 +489,9 @@ impl SledAgent {
             let notify_nexus = || async {
                 info!(
                     log,
-                    "contacting server nexus, registering sled: {}", sled_id
+                    "contacting server nexus, registering sled";
+                    "id" => ?sled_id,
+                    "baseboard" => ?baseboard,
                 );
                 let role = if is_scrimlet {
                     nexus_client::types::SledRole::Scrimlet
@@ -516,6 +509,7 @@ impl SledAgent {
                         &nexus_client::types::SledAgentStartupInfo {
                             sa_address: sled_address.to_string(),
                             role,
+                            baseboard: baseboard.clone(),
                         },
                     )
                     .await
@@ -607,7 +601,7 @@ impl SledAgent {
     /// Downloads and applies an artifact.
     pub async fn update_artifact(
         &self,
-        artifact: UpdateArtifact,
+        artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
         let nexus_client = self.inner.lazy_nexus_client.get().await?;
         crate::updates::download_artifact(artifact, &nexus_client).await?;

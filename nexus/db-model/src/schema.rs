@@ -386,6 +386,10 @@ table! {
 
         rack_id -> Uuid,
         is_scrimlet -> Bool,
+        serial_number -> Text,
+        part_number -> Text,
+        revision -> Int8,
+
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
@@ -401,6 +405,23 @@ table! {
         sled_id -> Uuid,
         ip -> Inet,
         kind -> crate::ServiceKindEnum,
+    }
+}
+
+table! {
+    physical_disk (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        variant -> crate::PhysicalDiskKindEnum,
+        sled_id -> Uuid,
     }
 }
 

@@ -6,8 +6,10 @@
 
 //! HTTP entrypoint functions for the gateway service
 
+mod component_details;
 mod conversions;
 
+use self::component_details::SpComponentDetails;
 use self::conversions::component_from_str;
 use crate::error::SpCommsError;
 use crate::ServerContext;
@@ -64,11 +66,76 @@ pub struct SpInfo {
 pub enum SpState {
     Enabled {
         serial_number: String,
-        // TODO more stuff
+        model: String,
+        revision: u32,
+        hubris_archive_id: String,
+        base_mac_address: [u8; 6],
+        version: ImageVersion,
+        power_state: PowerState,
+        rot: RotState,
     },
     CommunicationFailed {
         message: String,
     },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RotState {
+    // TODO gateway_messages's RotState includes a couple nested structures that
+    // I've flattened here because they only contain one field each. When those
+    // structures grow we'll need to expand/change this.
+    Enabled {
+        active: RotSlot,
+        slot_a: Option<RotImageDetails>,
+        slot_b: Option<RotImageDetails>,
+    },
+    CommunicationFailed {
+        message: String,
+    },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "slot", rename_all = "snake_case")]
+pub enum RotSlot {
+    A,
+    B,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotImageDetails {
+    pub digest: String,
+    pub version: ImageVersion,
 }
 
 #[derive(
@@ -276,6 +343,21 @@ impl Display for SpIdentifier {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+pub struct HostStartupOptions {
+    pub phase2_recovery_mode: bool,
+    pub kbm: bool,
+    pub bootrd: bool,
+    pub prom: bool,
+    pub kmdb: bool,
+    pub kmdb_boot: bool,
+    pub boot_ramdisk: bool,
+    pub boot_net: bool,
+    pub verbose: bool,
+}
+
 /// See RFD 81.
 ///
 /// This enum only lists power states the SP is able to control; higher power
@@ -292,10 +374,27 @@ impl Display for SpIdentifier {
     Deserialize,
     JsonSchema,
 )]
-enum PowerState {
+pub enum PowerState {
     A0,
     A1,
     A2,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct ImageVersion {
+    pub epoch: u32,
+    pub version: u32,
 }
 
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
@@ -512,6 +611,51 @@ async fn sp_get(
     Ok(HttpResponseOk(info))
 }
 
+/// Get host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<HostStartupOptions>, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let options = sp.get_startup_options().await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(options.into()))
+}
+
+/// Set host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+    body: TypedBody<HostStartupOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    sp.set_startup_options(body.into_inner().into())
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// List components of an SP
 ///
 /// A component is a distinct entity under an SP's direct control. This lists
@@ -545,10 +689,40 @@ async fn sp_component_list(
     path = "/sp/{type}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
-    _rqctx: RequestContext<Arc<ServerContext>>,
-    _path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
-    todo!()
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<Vec<SpComponentDetails>>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let details =
+        sp.component_details(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
+}
+
+/// Clear status of a component
+///
+/// For components that maintain event counters (e.g., the sidecar `monorail`),
+/// this will reset the event counters to zero.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/clear-status",
+}]
+async fn sp_component_clear_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    sp.component_clear_status(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// Get the currently-active slot for an SP component
@@ -975,11 +1149,14 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
+        api.register(sp_startup_options_get)?;
+        api.register(sp_startup_options_set)?;
         api.register(sp_reset)?;
         api.register(sp_power_state_get)?;
         api.register(sp_power_state_set)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_clear_status)?;
         api.register(sp_component_active_slot_get)?;
         api.register(sp_component_active_slot_set)?;
         api.register(sp_component_serial_console_attach)?;
