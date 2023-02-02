@@ -40,6 +40,7 @@ members = [
     "sp-sim",
     "test-utils",
     "tufaceous",
+    "tufaceous-lib",
     "wicket",
     "wicketd",
     "wicketd-client",
@@ -80,6 +81,7 @@ default-members = [
     "sp-sim",
     "test-utils",
     "tufaceous",
+    "tufaceous-lib",
     "wicket",
     "wicketd",
     "wicketd-client",
@@ -117,15 +119,16 @@ ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
-diesel = { version = "2.0.2" }
+diesel = { version = "2.0.3" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 expectorate = "1.0.6"
 fatfs = "0.3.6"
+fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -205,6 +208,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.20.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.10"
+semver = { version = "1.0.16", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_json = "1.0.91"
@@ -244,7 +248,7 @@ term = "0.7"
 termios = "0.3"
 test-strategy = "0.2.1"
 thiserror = "1.0"
-tokio = "1.24"
+tokio = "1.25"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.18"
@@ -255,7 +259,8 @@ trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.76"
+trybuild = "1.0.77"
+tufaceous-lib = { path = "tufaceous-lib" }
 uuid = { version = "1.2.2", features = ["serde", "v4"] }
 usdt = "0.3"
 vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }

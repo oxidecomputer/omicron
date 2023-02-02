@@ -25,6 +25,7 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authz;
@@ -43,6 +44,10 @@ lazy_static! {
         format!("/system/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_SLED_URL: String =
         format!("/system/hardware/sleds/{}", SLED_AGENT_UUID);
+    pub static ref HARDWARE_DISK_URL: String =
+        format!("/system/hardware/disks");
+    pub static ref HARDWARE_SLED_DISK_URL: String =
+        format!("/system/hardware/sleds/{}/disks", SLED_AGENT_UUID);
 
     // Global policy
     pub static ref SYSTEM_POLICY_URL: &'static str = "/system/policy";
@@ -414,6 +419,12 @@ lazy_static! {
 
     pub static ref DEMO_SPECIFIC_SSHKEY_URL: String =
         format!("{}/{}", *DEMO_SSHKEYS_URL, *DEMO_SSHKEY_NAME);
+
+    // System update
+
+    pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdatePath = params::SystemUpdatePath {
+        version: SemverVersion::new(1,0,0),
+    };
 }
 
 lazy_static! {
@@ -1455,6 +1466,20 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
+        VerifyEndpoint {
+            url: &HARDWARE_DISK_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_SLED_DISK_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
         /* Sagas */
 
         VerifyEndpoint {
@@ -1483,7 +1508,7 @@ lazy_static! {
         /* Updates */
 
         VerifyEndpoint {
-            url: "/system/updates/refresh",
+            url: "/v1/system/update/refresh",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Post(
@@ -1500,6 +1525,80 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
+        },
+
+
+        // TODO: system version is uncovered because it requires setup that
+        // cannot be done through an API request (because there is no create
+        // endpoint for updateable components)
+
+        // VerifyEndpoint {
+        //     url: "/v1/system/update/version",
+        //     visibility: Visibility::Public,
+        //     unprivileged_access: UnprivilegedAccess::None,
+        //     allowed_methods: vec![AllowedMethod::Get],
+        // },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/components",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        // TODO: make system update endpoints work instead of expecting 404
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates/1.0.0",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/updates/1.0.0/components",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/start",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::to_value(&*DEMO_SYSTEM_UPDATE_PARAMS).unwrap()
+            )],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/stop",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::Value::Null
+            )],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/deployments",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/update/deployments/120bbb6f-660a-440c-8cb7-199be202ddff",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
         /* Global Images */

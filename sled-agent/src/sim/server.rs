@@ -89,6 +89,11 @@ impl Server {
                     &nexus_client::types::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
                         role: nexus_client::types::SledRole::Gimlet,
+                        baseboard: nexus_client::types::Baseboard {
+                            identifier: String::from("Unknown"),
+                            model: String::from("Unknown"),
+                            revision: 0,
+                        },
                     },
                 )
                 .await)

@@ -17,7 +17,7 @@ use dropshot::{
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::UpdateArtifact;
+use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -159,7 +159,7 @@ async fn disk_put(
 }]
 async fn update_artifact(
     rqctx: RequestContext<SledAgent>,
-    artifact: TypedBody<UpdateArtifact>,
+    artifact: TypedBody<UpdateArtifactId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;

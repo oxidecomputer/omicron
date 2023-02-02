@@ -81,6 +81,11 @@ CREATE TABLE omicron.public.sled (
     /* Idenfities if this Sled is a Scrimlet */
     is_scrimlet BOOL NOT NULL,
 
+    /* Baseboard information about the sled */
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+    revision INT8 NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -130,6 +135,46 @@ CREATE TABLE omicron.public.service (
 CREATE INDEX ON omicron.public.service (
     sled_id
 );
+
+CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
+  'm2',
+  'u2'
+);
+
+-- A physical disk which exists inside the rack.
+CREATE TABLE omicron.public.physical_disk (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    vendor STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
+    -- FK into the Sled table
+    sled_id UUID NOT NULL,
+
+    -- This constraint should be upheld, even for deleted disks
+    -- in the fleet.
+    CONSTRAINT vendor_serial_model_unique UNIQUE (
+      vendor, serial, model
+    )
+);
+
+CREATE INDEX ON omicron.public.physical_disk (
+    variant,
+    id
+) WHERE time_deleted IS NULL;
+
+-- Make it efficient to look up physical disks by Sled.
+CREATE INDEX ON omicron.public.physical_disk (
+    sled_id,
+    id
+) WHERE time_deleted IS NULL;
 
 -- x509 certificates which may be used by services
 CREATE TABLE omicron.public.certificate (
@@ -1513,6 +1558,152 @@ CREATE TABLE omicron.public.update_available_artifact (
 /* This index is used to quickly find outdated artifacts. */
 CREATE INDEX ON omicron.public.update_available_artifact (
     targets_role_version
+);
+
+/*
+ * System updates
+ */
+CREATE TABLE omicron.public.system_update (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Because the version is unique, it could be the PK, but that would make
+    -- this resource different from every other resource for little benefit.
+
+    -- Unique semver version
+    version STRING(64) NOT NULL, -- TODO: length
+    -- version string with maj/min/patch 0-padded to be string sortable
+    version_sort STRING(64) NOT NULL -- TODO: length
+);
+
+CREATE UNIQUE INDEX ON omicron.public.system_update (
+    version
+);
+
+CREATE UNIQUE INDEX ON omicron.public.system_update (
+    version_sort
+);
+ 
+CREATE TYPE omicron.public.updateable_component_type AS ENUM (
+    'bootloader_for_rot',
+    'bootloader_for_sp',
+    'bootloader_for_host_proc',
+    'hubris_for_psc_rot',
+    'hubris_for_psc_sp',
+    'hubris_for_sidecar_rot',
+    'hubris_for_sidecar_sp',
+    'hubris_for_gimlet_rot',
+    'hubris_for_gimlet_sp',
+    'helios_host_phase_1',
+    'helios_host_phase_2',
+    'host_omicron'
+);
+
+/*
+ * Component updates. Associated with at least one system_update through
+ * system_update_component_update.
+ */
+CREATE TABLE omicron.public.component_update (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- On component updates there's no device ID because the update can apply to
+    -- multiple instances of a given device kind
+
+    -- The *system* update version associated with this version (this is confusing, will rename)
+    version STRING(64) NOT NULL, -- TODO: length
+    -- TODO: add component update version to component_update
+
+    component_type omicron.public.updateable_component_type NOT NULL
+);
+
+-- version is unique per component type
+CREATE UNIQUE INDEX ON omicron.public.component_update (
+    component_type, version
+);
+
+/*
+ * Associate system updates with component updates. Not done with a
+ * system_update_id field on component_update because the same component update
+ * may be part of more than one system update.
+ */
+CREATE TABLE omicron.public.system_update_component_update (
+    system_update_id UUID NOT NULL,
+    component_update_id UUID NOT NULL,
+
+    PRIMARY KEY (system_update_id, component_update_id)
+);
+
+-- For now, the plan is to treat stopped, failed, completed as sub-cases of
+-- "steady" described by a "reason". But reason is not implemented yet.
+-- Obviously this could be a boolean, but boolean status fields never stay
+-- boolean for long.
+CREATE TYPE omicron.public.update_status AS ENUM (
+    'updating',
+    'steady'
+);
+
+/*
+ * Updateable components and their update status
+ */
+CREATE TABLE omicron.public.updateable_component (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Free-form string that comes from the device
+    device_id STRING(40) NOT NULL,
+
+    component_type omicron.public.updateable_component_type NOT NULL,
+
+    -- The semver version of this component's own software
+    version STRING(64) NOT NULL, -- TODO: length
+
+    -- The version of the system update this component's software came from.
+    -- This may need to be nullable if we are registering components before we
+    -- know about system versions at all
+    system_version STRING(64) NOT NULL, -- TODO: length
+    -- version string with maj/min/patch 0-padded to be string sortable
+    system_version_sort STRING(64) NOT NULL, -- TODO: length
+
+    status omicron.public.update_status NOT NULL
+    -- TODO: status reason for updateable_component
+);
+
+-- can't have two components of the same type with the same device ID
+CREATE UNIQUE INDEX ON omicron.public.updateable_component (
+    component_type, device_id
+);
+
+CREATE INDEX ON omicron.public.updateable_component (
+    system_version_sort
+);
+
+/*
+ * System updates
+ */
+CREATE TABLE omicron.public.update_deployment (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- semver version of corresponding system update
+    -- TODO: this makes sense while version is the PK of system_update, but
+    -- if/when I change that back to ID, this needs to be the ID too
+    version STRING(64) NOT NULL,
+
+    status omicron.public.update_status NOT NULL
+    -- TODO: status reason for update_deployment
+);
+
+CREATE INDEX on omicron.public.update_deployment (
+    time_created
 );
 
 /*******************************************************************/

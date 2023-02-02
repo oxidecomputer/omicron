@@ -15,6 +15,7 @@ pub use context::ServerContext;
 use dropshot::ShutdownWaitFuture;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use gateway_sp_comms::InMemoryHostPhase2Provider;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::ManagementSwitch;
@@ -134,10 +135,16 @@ impl Server {
             }
         }
 
+        let host_phase2_provider =
+            Arc::new(InMemoryHostPhase2Provider::with_capacity(
+                config.host_phase2_recovery_image_cache_max_images,
+            ));
         let apictx =
-            ServerContext::new(config.switch, &log).await.map_err(|error| {
-                format!("initializing server context: {}", error)
-            })?;
+            ServerContext::new(host_phase2_provider, config.switch, &log)
+                .await
+                .map_err(|error| {
+                    format!("initializing server context: {}", error)
+                })?;
 
         let mut http_servers = HashMap::with_capacity(args.addresses.len());
         let all_servers_shutdown = FuturesUnordered::new();

@@ -7,7 +7,7 @@
 use crate::nexus::NexusClient;
 use futures::{TryFutureExt, TryStreamExt};
 use omicron_common::api::internal::nexus::{
-    UpdateArtifact, UpdateArtifactKind,
+    UpdateArtifactId, UpdateArtifactKind,
 };
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -27,7 +27,7 @@ pub enum Error {
 }
 
 pub async fn download_artifact(
-    artifact: UpdateArtifact,
+    artifact: UpdateArtifactId,
     nexus: &NexusClient,
 ) -> Result<(), Error> {
     match artifact.kind {
@@ -109,7 +109,7 @@ mod test {
         // The (completely fabricated) artifact we'd like to download.
         let expected_name = "test_artifact";
         let expected_contents = "test_artifact contents";
-        let artifact = UpdateArtifact {
+        let artifact = UpdateArtifactId {
             name: expected_name.to_string(),
             version: "0.0.0".to_string(),
             kind: UpdateArtifactKind::Zone,

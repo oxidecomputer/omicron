@@ -72,6 +72,24 @@ source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
 output.type = "zone"
 output.intermediate_only = true
 
+[package.wicketd]
+service_name = "wicketd"
+source.type = "local"
+source.rust.binary_names = ["wicketd"]
+source.rust.release = true
+source.paths = [ { from = "smf/wicketd", to = "/var/svc/manifest/site/wicketd" } ]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.wicket]
+service_name = "wicket"
+source.type = "local"
+source.rust.binary_names = ["wicket"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+
 # Packages not built within Omicron, but which must be imported.
 
 # Refer to
@@ -174,7 +192,7 @@ output.intermediate_only = true
 service_name = "switch"
 only_for_targets.switch_variant = "asic"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
@@ -187,5 +205,5 @@ output.type = "zone"
 service_name = "switch"
 only_for_targets.switch_variant = "stub"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"

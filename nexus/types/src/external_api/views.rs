@@ -13,7 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName,
+    ObjectIdentity, RoleName, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -285,12 +285,47 @@ pub struct Rack {
 
 // SLEDS
 
-/// Client view of an [`Sled`]
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Baseboard {
+    pub serial: String,
+    pub part: String,
+    pub revision: i64,
+}
+
+/// Client view of a [`Sled`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
+}
+
+// PHYSICAL DISKS
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskType {
+    Internal,
+    External,
+}
+
+/// Client view of a [`PhysicalDisk`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PhysicalDisk {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    /// The sled to which this disk is attached, if any.
+    pub sled_id: Option<Uuid>,
+
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub disk_type: PhysicalDiskType,
 }
 
 // SILO USERS
@@ -396,4 +431,63 @@ pub struct DeviceAccessTokenGrant {
 #[serde(rename_all = "snake_case")]
 pub enum DeviceAccessTokenType {
     Bearer,
+}
+
+// SYSTEM UPDATES
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct VersionRange {
+    pub low: SemverVersion,
+    pub high: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum UpdateStatus {
+    Updating,
+    Steady,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct SystemVersion {
+    pub version_range: VersionRange,
+    pub status: UpdateStatus,
+    // TODO: time_released? time_last_applied? I got a fever and the only
+    // prescription is more timestamps
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdate {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ComponentUpdate {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    pub component_type: shared::UpdateableComponentType,
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateableComponent {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    pub device_id: String,
+    pub component_type: shared::UpdateableComponentType,
+    pub version: SemverVersion,
+    pub system_version: SemverVersion,
+    pub status: UpdateStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateDeployment {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub version: SemverVersion,
+    pub status: UpdateStatus,
 }

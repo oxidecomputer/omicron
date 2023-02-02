@@ -39,6 +39,8 @@ pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
 pub const MGS_PORT: u16 = 12225;
+pub const WICKETD_PORT: u16 = 12226;
+pub const BOOTSTRAP_ARTIFACT_PORT: u16 = 12227;
 pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;

@@ -1,0 +1,20 @@
+[package]
+name = "tufaceous-lib"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true, features = ["backtrace"] }
+camino.workspace = true
+chrono.workspace = true
+fs-err.workspace = true
+hex.workspace = true
+omicron-common.workspace = true
+rand.workspace = true
+ring = { workspace = true, features = ["std"] }
+serde_json.workspace = true
+sha2 = "0.10.6"
+tempfile.workspace = true
+tough.workspace = true
+url = "2.3.1"

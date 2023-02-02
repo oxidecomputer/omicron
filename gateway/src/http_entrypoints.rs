@@ -6,8 +6,10 @@
 
 //! HTTP entrypoint functions for the gateway service
 
+mod component_details;
 mod conversions;
 
+use self::component_details::SpComponentDetails;
 use self::conversions::component_from_str;
 use crate::error::SpCommsError;
 use crate::ServerContext;
@@ -20,6 +22,7 @@ use dropshot::Path;
 use dropshot::RawRequest;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use dropshot::UntypedBody;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -275,6 +278,21 @@ impl Display for SpIdentifier {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+pub struct HostStartupOptions {
+    pub phase2_recovery_mode: bool,
+    pub kbm: bool,
+    pub bootrd: bool,
+    pub prom: bool,
+    pub kmdb: bool,
+    pub kmdb_boot: bool,
+    pub boot_ramdisk: bool,
+    pub boot_net: bool,
+    pub verbose: bool,
+}
+
 /// See RFD 81.
 ///
 /// This enum only lists power states the SP is able to control; higher power
@@ -304,6 +322,12 @@ enum PowerState {
 )]
 pub struct SpComponentFirmwareSlot {
     pub slot: u16,
+}
+
+/// Identity of a host phase2 recovery image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HostPhase2RecoveryImageId {
+    pub sha256_hash: String,
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -505,6 +529,51 @@ async fn sp_get(
     Ok(HttpResponseOk(info))
 }
 
+/// Get host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<HostStartupOptions>, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let options = sp.get_startup_options().await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(options.into()))
+}
+
+/// Set host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+    body: TypedBody<HostStartupOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    sp.set_startup_options(body.into_inner().into())
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// List components of an SP
 ///
 /// A component is a distinct entity under an SP's direct control. This lists
@@ -538,10 +607,40 @@ async fn sp_component_list(
     path = "/sp/{type}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
-    _rqctx: RequestContext<Arc<ServerContext>>,
-    _path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
-    todo!()
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<Vec<SpComponentDetails>>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let details =
+        sp.component_details(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
+}
+
+/// Clear status of a component
+///
+/// For components that maintain event counters (e.g., the sidecar `monorail`),
+/// this will reset the event counters to zero.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/clear-status",
+}]
+async fn sp_component_clear_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    sp.component_clear_status(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// Get the currently-active slot for an SP component
@@ -913,6 +1012,41 @@ async fn sp_power_state_set(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Upload a host phase2 image that can be served to recovering hosts via the
+/// host/SP control uart.
+///
+/// MGS caches this image in memory and is limited to a small, fixed number of
+/// images (potentially 1). Uploading a new image may evict the
+/// least-recently-requested image if our cache is already full.
+#[endpoint {
+    method = POST,
+    path = "/recovery/host-phase2",
+}]
+async fn recovery_host_phase2_upload(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: UntypedBody,
+) -> Result<HttpResponseOk<HostPhase2RecoveryImageId>, HttpError> {
+    let apictx = rqctx.context();
+
+    // TODO: this makes a full copy of the host image, potentially unnecessarily
+    // if it's malformed.
+    let image = body.as_bytes().to_vec();
+
+    let sha2 =
+        apictx.host_phase2_provider.insert(image).await.map_err(|err| {
+            // Any cache-insertion failure indicates a malformed image; map them
+            // to bad requests.
+            HttpError::for_bad_request(
+                Some("BadHostPhase2Image".to_string()),
+                err.to_string(),
+            )
+        })?;
+
+    Ok(HttpResponseOk(HostPhase2RecoveryImageId {
+        sha256_hash: hex::encode(&sha2),
+    }))
+}
+
 // TODO
 // The gateway service will get asynchronous notifications both from directly
 // SPs over the management network and indirectly from Ignition via the Sidecar
@@ -933,11 +1067,14 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
+        api.register(sp_startup_options_get)?;
+        api.register(sp_startup_options_set)?;
         api.register(sp_reset)?;
         api.register(sp_power_state_get)?;
         api.register(sp_power_state_set)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_clear_status)?;
         api.register(sp_component_active_slot_get)?;
         api.register(sp_component_active_slot_set)?;
         api.register(sp_component_serial_console_attach)?;
@@ -948,6 +1085,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(ignition_list)?;
         api.register(ignition_get)?;
         api.register(ignition_command)?;
+        api.register(recovery_host_phase2_upload)?;
         Ok(())
     }
 
