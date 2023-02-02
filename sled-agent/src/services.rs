@@ -38,12 +38,14 @@ use crate::params::{
 use crate::smf_helper::SmfHelper;
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::WICKETD_PORT;
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -741,6 +743,26 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
+                ServiceType::Wicketd => {
+                    info!(self.inner.log, "Setting up wicketd service");
+
+                    smfh.setprop(
+                        "config/address",
+                        &format!("[::1]:{WICKETD_PORT}"),
+                    )?;
+
+                    // TODO: Use bootstrap address
+                    smfh.setprop(
+                        "config/artifact-address",
+                        &format!("[::1]:{BOOTSTRAP_ARTIFACT_PORT}"),
+                    )?;
+
+                    smfh.setprop(
+                        "config/mgs-address",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )?;
+                    smfh.refresh()?;
+                }
                 ServiceType::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
 
@@ -906,7 +928,11 @@ impl ServiceManager {
 
         let services = match self.inner.stub_scrimlet {
             Some(_) => {
-                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
+                vec![
+                    ServiceType::Dendrite { asic: DendriteAsic::TofinoStub },
+                    ServiceType::ManagementGatewayService,
+                    ServiceType::Wicketd,
+                ]
             }
             None => {
                 vec![

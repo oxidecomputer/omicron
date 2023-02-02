@@ -7,13 +7,11 @@
 use dropshot::ConfigLogging;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
-use std::net::SocketAddrV6;
 use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
-    pub mgs_addr: SocketAddrV6,
     pub log: ConfigLogging,
 }
 
