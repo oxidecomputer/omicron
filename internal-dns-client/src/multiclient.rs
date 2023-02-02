@@ -275,7 +275,9 @@ impl Resolver {
             }
 
             _ => {
-                panic!("SRV lookup didn't return SRV!");
+                return Err(ResolveError::Resolve(
+                    "SRV query did not return SRV RData!".into(),
+                ));
             }
         })
     }
