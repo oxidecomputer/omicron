@@ -276,6 +276,21 @@ impl Display for SpIdentifier {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+pub struct HostStartupOptions {
+    pub phase2_recovery_mode: bool,
+    pub kbm: bool,
+    pub bootrd: bool,
+    pub prom: bool,
+    pub kmdb: bool,
+    pub kmdb_boot: bool,
+    pub boot_ramdisk: bool,
+    pub boot_net: bool,
+    pub verbose: bool,
+}
+
 /// See RFD 81.
 ///
 /// This enum only lists power states the SP is able to control; higher power
@@ -510,6 +525,51 @@ async fn sp_get(
     };
 
     Ok(HttpResponseOk(info))
+}
+
+/// Get host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<HostStartupOptions>, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let options = sp.get_startup_options().await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(options.into()))
+}
+
+/// Set host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+    body: TypedBody<HostStartupOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    sp.set_startup_options(body.into_inner().into())
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// List components of an SP
@@ -975,6 +1035,8 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
+        api.register(sp_startup_options_get)?;
+        api.register(sp_startup_options_set)?;
         api.register(sp_reset)?;
         api.register(sp_power_state_get)?;
         api.register(sp_power_state_set)?;

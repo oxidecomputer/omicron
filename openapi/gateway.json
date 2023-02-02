@@ -836,6 +836,97 @@
           }
         }
       }
+    },
+    "/sp/{type}/{slot}/startup-options": {
+      "get": {
+        "summary": "Get host startup options for a sled",
+        "description": "This endpoint will currently fail for any `SpType` other than `SpType::Sled`.",
+        "operationId": "sp_startup_options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostStartupOptions"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set host startup options for a sled",
+        "description": "This endpoint will currently fail for any `SpType` other than `SpType::Sled`.",
+        "operationId": "sp_startup_options_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostStartupOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -881,6 +972,49 @@
         },
         "required": [
           "sha256_hash"
+        ]
+      },
+      "HostStartupOptions": {
+        "type": "object",
+        "properties": {
+          "boot_net": {
+            "type": "boolean"
+          },
+          "boot_ramdisk": {
+            "type": "boolean"
+          },
+          "bootrd": {
+            "type": "boolean"
+          },
+          "kbm": {
+            "type": "boolean"
+          },
+          "kmdb": {
+            "type": "boolean"
+          },
+          "kmdb_boot": {
+            "type": "boolean"
+          },
+          "phase2_recovery_mode": {
+            "type": "boolean"
+          },
+          "prom": {
+            "type": "boolean"
+          },
+          "verbose": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "boot_net",
+          "boot_ramdisk",
+          "bootrd",
+          "kbm",
+          "kmdb",
+          "kmdb_boot",
+          "phase2_recovery_mode",
+          "prom",
+          "verbose"
         ]
       },
       "PowerState": {
