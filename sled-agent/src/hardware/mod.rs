@@ -35,6 +35,53 @@ pub enum HardwareUpdate {
     DiskRemoved(UnparsedDisk),
 }
 
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug)]
+pub struct Baseboard {
+    identifier: String,
+    model: String,
+    revision: i64,
+}
+
+impl Baseboard {
+    #[allow(dead_code)]
+    pub fn new(identifier: String, model: String, revision: i64) -> Self {
+        Self { identifier, model, revision }
+    }
+
+    // XXX This should be removed, but it requires a refactor in how devices are
+    // polled.
+    pub fn unknown() -> Self {
+        Self {
+            identifier: String::from("Unknown"),
+            model: String::from("Unknown"),
+            revision: 0,
+        }
+    }
+
+    pub fn identifier(&self) -> &str {
+        &self.identifier
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub fn revision(&self) -> i64 {
+        self.revision
+    }
+}
+
+impl From<Baseboard> for nexus_client::types::Baseboard {
+    fn from(b: Baseboard) -> nexus_client::types::Baseboard {
+        nexus_client::types::Baseboard {
+            identifier: b.identifier,
+            model: b.model,
+            revision: b.revision,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DiskError {
     #[error("Cannot open {path} due to {error}")]
@@ -216,7 +263,7 @@ impl Disk {
                 // To remedy: Let's enforce that the partition exists.
                 info!(
                     log,
-                    "Formatting zpool on disk {}",
+                    "GPT exists without Zpool: formatting zpool on disk {}",
                     paths.devfs_path.display()
                 );
                 // If a zpool does not already exist, create one.
@@ -234,6 +281,14 @@ impl Disk {
             partitions,
             zpool_name,
         })
+    }
+
+    pub fn identity(&self) -> &DiskIdentity {
+        &self.identity
+    }
+
+    pub fn variant(&self) -> DiskVariant {
+        self.variant
     }
 
     pub fn devfs_path(&self) -> &PathBuf {

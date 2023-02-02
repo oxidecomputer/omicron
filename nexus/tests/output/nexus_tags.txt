@@ -166,6 +166,7 @@ ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
 local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
 local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
 local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
+physical_disk_list                       /system/hardware/disks
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
 saga_list                                /system/sagas
@@ -183,6 +184,7 @@ silo_users_list                          /system/silos/{silo_name}/users/all
 silo_view                                /system/silos/{silo_name}
 silo_view_by_id                          /system/by-id/silos/{id}
 sled_list                                /system/hardware/sleds
+sled_physical_disk_list                  /system/hardware/sleds/{sled_id}/disks
 sled_view                                /system/hardware/sleds/{sled_id}
 system_component_version_list            /v1/system/update/components
 system_image_create                      /system/images

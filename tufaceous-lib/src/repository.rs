@@ -2,15 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{key::Key, target::TargetWriter, AddZone};
+use crate::{key::Key, target::TargetWriter, AddArtifact};
 use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use fs_err::{self as fs, File};
-use omicron_common::{
-    api::internal::nexus::UpdateArtifactKind,
-    update::{Artifact, ArtifactsDocument},
-};
+use omicron_common::update::{Artifact, ArtifactsDocument};
 use std::num::NonZeroU64;
 use tough::{
     editor::{signed::SignedRole, RepositoryEditor},
@@ -170,15 +167,19 @@ impl OmicronRepoEditor {
     ///
     /// If the name isn't specified, it is derived from the zone path by taking
     /// the file name and stripping the extension.
-    pub fn add_zone(&mut self, zone: &AddZone) -> Result<()> {
-        let filename = format!("{}-{}.tar.gz", zone.name(), zone.version());
+    pub fn add_artifact(&mut self, new_artifact: &AddArtifact) -> Result<()> {
+        let filename = format!(
+            "{}-{}.tar.gz",
+            new_artifact.name(),
+            new_artifact.version(),
+        );
 
         // if we already have an artifact of this name/version/kind, replace it.
         if let Some(artifact) =
             self.artifacts.artifacts.iter_mut().find(|artifact| {
-                artifact.name == zone.name()
-                    && artifact.version == zone.version()
-                    && artifact.kind == UpdateArtifactKind::Zone.into()
+                artifact.name == new_artifact.name()
+                    && artifact.version == new_artifact.version()
+                    && artifact.kind == new_artifact.kind().into()
             })
         {
             self.editor.remove_target(&artifact.target.as_str().try_into()?)?;
@@ -195,9 +196,9 @@ impl OmicronRepoEditor {
                 );
             }
             self.artifacts.artifacts.push(Artifact {
-                name: zone.name().to_owned(),
-                version: zone.version().to_owned(),
-                kind: UpdateArtifactKind::Zone.into(),
+                name: new_artifact.name().to_owned(),
+                version: new_artifact.version().to_owned(),
+                kind: new_artifact.kind().into(),
                 target: filename.clone(),
             })
         }
@@ -205,7 +206,7 @@ impl OmicronRepoEditor {
         let targets_dir = self.repo_path.join("targets");
 
         let mut file = TargetWriter::new(&targets_dir, filename)?;
-        std::io::copy(&mut File::open(zone.path())?, &mut file)?;
+        std::io::copy(&mut File::open(new_artifact.path())?, &mut file)?;
         file.finish(&mut self.editor)?;
 
         Ok(())

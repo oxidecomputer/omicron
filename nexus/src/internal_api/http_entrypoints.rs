@@ -7,13 +7,15 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    OximeterInfo, RackInitializationRequest, SledAgentStartupInfo,
+    OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
+    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentStartupInfo,
     ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
@@ -23,7 +25,7 @@ use hyper::Body;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::UpdateArtifact;
+use omicron_common::api::internal::nexus::UpdateArtifactId;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -38,6 +40,8 @@ pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(sled_agent_put)?;
         api.register(rack_initialization_complete)?;
+        api.register(physical_disk_put)?;
+        api.register(physical_disk_delete)?;
         api.register(zpool_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
@@ -114,7 +118,48 @@ async fn rack_initialization_complete(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// Path parameters for Sled Agent requests (internal API)
+/// Report that a physical disk for the specified sled has come online.
+#[endpoint {
+     method = PUT,
+     path = "/physical-disk",
+ }]
+async fn physical_disk_put(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<PhysicalDiskPutRequest>,
+) -> Result<HttpResponseOk<PhysicalDiskPutResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let disk = body.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.upsert_physical_disk(&opctx, disk).await?;
+        Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Report that a physical disk for the specified sled has gone offline.
+#[endpoint {
+     method = DELETE,
+     path = "/physical-disk",
+ }]
+async fn physical_disk_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<PhysicalDiskDeleteRequest>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let disk = body.into_inner();
+
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.delete_physical_disk(&opctx, disk).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Zpool requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct ZpoolPathParam {
     sled_id: Uuid,
@@ -323,7 +368,7 @@ async fn cpapi_metrics_collect(
 }]
 async fn cpapi_artifact_download(
     request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UpdateArtifact>,
+    path_params: Path<UpdateArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;

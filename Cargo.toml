@@ -126,8 +126,8 @@ fatfs = "0.3.6"
 fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2220180907345c4a0430503a30955aa38ce19a4a" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"

@@ -40,7 +40,7 @@ async fn discovery_both_locations() {
 
             let resp: SpInfo = test_util::object_get(client, &url).await;
             match resp.details {
-                SpState::Enabled { serial_number } => {
+                SpState::Enabled { serial_number, .. } => {
                     assert_eq!(serial_number, expected_serial)
                 }
                 other => panic!("unexpected state {:?}", other),

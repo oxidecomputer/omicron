@@ -378,6 +378,7 @@ pub enum ServiceType {
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
     ManagementGatewayService,
+    Wicketd,
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
 }
@@ -389,6 +390,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
+            ServiceType::Wicketd => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
         }
@@ -412,6 +414,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Oximeter => AutoSt::Oximeter,
             St::ManagementGatewayService => AutoSt::ManagementGatewayService,
+            St::Wicketd => AutoSt::Wicketd,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
         }
@@ -497,6 +500,7 @@ impl ServiceZoneRequest {
             ServiceType::ManagementGatewayService => {
                 SRV::Service(ServiceName::ManagementGatewayService)
             }
+            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
             ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
             ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
         }
@@ -516,6 +520,8 @@ impl ServiceZoneRequest {
             ServiceType::ManagementGatewayService => {
                 Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
             }
+            // TODO: Is this correct?
+            ServiceType::Wicketd => None,
             ServiceType::Dendrite { .. } => {
                 Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
             }
