@@ -263,9 +263,6 @@ impl NexusSaga for SagaSnapshotCreate {
 
             // (Pantry) Call the Pantry's /detach
             builder.append(call_pantry_detach_for_disk_action());
-
-            // (Pantry) Clear attach_instance_id
-            builder.append(detach_disk_from_pantry_action());
         }
 
         // (Sleds + DB) Start snapshot downstairs, add an entry in the DB for
@@ -278,6 +275,14 @@ impl NexusSaga for SagaSnapshotCreate {
         builder.append(create_volume_record_action());
         // (DB) Mark snapshot as "ready"
         builder.append(finalize_snapshot_record_action());
+
+        if params.use_the_pantry {
+            // (Pantry) Set the state back to Detached
+            //
+            // This has to be the last saga node! Otherwise, concurrent
+            // operation on this disk is possible.
+            builder.append(detach_disk_from_pantry_action());
+        }
 
         Ok(builder.build()?)
     }
