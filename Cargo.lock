@@ -6236,6 +6236,7 @@ dependencies = [
  "gateway-messages",
  "hex",
  "omicron-common",
+ "omicron-gateway",
  "serde",
  "slog",
  "slog-dtrace",

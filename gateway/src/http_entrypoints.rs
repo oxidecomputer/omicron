@@ -66,11 +66,76 @@ pub struct SpInfo {
 pub enum SpState {
     Enabled {
         serial_number: String,
-        // TODO more stuff
+        model: String,
+        revision: u32,
+        hubris_archive_id: String,
+        base_mac_address: [u8; 6],
+        version: ImageVersion,
+        power_state: PowerState,
+        rot: RotState,
     },
     CommunicationFailed {
         message: String,
     },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RotState {
+    // TODO gateway_messages's RotState includes a couple nested structures that
+    // I've flattened here because they only contain one field each. When those
+    // structures grow we'll need to expand/change this.
+    Enabled {
+        active: RotSlot,
+        slot_a: Option<RotImageDetails>,
+        slot_b: Option<RotImageDetails>,
+    },
+    CommunicationFailed {
+        message: String,
+    },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "slot", rename_all = "snake_case")]
+pub enum RotSlot {
+    A,
+    B,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotImageDetails {
+    pub digest: String,
+    pub version: ImageVersion,
 }
 
 #[derive(
@@ -309,10 +374,27 @@ pub struct HostStartupOptions {
     Deserialize,
     JsonSchema,
 )]
-enum PowerState {
+pub enum PowerState {
     A0,
     A1,
     A2,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct ImageVersion {
+    pub epoch: u32,
+    pub version: u32,
 }
 
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for

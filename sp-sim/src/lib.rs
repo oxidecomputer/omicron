@@ -31,7 +31,7 @@ pub enum Responsiveness {
 #[async_trait]
 pub trait SimulatedSp {
     /// Serial number.
-    fn serial_number(&self) -> String;
+    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState;
 
     /// Public key for the manufacturing cert used to sign this SP's RoT certs.
     fn manufacturing_public_key(&self) -> Ed25519PublicKey;

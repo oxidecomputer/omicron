@@ -1068,6 +1068,25 @@
           "verbose"
         ]
       },
+      "ImageVersion": {
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "epoch",
+          "version"
+        ]
+      },
       "LinkStatus": {
         "oneOf": [
           {
@@ -1683,6 +1702,109 @@
           "A2"
         ]
       },
+      "RotImageDetails": {
+        "type": "object",
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ImageVersion"
+          }
+        },
+        "required": [
+          "digest",
+          "version"
+        ]
+      },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageDetails"
+                  }
+                ]
+              },
+              "slot_b": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageDetails"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
       "SpComponentDetails": {
         "oneOf": [
           {
@@ -2126,6 +2248,33 @@
           {
             "type": "object",
             "properties": {
+              "base_mac_address": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                },
+                "minItems": 6,
+                "maxItems": 6
+              },
+              "hubris_archive_id": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "power_state": {
+                "$ref": "#/components/schemas/PowerState"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "rot": {
+                "$ref": "#/components/schemas/RotState"
+              },
               "serial_number": {
                 "type": "string"
               },
@@ -2134,11 +2283,21 @@
                 "enum": [
                   "enabled"
                 ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ImageVersion"
               }
             },
             "required": [
+              "base_mac_address",
+              "hubris_archive_id",
+              "model",
+              "power_state",
+              "revision",
+              "rot",
               "serial_number",
-              "state"
+              "state",
+              "version"
             ]
           },
           {

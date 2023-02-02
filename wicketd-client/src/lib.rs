@@ -31,6 +31,10 @@ progenitor::generate_api!(
         SpIgnitionSystemType= { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         SpInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         RackV1Inventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        RotState = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        RotImageDetails = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
     }
 );
 
