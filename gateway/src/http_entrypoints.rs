@@ -397,12 +397,18 @@ pub struct ImageVersion {
     pub version: u32,
 }
 
+// This type is a duplicate of the type in `ipcc-key-value`, and we provide a
+// `From<_>` impl to convert to it. We keep these types distinct to allow us to
+// choose different representations for MGS's HTTP API (this type) and the wire
+// format passed through the SP to installinator
+// (`ipcc_key_value::InstallinatorImageId`), although _currently_ they happen to
+// be defined identically.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub struct InstallinatorImageId {
-    pub host_os: [u8; 32],
+    pub host_phase_2: [u8; 32],
     pub control_plane: [u8; 32],
 }
 

@@ -30,8 +30,8 @@ pub enum Key {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct InstallinatorImageId {
-    /// SHA-256 hash of the host OS image to fetch.
-    pub host_os: [u8; 32],
+    /// SHA-256 hash of the host phase 2 image to fetch.
+    pub host_phase_2: [u8; 32],
     /// SHA-256 hash of the control plane image to fetch.
     pub control_plane: [u8; 32],
 }

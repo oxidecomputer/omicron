@@ -366,6 +366,6 @@ impl From<StartupOptions> for HostStartupOptions {
 
 impl From<InstallinatorImageId> for ipcc_key_value::InstallinatorImageId {
     fn from(id: InstallinatorImageId) -> Self {
-        Self { host_os: id.host_os, control_plane: id.control_plane }
+        Self { host_phase_2: id.host_phase_2, control_plane: id.control_plane }
     }
 }
