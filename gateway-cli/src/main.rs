@@ -145,7 +145,7 @@ enum Command {
             conflicts_with = "clear",
             required_unless_present = "clear",
         )]
-        host_os: Option<[u8; 32]>,
+        host_phase_2: Option<[u8; 32]>,
         /// Hash of the control plane image.
         #[clap(
             long,
@@ -459,7 +459,7 @@ async fn main() -> Result<()> {
         Command::SetInstallinatorImageId {
             sp,
             clear,
-            host_os,
+            host_phase_2,
             control_plane,
         } => {
             if clear {
@@ -468,13 +468,13 @@ async fn main() -> Result<()> {
                     .await?;
             } else {
                 // clap guarantees these are not `None`.
-                let host_os = host_os.unwrap().to_vec();
+                let host_phase_2 = host_phase_2.unwrap().to_vec();
                 let control_plane = control_plane.unwrap().to_vec();
                 client
                     .sp_installinator_image_id_set(
                         sp.type_,
                         sp.slot,
-                        &InstallinatorImageId { host_os, control_plane },
+                        &InstallinatorImageId { host_phase_2, control_plane },
                     )
                     .await?;
             }
