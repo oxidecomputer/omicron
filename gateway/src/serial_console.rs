@@ -16,11 +16,13 @@ use gateway_sp_comms::AttachedSerialConsoleSend;
 use hyper::upgrade::Upgraded;
 use slog::error;
 use slog::info;
+use slog::warn;
 use slog::Logger;
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::Role;
@@ -51,13 +53,18 @@ pub(crate) async fn run(
     let (ws_sink, ws_stream) = ws_stream.split();
 
     // Spawn a task to send any messages received from the SP to the client
-    // websocket.
+    // websocket. Our choice of channel size here is relatively arbitrary, but
+    // we want to pick _something_ to avoid an unbounded channel in the event of
+    // a misbehaving client.
     //
-    // TODO-cleanup We have no way to apply backpressure to the SP, and are
-    // willing to buffer up an arbitray amount of data in memory. We should
-    // apply some form of backpressure (which the SP could only handle by
-    // discarding data).
-    let (ws_sink_tx, ws_sink_rx) = mpsc::unbounded_channel();
+    // This channel is used to forward data we receive from the SP to our
+    // websocket client: one UDP-packet-worth (anywhere from 1 byte to about 1
+    // KiB) per message. We'll pick a channel size of 10,000, which allows us to
+    // buffer at least 10,000 bytes (if the SP is sending us single-byte
+    // packets, which it shouldn't be in general!) and and most ~10 MiB (if the
+    // SP is sending us ~1 KiB packets and our web socket client isn't pulling
+    // data out fast enough).
+    let (ws_sink_tx, ws_sink_rx) = mpsc::channel(10_000);
     let mut ws_sink_handle = tokio::spawn(ws_sink_task(ws_sink, ws_sink_rx));
 
     // Spawn a task to send any messages received from the client websocket
@@ -93,7 +100,21 @@ pub(crate) async fn run(
                             log, "received serial console data from SP";
                             "length" => data.len(),
                         );
-                        let _ = ws_sink_tx.send(Message::Binary(data));
+                        match ws_sink_tx.try_send(Message::Binary(data)) {
+                            Ok(()) => (),
+                            Err(TrySendError::Full(data)) => {
+                                warn!(
+                                    log, "channel full; discarding serial console data from SP";
+                                    "length" => data.len(),
+                                );
+                            }
+                            Err(TrySendError::Closed(_)) => {
+                                // Channel is gone; ignore this and we'll land
+                                // in the `join_result` for the sink task
+                                // momentarily.
+                                ()
+                            }
+                        }
                     }
                     None => {
                         // Sender is closed; i.e., we've been detached.
@@ -114,7 +135,7 @@ pub(crate) async fn run(
 
 async fn ws_sink_task(
     mut ws_sink: SplitSink<WebSocketStream<Upgraded>, Message>,
-    mut messages: mpsc::UnboundedReceiver<Message>,
+    mut messages: mpsc::Receiver<Message>,
 ) -> Result<(), SerialTaskError> {
     while let Some(message) = messages.recv().await {
         ws_sink.send(message).await?;
