@@ -1183,7 +1183,7 @@
             "minItems": 32,
             "maxItems": 32
           },
-          "host_os": {
+          "host_phase_2": {
             "type": "array",
             "items": {
               "type": "integer",
@@ -1196,7 +1196,7 @@
         },
         "required": [
           "control_plane",
-          "host_os"
+          "host_phase_2"
         ]
       },
       "LinkStatus": {
