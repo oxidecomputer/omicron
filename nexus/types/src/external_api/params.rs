@@ -146,6 +146,32 @@ impl InstanceSelector {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalInstanceSelector {
+    pub instance_selector: Option<InstanceSelector>,
+}
+
+pub struct NetworkInterfaceSelector {
+    pub instance_selector: Option<InstanceSelector>,
+    pub network_interface: NameOrId,
+}
+
+impl NetworkInterfaceSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        instance: Option<NameOrId>,
+        network_interface: NameOrId,
+    ) -> Self {
+        NetworkInterfaceSelector {
+            instance_selector: instance.map(|instance| {
+                InstanceSelector::new(organization, project, instance)
+            }),
+            network_interface,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct VpcSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,

@@ -4243,6 +4243,43 @@ async fn instance_network_interface_view_by_id(
 /// Update a network interface
 #[endpoint {
     method = PUT,
+    path = "/v1/network-interfaces/{interface_name}",
+    tags = ["instances"],
+}]
+async fn instance_network_interface_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<NetworkInterfacePathParam>,
+    query_params: Query<params::OptionalInstanceSelector>,
+    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_iface = updated_iface.into_inner();
+        let network_interface_slector = params::NetworkInterfaceSelector {
+            instance_selector: query.instance_selector,
+            network_interface: path.network_interface,
+        };
+        let network_interface_lookup =
+            nexus.network_interface_lookup(&opctx, &instance_selector)?;
+        let interface = nexus
+            .network_interface_update(
+                &opctx,
+                &network_interface_lookup,
+                updated_iface,
+            )
+            .await?;
+        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update a network interface
+#[endpoint {
+    method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
