@@ -90,17 +90,15 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
-            // Derive the bootstrap address from the data link's MAC address.
+            // Derive the bootstrap addresses from the data link's MAC address.
             let link = config
                 .get_link()
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-            let bootstrap_address = bootstrap_address(link)
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
 
             // Configure and run the Bootstrap server.
             let bootstrap_config = BootstrapConfig {
                 id: Uuid::new_v4(),
-                bind_address: bootstrap_address,
+                link,
                 log: config.log.clone(),
                 rss_config,
                 sp_config,
@@ -109,16 +107,12 @@ async fn do_run() -> Result<(), CmdError> {
             // TODO: It's a little silly to pass the config this way - namely,
             // that we construct the bootstrap config from `config`, but then
             // pass it separately just so the sled agent can ingest it later on.
-            bootstrap_server::Server::start(
-                *bootstrap_address.ip(),
-                bootstrap_config,
-                config,
-            )
-            .await
-            .map_err(CmdError::Failure)?
-            .wait_for_finish()
-            .await
-            .map_err(CmdError::Failure)?;
+            bootstrap_server::Server::start(bootstrap_config, config)
+                .await
+                .map_err(CmdError::Failure)?
+                .wait_for_finish()
+                .await
+                .map_err(CmdError::Failure)?;
 
             Ok(())
         }

@@ -18,7 +18,7 @@ use super::trust_quorum::{
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::hardware::HardwareManager;
-use crate::illumos::dladm::{self, Dladm, PhysicalLink};
+use crate::illumos::dladm::{self, Dladm, GetMacError, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
@@ -74,6 +74,9 @@ pub enum BootstrapError {
 
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
+
+    #[error(transparent)]
+    GetMacError(#[from] GetMacError),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -101,7 +104,7 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    address: Ipv6Addr,
+    address: SocketAddrV6,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
@@ -118,7 +121,11 @@ fn get_sled_agent_request_path() -> PathBuf {
         .join("sled-agent-request.toml")
 }
 
-fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
+fn mac_to_socket_addr(
+    mac: MacAddr,
+    interface_id: u64,
+    port: u16,
+) -> SocketAddrV6 {
     let mac_bytes = mac.into_array();
     assert_eq!(6, mac_bytes.len());
 
@@ -127,34 +134,38 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
         ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
-        0,
-        0,
-        0,
-        1,
+        (interface_id >> 48 & 0xffff).try_into().unwrap(),
+        (interface_id >> 32 & 0xffff).try_into().unwrap(),
+        (interface_id >> 16 & 0xffff).try_into().unwrap(),
+        (interface_id & 0xfff).try_into().unwrap(),
     );
 
-    SocketAddrV6::new(address, BOOTSTRAP_AGENT_PORT, 0, 0)
+    SocketAddrV6::new(address, port, 0, 0)
 }
 
 // TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
 // could be randomly generated when it no longer needs to be durable.
 pub fn bootstrap_address(
     link: PhysicalLink,
+    interface_id: u64,
+    port: u16,
 ) -> Result<SocketAddrV6, dladm::GetMacError> {
     let mac = Dladm::get_mac(link)?;
-    Ok(mac_to_socket_addr(mac))
+    Ok(mac_to_socket_addr(mac, interface_id, port))
 }
 
 impl Agent {
     pub async fn new(
         log: Logger,
         sled_config: SledConfig,
-        address: Ipv6Addr,
+        link: PhysicalLink,
         sp: Option<SpHandle>,
     ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
         ));
+
+        let address = bootstrap_address(link, 1, BOOTSTRAP_AGENT_PORT)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -182,6 +193,9 @@ impl Agent {
             ))
         })?;
 
+        // TODO: Create a vnic for the switch zone over the boostrap etherstub
+        // TODO: Create an address using bootstrap address for the switch zone,
+        // with ip ::2
         let etherstub_vnic =
             Dladm::ensure_etherstub_vnic(&etherstub).map_err(|e| {
                 BootstrapError::SledError(format!(
@@ -192,7 +206,7 @@ impl Agent {
 
         Zones::ensure_has_global_zone_v6_address(
             etherstub_vnic.clone(),
-            address,
+            *address.ip(),
             "bootstrap6",
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
@@ -200,7 +214,7 @@ impl Agent {
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::new(log.clone())?;
-        ddmd_client.advertise_prefix(Ipv6Subnet::new(address));
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(*address.ip()));
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/1934):
         // Initialize ZFS and Zone resources before we can safely launch the
@@ -593,7 +607,7 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                self.address,
+                *self.address.ip(),
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.
@@ -606,6 +620,11 @@ impl Agent {
             self.rss.lock().await.replace(rss);
         }
         Ok(())
+    }
+
+    /// Return the global zone address that the bootstrap agent binds to.
+    pub fn address(&self) -> SocketAddrV6 {
+        self.address
     }
 }
 
@@ -647,7 +666,7 @@ mod tests {
         let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
 
         assert_eq!(
-            mac_to_socket_addr(mac).ip(),
+            mac_to_socket_addr(mac, 1, BOOTSTRAP_AGENT_PORT).ip(),
             &"fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
         );
     }
