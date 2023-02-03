@@ -25,7 +25,6 @@ pub enum Key {
 
 /// Description of the images `installinator` needs to fetch from a peer on the
 /// bootstrap network during sled recovery.
-// TODO this may need more or different fields
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
@@ -37,13 +36,12 @@ pub struct InstallinatorImageId {
     pub control_plane: [u8; 32],
 }
 
-// TODO the existence of these methods is a _little_ dubious:
-// `InstallinatorImageId` is `pub` and implements `Serialize + Deserialize`, so
-// any caller could choose to serialize/deserialize an instance with any
-// serde serializer/deserializer already. However, in our case MGS will be
-// serializing and installinator will be deserializing, so I think it makes
-// sense that both of those can call these functions to keep the choice of
-// encoding in one place.
+// The existence of these methods is a _little_ dubious: `InstallinatorImageId`
+// is `pub` and implements `Serialize + Deserialize`, so any caller could choose
+// to serialize/deserialize an instance with any serde serializer/deserializer
+// already. However, in our case MGS will be serializing and installinator will
+// be deserializing, so I think it makes sense that both of those can call these
+// functions to keep the choice of encoding in one place.
 impl InstallinatorImageId {
     pub fn serialize(&self) -> Vec<u8> {
         use ciborium::ser::Error;
