@@ -982,7 +982,6 @@ authz_resource! {
 authz_resource! {
     name = "SystemUpdate",
     parent = "Fleet",
-    // primary_key = db::model::SemverVersion,
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
