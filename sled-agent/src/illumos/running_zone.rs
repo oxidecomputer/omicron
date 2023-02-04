@@ -301,6 +301,7 @@ impl RunningZone {
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
                 link: None,
+                bootstrap_vnic: None, // TODO: Change this?
             },
         })
     }
@@ -373,6 +374,9 @@ pub struct InstalledZone {
     // NIC used for control plane communication.
     control_vnic: Link,
 
+    // Nic used for bootstrap network communication
+    bootstrap_vnic: Option<Link>,
+
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<Port>,
 
@@ -402,18 +406,23 @@ impl InstalledZone {
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
-        vnic_allocator: &VnicAllocator<Etherstub>,
+        underlay_vnic_allocator: &VnicAllocator<Etherstub>,
         zone_name: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         opte_ports: Vec<Port>,
+        bootstrap_vnic: Option<Link>,
         link: Option<Link>,
         limit_priv: Vec<String>,
     ) -> Result<InstalledZone, InstallZoneError> {
-        let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
-            InstallZoneError::CreateVnic { zone: zone_name.to_string(), err }
-        })?;
+        let control_vnic =
+            underlay_vnic_allocator.new_control(None).map_err(|err| {
+                InstallZoneError::CreateVnic {
+                    zone: zone_name.to_string(),
+                    err,
+                }
+            })?;
 
         let full_zone_name = Self::get_zone_name(zone_name, unique_name);
         let zone_image_path =
@@ -423,6 +432,7 @@ impl InstalledZone {
             .iter()
             .map(|port| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
+            .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(link.as_ref().map(|vnic| vnic.name().to_string()))
             .collect();
 
@@ -446,6 +456,7 @@ impl InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
             name: full_zone_name,
             control_vnic,
+            bootstrap_vnic,
             opte_ports,
             link,
         })

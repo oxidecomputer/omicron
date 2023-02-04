@@ -71,6 +71,12 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         }
     }
 
+    pub fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
+        let name = self.next();
+        Dladm::create_vnic(&self.data_link, &name, None, None)?;
+        Ok(Link { name, deleted: false, kind: LinkKind::OxideBootstrapVnic })
+    }
+
     /// Allocates a new VNIC name, which should be unique within the
     /// scope of this allocator.
     fn next(&self) -> String {
@@ -89,6 +95,7 @@ pub enum LinkKind {
     Physical,
     OxideControlVnic,
     GuestVnic,
+    OxideBootstrapVnic,
 }
 
 impl LinkKind {

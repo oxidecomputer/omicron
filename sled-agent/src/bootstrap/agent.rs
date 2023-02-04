@@ -183,7 +183,7 @@ impl Agent {
                 err,
             })?;
 
-        let etherstub = Dladm::ensure_etherstub(
+        let bootstrap_etherstub = Dladm::ensure_etherstub(
             crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME,
         )
         .map_err(|e| {
@@ -193,19 +193,18 @@ impl Agent {
             ))
         })?;
 
-        // TODO: Create a vnic for the switch zone over the boostrap etherstub
-        // TODO: Create an address using bootstrap address for the switch zone,
-        // with ip ::2
-        let etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&etherstub).map_err(|e| {
-                BootstrapError::SledError(format!(
-                    "Can't access etherstub VNIC device: {}",
-                    e
-                ))
-            })?;
+        let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
+            &bootstrap_etherstub,
+        )
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub VNIC device: {}",
+                e
+            ))
+        })?;
 
         Zones::ensure_has_global_zone_v6_address(
-            etherstub_vnic.clone(),
+            bootstrap_etherstub_vnic.clone(),
             *address.ip(),
             "bootstrap6",
         )
@@ -247,6 +246,7 @@ impl Agent {
             &sled_config,
             underlay_etherstub,
             underlay_etherstub_vnic,
+            bootstrap_etherstub,
         )
         .await?;
 

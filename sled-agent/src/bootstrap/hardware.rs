@@ -124,17 +124,20 @@ impl HardwareMonitor {
     pub async fn new(
         log: &Logger,
         sled_config: &SledConfig,
-        etherstub: Etherstub,
-        etherstub_vnic: EtherstubVnic,
+        underlay_etherstub: Etherstub,
+        underlay_etherstub_vnic: EtherstubVnic,
+        bootstrap_etherstub: Etherstub,
     ) -> Result<Self, Error> {
         let hardware =
             HardwareManager::new(log.clone(), sled_config.stub_scrimlet)
                 .map_err(|e| Error::Hardware(e))?;
 
+        // TODO: Add the etherstub for the bootstrap network here
         let service_manager = ServiceManager::new(
             log.clone(),
-            etherstub.clone(),
-            etherstub_vnic.clone(),
+            underlay_etherstub.clone(),
+            underlay_etherstub_vnic.clone(),
+            bootstrap_etherstub,
             sled_config.stub_scrimlet,
             sled_config.sidecar_revision.clone(),
         )
