@@ -14,6 +14,7 @@ members = [
     "installinator-artifactd",
     "internal-dns",
     "internal-dns-client",
+    "ipcc-key-value",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -58,6 +59,7 @@ default-members = [
     "installinator-artifactd",
     "internal-dns",
     "internal-dns-client",
+    "ipcc-key-value",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -104,6 +106,7 @@ bincode = "1.3.3"
 buf-list = "0.1.3"
 bytes = "1.4.0"
 camino = "1.1"
+ciborium = "0.2.0"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "4.1", features = ["derive"] }
@@ -126,8 +129,8 @@ fatfs = "0.3.6"
 fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "482bae9bfa704282e981008abae9328344150d36" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "482bae9bfa704282e981008abae9328344150d36" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -140,6 +143,7 @@ installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
 internal-dns = { path = "internal-dns" }
 internal-dns-client = { path = "internal-dns-client" }
+ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = "0.20"
 itertools = "0.10.5"
 lazy_static = "1.4.0"

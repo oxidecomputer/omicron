@@ -8,6 +8,7 @@ license = "MPL-2.0"
 anyhow.workspace = true
 clap.workspace = true
 futures.workspace = true
+hex.workspace = true
 libc.workspace = true
 reqwest.workspace = true
 serde.workspace = true
