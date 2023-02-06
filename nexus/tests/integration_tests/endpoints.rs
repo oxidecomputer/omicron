@@ -1516,28 +1516,12 @@ lazy_static! {
             )],
         },
 
-        /* Metrics */
-
         VerifyEndpoint {
-            url: &DEMO_SYSTEM_METRICS_URL,
+            url: "/v1/system/update/version",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
+            allowed_methods: vec![AllowedMethod::Get],
         },
-
-
-        // TODO: system version is uncovered because it requires setup that
-        // cannot be done through an API request (because there is no create
-        // endpoint for updateable components)
-
-        // VerifyEndpoint {
-        //     url: "/v1/system/update/version",
-        //     visibility: Visibility::Public,
-        //     unprivileged_access: UnprivilegedAccess::None,
-        //     allowed_methods: vec![AllowedMethod::Get],
-        // },
 
         VerifyEndpoint {
             url: "/v1/system/update/components",
@@ -1559,14 +1543,14 @@ lazy_static! {
             url: "/v1/system/update/updates/1.0.0",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
+            allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
             url: "/v1/system/update/updates/1.0.0/components",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
+            allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
@@ -1599,6 +1583,17 @@ lazy_static! {
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::GetNonexistent],
+        },
+
+        /* Metrics */
+
+        VerifyEndpoint {
+            url: &DEMO_SYSTEM_METRICS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
         },
 
         /* Global Images */
