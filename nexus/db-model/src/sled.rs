@@ -13,6 +13,23 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
+/// Baseboard information about a sled.
+///
+/// The combination of these columns may be used as a unique identifier for the
+/// sled.
+pub struct SledBaseboard {
+    pub serial_number: String,
+    pub part_number: String,
+    pub revision: i64,
+}
+
+/// Hardware information about the sled.
+pub struct SledSystemHardware {
+    pub is_scrimlet: bool,
+    pub cpus: i64,
+    pub physical_ram: ByteCount,
+}
+
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = sled)]
@@ -44,12 +61,8 @@ impl Sled {
     pub fn new(
         id: Uuid,
         addr: SocketAddrV6,
-        is_scrimlet: bool,
-        serial_number: String,
-        part_number: String,
-        revision: i64,
-        cpus: i64,
-        physical_ram: ByteCount,
+        baseboard: SledBaseboard,
+        hardware: SledSystemHardware,
         rack_id: Uuid,
     ) -> Self {
         let last_used_address = {
@@ -62,12 +75,12 @@ impl Sled {
             time_deleted: None,
             rcgen: Generation::new(),
             rack_id,
-            is_scrimlet,
-            serial_number,
-            part_number,
-            revision,
-            cpus,
-            physical_ram,
+            is_scrimlet: hardware.is_scrimlet,
+            serial_number: baseboard.serial_number,
+            part_number: baseboard.part_number,
+            revision: baseboard.revision,
+            cpus: hardware.cpus,
+            physical_ram: hardware.physical_ram,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,

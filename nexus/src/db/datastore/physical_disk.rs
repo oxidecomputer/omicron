@@ -136,6 +136,9 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test::{
+        sled_baseboard_for_test, sled_system_hardware_for_test,
+    };
     use crate::db::model::{PhysicalDiskKind, Sled};
     use dropshot::PaginationOrder;
     use nexus_test_utils::db::test_setup_database;
@@ -146,24 +149,13 @@ mod test {
 
     async fn create_test_sled(db: &DataStore) -> Sled {
         let sled_id = Uuid::new_v4();
-        let is_scrimlet = false;
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
         let rack_id = Uuid::new_v4();
-        let identifier = String::from("identifier");
-        let model = String::from("model");
-        let revision = 0;
-        let cpu_count = 4;
-        let physical_ram =
-            crate::db::model::ByteCount::try_from(1 << 30).unwrap();
         let sled = Sled::new(
             sled_id,
             addr,
-            is_scrimlet,
-            identifier,
-            model,
-            revision,
-            cpu_count,
-            physical_ram,
+            sled_baseboard_for_test(),
+            sled_system_hardware_for_test(),
             rack_id,
         );
         db.sled_upsert(sled)
