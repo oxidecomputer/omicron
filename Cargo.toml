@@ -193,7 +193,7 @@ proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "92508d573529a1ee50a9422fbca045a5e980a2b5", features = [ "generated-migration" ] }
-proptest = "1.0.0"
+proptest = "1.1.0"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.6"
