@@ -478,12 +478,9 @@ impl SledAgent {
         let baseboard = nexus_client::types::Baseboard::from(
             self.inner.hardware.baseboard(),
         );
-        let cpus = crate::system::online_processor_count()
-            .expect("Number of processors unknown")
-            .try_into()
-            .unwrap();
-        let physical_ram =
-            crate::system::physical_ram_bytes().expect("RAM unknown");
+        let cpus = self.inner.hardware.online_processor_count();
+        let physical_ram = self.inner.hardware.physical_ram_bytes();
+
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
@@ -516,7 +513,7 @@ impl SledAgent {
                             sa_address: sled_address.to_string(),
                             role,
                             baseboard: baseboard.clone(),
-                            cpus,
+                            cpus: cpus.into(),
                             physical_ram: nexus_client::types::ByteCount(
                                 physical_ram,
                             ),

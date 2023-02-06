@@ -31,6 +31,14 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
+    pub fn online_processor_count(&self) -> u32 {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn physical_ram_bytes(&self) -> u64 {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
     pub fn disks(&self) -> HashSet<UnparsedDisk> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }

@@ -16,6 +16,7 @@ use tokio::task::JoinHandle;
 
 mod disk;
 mod gpt;
+mod sysconf;
 
 pub use disk::ensure_partition_layout;
 
@@ -38,6 +39,9 @@ enum Error {
 
     #[error("Could not translate {0} to '/dev' path: no links")]
     NoDevLinks(PathBuf),
+
+    #[error("Failed to issue request to sysconf: {0}")]
+    SysconfError(#[from] sysconf::Error),
 }
 
 // A snapshot of information about the underlying Tofino device
@@ -135,6 +139,8 @@ struct HardwareView {
     tofino: TofinoView,
     disks: HashSet<UnparsedDisk>,
     baseboard: Option<Baseboard>,
+    online_processor_count: u32,
+    physical_ram_bytes: u64,
 }
 
 impl HardwareView {
@@ -143,20 +149,24 @@ impl HardwareView {
     //
     // Otherwise, values that we really expect to be static will need to be
     // nullable.
-    fn new() -> Self {
-        Self {
+    fn new() -> Result<Self, Error> {
+        Ok(Self {
             tofino: TofinoView::Real(TofinoSnapshot::new()),
             disks: HashSet::new(),
             baseboard: None,
-        }
+            online_processor_count: sysconf::online_processor_count()?,
+            physical_ram_bytes: sysconf::physical_ram_bytes()?,
+        })
     }
 
-    fn new_stub_tofino(active: bool) -> Self {
-        Self {
+    fn new_stub_tofino(active: bool) -> Result<Self, Error> {
+        Ok(Self {
             tofino: TofinoView::Stub { active },
             disks: HashSet::new(),
             baseboard: None,
-        }
+            online_processor_count: sysconf::online_processor_count()?,
+            physical_ram_bytes: sysconf::physical_ram_bytes()?,
+        })
     }
 
     // Updates our view of the Tofino switch against a snapshot.
@@ -519,8 +529,9 @@ impl HardwareManager {
         // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
         let hw = match stub_scrimlet {
-            None => HardwareView::new(),
-            Some(active) => HardwareView::new_stub_tofino(active),
+            None => HardwareView::new().map_err(|e| e.to_string())?,
+            Some(active) => HardwareView::new_stub_tofino(active)
+                .map_err(|e| e.to_string())?,
         };
         let inner = Arc::new(Mutex::new(hw));
 
@@ -555,6 +566,14 @@ impl HardwareManager {
             .as_ref()
             .cloned()
             .unwrap_or_else(|| Baseboard::unknown())
+    }
+
+    pub fn online_processor_count(&self) -> u32 {
+        self.inner.lock().unwrap().online_processor_count
+    }
+
+    pub fn physical_ram_bytes(&self) -> u64 {
+        self.inner.lock().unwrap().physical_ram_bytes
     }
 
     pub fn disks(&self) -> HashSet<UnparsedDisk> {

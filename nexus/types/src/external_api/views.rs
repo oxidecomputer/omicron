@@ -285,7 +285,7 @@ pub struct Rack {
 
 // SLEDS
 
-/// Describes properties that should uniquely identify a Gimlet.
+/// Properties that should uniquely identify a Gimlet.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
     pub serial: String,
@@ -293,15 +293,20 @@ pub struct Baseboard {
     pub revision: i64,
 }
 
-/// Client view of a [`Sled`]
+/// An operator's view of a sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
+    /// The underlay address on which the Sled Agent is listening.
+    // TODO: Should this be exposed to the operator?
     pub service_address: SocketAddrV6,
     pub baseboard: Baseboard,
+    /// The rack to which this Sled is currently attached.
     pub rack_id: Uuid,
+    /// The number of online processors available to the sled.
     pub cpus: i64,
+    /// The total amount of physical RAM available to the sled.
     pub physical_ram: ByteCount,
 }
 

@@ -9687,7 +9687,7 @@
     },
     "schemas": {
       "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "description": "Properties that should uniquely identify a Gimlet.",
         "type": "object",
         "properties": {
           "part": {
@@ -13706,13 +13706,14 @@
         ]
       },
       "Sled": {
-        "description": "Client view of a [`Sled`]",
+        "description": "An operator's view of a sled.",
         "type": "object",
         "properties": {
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
           },
           "cpus": {
+            "description": "The number of online processors available to the sled.",
             "type": "integer",
             "format": "int64"
           },
@@ -13722,13 +13723,20 @@
             "format": "uuid"
           },
           "physical_ram": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "The total amount of physical RAM available to the sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "rack_id": {
+            "description": "The rack to which this Sled is currently attached.",
             "type": "string",
             "format": "uuid"
           },
           "service_address": {
+            "description": "The underlay address on which the Sled Agent is listening.",
             "type": "string"
           },
           "time_created": {
