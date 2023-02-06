@@ -12,6 +12,7 @@ use clap::Parser;
 use clap::Subcommand;
 use gateway_client::types::HostStartupOptions;
 use gateway_client::types::IgnitionCommand;
+use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
@@ -127,6 +128,32 @@ enum Command {
         boot_net: bool,
         #[clap(long, requires = "set")]
         startup_verbose: bool,
+    },
+
+    /// Set the installinator image ID IPCC key/value.
+    SetInstallinatorImageId {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Clear any previously-set ID.
+        #[clap(long)]
+        clear: bool,
+        /// Hash of the host OS image.
+        #[clap(
+            long,
+            value_parser = sha256_from_str,
+            conflicts_with = "clear",
+            required_unless_present = "clear",
+        )]
+        host_phase_2: Option<[u8; 32]>,
+        /// Hash of the control plane image.
+        #[clap(
+            long,
+            value_parser = sha256_from_str,
+            conflicts_with = "clear",
+            required_unless_present = "clear",
+        )]
+        control_plane: Option<[u8; 32]>,
     },
 
     /// Ask SP for its inventory.
@@ -263,6 +290,12 @@ fn level_from_str(s: &str) -> Result<Level> {
     } else {
         bail!(format!("Invalid log level: {}", s))
     }
+}
+
+fn sha256_from_str(s: &str) -> Result<[u8; 32]> {
+    hex::FromHex::from_hex(s).map_err(|err| {
+        anyhow!("failed to parse {s:?} as a sha256 digest: {err}")
+    })
 }
 
 fn sp_identifier_from_str(s: &str) -> Result<SpIdentifier> {
@@ -421,6 +454,29 @@ async fn main() -> Result<()> {
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
+            }
+        }
+        Command::SetInstallinatorImageId {
+            sp,
+            clear,
+            host_phase_2,
+            control_plane,
+        } => {
+            if clear {
+                client
+                    .sp_installinator_image_id_delete(sp.type_, sp.slot)
+                    .await?;
+            } else {
+                // clap guarantees these are not `None`.
+                let host_phase_2 = host_phase_2.unwrap().to_vec();
+                let control_plane = control_plane.unwrap().to_vec();
+                client
+                    .sp_installinator_image_id_set(
+                        sp.type_,
+                        sp.slot,
+                        &InstallinatorImageId { host_phase_2, control_plane },
+                    )
+                    .await?;
             }
         }
         Command::Inventory { sp } => {

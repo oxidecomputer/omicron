@@ -397,6 +397,21 @@ pub struct ImageVersion {
     pub version: u32,
 }
 
+// This type is a duplicate of the type in `ipcc-key-value`, and we provide a
+// `From<_>` impl to convert to it. We keep these types distinct to allow us to
+// choose different representations for MGS's HTTP API (this type) and the wire
+// format passed through the SP to installinator
+// (`ipcc_key_value::InstallinatorImageId`), although _currently_ they happen to
+// be defined identically.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct InstallinatorImageId {
+    pub host_phase_2: [u8; 32],
+    pub control_plane: [u8; 32],
+}
+
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
 /// the host boot flash.
 #[derive(
@@ -1094,6 +1109,58 @@ async fn sp_power_state_set(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Set the installinator image ID the sled should use for recovery.
+///
+/// This value can be read by the host via IPCC; see the `ipcc-key-value` crate.
+#[endpoint {
+    method = PUT,
+    path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+}]
+async fn sp_installinator_image_id_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+    body: TypedBody<InstallinatorImageId>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    use ipcc_key_value::Key;
+
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let image_id =
+        ipcc_key_value::InstallinatorImageId::from(body.into_inner());
+
+    sp.set_ipcc_key_lookup_value(
+        Key::InstallinatorImageId as u8,
+        image_id.serialize(),
+    )
+    .await
+    .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Clear any previously-set installinator image ID on the target sled.
+#[endpoint {
+    method = DELETE,
+    path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+}]
+async fn sp_installinator_image_id_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    use ipcc_key_value::Key;
+
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    // We clear the image ID by setting it to a 0-length vec.
+    sp.set_ipcc_key_lookup_value(Key::InstallinatorImageId as u8, Vec::new())
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// Upload a host phase2 image that can be served to recovering hosts via the
 /// host/SP control uart.
 ///
@@ -1154,6 +1221,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_reset)?;
         api.register(sp_power_state_get)?;
         api.register(sp_power_state_set)?;
+        api.register(sp_installinator_image_id_set)?;
+        api.register(sp_installinator_image_id_delete)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_clear_status)?;

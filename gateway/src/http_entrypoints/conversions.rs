@@ -9,6 +9,7 @@
 use super::HostStartupOptions;
 use super::IgnitionCommand;
 use super::ImageVersion;
+use super::InstallinatorImageId;
 use super::PowerState;
 use super::RotImageDetails;
 use super::RotSlot;
@@ -360,5 +361,11 @@ impl From<StartupOptions> for HostStartupOptions {
             boot_net: opt.contains(StartupOptions::STARTUP_BOOT_NET),
             verbose: opt.contains(StartupOptions::STARTUP_VERBOSE),
         }
+    }
+}
+
+impl From<InstallinatorImageId> for ipcc_key_value::InstallinatorImageId {
+    fn from(id: InstallinatorImageId) -> Self {
+        Self { host_phase_2: id.host_phase_2, control_plane: id.control_plane }
     }
 }
