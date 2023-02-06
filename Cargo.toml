@@ -266,7 +266,7 @@ vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
 walkdir = "2.3"
 wicketd-client = { path = "wicketd-client" }
 zeroize = { version = "1.5.7", features = ["zeroize_derive", "std"] }
-zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "0.6.4", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.2", default-features = false, features = ["async"] }
 
 [profile.dev]
