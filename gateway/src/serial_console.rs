@@ -112,7 +112,6 @@ pub(crate) async fn run(
                                 // Channel is gone; ignore this and we'll land
                                 // in the `join_result` for the sink task
                                 // momentarily.
-                                ()
                             }
                         }
                     }
@@ -124,7 +123,16 @@ pub(crate) async fn run(
                             code: CloseCode::Policy,
                             reason: Cow::Borrowed("serial console was detached"),
                         };
-                        let _ = ws_sink_tx.send(Message::Close(Some(close)));
+                        // Unlike above where we use `ws_sink_tx.try_send()` (to
+                        // discard data if our client is behind), we do _not_
+                        // want to discard the close message: use regular
+                        // `send()` and await space in the channel to send this
+                        // message. We ignore the returned result, though: if
+                        // our client is gone, we don't need to tell them to go
+                        // away.
+                        let _ = ws_sink_tx
+                            .send(Message::Close(Some(close)))
+                            .await;
                         return Ok(());
                     }
                 }
