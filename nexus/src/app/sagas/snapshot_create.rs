@@ -105,6 +105,7 @@ use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use internal_dns_client::names::ServiceName;
 use internal_dns_client::names::SRV;
+use nexus_db_model::Generation;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
@@ -163,7 +164,7 @@ declare_saga_actions! {
     GET_PANTRY_ADDRESS -> "pantry_address" {
         + ssc_get_pantry_address
     }
-    ATTACH_DISK_TO_PANTRY -> "attach_disk_to_pantry" {
+    ATTACH_DISK_TO_PANTRY -> "disk_generation_number" {
         + ssc_attach_disk_to_pantry
         - ssc_attach_disk_to_pantry_undo
     }
@@ -734,7 +735,7 @@ async fn ssc_get_pantry_address(
 
 async fn ssc_attach_disk_to_pantry(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<Generation, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -786,7 +787,16 @@ async fn ssc_attach_disk_to_pantry(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(())
+    // Record the disk's new generation number as this saga node's output. It
+    // will be important later to *only* transition this disk out of maintenance
+    // if the generation number matches what *this* saga is doing.
+    let (.., db_disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(db_disk.runtime().gen)
 }
 
 async fn ssc_attach_disk_to_pantry_undo(
@@ -1092,21 +1102,43 @@ async fn ssc_detach_disk_from_pantry(
 
     match db_disk.state().into() {
         external::DiskState::Maintenance => {
-            info!(
-                log,
-                "setting disk {} state from maintenance to detached",
-                params.disk_id
-            );
+            // A previous execution of this node in *this* saga may have already
+            // transitioned this disk from maintenance to detached. Another saga
+            // may have transitioned this disk *back* to the maintenance state.
+            // If this saga crashed before marking this node as complete, upon
+            // re-execution (absent any other checks) this node would
+            // incorrectly attempt to transition this disk out of maintenance,
+            // conflicting with the other currently executing saga.
+            //
+            // Check that the generation number matches what is expected for
+            // this saga's execution.
+            let expected_disk_generation_number =
+                sagactx.lookup::<Generation>("disk_generation_number")?;
+            if expected_disk_generation_number == db_disk.runtime().gen {
+                info!(
+                    log,
+                    "setting disk {} state from maintenance to detached",
+                    params.disk_id
+                );
 
-            osagactx
-                .datastore()
-                .disk_update_runtime(
-                    &opctx,
-                    &authz_disk,
-                    &db_disk.runtime().detach(),
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
+                osagactx
+                    .datastore()
+                    .disk_update_runtime(
+                        &opctx,
+                        &authz_disk,
+                        &db_disk.runtime().detach(),
+                    )
+                    .await
+                    .map_err(ActionError::action_failed)?;
+            } else {
+                info!(
+                    log,
+                    "disk {} has generation number {:?}, which doesn't match the expected {:?}: skip setting to detach",
+                    params.disk_id,
+                    db_disk.runtime().gen,
+                    expected_disk_generation_number,
+                );
+            }
         }
 
         external::DiskState::Detached => {
