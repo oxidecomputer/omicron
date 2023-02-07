@@ -18,7 +18,6 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 // SILOS
@@ -298,9 +297,6 @@ pub struct Baseboard {
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
-    /// The underlay address on which the Sled Agent is listening.
-    // TODO: Should this be exposed to the operator?
-    pub service_address: SocketAddrV6,
     pub baseboard: Baseboard,
     /// The rack to which this Sled is currently attached.
     pub rack_id: Uuid,

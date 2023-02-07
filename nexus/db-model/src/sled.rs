@@ -108,7 +108,6 @@ impl From<Sled> for views::Sled {
     fn from(sled: Sled) -> Self {
         Self {
             identity: sled.identity(),
-            service_address: sled.address(),
             rack_id: sled.rack_id,
             baseboard: views::Baseboard {
                 serial: sled.serial_number,

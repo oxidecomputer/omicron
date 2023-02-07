@@ -13728,10 +13728,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "service_address": {
-            "description": "The underlay address on which the Sled Agent is listening.",
-            "type": "string"
-          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -13756,7 +13752,6 @@
           "id",
           "online_logical_cpus",
           "rack_id",
-          "service_address",
           "time_created",
           "time_modified",
           "usable_physical_ram"
