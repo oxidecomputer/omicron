@@ -514,7 +514,7 @@ impl SledAgent {
                             sa_address: sled_address.to_string(),
                             role,
                             baseboard: baseboard.clone(),
-                            online_logical_cpus: online_logical_cpus.into(),
+                            online_logical_cpus,
                             usable_physical_ram: nexus_client::types::ByteCount(
                                 usable_physical_ram,
                             ),
