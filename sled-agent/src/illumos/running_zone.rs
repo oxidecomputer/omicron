@@ -93,6 +93,15 @@ pub enum GetZoneError {
         #[source]
         err: crate::illumos::zone::EnsureAddressError,
     },
+
+    #[error(
+        "Cannot get zone '{name}': Incorrect bootstrap interface access {err}"
+    )]
+    BootstrapInterface {
+        name: String,
+        #[source]
+        err: crate::illumos::zone::GetBootstrapInterfaceError,
+    },
 }
 
 /// Represents a running zone.
@@ -290,6 +299,19 @@ impl RunningZone {
         let control_vnic = Link::wrap_existing(vnic_name)
             .expect("Failed to wrap valid control VNIC");
 
+        // The bootstrap address for a running zone never changes,
+        // so there's no need to call `Zones::ensure_address`.
+        // Currently, only the switch zone has a bootstrap interface.
+        let bootstrap_vnic = Zones::get_bootstrap_interface(zone_name)
+            .map_err(|err| GetZoneError::BootstrapInterface {
+                name: zone_name.to_string(),
+                err,
+            })?
+            .map(|name| {
+                Link::wrap_existing(name)
+                    .expect("Failed to wrap valid bootstrap VNIC")
+            });
+
         Ok(Self {
             running: true,
             inner: InstalledZone {
@@ -301,7 +323,7 @@ impl RunningZone {
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
                 link: None,
-                bootstrap_vnic: None, // TODO: Change this?
+                bootstrap_vnic,
             },
         })
     }

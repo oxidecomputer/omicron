@@ -10,7 +10,9 @@ use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{
+    EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL,
+};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
@@ -82,6 +84,24 @@ pub enum GetControlInterfaceError {
 
     #[error("VNIC starting with 'oxControl' not found in {zone}")]
     NotFound { zone: String },
+}
+
+/// Errors from [`Zones::get_bootstrap_interface`].
+/// Error which may be returned accessing the control interface of a zone.
+#[derive(thiserror::Error, Debug)]
+pub enum GetBootstrapInterfaceError {
+    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    Execution {
+        zone: String,
+        #[source]
+        err: crate::illumos::ExecutionError,
+    },
+
+    #[error("VNIC starting with 'oxBootstrap' not found in {zone}")]
+    NotFound { zone: String },
+
+    #[error("VNIC starting with 'oxBootstrap' found non-switch zone: {zone}")]
+    Unexpected { zone: String },
 }
 
 /// Errors which may be encountered ensuring addresses.
@@ -349,6 +369,46 @@ impl Zones {
             .ok_or(GetControlInterfaceError::NotFound {
                 zone: zone.to_string(),
             })
+    }
+
+    /// Returns the name of the VNIC used to communicate with the bootstrap network.
+    pub fn get_bootstrap_interface(
+        zone: &str,
+    ) -> Result<Option<String>, GetBootstrapInterfaceError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            ZLOGIN,
+            zone,
+            DLADM,
+            "show-vnic",
+            "-p",
+            "-o",
+            "LINK",
+        ]);
+        let output = execute(cmd).map_err(|err| {
+            GetBootstrapInterfaceError::Execution {
+                zone: zone.to_string(),
+                err,
+            }
+        })?;
+        let vnic =
+            String::from_utf8_lossy(&output.stdout).lines().find_map(|name| {
+                if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
+                    Some(name.to_string())
+                } else {
+                    None
+                }
+            });
+
+        if zone == "oxz_switch" && vnic.is_none() {
+            Err(GetBootstrapInterfaceError::NotFound { zone: zone.to_string() })
+        } else if zone != "oxz_switch" && vnic.is_some() {
+            Err(GetBootstrapInterfaceError::Unexpected {
+                zone: zone.to_string(),
+            })
+        } else {
+            Ok(vnic)
+        }
     }
 
     /// Ensures that an IP address on an interface matches the requested value.
