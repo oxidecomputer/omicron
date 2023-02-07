@@ -542,7 +542,8 @@
               }
             }
           }
-        }
+        },
+        "x-dropshot-websocket": {}
       }
     },
     "/sp/{type}/{slot}/component/{component}/serial-console/detach": {

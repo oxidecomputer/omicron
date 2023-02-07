@@ -19,10 +19,11 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
-use dropshot::RawRequest;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use dropshot::UntypedBody;
+use dropshot::WebsocketEndpointResult;
+use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -795,6 +796,15 @@ async fn sp_component_active_slot_set(
 
 /// Upgrade into a websocket connection attached to the given SP component's
 /// serial console.
+// This is a websocket endpoint; normally we'd expect to use `dropshot::channel`
+// with `protocol = WEBSOCKETS` instead of `dropshot::endpoint`, but
+// `dropshot::channel` doesn't allow us to return an error _before_ upgrading
+// the connection, and we want to bail out ASAP if the SP doesn't allow us to
+// attach. Therefore, we use `dropshot::endpoint` with the special argument type
+// `WebsocketUpgrade`: this inserts the correct marker for progenitor to know
+// this is a websocket endpoint, and it allows us to call
+// `WebsocketUpgrade::handle()` (the method `dropshot::channel` would call for
+// us to upgrade the connection) by hand after our error checking.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component/{component}/serial-console/attach",
@@ -802,23 +812,25 @@ async fn sp_component_active_slot_set(
 async fn sp_component_serial_console_attach(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
-    raw_request: RawRequest,
-) -> Result<http::Response<hyper::Body>, HttpError> {
+    websocket: WebsocketUpgrade,
+) -> WebsocketEndpointResult {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-
     let component = component_from_str(&component)?;
-    let mut request = raw_request.into_inner();
 
-    let sp = sp.into();
-    Ok(crate::serial_console::attach(
-        &apictx.mgmt_switch,
-        sp,
-        component,
-        &mut request,
-        apictx.log.new(slog::o!("sp" => format!("{sp:?}"))),
-    )
-    .await?)
+    // Ensure we can attach to this SP's serial console.
+    let console = apictx
+        .mgmt_switch
+        .sp(sp.into())?
+        .serial_console_attach(component)
+        .await
+        .map_err(SpCommsError::from)?;
+
+    let log = apictx.log.new(slog::o!("sp" => format!("{sp:?}")));
+
+    // We've successfully attached to the SP's serial console: upgrade the
+    // websocket and run our side of that connection.
+    websocket.handle(move |conn| crate::serial_console::run(console, conn, log))
 }
 
 /// Detach the websocket connection attached to the given SP component's serial
