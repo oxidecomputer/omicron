@@ -672,9 +672,11 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             // after the saga starts.
             error!(log, "disk {} not attached to an instance!", disk.id());
 
-            Err(ActionError::action_failed(
-                "disk detached after snapshot_create saga started!".to_string(),
-            ))
+            Err(ActionError::action_failed(Error::ServiceUnavailable {
+                internal_message:
+                    "disk detached after snapshot_create saga started!"
+                        .to_string(),
+            }))
         }
     }
 }
@@ -761,10 +763,15 @@ async fn ssc_attach_disk_to_pantry(
         }
 
         _ => {
-            return Err(ActionError::action_failed(format!(
-                "disk is in state {:?}",
-                db_disk.state()
-            )));
+            // Return a 503 indicating that the user should retry
+            return Err(ActionError::action_failed(
+                Error::ServiceUnavailable {
+                    internal_message: format!(
+                        "disk is in state {:?}",
+                        db_disk.state(),
+                    ),
+                },
+            ));
         }
     }
 
@@ -1524,7 +1531,9 @@ mod test {
     use super::*;
 
     use crate::app::saga::create_saga_dag;
+    use crate::app::test_interfaces::TestInterfaces;
     use crate::db::DataStore;
+    use crate::external_api::shared::IpRange;
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
@@ -1533,11 +1542,18 @@ mod test {
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
+    use nexus_test_utils::resource_helpers::object_create;
+    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::Instance;
+    use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
     use sled_agent_client::types::CrucibleOpts;
+    use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
+    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     #[test]
@@ -1986,5 +2002,256 @@ mod test {
             );
             dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_use_the_pantry_wrongly_set(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        // Test the correct handling of the following race: the user requests a
+        // snapshot of a disk that isn't attached to anything (meaning
+        // `use_the_pantry` is true, but before the saga starts executing
+        // something else attaches the disk to an instance.
+        DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx().nexus;
+        let disk_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(cptestctx);
+
+        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+            LookupPath::new(&opctx, nexus.datastore())
+                .disk_id(disk_id)
+                .lookup_for(authz::Action::Read)
+                .await
+                .expect("Failed to look up created disk");
+
+        let silo_id = authz_silo.id();
+        let project_id = authz_project.id();
+
+        let params = new_test_params(
+            &opctx,
+            silo_id,
+            project_id,
+            disk_id,
+            Name::from_str(DISK_NAME).unwrap(),
+            // set use_the_pantry to true, disk is unattached at time of saga creation
+            true,
+        );
+
+        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+
+        // Before running the saga, attach the disk to an instance!
+        let (.., authz_disk, db_disk) =
+            LookupPath::new(&opctx, nexus.datastore())
+                .disk_id(disk_id)
+                .fetch_for(authz::Action::Read)
+                .await
+                .expect("Failed to look up created disk");
+
+        assert!(nexus
+            .datastore()
+            .disk_update_runtime(
+                &opctx,
+                &authz_disk,
+                &db_disk.runtime().attach(Uuid::new_v4()),
+            )
+            .await
+            .expect("failed to attach disk"));
+
+        // Actually run the saga
+        let output = nexus.run_saga(runnable_saga).await;
+
+        // Expect to see 503
+        match output {
+            Err(e) => {
+                assert!(matches!(e, Error::ServiceUnavailable { .. }));
+            }
+
+            Ok(_) => {
+                assert!(false);
+            }
+        }
+
+        // Detach the disk, then rerun the saga
+        let (.., authz_disk, db_disk) =
+            LookupPath::new(&opctx, nexus.datastore())
+                .disk_id(disk_id)
+                .fetch_for(authz::Action::Read)
+                .await
+                .expect("Failed to look up created disk");
+
+        assert!(nexus
+            .datastore()
+            .disk_update_runtime(
+                &opctx,
+                &authz_disk,
+                &db_disk.runtime().detach(),
+            )
+            .await
+            .expect("failed to detach disk"));
+
+        // Rerun the saga
+        let params = new_test_params(
+            &opctx,
+            silo_id,
+            project_id,
+            disk_id,
+            Name::from_str(DISK_NAME).unwrap(),
+            // set use_the_pantry to true, disk is unattached at time of saga creation
+            true,
+        );
+
+        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let output = nexus.run_saga(runnable_saga).await;
+
+        // Expect 200
+        assert!(output.is_ok());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_use_the_pantry_wrongly_unset(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        // Test the correct handling of the following race: the user requests a
+        // snapshot of a disk that is attached to an instance (meaning
+        // `use_the_pantry` is false, but before the saga starts executing
+        // something else detaches the disk.
+        DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx().nexus;
+        let disk_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(cptestctx);
+
+        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+            LookupPath::new(&opctx, nexus.datastore())
+                .disk_id(disk_id)
+                .lookup_for(authz::Action::Read)
+                .await
+                .expect("Failed to look up created disk");
+
+        let silo_id = authz_silo.id();
+        let project_id = authz_project.id();
+
+        let params = new_test_params(
+            &opctx,
+            silo_id,
+            project_id,
+            disk_id,
+            Name::from_str(DISK_NAME).unwrap(),
+            // set use_the_pantry to true, disk is attached at time of saga creation
+            false,
+        );
+
+        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+
+        // Before running the saga, detach the disk!
+        let (.., authz_disk, db_disk) =
+            LookupPath::new(&opctx, nexus.datastore())
+                .disk_id(disk_id)
+                .fetch_for(authz::Action::Modify)
+                .await
+                .expect("Failed to look up created disk");
+
+        assert!(nexus
+            .datastore()
+            .disk_update_runtime(
+                &opctx,
+                &authz_disk,
+                &db_disk.runtime().detach(),
+            )
+            .await
+            .expect("failed to detach disk"));
+
+        // Actually run the saga
+        let output = nexus.run_saga(runnable_saga).await;
+
+        // Expect to see 503
+        match output {
+            Err(e) => {
+                assert!(matches!(e, Error::ServiceUnavailable { .. }));
+            }
+
+            Ok(_) => {
+                assert!(false);
+            }
+        }
+
+        // Attach the to an instance, then rerun the saga
+        populate_ip_pool(
+            &client,
+            "default",
+            Some(
+                IpRange::try_from((
+                    Ipv4Addr::new(10, 1, 0, 0),
+                    Ipv4Addr::new(10, 1, 255, 255),
+                ))
+                .unwrap(),
+            ),
+        )
+        .await;
+
+        let instances_url = format!(
+            "/organizations/{}/projects/{}/instances",
+            ORG_NAME, PROJECT_NAME,
+        );
+        let instance_name = "base-instance";
+
+        let instance: Instance = object_create(
+            client,
+            &instances_url,
+            &params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: instance_name.parse().unwrap(),
+                    description: format!("instance {:?}", instance_name),
+                },
+                ncpus: InstanceCpuCount(2),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: String::from("base_instance"),
+                user_data:
+                    b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                        .to_vec(),
+                network_interfaces:
+                    params::InstanceNetworkInterfaceAttachment::None,
+                disks: vec![params::InstanceDiskAttachment::Attach(
+                    params::InstanceDiskAttach { name: Name::from_str(DISK_NAME).unwrap() },
+                )],
+                external_ips: vec![],
+                start: true,
+            },
+        )
+        .await;
+
+        // cannot snapshot attached disk for instance in state starting
+        let nexus = &cptestctx.server.apictx().nexus;
+        let sa =
+            nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+        sa.instance_finish_transition(instance.identity.id).await;
+
+        // Rerun the saga
+        let params = new_test_params(
+            &opctx,
+            silo_id,
+            project_id,
+            disk_id,
+            Name::from_str(DISK_NAME).unwrap(),
+            // set use_the_pantry to false, disk is attached at time of saga creation
+            false,
+        );
+
+        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let output = nexus.run_saga(runnable_saga).await;
+
+        // Expect 200
+        assert!(output.is_ok());
     }
 }
