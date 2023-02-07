@@ -81,8 +81,8 @@ impl Server {
                             model: String::from("Unknown"),
                             revision: 0,
                         },
-                        cpus: 4,
-                        physical_ram: NexusTypes::ByteCount(1 << 30),
+                        online_logical_cpus: 4,
+                        usable_physical_ram: NexusTypes::ByteCount(1 << 30),
                     },
                 )
                 .await)

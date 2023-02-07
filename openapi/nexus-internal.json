@@ -2138,18 +2138,11 @@
               }
             ]
           },
-          "cpus": {
-            "description": "Number of CPUs online on the sled.",
+          "online_logical_cpus": {
+            "description": "The number of online logical processors available to the sled.",
             "type": "integer",
-            "format": "int64"
-          },
-          "physical_ram": {
-            "description": "Amount of RAM used by the sled.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
+            "format": "uint32",
+            "minimum": 0
           },
           "role": {
             "description": "Describes the responsibilities of the sled",
@@ -2162,14 +2155,22 @@
           "sa_address": {
             "description": "The address of the sled agent's API endpoint",
             "type": "string"
+          },
+          "usable_physical_ram": {
+            "description": "Amount of RAM which may be used by the Sled's OS.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           }
         },
         "required": [
           "baseboard",
-          "cpus",
-          "physical_ram",
+          "online_logical_cpus",
           "role",
-          "sa_address"
+          "sa_address",
+          "usable_physical_ram"
         ]
       },
       "SledRole": {

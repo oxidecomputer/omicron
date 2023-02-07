@@ -50,8 +50,8 @@ impl super::Nexus {
             },
             db::model::SledSystemHardware {
                 is_scrimlet,
-                cpus: info.cpus,
-                physical_ram: info.physical_ram.into(),
+                online_logical_cpus: info.online_logical_cpus,
+                usable_physical_ram: info.usable_physical_ram.into(),
             },
             self.rack_id,
         );

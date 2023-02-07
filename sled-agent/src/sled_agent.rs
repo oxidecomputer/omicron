@@ -478,8 +478,9 @@ impl SledAgent {
         let baseboard = nexus_client::types::Baseboard::from(
             self.inner.hardware.baseboard(),
         );
-        let cpus = self.inner.hardware.online_processor_count();
-        let physical_ram = self.inner.hardware.physical_ram_bytes();
+        let online_logical_cpus = self.inner.hardware.online_processor_count();
+        let usable_physical_ram =
+            self.inner.hardware.usable_physical_ram_bytes();
 
         let log = log.clone();
         let fut = async move {
@@ -513,9 +514,9 @@ impl SledAgent {
                             sa_address: sled_address.to_string(),
                             role,
                             baseboard: baseboard.clone(),
-                            cpus: cpus.into(),
-                            physical_ram: nexus_client::types::ByteCount(
-                                physical_ram,
+                            online_logical_cpus: online_logical_cpus.into(),
+                            usable_physical_ram: nexus_client::types::ByteCount(
+                                usable_physical_ram,
                             ),
                         },
                     )

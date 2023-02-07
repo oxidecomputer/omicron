@@ -48,11 +48,11 @@ pub struct SledAgentStartupInfo {
     /// Describes the sled's identity
     pub baseboard: Baseboard,
 
-    /// Number of CPUs online on the sled.
-    pub cpus: i64,
+    /// The number of online logical processors available to the sled.
+    pub online_logical_cpus: u32,
 
-    /// Amount of RAM used by the sled.
-    pub physical_ram: ByteCount,
+    /// Amount of RAM which may be used by the Sled's OS.
+    pub usable_physical_ram: ByteCount,
 }
 
 /// Describes the type of physical disk.

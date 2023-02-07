@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, Generation, SqlU16};
+use super::{ByteCount, Generation, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
@@ -26,8 +26,8 @@ pub struct SledBaseboard {
 /// Hardware information about the sled.
 pub struct SledSystemHardware {
     pub is_scrimlet: bool,
-    pub cpus: i64,
-    pub physical_ram: ByteCount,
+    pub online_logical_cpus: u32,
+    pub usable_physical_ram: ByteCount,
 }
 
 /// Database representation of a Sled.
@@ -46,8 +46,8 @@ pub struct Sled {
     part_number: String,
     revision: i64,
 
-    cpus: i64,
-    physical_ram: ByteCount,
+    online_logical_cpus: SqlU32,
+    usable_physical_ram: ByteCount,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
@@ -79,8 +79,8 @@ impl Sled {
             serial_number: baseboard.serial_number,
             part_number: baseboard.part_number,
             revision: baseboard.revision,
-            cpus: hardware.cpus,
-            physical_ram: hardware.physical_ram,
+            online_logical_cpus: SqlU32::new(hardware.online_logical_cpus),
+            usable_physical_ram: hardware.usable_physical_ram,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,
@@ -115,8 +115,8 @@ impl From<Sled> for views::Sled {
                 part: sled.part_number,
                 revision: sled.revision,
             },
-            cpus: sled.cpus,
-            physical_ram: *sled.physical_ram,
+            online_logical_cpus: sled.online_logical_cpus.0,
+            usable_physical_ram: *sled.usable_physical_ram,
         }
     }
 }

@@ -87,8 +87,8 @@ CREATE TABLE omicron.public.sled (
     revision INT8 NOT NULL,
 
     /* CPU & RAM summary for the sled */
-    cpus INT8 NOT NULL,
-    physical_ram INT8 NOT NULL,
+    online_cpus INT8 CHECK (online_cpus BETWEEN 0 AND 4294967295) NOT NULL,
+    usable_physical_ram INT8 NOT NULL,
 
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,

@@ -24,8 +24,13 @@ fn sysconf(argname: &str, arg: libc::c_int) -> Result<u64, Error> {
     Ok(r.try_into()?)
 }
 
-/// Returns the number of physical processors on this sled.
+/// Returns the number of online processors on this sled.
 pub fn online_processor_count() -> Result<u32, Error> {
+    // Although the value returned by sysconf is an i64, we parse
+    // the value as a u32.
+    //
+    // A value greater than u32::MAX (or a negative value) would return
+    // an error here.
     Ok(u32::try_from(sysconf(
         "online processor count",
         libc::_SC_NPROCESSORS_ONLN,
@@ -33,7 +38,7 @@ pub fn online_processor_count() -> Result<u32, Error> {
 }
 
 /// Returns the amount of RAM on this sled, in bytes.
-pub fn physical_ram_bytes() -> Result<u64, Error> {
+pub fn usable_physical_ram_bytes() -> Result<u64, Error> {
     let phys_pages = sysconf("physical pages", libc::_SC_PHYS_PAGES)?;
     let page_size = sysconf("physical page size", libc::_SC_PAGESIZE)?;
     Ok(phys_pages * page_size)

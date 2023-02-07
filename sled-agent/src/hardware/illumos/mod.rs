@@ -140,7 +140,7 @@ struct HardwareView {
     disks: HashSet<UnparsedDisk>,
     baseboard: Option<Baseboard>,
     online_processor_count: u32,
-    physical_ram_bytes: u64,
+    usable_physical_ram_bytes: u64,
 }
 
 impl HardwareView {
@@ -155,7 +155,7 @@ impl HardwareView {
             disks: HashSet::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
-            physical_ram_bytes: sysconf::physical_ram_bytes()?,
+            usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
         })
     }
 
@@ -165,7 +165,7 @@ impl HardwareView {
             disks: HashSet::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
-            physical_ram_bytes: sysconf::physical_ram_bytes()?,
+            usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
         })
     }
 
@@ -572,8 +572,8 @@ impl HardwareManager {
         self.inner.lock().unwrap().online_processor_count
     }
 
-    pub fn physical_ram_bytes(&self) -> u64 {
-        self.inner.lock().unwrap().physical_ram_bytes
+    pub fn usable_physical_ram_bytes(&self) -> u64 {
+        self.inner.lock().unwrap().usable_physical_ram_bytes
     }
 
     pub fn disks(&self) -> HashSet<UnparsedDisk> {

@@ -285,7 +285,7 @@ pub struct Rack {
 
 // SLEDS
 
-/// Properties that should uniquely identify a Gimlet.
+/// Properties that should uniquely identify a Sled.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
     pub serial: String,
@@ -293,7 +293,7 @@ pub struct Baseboard {
     pub revision: i64,
 }
 
-/// An operator's view of a sled.
+/// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
@@ -304,10 +304,10 @@ pub struct Sled {
     pub baseboard: Baseboard,
     /// The rack to which this Sled is currently attached.
     pub rack_id: Uuid,
-    /// The number of online processors available to the sled.
-    pub cpus: i64,
-    /// The total amount of physical RAM available to the sled.
-    pub physical_ram: ByteCount,
+    /// The number of online logical processors available to the sled.
+    pub online_logical_cpus: u32,
+    /// Amount of RAM which may be used by the Sled's OS.
+    pub usable_physical_ram: ByteCount,
 }
 
 // PHYSICAL DISKS

@@ -295,8 +295,8 @@ mod test {
     pub fn sled_system_hardware_for_test() -> SledSystemHardware {
         SledSystemHardware {
             is_scrimlet: false,
-            cpus: 4,
-            physical_ram: crate::db::model::ByteCount::try_from(1 << 40)
+            online_logical_cpus: 4,
+            usable_physical_ram: crate::db::model::ByteCount::try_from(1 << 40)
                 .unwrap(),
         }
     }
