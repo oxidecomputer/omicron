@@ -40,7 +40,7 @@ impl ComponentScreen {
         let help_data = vec![
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
-            ("<ESC>", "Go back to the rack screen"),
+            ("<ESC>", "Exit help menu | Go back to the rack screen"),
             ("<CTRL-r>", "Go back to the rack screen"),
             ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
@@ -226,6 +226,13 @@ impl ComponentScreen {
             }
             KeyCode::Char('h') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.help_menu_state.toggle();
+                }
+            }
+            KeyCode::Esc => {
+                if self.help_menu_state.is_closed() {
+                    return vec![Action::SwitchScreen(ScreenId::Rack)];
+                } else {
                     self.help_menu_state.toggle();
                 }
             }
