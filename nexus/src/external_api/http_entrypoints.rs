@@ -3976,13 +3976,10 @@ async fn instance_network_interface_list_v1(
         let pag_params = data_page_params_for(&rqctx, &query)?;
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let instance_lookup = nexus.instance_lookup(&opctx, &query)?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &scan_params.selector)?;
         let interfaces = nexus
-            .instance_list_network_interfaces(
-                &opctx,
-                &instance_lookup,
-                &paginated_by,
-            )
+            .network_interface_list(&opctx, &instance_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -4020,7 +4017,7 @@ async fn instance_network_interface_list(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let interfaces = nexus
-            .instance_list_network_interfaces(
+            .network_interface_list(
                 &opctx,
                 &instance_lookup,
                 &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
@@ -4056,7 +4053,7 @@ async fn instance_network_interface_create_v1(
         let query = query_params.into_inner();
         let instance_lookup = nexus.instance_lookup(&opctx, &query)?;
         let iface = nexus
-            .instance_create_network_interface(
+            .network_interface_create(
                 &opctx,
                 &instance_lookup,
                 &interface_params.into_inner(),
@@ -4093,7 +4090,7 @@ async fn instance_network_interface_create(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let iface = nexus
-            .instance_create_network_interface(
+            .network_interface_create(
                 &opctx,
                 &instance_lookup,
                 &interface_params.into_inner(),
@@ -4120,6 +4117,40 @@ pub struct NetworkInterfacePathParam {
 /// interfaces.
 #[endpoint {
     method = DELETE,
+    path = "/v1/network-interfaces/{interface}",
+    tags = ["instances"],
+}]
+async fn instance_network_interface_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::NetworkInterfacePath>,
+    query_params: Query<params::OptionalInstanceSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector {
+            instance_selector: query.instance_selector,
+            network_interface: path.interface.into(),
+        };
+        let interface_lookup =
+            nexus.network_interface_lookup(&opctx, &interface_selector)?;
+        nexus.network_interface_delete(&opctx, &interface_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a network interface
+///
+/// Note that the primary interface for an instance cannot be deleted if there
+/// are any secondary interfaces. A new primary interface must be designated
+/// first. The primary interface can be deleted if there are no secondary
+/// interfaces.
+#[endpoint {
+    method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
@@ -4128,23 +4159,19 @@ async fn instance_network_interface_delete(
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let interface_name = &path.interface_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .instance_delete_network_interface(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                interface_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.instance_name.into()),
+            path.interface_name.into(),
+        );
+        let interface_lookup =
+            nexus.network_interface_lookup(&opctx, &interface_selector)?;
+        nexus.network_interface_delete(&opctx, &interface_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4153,32 +4180,29 @@ async fn instance_network_interface_delete(
 /// Fetch a network interface
 #[endpoint {
     method = GET,
-    path = "/v1/network-interfaces/{interface_name}",
+    path = "/v1/network-interfaces/{interface}",
     tags = ["instances"],
 }]
 async fn instance_network_interface_view_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<NetworkInterfacePathParam>,
+    path_params: Path<params::NetworkInterfacePath>,
+    query_params: Query<params::OptionalInstanceSelector>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let interface_name = &path.interface_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let interface = nexus
-            .network_interface_fetch(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                interface_name,
-            )
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector {
+            instance_selector: query.instance_selector,
+            network_interface: path.interface,
+        };
+        let (.., interface) = nexus
+            .network_interface_lookup(&opctx, &interface_selector)?
+            .fetch()
             .await?;
-        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+        Ok(HttpResponseOk(interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4195,24 +4219,21 @@ async fn instance_network_interface_view(
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let interface_name = &path.interface_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let interface = nexus
-            .network_interface_fetch(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                interface_name,
-            )
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.instance_name.into()),
+            path.interface_name.into(),
+        );
+        let (.., interface) = nexus
+            .network_interface_lookup(&opctx, &interface_selector)?
+            .fetch()
             .await?;
-        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+        Ok(HttpResponseOk(interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4228,14 +4249,19 @@ async fn instance_network_interface_view_by_id(
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let network_interface =
-            nexus.network_interface_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(network_interface.into()))
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector {
+            instance_selector: None,
+            network_interface: path.id.into(),
+        };
+        let (.., interface) = nexus
+            .network_interface_lookup(&opctx, &interface_selector)?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4246,9 +4272,9 @@ async fn instance_network_interface_view_by_id(
     path = "/v1/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
-async fn instance_network_interface_update(
+async fn instance_network_interface_update_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<NetworkInterfacePathParam>,
+    path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
     updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
@@ -4259,12 +4285,12 @@ async fn instance_network_interface_update(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let updated_iface = updated_iface.into_inner();
-        let network_interface_slector = params::NetworkInterfaceSelector {
+        let network_interface_selector = params::NetworkInterfaceSelector {
             instance_selector: query.instance_selector,
-            network_interface: path.network_interface,
+            network_interface: path.interface,
         };
-        let network_interface_lookup =
-            nexus.network_interface_lookup(&opctx, &instance_selector)?;
+        let network_interface_lookup = nexus
+            .network_interface_lookup(&opctx, &network_interface_selector)?;
         let interface = nexus
             .network_interface_update(
                 &opctx,
@@ -4289,26 +4315,23 @@ async fn instance_network_interface_update(
     updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let interface_name = &path.interface_name;
-    let updated_iface = updated_iface.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let updated_iface = updated_iface.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.instance_name.into()),
+            path.interface_name.into(),
+        );
+        let interface_lookup =
+            nexus.network_interface_lookup(&opctx, &interface_selector)?;
         let interface = nexus
-            .network_interface_update(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                interface_name,
-                updated_iface,
-            )
+            .network_interface_update(&opctx, &interface_lookup, updated_iface)
             .await?;
-        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+        Ok(HttpResponseOk(interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

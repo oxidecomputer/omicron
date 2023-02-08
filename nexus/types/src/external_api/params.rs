@@ -37,6 +37,11 @@ pub struct InstancePath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct NetworkInterfacePath {
+    pub interface: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct VpcPath {
     pub vpc: NameOrId,
 }
