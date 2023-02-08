@@ -10,11 +10,12 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use gateway_client::types::HostStartupOptions;
 use gateway_client::types::IgnitionCommand;
+use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::UpdateBody;
@@ -29,6 +30,8 @@ use std::io;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio_tungstenite::tungstenite::protocol::Role;
+use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
 
 mod picocom_map;
@@ -105,7 +108,53 @@ enum Command {
         /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
         #[clap(value_parser = sp_identifier_from_str, action)]
         sp: SpIdentifier,
-        options: Option<u64>,
+        /// Set startup options to the bitwise-OR of all further options
+        #[clap(long)]
+        set: bool,
+        #[clap(long, requires = "set")]
+        phase2_recovery: bool,
+        #[clap(long, requires = "set")]
+        kbm: bool,
+        #[clap(long, requires = "set")]
+        bootrd: bool,
+        #[clap(long, requires = "set")]
+        prom: bool,
+        #[clap(long, requires = "set")]
+        kmdb: bool,
+        #[clap(long, requires = "set")]
+        kmdb_boot: bool,
+        #[clap(long, requires = "set")]
+        boot_ramdisk: bool,
+        #[clap(long, requires = "set")]
+        boot_net: bool,
+        #[clap(long, requires = "set")]
+        startup_verbose: bool,
+    },
+
+    /// Set the installinator image ID IPCC key/value.
+    SetInstallinatorImageId {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Clear any previously-set ID.
+        #[clap(long)]
+        clear: bool,
+        /// Hash of the host OS image.
+        #[clap(
+            long,
+            value_parser = sha256_from_str,
+            conflicts_with = "clear",
+            required_unless_present = "clear",
+        )]
+        host_phase_2: Option<[u8; 32]>,
+        /// Hash of the control plane image.
+        #[clap(
+            long,
+            value_parser = sha256_from_str,
+            conflicts_with = "clear",
+            required_unless_present = "clear",
+        )]
+        control_plane: Option<[u8; 32]>,
     },
 
     /// Ask SP for its inventory.
@@ -244,6 +293,12 @@ fn level_from_str(s: &str) -> Result<Level> {
     }
 }
 
+fn sha256_from_str(s: &str) -> Result<[u8; 32]> {
+    hex::FromHex::from_hex(s).map_err(|err| {
+        anyhow!("failed to parse {s:?} as a sha256 digest: {err}")
+    })
+}
+
 fn sp_identifier_from_str(s: &str) -> Result<SpIdentifier> {
     const BAD_FORMAT: &str = concat!(
         "SP identifier must be of the form TYPE/SLOT; ",
@@ -366,17 +421,81 @@ async fn main() -> Result<()> {
                 dumper.dump(&info)?;
             }
         }
-        Command::StartupOptions { .. } => {
-            todo!("missing MGS endpoint");
+        Command::StartupOptions {
+            sp,
+            set,
+            phase2_recovery,
+            kbm,
+            bootrd,
+            prom,
+            kmdb,
+            kmdb_boot,
+            boot_ramdisk,
+            boot_net,
+            startup_verbose,
+        } => {
+            if set {
+                let options = HostStartupOptions {
+                    phase2_recovery_mode: phase2_recovery,
+                    kbm,
+                    bootrd,
+                    prom,
+                    kmdb,
+                    kmdb_boot,
+                    boot_ramdisk,
+                    boot_net,
+                    verbose: startup_verbose,
+                };
+                client
+                    .sp_startup_options_set(sp.type_, sp.slot, &options)
+                    .await?;
+            } else {
+                let info = client
+                    .sp_startup_options_get(sp.type_, sp.slot)
+                    .await?
+                    .into_inner();
+                dumper.dump(&info)?;
+            }
+        }
+        Command::SetInstallinatorImageId {
+            sp,
+            clear,
+            host_phase_2,
+            control_plane,
+        } => {
+            if clear {
+                client
+                    .sp_installinator_image_id_delete(sp.type_, sp.slot)
+                    .await?;
+            } else {
+                // clap guarantees these are not `None`.
+                let host_phase_2 = host_phase_2.unwrap().to_vec();
+                let control_plane = control_plane.unwrap().to_vec();
+                client
+                    .sp_installinator_image_id_set(
+                        sp.type_,
+                        sp.slot,
+                        &InstallinatorImageId { host_phase_2, control_plane },
+                    )
+                    .await?;
+            }
         }
         Command::Inventory { sp } => {
             let info =
                 client.sp_component_list(sp.type_, sp.slot).await?.into_inner();
             dumper.dump(&info)?;
         }
-        Command::ComponentDetails { .. }
-        | Command::ComponentClearStatus { .. } => {
-            todo!("missing MGS endpoint");
+        Command::ComponentDetails { sp, component } => {
+            let info = client
+                .sp_component_get(sp.type_, sp.slot, &component)
+                .await?
+                .into_inner();
+            dumper.dump(&info)?;
+        }
+        Command::ComponentClearStatus { sp, component } => {
+            client
+                .sp_component_clear_status(sp.type_, sp.slot, &component)
+                .await?;
         }
         Command::UsartAttach {
             sp,
@@ -386,20 +505,21 @@ async fn main() -> Result<()> {
             omap,
             uart_logfile,
         } => {
-            let type_ = match sp.type_ {
-                SpType::Sled => "sled",
-                SpType::Switch => "switch",
-                SpType::Power => "power",
-            };
-            // TODO should we be able to attach through the openapi client?
-            // Check how propolis-cli does this.
-            let path = format!(
-                "ws://{}/sp/{}/{}/component/{}/serial-console/attach",
-                args.server, type_, sp.slot, SERIAL_CONSOLE_COMPONENT,
-            );
-            let (ws, _response) = tokio_tungstenite::connect_async(path)
+            let upgraded = client
+                .sp_component_serial_console_attach(
+                    sp.type_,
+                    sp.slot,
+                    SERIAL_CONSOLE_COMPONENT,
+                )
                 .await
-                .with_context(|| "failed to create serial websocket stream")?;
+                .map_err(|err| anyhow!("{err}"))?;
+
+            let ws = WebSocketStream::from_raw_socket(
+                upgraded.into_inner(),
+                Role::Client,
+                None,
+            )
+            .await;
             usart::run(
                 ws,
                 raw,

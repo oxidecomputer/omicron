@@ -38,12 +38,14 @@ use crate::params::{
 use crate::smf_helper::SmfHelper;
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::WICKETD_PORT;
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -741,6 +743,26 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
+                ServiceType::Wicketd => {
+                    info!(self.inner.log, "Setting up wicketd service");
+
+                    smfh.setprop(
+                        "config/address",
+                        &format!("[::1]:{WICKETD_PORT}"),
+                    )?;
+
+                    // TODO: Use bootstrap address
+                    smfh.setprop(
+                        "config/artifact-address",
+                        &format!("[::1]:{BOOTSTRAP_ARTIFACT_PORT}"),
+                    )?;
+
+                    smfh.setprop(
+                        "config/mgs-address",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )?;
+                    smfh.refresh()?;
+                }
                 ServiceType::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
 
@@ -906,7 +928,11 @@ impl ServiceManager {
 
         let services = match self.inner.stub_scrimlet {
             Some(_) => {
-                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
+                vec![
+                    ServiceType::Dendrite { asic: DendriteAsic::TofinoStub },
+                    ServiceType::ManagementGatewayService,
+                    ServiceType::Wicketd,
+                ]
             }
             None => {
                 vec![
@@ -1099,7 +1125,10 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::illumos::{
-        dladm::{Etherstub, MockDladm, ETHERSTUB_NAME, ETHERSTUB_VNIC_NAME},
+        dladm::{
+            Etherstub, MockDladm, UNDERLAY_ETHERSTUB_NAME,
+            UNDERLAY_ETHERSTUB_VNIC_NAME,
+        },
         svc,
         zone::MockZones,
     };
@@ -1116,7 +1145,7 @@ mod test {
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
             |physical_link: &Etherstub, _, _, _| {
-                assert_eq!(&physical_link.0, &ETHERSTUB_NAME);
+                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
                 Ok(())
             },
         );
@@ -1255,8 +1284,8 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1290,8 +1319,8 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1327,8 +1356,8 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1353,8 +1382,8 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1387,8 +1416,8 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )
@@ -1415,8 +1444,8 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             None,
             "rev-test".to_string(),
         )

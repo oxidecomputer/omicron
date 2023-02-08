@@ -325,7 +325,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpComponentInfo"
+                  "title": "Array_of_SpComponentDetails",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpComponentDetails"
+                  }
                 }
               }
             }
@@ -448,6 +452,53 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/clear-status": {
+      "post": {
+        "summary": "Clear status of a component",
+        "description": "For components that maintain event counters (e.g., the sidecar `monorail`), this will reset the event counters to zero.",
+        "operationId": "sp_component_clear_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/serial-console/attach": {
       "get": {
         "summary": "Upgrade into a websocket connection attached to the given SP component's",
@@ -491,7 +542,8 @@
               }
             }
           }
-        }
+        },
+        "x-dropshot-websocket": {}
       }
     },
     "/sp/{type}/{slot}/component/{component}/serial-console/detach": {
@@ -709,6 +761,89 @@
         }
       }
     },
+    "/sp/{type}/{slot}/ipcc/installinator-image-id": {
+      "put": {
+        "summary": "Set the installinator image ID the sled should use for recovery.",
+        "description": "This value can be read by the host via IPCC; see the `ipcc-key-value` crate.",
+        "operationId": "sp_installinator_image_id_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallinatorImageId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear any previously-set installinator image ID on the target sled.",
+        "operationId": "sp_installinator_image_id_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/power-state": {
       "get": {
         "summary": "Get the current power state of a sled via its SP.",
@@ -836,6 +971,97 @@
           }
         }
       }
+    },
+    "/sp/{type}/{slot}/startup-options": {
+      "get": {
+        "summary": "Get host startup options for a sled",
+        "description": "This endpoint will currently fail for any `SpType` other than `SpType::Sled`.",
+        "operationId": "sp_startup_options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostStartupOptions"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set host startup options for a sled",
+        "description": "This endpoint will currently fail for any `SpType` other than `SpType::Sled`.",
+        "operationId": "sp_startup_options_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostStartupOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -883,6 +1109,703 @@
           "sha256_hash"
         ]
       },
+      "HostStartupOptions": {
+        "type": "object",
+        "properties": {
+          "boot_net": {
+            "type": "boolean"
+          },
+          "boot_ramdisk": {
+            "type": "boolean"
+          },
+          "bootrd": {
+            "type": "boolean"
+          },
+          "kbm": {
+            "type": "boolean"
+          },
+          "kmdb": {
+            "type": "boolean"
+          },
+          "kmdb_boot": {
+            "type": "boolean"
+          },
+          "phase2_recovery_mode": {
+            "type": "boolean"
+          },
+          "prom": {
+            "type": "boolean"
+          },
+          "verbose": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "boot_net",
+          "boot_ramdisk",
+          "bootrd",
+          "kbm",
+          "kmdb",
+          "kmdb_boot",
+          "phase2_recovery_mode",
+          "prom",
+          "verbose"
+        ]
+      },
+      "ImageVersion": {
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "epoch",
+          "version"
+        ]
+      },
+      "InstallinatorImageId": {
+        "type": "object",
+        "properties": {
+          "control_plane": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 32,
+            "maxItems": 32
+          },
+          "host_phase_2": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 32,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "control_plane",
+          "host_phase_2"
+        ]
+      },
+      "LinkStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "down"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "up"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "MeasurementErrorCode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_sensor"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "no_reading"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "not_present"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_error"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_timeout"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "device_off"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          }
+        ]
+      },
+      "MeasurementKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "temperature"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "power"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "current"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "voltage"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "input_current"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "input_voltage"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "speed"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "PacketCount": {
+        "type": "object",
+        "properties": {
+          "broadcast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "multicast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "unicast": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "broadcast",
+          "multicast",
+          "unicast"
+        ]
+      },
+      "PhyStatus": {
+        "type": "object",
+        "properties": {
+          "mac_link_up": {
+            "$ref": "#/components/schemas/LinkStatus"
+          },
+          "media_link_up": {
+            "$ref": "#/components/schemas/LinkStatus"
+          },
+          "ty": {
+            "$ref": "#/components/schemas/PhyType"
+          }
+        },
+        "required": [
+          "mac_link_up",
+          "media_link_up",
+          "ty"
+        ]
+      },
+      "PhyType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8504"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8522"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8552"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vsc8562"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortConfig": {
+        "type": "object",
+        "properties": {
+          "dev_num": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "dev_type": {
+            "$ref": "#/components/schemas/PortDev"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PortMode"
+          },
+          "serdes_num": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "serdes_type": {
+            "$ref": "#/components/schemas/PortSerdes"
+          }
+        },
+        "required": [
+          "dev_num",
+          "dev_type",
+          "mode",
+          "serdes_num",
+          "serdes_type"
+        ]
+      },
+      "PortCounters": {
+        "type": "object",
+        "properties": {
+          "link_down_sticky": {
+            "type": "boolean"
+          },
+          "phy_link_down_sticky": {
+            "type": "boolean"
+          },
+          "rx": {
+            "$ref": "#/components/schemas/PacketCount"
+          },
+          "tx": {
+            "$ref": "#/components/schemas/PacketCount"
+          }
+        },
+        "required": [
+          "link_down_sticky",
+          "phy_link_down_sticky",
+          "rx",
+          "tx"
+        ]
+      },
+      "PortDev": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev1g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev2g5"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dev10g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortMode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sfi"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "base_kr"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sgmii"
+                ]
+              },
+              "speed": {
+                "$ref": "#/components/schemas/Speed"
+              }
+            },
+            "required": [
+              "mode",
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "qsgmii"
+                ]
+              },
+              "speed": {
+                "$ref": "#/components/schemas/Speed"
+              }
+            },
+            "required": [
+              "mode",
+              "speed"
+            ]
+          }
+        ]
+      },
+      "PortSerdes": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes1g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes6g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serdes10g"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PortStatusErrorCode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unconfigured"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              },
+              "raw": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "code",
+              "raw"
+            ]
+          }
+        ]
+      },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
         "type": "string",
@@ -890,6 +1813,230 @@
           "A0",
           "A1",
           "A2"
+        ]
+      },
+      "RotImageDetails": {
+        "type": "object",
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ImageVersion"
+          }
+        },
+        "required": [
+          "digest",
+          "version"
+        ]
+      },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageDetails"
+                  }
+                ]
+              },
+              "slot_b": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageDetails"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpComponentDetails": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cfg": {
+                "$ref": "#/components/schemas/PortConfig"
+              },
+              "counters": {
+                "$ref": "#/components/schemas/PortCounters"
+              },
+              "link_status": {
+                "$ref": "#/components/schemas/LinkStatus"
+              },
+              "phy_status": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PhyStatus"
+                  }
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "port_status"
+                ]
+              }
+            },
+            "required": [
+              "cfg",
+              "counters",
+              "link_status",
+              "port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/PortStatusErrorCode"
+              },
+              "port": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "port_status_error"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "port",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurement"
+                ]
+              },
+              "value": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "name",
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/MeasurementErrorCode"
+              },
+              "kind": {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurement_error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "kind",
+              "name",
+              "type"
+            ]
+          }
         ]
       },
       "SpComponentFirmwareSlot": {
@@ -1214,6 +2361,33 @@
           {
             "type": "object",
             "properties": {
+              "base_mac_address": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                },
+                "minItems": 6,
+                "maxItems": 6
+              },
+              "hubris_archive_id": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "power_state": {
+                "$ref": "#/components/schemas/PowerState"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "rot": {
+                "$ref": "#/components/schemas/RotState"
+              },
               "serial_number": {
                 "type": "string"
               },
@@ -1222,11 +2396,21 @@
                 "enum": [
                   "enabled"
                 ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ImageVersion"
               }
             },
             "required": [
+              "base_mac_address",
+              "hubris_archive_id",
+              "model",
+              "power_state",
+              "revision",
+              "rot",
               "serial_number",
-              "state"
+              "state",
+              "version"
             ]
           },
           {
@@ -1398,6 +2582,52 @@
               "code",
               "id",
               "state"
+            ]
+          }
+        ]
+      },
+      "Speed": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed100_m"
+                ]
+              }
+            },
+            "required": [
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed1_g"
+                ]
+              }
+            },
+            "required": [
+              "speed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "speed10_g"
+                ]
+              }
+            },
+            "required": [
+              "speed"
             ]
           }
         ]

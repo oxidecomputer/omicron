@@ -77,11 +77,27 @@ impl ProducerEndpoint {
     }
 }
 
-/// Description of a single update artifact.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateArtifact {
+/// An identifier for a single update artifact.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct UpdateArtifactId {
+    /// The artifact's name.
     pub name: String,
+
+    /// The artifact's version.
     pub version: String,
+
+    /// The kind of update artifact this is.
     pub kind: UpdateArtifactKind,
 }
 
@@ -93,6 +109,9 @@ pub struct UpdateArtifact {
     Debug,
     PartialEq,
     Eq,
+    Hash,
+    Ord,
+    PartialOrd,
     Display,
     Deserialize,
     Serialize,

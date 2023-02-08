@@ -9,6 +9,7 @@ use anyhow::Context;
 use anyhow::Result;
 use futures::SinkExt;
 use futures::StreamExt;
+use reqwest::Upgraded;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io;
@@ -19,19 +20,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 use termios::Termios;
 use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 
 const CTRL_A: u8 = b'\x01';
 const CTRL_X: u8 = b'\x18';
 
 pub(crate) async fn run(
-    mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    mut ws: WebSocketStream<Upgraded>,
     raw: bool,
     stdin_buffer_time: Duration,
     imap: Option<String>,

@@ -29,7 +29,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifact,
+    internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -214,8 +214,10 @@ impl SledAgent {
         ));
         info!(&log, "created sled agent");
 
-        let etherstub =
-            Dladm::ensure_etherstub().map_err(|e| Error::Etherstub(e))?;
+        let etherstub = Dladm::ensure_etherstub(
+            crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME,
+        )
+        .map_err(|e| Error::Etherstub(e))?;
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
             .map_err(|e| Error::EtherstubVnic(e))?;
 
@@ -609,7 +611,7 @@ impl SledAgent {
     /// Downloads and applies an artifact.
     pub async fn update_artifact(
         &self,
-        artifact: UpdateArtifact,
+        artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
         let nexus_client = self.inner.lazy_nexus_client.get().await?;
         crate::updates::download_artifact(artifact, &nexus_client).await?;
@@ -678,11 +680,15 @@ impl SledAgent {
     }
 }
 
-// Delete all underlay addresses created directly over the etherstub VNIC used
+// Delete all underlay addresses created directly over the etherstub VNICs used
 // for inter-zone communications.
 fn delete_etherstub_addresses(log: &Logger) -> Result<(), Error> {
-    let prefix = format!("{}/", crate::illumos::dladm::ETHERSTUB_VNIC_NAME);
-    delete_addresses_matching_prefixes(log, &[prefix])
+    let underlay_prefix =
+        format!("{}/", crate::illumos::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME);
+    let bootstrap_prefix =
+        format!("{}/", crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME);
+    delete_addresses_matching_prefixes(log, &[underlay_prefix])?;
+    delete_addresses_matching_prefixes(log, &[bootstrap_prefix])
 }
 
 fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
@@ -754,12 +760,18 @@ async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
 
 // Delete the etherstub and underlay VNIC used for interzone communication
 fn delete_etherstub(log: &Logger) -> Result<(), Error> {
-    use crate::illumos::dladm::ETHERSTUB_NAME;
-    use crate::illumos::dladm::ETHERSTUB_VNIC_NAME;
-    warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic()?;
-    warn!(log, "Deleting Omicron etherstub"; "stub_name" => ETHERSTUB_NAME);
-    Dladm::delete_etherstub()?;
+    use crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME;
+    use crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
+    use crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME;
+    use crate::illumos::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
+    warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => UNDERLAY_ETHERSTUB_VNIC_NAME);
+    Dladm::delete_etherstub_vnic(UNDERLAY_ETHERSTUB_VNIC_NAME)?;
+    warn!(log, "Deleting Omicron underlay etherstub"; "stub_name" => UNDERLAY_ETHERSTUB_NAME);
+    Dladm::delete_etherstub(UNDERLAY_ETHERSTUB_NAME)?;
+    warn!(log, "Deleting Omicron bootstrap VNIC"; "vnic_name" => BOOTSTRAP_ETHERSTUB_VNIC_NAME);
+    Dladm::delete_etherstub_vnic(BOOTSTRAP_ETHERSTUB_VNIC_NAME)?;
+    warn!(log, "Deleting Omicron bootstrap etherstub"; "stub_name" => BOOTSTRAP_ETHERSTUB_NAME);
+    Dladm::delete_etherstub(BOOTSTRAP_ETHERSTUB_NAME)?;
     Ok(())
 }
 

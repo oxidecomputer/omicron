@@ -47,8 +47,12 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
-    patch =
-        { SpIdentifier = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
-          SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord] }
-    }
+    patch = {
+        SpIdentifier = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
+        SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        RotState = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        RotImageDetails = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+    },
 );
