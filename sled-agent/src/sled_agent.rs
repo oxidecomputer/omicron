@@ -40,8 +40,6 @@ use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crucible_client_types::VolumeConstructionRequest;
-
 #[cfg(not(test))]
 use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
 #[cfg(test)]
@@ -643,20 +641,6 @@ impl SledAgent {
             )
             .await
             .map_err(Error::from)
-    }
-
-    /// Issue a snapshot request for a Crucible disk not attached to an
-    /// instance.
-    pub async fn issue_disk_snapshot_request(
-        &self,
-        _disk_id: Uuid,
-        _volume_construction_request: VolumeConstructionRequest,
-        _snapshot_id: Uuid,
-    ) -> Result<(), Error> {
-        // For a disk not attached to an instance, implementation requires
-        // constructing a volume and performing a snapshot through some other
-        // means. Currently unimplemented.
-        todo!();
     }
 
     pub async fn firewall_rules_ensure(
