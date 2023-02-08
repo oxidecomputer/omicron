@@ -18,6 +18,7 @@
           {
             "in": "path",
             "name": "kind",
+            "description": "The kind of update artifact this is.",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/UpdateArtifactKind"
@@ -26,6 +27,7 @@
           {
             "in": "path",
             "name": "name",
+            "description": "The artifact's name.",
             "required": true,
             "schema": {
               "type": "string"
@@ -34,6 +36,7 @@
           {
             "in": "path",
             "name": "version",
+            "description": "The artifact's version.",
             "required": true,
             "schema": {
               "type": "string"
@@ -1050,6 +1053,21 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
                 ]
               }
             },
@@ -2084,6 +2102,20 @@
                 "type": "string",
                 "enum": [
                   "tfport"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
                 ]
               }
             },

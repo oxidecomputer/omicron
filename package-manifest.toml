@@ -72,6 +72,24 @@ source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
 output.type = "zone"
 output.intermediate_only = true
 
+[package.wicketd]
+service_name = "wicketd"
+source.type = "local"
+source.rust.binary_names = ["wicketd"]
+source.rust.release = true
+source.paths = [ { from = "smf/wicketd", to = "/var/svc/manifest/site/wicketd" } ]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.wicket]
+service_name = "wicket"
+source.type = "local"
+source.rust.binary_names = ["wicket"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+
 # Packages not built within Omicron, but which must be imported.
 
 # Refer to
@@ -87,10 +105,20 @@ service_name = "crucible"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec"
+source.commit = "fb671895e8adb3cab5e801bbbe8728997178aba4"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "7f40883e3785cd50a042dabd8b02f87c72e2c2ae99ff8f137b9c8f39c2b87c97"
+source.sha256 = "227761dcba9372619c71fcf7137a7a98c4d618192cbaa6f41031c4429ab99c04"
+output.type = "zone"
+
+[package.crucible-pantry]
+service_name = "crucible_pantry"
+source.type = "prebuilt"
+source.repo = "crucible"
+source.commit = "fb671895e8adb3cab5e801bbbe8728997178aba4"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
+source.sha256 = "bf648339cfd010bad65186584fe34108cc1f27162c62e11f1d18b1fe89a43ddc"
 output.type = "zone"
 
 # Refer to
@@ -100,10 +128,10 @@ output.type = "zone"
 service_name = "propolis-server"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "92508d573529a1ee50a9422fbca045a5e980a2b5"
+source.commit = "880a031fbdd7417cd3a4643f8bf419d8d5ea8224"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "6fcbff8968addc95e6f7f099f3fc19fe68a4f1192a2aa9f90df2b75f2f94f7da"
+source.sha256 = "93265033a62a998ebc2d64ed3c0f0d4a97c16d34132d3d59660f5430a24990e9"
 output.type = "zone"
 
 [package.maghemite]
@@ -164,7 +192,7 @@ output.intermediate_only = true
 service_name = "switch"
 only_for_targets.switch_variant = "asic"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
@@ -177,5 +205,5 @@ output.type = "zone"
 service_name = "switch"
 only_for_targets.switch_variant = "stub"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"

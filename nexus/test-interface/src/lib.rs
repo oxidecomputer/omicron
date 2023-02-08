@@ -45,6 +45,11 @@ pub trait NexusServer {
     async fn get_https_server_external_address(&self) -> Option<SocketAddr>;
     async fn get_http_server_internal_address(&self) -> SocketAddr;
 
+    async fn set_resolver(
+        &self,
+        resolver: internal_dns_client::multiclient::Resolver,
+    );
+
     // Previously, as a dataset was created (within the sled agent),
     // we'd use an internal API from Nexus to record that the dataset
     // now exists. In other words, Sled Agent was in control, by telling

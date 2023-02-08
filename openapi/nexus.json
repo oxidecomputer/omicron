@@ -10654,6 +10654,21 @@
             ]
           },
           {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
             "description": "Disk is being attached to the given Instance",
             "type": "object",
             "properties": {
@@ -13717,6 +13732,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "service_address": {
             "type": "string"
           },
@@ -13734,6 +13753,7 @@
         "required": [
           "baseboard",
           "id",
+          "rack_id",
           "service_address",
           "time_created",
           "time_modified"

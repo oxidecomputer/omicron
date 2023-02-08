@@ -111,7 +111,10 @@ CREATE INDEX ON omicron.public.sled (
 CREATE TYPE omicron.public.service_kind AS ENUM (
   'internal_dns',
   'nexus',
-  'oximeter'
+  'oximeter',
+  'dendrite',
+  'tfport',
+  'crucible_pantry'
 );
 
 CREATE TABLE omicron.public.service (

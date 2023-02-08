@@ -490,6 +490,9 @@ impl ServiceInner {
                         ServiceType::Oximeter => {
                             NexusTypes::ServiceKind::Oximeter
                         }
+                        ServiceType::CruciblePantry => {
+                            NexusTypes::ServiceKind::CruciblePantry
+                        }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",

@@ -23,11 +23,19 @@ pub const VNIC_PREFIX_GUEST: &str = "vopte";
 /// Path to the DLADM command.
 pub const DLADM: &str = "/usr/sbin/dladm";
 
-/// The name of the etherstub to be created for the underlay.
-pub const ETHERSTUB_NAME: &str = "stub0";
+/// The name of the etherstub to be created for the underlay network.
+pub const UNDERLAY_ETHERSTUB_NAME: &str = "underlay_stub0";
 
-/// The name of the etherstub VNIC to be created in the global zone.
-pub const ETHERSTUB_VNIC_NAME: &str = "underlay0";
+/// The name of the etherstub to be created for the bootstrap network.
+pub const BOOTSTRAP_ETHERSTUB_NAME: &str = "bootstrap_stub0";
+
+/// The name of the etherstub VNIC to be created in the global zone for the
+/// underlay network.
+pub const UNDERLAY_ETHERSTUB_VNIC_NAME: &str = "underlay0";
+
+/// The name of the etherstub VNIC to be created in the global zone for the
+/// bootstrap network.
+pub const BOOTSTRAP_ETHERSTUB_VNIC_NAME: &str = "bootstrap0";
 
 /// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
@@ -137,23 +145,22 @@ pub struct Dladm {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
-    pub fn ensure_etherstub() -> Result<Etherstub, ExecutionError> {
-        if let Ok(stub) = Self::get_etherstub() {
+    pub fn ensure_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
+        if let Ok(stub) = Self::get_etherstub(name) {
             return Ok(stub);
         }
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd =
-            command.args(&[DLADM, "create-etherstub", "-t", ETHERSTUB_NAME]);
+        let cmd = command.args(&[DLADM, "create-etherstub", "-t", name]);
         execute(cmd)?;
-        Ok(Etherstub(ETHERSTUB_NAME.to_string()))
+        Ok(Etherstub(name.to_string()))
     }
 
     /// Finds an etherstub.
-    fn get_etherstub() -> Result<Etherstub, ExecutionError> {
+    fn get_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[DLADM, "show-etherstub", ETHERSTUB_NAME]);
+        let cmd = command.args(&[DLADM, "show-etherstub", name]);
         execute(cmd)?;
-        Ok(Etherstub(ETHERSTUB_NAME.to_string()))
+        Ok(Etherstub(name.to_string()))
     }
 
     /// Creates a VNIC on top of the etherstub.
@@ -163,59 +170,61 @@ impl Dladm {
     pub fn ensure_etherstub_vnic(
         source: &Etherstub,
     ) -> Result<EtherstubVnic, CreateVnicError> {
-        if let Ok(vnic) = Self::get_etherstub_vnic() {
+        let vnic_name = match source.0.as_str() {
+            UNDERLAY_ETHERSTUB_NAME => UNDERLAY_ETHERSTUB_VNIC_NAME,
+            BOOTSTRAP_ETHERSTUB_NAME => BOOTSTRAP_ETHERSTUB_VNIC_NAME,
+            _ => unreachable!(),
+        };
+        if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
             return Ok(vnic);
         }
-        Self::create_vnic(source, ETHERSTUB_VNIC_NAME, None, None)?;
-        Ok(EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()))
+        Self::create_vnic(source, vnic_name, None, None)?;
+        Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
-    fn get_etherstub_vnic() -> Result<EtherstubVnic, ExecutionError> {
+    fn get_etherstub_vnic(name: &str) -> Result<EtherstubVnic, ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[DLADM, "show-vnic", ETHERSTUB_VNIC_NAME]);
+        let cmd = command.args(&[DLADM, "show-vnic", name]);
         execute(cmd)?;
-        Ok(EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()))
+        Ok(EtherstubVnic(name.to_string()))
     }
 
     // Return the name of the IP interface over the etherstub VNIC, if it
     // exists.
-    fn get_etherstub_vnic_interface() -> Result<String, ExecutionError> {
+    fn get_etherstub_vnic_interface(
+        name: &str,
+    ) -> Result<String, ExecutionError> {
         let mut cmd = std::process::Command::new(PFEXEC);
-        let cmd = cmd.args(&[
-            IPADM,
-            "show-if",
-            "-p",
-            "-o",
-            "IFNAME",
-            ETHERSTUB_VNIC_NAME,
-        ]);
+        let cmd = cmd.args(&[IPADM, "show-if", "-p", "-o", "IFNAME", name]);
         execute(cmd)?;
-        Ok(ETHERSTUB_VNIC_NAME.to_string())
+        Ok(name.to_string())
     }
 
     /// Delete the VNIC over the inter-zone comms etherstub.
-    pub(crate) fn delete_etherstub_vnic() -> Result<(), ExecutionError> {
+    pub(crate) fn delete_etherstub_vnic(
+        name: &str,
+    ) -> Result<(), ExecutionError> {
         // It's not clear why, but this requires deleting the _interface_ that's
         // over the VNIC first. Other VNICs don't require this for some reason.
-        if Self::get_etherstub_vnic_interface().is_ok() {
+        if Self::get_etherstub_vnic_interface(name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
-            let cmd = cmd.args(&[IPADM, "delete-if", ETHERSTUB_VNIC_NAME]);
+            let cmd = cmd.args(&[IPADM, "delete-if", name]);
             execute(cmd)?;
         }
 
-        if Self::get_etherstub_vnic().is_ok() {
+        if Self::get_etherstub_vnic(name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
-            let cmd = cmd.args(&[DLADM, "delete-vnic", ETHERSTUB_VNIC_NAME]);
+            let cmd = cmd.args(&[DLADM, "delete-vnic", name]);
             execute(cmd)?;
         }
         Ok(())
     }
 
     /// Delete the inter-zone comms etherstub.
-    pub(crate) fn delete_etherstub() -> Result<(), ExecutionError> {
-        if Self::get_etherstub().is_ok() {
+    pub(crate) fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
+        if Self::get_etherstub(name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
-            let cmd = cmd.args(&[DLADM, "delete-etherstub", ETHERSTUB_NAME]);
+            let cmd = cmd.args(&[DLADM, "delete-etherstub", name]);
             execute(cmd)?;
         }
         Ok(())

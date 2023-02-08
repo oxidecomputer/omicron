@@ -10,6 +10,7 @@ use omicron_common::address::{
 use slog::{info, Logger};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
@@ -50,6 +51,21 @@ impl DnsAddressLookup for Ipv6Subnet<AZ_PREFIX> {
         subnet_to_ips(*self)
             .map(|address| SocketAddr::new(address, DNS_PORT))
             .collect()
+    }
+}
+
+pub struct ServerAddresses {
+    pub dropshot_server_addrs: Vec<SocketAddr>,
+    pub dns_server_addrs: Vec<SocketAddr>,
+}
+
+impl DnsAddressLookup for ServerAddresses {
+    fn dropshot_server_addrs(&self) -> Vec<SocketAddr> {
+        self.dropshot_server_addrs.clone()
+    }
+
+    fn dns_server_addrs(&self) -> Vec<SocketAddr> {
+        self.dns_server_addrs.clone()
     }
 }
 
@@ -170,10 +186,14 @@ pub enum ResolveError {
 
     #[error("Record not found for SRV key: {0}")]
     NotFound(crate::names::SRV),
+
+    #[error("Record not found for {0}")]
+    NotFoundByString(String),
 }
 
 /// A wrapper around a DNS resolver, providing a way to conveniently
 /// look up IP addresses of services based on their SRV keys.
+#[derive(Clone)]
 pub struct Resolver {
     inner: Box<TokioAsyncResolver>,
 }
@@ -230,6 +250,41 @@ impl Resolver {
             .next()
             .ok_or_else(|| ResolveError::NotFound(srv))?;
         Ok(*address)
+    }
+
+    /// Looks up a single [`SocketAddrV6`] based on the SRV name
+    /// Returns an error if the record does not exist.
+    pub async fn lookup_socket_v6(
+        &self,
+        srv: crate::names::SRV,
+    ) -> Result<SocketAddrV6, ResolveError> {
+        let response =
+            self.inner.lookup(&srv.to_string(), RecordType::SRV).await?;
+
+        let rdata = response
+            .iter()
+            .next()
+            .ok_or_else(|| ResolveError::NotFound(srv))?;
+
+        Ok(match rdata {
+            trust_dns_proto::rr::record_data::RData::SRV(srv) => {
+                let name = srv.target();
+                let response =
+                    self.inner.ipv6_lookup(&name.to_string()).await?;
+
+                let address = response.iter().next().ok_or_else(|| {
+                    ResolveError::NotFoundByString(name.to_string())
+                })?;
+
+                SocketAddrV6::new(*address, srv.port(), 0, 0)
+            }
+
+            _ => {
+                return Err(ResolveError::Resolve(
+                    "SRV query did not return SRV RData!".into(),
+                ));
+            }
+        })
     }
 
     pub async fn lookup_ip(

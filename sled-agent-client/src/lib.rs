@@ -157,6 +157,7 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
             Detaching(u) => Self::Detaching(u),
@@ -184,6 +185,7 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
             Detaching(u) => Self::Detaching(u),
@@ -287,11 +289,11 @@ impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::UpdateArtifact>
-    for types::UpdateArtifact
+impl From<omicron_common::api::internal::nexus::UpdateArtifactId>
+    for types::UpdateArtifactId
 {
-    fn from(s: omicron_common::api::internal::nexus::UpdateArtifact) -> Self {
-        types::UpdateArtifact {
+    fn from(s: omicron_common::api::internal::nexus::UpdateArtifactId) -> Self {
+        types::UpdateArtifactId {
             name: s.name,
             version: s.version,
             kind: s.kind.into(),

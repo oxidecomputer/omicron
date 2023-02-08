@@ -7,7 +7,7 @@
 use crate::management_switch::SpIdentifier;
 use dropshot::HttpError;
 use gateway_messages::SpError;
-use gateway_sp_comms::error::CommunicationError;
+pub use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
 use gateway_sp_comms::BindError;
 use std::time::Duration;
@@ -44,26 +44,6 @@ pub enum SpCommsError {
     SpCommunicationFailed(#[from] CommunicationError),
     #[error("updating SP failed: {0}")]
     UpdateFailed(#[from] UpdateError),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum Error {
-    #[error("websocket connection failure: {0}")]
-    BadWebsocketConnection(&'static str),
-    #[error(transparent)]
-    CommunicationsError(#[from] SpCommsError),
-}
-
-impl From<Error> for HttpError {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::CommunicationsError(err) => err.into(),
-            Error::BadWebsocketConnection(_) => HttpError::for_bad_request(
-                Some("BadWebsocketConnection".to_string()),
-                err.to_string(),
-            ),
-        }
-    }
 }
 
 impl From<SpCommsError> for HttpError {

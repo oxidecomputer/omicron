@@ -172,7 +172,10 @@ impl Agent {
                 err,
             })?;
 
-        let etherstub = Dladm::ensure_etherstub().map_err(|e| {
+        let etherstub = Dladm::ensure_etherstub(
+            crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME,
+        )
+        .map_err(|e| {
             BootstrapError::SledError(format!(
                 "Can't access etherstub device: {}",
                 e
@@ -203,14 +206,33 @@ impl Agent {
         // Initialize ZFS and Zone resources before we can safely launch the
         // switch zone. See: Zfs::ensure_zoned_filesystem.
 
+        // HardwareMonitor must be on the underlay network like all services
+        let underlay_etherstub = Dladm::ensure_etherstub(
+            crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME,
+        )
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })?;
+
+        let underlay_etherstub_vnic =
+            Dladm::ensure_etherstub_vnic(&underlay_etherstub).map_err(|e| {
+                BootstrapError::SledError(format!(
+                    "Can't access etherstub VNIC device: {}",
+                    e
+                ))
+            })?;
+
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
         let hardware_monitor = HardwareMonitor::new(
             &ba_log,
             &sled_config,
-            etherstub,
-            etherstub_vnic,
+            underlay_etherstub,
+            underlay_etherstub_vnic,
         )
         .await?;
 

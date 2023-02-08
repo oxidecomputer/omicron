@@ -4,6 +4,7 @@
 
 //! Tests basic snapshot support in the API
 
+use crate::integration_tests::instances::instance_simulate;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
@@ -20,6 +21,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
+use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
@@ -56,7 +58,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 }
 
 #[nexus_test]
-async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
+async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     populate_ip_pool(&client, "default", None).await;
@@ -138,7 +140,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     );
     let instance_name = "base-instance";
 
-    let _instance: Instance = object_create(
+    let instance: Instance = object_create(
         client,
         &instances_url,
         &params::InstanceCreate {
@@ -162,6 +164,10 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
+
+    // cannot snapshot attached disk for instance in state starting
+    let nexus = &cptestctx.server.apictx().nexus;
+    instance_simulate(nexus, &instance.identity.id).await;
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -262,6 +268,18 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    // Assert disk is detached
+    let disk_url = format!("{}/{}", disks_url, base_disk_name);
+    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk")
+        .parsed_body()
+        .unwrap();
+
+    assert_eq!(disk.state, DiskState::Detached);
+
     // Issue snapshot request
     let snapshots_url = format!(
         "/organizations/{}/projects/{}/snapshots",
@@ -276,13 +294,25 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.clone(),
         },
     )
     .await;
 
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
+
+    // Assert disk is still detached
+    let disk_url = format!("{}/{}", disks_url, base_disk_name);
+    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk")
+        .parsed_body()
+        .unwrap();
+
+    assert_eq!(disk.state, DiskState::Detached);
 }
 
 #[nexus_test]
