@@ -115,6 +115,7 @@ impl Plan {
             Ok(None)
         }
     }
+
     // Gets zpool UUIDs from the sled.
     async fn get_zpools_from_sled(
         log: &Logger,
@@ -188,9 +189,8 @@ impl Plan {
 
         for idx in 0..sled_addrs.len() {
             let sled_address = sled_addrs[idx];
-            let sled_subnet_index =
-                u8::try_from(idx + 1).expect("Too many peers!");
-            let subnet = config.sled_subnet(sled_subnet_index);
+            let subnet: Ipv6Subnet<SLED_PREFIX> =
+                Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip());
             let zpools = Self::get_zpools_from_sled(log, sled_address).await?;
             let mut addr_alloc = AddressBumpAllocator::new(subnet);
 
