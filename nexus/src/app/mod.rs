@@ -34,6 +34,7 @@ mod image;
 mod instance;
 mod ip_pool;
 mod metrics;
+mod network_interface;
 mod organization;
 mod oximeter;
 mod project;
