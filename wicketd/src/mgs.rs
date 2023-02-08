@@ -250,6 +250,17 @@ impl MgsHandle {
             .map(|resp| resp.into_inner())
             .map_err(map_mgs_client_error)
     }
+
+    pub async fn sp_reset(
+        &self,
+        target: SpIdentifier,
+    ) -> Result<(), HttpError> {
+        self.mgs_client
+            .sp_reset(target.type_, target.slot)
+            .await
+            .map(|resp| resp.into_inner())
+            .map_err(map_mgs_client_error)
+    }
 }
 
 /// The entity responsible for interacting with MGS

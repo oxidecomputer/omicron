@@ -38,6 +38,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_component_update)?;
         api.register(get_component_update_status)?;
         api.register(post_component_update_abort)?;
+        api.register(post_reset_sp)?;
         Ok(())
     }
 
@@ -210,6 +211,20 @@ async fn post_component_update_abort(
         .mgs_handle
         .component_update_abort(target.into_inner(), body.into_inner())
         .await?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// An endpoint to reset an SP.
+#[endpoint {
+    method = POST,
+    path = "/reset/sp/{type}/{slot}",
+}]
+async fn post_reset_sp(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpIdentifier>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    rqctx.context().mgs_handle.sp_reset(target.into_inner()).await?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }

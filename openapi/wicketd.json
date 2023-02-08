@@ -108,6 +108,43 @@
         }
       }
     },
+    "/reset/sp/{type}/{slot}": {
+      "post": {
+        "summary": "An endpoint to reset an SP.",
+        "operationId": "post_reset_sp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/update/{type}/{slot}": {
       "post": {
         "summary": "An endpoint to start a component update via MGS.",
