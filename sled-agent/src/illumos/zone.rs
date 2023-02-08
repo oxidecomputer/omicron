@@ -87,7 +87,7 @@ pub enum GetControlInterfaceError {
 }
 
 /// Errors from [`Zones::get_bootstrap_interface`].
-/// Error which may be returned accessing the control interface of a zone.
+/// Error which may be returned accessing the bootstrap interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetBootstrapInterfaceError {
     #[error("Failed to query zone '{zone}' for control interface: {err}")]
@@ -100,7 +100,9 @@ pub enum GetBootstrapInterfaceError {
     #[error("VNIC starting with 'oxBootstrap' not found in {zone}")]
     NotFound { zone: String },
 
-    #[error("VNIC starting with 'oxBootstrap' found non-switch zone: {zone}")]
+    #[error(
+        "VNIC starting with 'oxBootstrap' found in non-switch zone: {zone}"
+    )]
     Unexpected { zone: String },
 }
 

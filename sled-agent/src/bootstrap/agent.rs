@@ -171,11 +171,12 @@ impl Agent {
 
         // The only zone with a bootstrap ip address besides the global zone,
         // is the switch zone. We allocate this address here since we have
-        // access to the  physical link. This also allows us to keep bootstrap
+        // access to the physical link. This also allows us to keep bootstrap
         // address allocation in one place.
         //
         // If other zones end up needing bootstrap addresses, we'll have to
-        // rethink this strategy.
+        // rethink this strategy, and plumb bootstrap adresses similar to
+        // underlay addresses.
         let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
 
         // We expect this directory to exist - ensure that it does, before any
