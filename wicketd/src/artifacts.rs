@@ -45,10 +45,26 @@ impl WicketdArtifactStore {
     pub(crate) fn put_repository(&self, bytes: &[u8]) -> Result<(), HttpError> {
         slog::debug!(self.log, "adding repository"; "size" => bytes.len());
 
-        let new_artifacts = extract_and_validate(&bytes, &self.log)
+        let new_artifacts = extract_and_validate(bytes, &self.log)
             .map_err(|error| error.to_http_error())?;
         self.replace(new_artifacts);
         Ok(())
+    }
+
+    pub(crate) fn artifact_ids(&self) -> Vec<ArtifactId> {
+        self.artifacts.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// Take a snapshot of the contents of the artifact store.
+    ///
+    /// This allows the update planner to grab the current repository (along
+    /// with all its data) to hand off to a potentially long-running update,
+    /// avoiding (some) issues with the artifacts being replaced while the
+    /// update is running.
+    pub(crate) fn snapshot(&self) -> HashMap<ArtifactId, BufList> {
+        // We expect this hashmap to be relatively small (order ~10), and
+        // cloning both ArtifactIds and BufLists are cheap.
+        self.artifacts.lock().unwrap().0.clone()
     }
 
     // ---

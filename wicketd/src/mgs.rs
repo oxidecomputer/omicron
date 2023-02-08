@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
-const MGS_TIMEOUT_MS: u32 = 3000;
+const MGS_TIMEOUT: Duration = Duration::from_secs(10);
 
 // We support:
 //   * One outstanding query request from wicket
@@ -32,7 +32,7 @@ const CHANNEL_CAPACITY: usize = 8;
 pub struct ShutdownInProgress;
 
 #[derive(Debug)]
-pub enum MgsRequest {
+enum MgsRequest {
     GetInventory {
         etag: Option<String>,
         reply_tx: oneshot::Sender<GetInventoryResponse>,
@@ -40,14 +40,15 @@ pub enum MgsRequest {
 }
 
 /// A mechanism for interacting with the  MgsManager
+#[derive(Debug, Clone)]
 pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
 }
 
-/// The response to a `get_inventory` call: the inventory of artifacts known to wicketd, or a
+/// The response to a `get_inventory` call: the inventory known to wicketd, or a
 /// notification that data is unavailable.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "kebab-case", tag = "type", content = "data")]
+#[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
     Response { inventory: RackV1Inventory, received_ago: Duration },
     Unavailable,
@@ -79,6 +80,24 @@ impl MgsHandle {
     }
 }
 
+pub fn make_mgs_client(
+    log: Logger,
+    mgs_addr: SocketAddrV6,
+) -> gateway_client::Client {
+    // TODO-correctness Do all users of this client (including both direct API
+    // calls by `UpdatePlanner` and polling by `MgsManager`) want the same
+    // timeout?
+    let endpoint = format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
+    info!(log, "MGS Endpoint: {}", endpoint);
+    let client = reqwest::ClientBuilder::new()
+        .connect_timeout(MGS_TIMEOUT)
+        .timeout(MGS_TIMEOUT)
+        .build()
+        .unwrap();
+
+    gateway_client::Client::new_with_client(&endpoint, client, log)
+}
+
 /// The entity responsible for interacting with MGS
 ///
 /// `MgsManager` will poll MGS periodically to update its local information,
@@ -106,21 +125,7 @@ impl MgsManager {
     pub fn new(log: &Logger, mgs_addr: SocketAddrV6) -> MgsManager {
         let log = log.new(o!("component" => "wicketd MgsManager"));
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
-        let endpoint =
-            format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
-        info!(log, "MGS Endpoint: {}", endpoint);
-        let timeout = std::time::Duration::from_millis(MGS_TIMEOUT_MS.into());
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(timeout)
-            .timeout(timeout)
-            .build()
-            .unwrap();
-
-        let mgs_client = gateway_client::Client::new_with_client(
-            &endpoint,
-            client,
-            log.clone(),
-        );
+        let mgs_client = make_mgs_client(log.clone(), mgs_addr);
         let inventory = None;
         MgsManager { log, tx, rx, mgs_client, inventory }
     }
@@ -149,8 +154,8 @@ impl MgsManager {
                 Some(request) = self.rx.recv() => {
                     match request {
                         MgsRequest::GetInventory {reply_tx, ..} => {
-                        let response = GetInventoryResponse::new(self.inventory.clone());
-                        let _ = reply_tx.send(response);
+                            let response = GetInventoryResponse::new(self.inventory.clone());
+                            let _ = reply_tx.send(response);
                         }
                     }
                 }

@@ -7768,6 +7768,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
+ "gateway-messages",
  "http",
  "hyper",
  "installinator-artifactd",
