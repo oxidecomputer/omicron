@@ -4133,7 +4133,7 @@ async fn instance_network_interface_delete_v1(
         let query = query_params.into_inner();
         let interface_selector = params::NetworkInterfaceSelector {
             instance_selector: query.instance_selector,
-            network_interface: path.interface.into(),
+            network_interface: path.interface,
         };
         let interface_lookup =
             nexus.network_interface_lookup(&opctx, &interface_selector)?;
