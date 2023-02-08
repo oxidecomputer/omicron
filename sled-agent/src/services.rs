@@ -239,6 +239,7 @@ pub struct ServiceManagerInner {
     ddmd_client: DdmAdminClient,
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
+    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -300,6 +301,7 @@ impl ServiceManager {
         bootstrap_etherstub: Etherstub,
         stub_scrimlet: Option<bool>,
         sidecar_revision: String,
+        switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -324,6 +326,7 @@ impl ServiceManager {
                 ddmd_client: DdmAdminClient::new(log)?,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
+                switch_zone_bootstrap_address,
             }),
         };
         Ok(mgr)
@@ -520,6 +523,7 @@ impl ServiceManager {
         let bootstrap_vnic = self.bootstrap_vnic_needed(request)?;
         let link = self.link_needed(request)?;
         let limit_priv = Self::privs_needed(request);
+        let needs_bootstrap_address = bootstrap_vnic.is_some();
 
         let devices: Vec<zone::Device> = device_names
             .iter()
@@ -544,6 +548,19 @@ impl ServiceManager {
         .await?;
 
         let running_zone = RunningZone::boot(installed_zone).await?;
+
+        if needs_bootstrap_address {
+            info!(
+                self.inner.log,
+                "Ensuring bootstrap address {} exists in switch zone",
+                self.inner.switch_zone_bootstrap_address.to_string()
+            );
+            running_zone
+                .ensure_bootstrap_address(
+                    self.inner.switch_zone_bootstrap_address,
+                )
+                .await?;
+        }
 
         for addr in &request.addresses {
             info!(

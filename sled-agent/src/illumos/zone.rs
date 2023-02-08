@@ -632,12 +632,12 @@ impl Zones {
             )
             .map_err(|err| anyhow!(err))?;
 
-            // Ensure that a static IPv6 address has been allocated
-            // to the Global Zone. Without this, we don't have a way
-            // to route to IP addresses that we want to create in
-            // the non-GZ. Note that we use a `/64` prefix, as all addresses
-            // allocated for services on this sled itself are within the underlay
-            // prefix. Anything else must be routed through Sidecar.
+            // Ensure that a static IPv6 address has been allocated to the
+            // Global Zone. Without this, we don't have a way to route to IP
+            // addresses that we want to create in the non-GZ. Note that we
+            // use a `/64` prefix, as all addresses allocated for services on
+            // this sled itself are within the underlay or bootstrap prefix.
+            // Anything else must be routed through Sidecar.
             Self::ensure_address(
                 None,
                 &gz_link_local_addrobj

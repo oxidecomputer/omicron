@@ -51,6 +51,11 @@ pub enum EnsureAddressError {
 
     #[error(transparent)]
     EnsureAddressError(#[from] crate::illumos::zone::EnsureAddressError),
+
+    #[error(
+        "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
+    )]
+    MissingBootstrapVnic { address: String, zone: String },
 }
 
 /// Erros returned from [`RunningZone::get`].
@@ -189,6 +194,33 @@ impl RunningZone {
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
+    }
+
+    /// This is the API for creating a bootstrap address on the switch zone.
+    pub async fn ensure_bootstrap_address(
+        &self,
+        address: Ipv6Addr,
+    ) -> Result<(), EnsureAddressError> {
+        info!(self.inner.log, "Adding bootstrap address");
+        let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
+            EnsureAddressError::MissingBootstrapVnic {
+                address: address.to_string(),
+                zone: self.inner.name.clone(),
+            }
+        })?;
+        let addrtype =
+            AddressRequest::new_static(std::net::IpAddr::V6(address), None);
+        let addrobj =
+            AddrObject::new(vnic.name(), "bootstrap6").map_err(|err| {
+                EnsureAddressError::AddrObject {
+                    request: addrtype,
+                    zone: self.inner.name.clone(),
+                    err,
+                }
+            })?;
+        let _ =
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        Ok(())
     }
 
     // TODO: Remove once Nexus uses OPTE - external addresses should generally

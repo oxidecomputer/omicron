@@ -121,15 +121,11 @@ fn get_sled_agent_request_path() -> PathBuf {
         .join("sled-agent-request.toml")
 }
 
-fn mac_to_socket_addr(
-    mac: MacAddr,
-    interface_id: u64,
-    port: u16,
-) -> SocketAddrV6 {
+fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
     let mac_bytes = mac.into_array();
     assert_eq!(6, mac_bytes.len());
 
-    let address = Ipv6Addr::new(
+    Ipv6Addr::new(
         BOOTSTRAP_PREFIX,
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
@@ -138,20 +134,26 @@ fn mac_to_socket_addr(
         (interface_id >> 32 & 0xffff).try_into().unwrap(),
         (interface_id >> 16 & 0xffff).try_into().unwrap(),
         (interface_id & 0xfff).try_into().unwrap(),
-    );
+    )
+}
 
-    SocketAddrV6::new(address, port, 0, 0)
+fn bootstrap_ip(
+    link: PhysicalLink,
+    interface_id: u64,
+) -> Result<Ipv6Addr, dladm::GetMacError> {
+    let mac = Dladm::get_mac(link)?;
+    Ok(mac_to_bootstrap_ip(mac, interface_id))
 }
 
 // TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
 // could be randomly generated when it no longer needs to be durable.
-pub fn bootstrap_address(
+fn bootstrap_address(
     link: PhysicalLink,
     interface_id: u64,
     port: u16,
 ) -> Result<SocketAddrV6, dladm::GetMacError> {
-    let mac = Dladm::get_mac(link)?;
-    Ok(mac_to_socket_addr(mac, interface_id, port))
+    let ip = bootstrap_ip(link, interface_id)?;
+    Ok(SocketAddrV6::new(ip, port, 0, 0))
 }
 
 impl Agent {
@@ -165,7 +167,16 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
 
-        let address = bootstrap_address(link, 1, BOOTSTRAP_AGENT_PORT)?;
+        let address = bootstrap_address(link.clone(), 1, BOOTSTRAP_AGENT_PORT)?;
+
+        // The only zone with a bootstrap ip address besides the global zone,
+        // is the switch zone. We allocate this address here since we have
+        // access to the  physical link. This also allows us to keep bootstrap
+        // address allocation in one place.
+        //
+        // If other zones end up needing bootstrap addresses, we'll have to
+        // rethink this strategy.
+        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -247,6 +258,7 @@ impl Agent {
             underlay_etherstub,
             underlay_etherstub_vnic,
             bootstrap_etherstub,
+            switch_zone_bootstrap_address,
         )
         .await?;
 

@@ -9,6 +9,7 @@ use crate::hardware::HardwareManager;
 use crate::illumos::dladm::{Etherstub, EtherstubVnic};
 use crate::services::ServiceManager;
 use slog::Logger;
+use std::net::Ipv6Addr;
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -127,6 +128,7 @@ impl HardwareMonitor {
         underlay_etherstub: Etherstub,
         underlay_etherstub_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
+        switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
         let hardware =
             HardwareManager::new(log.clone(), sled_config.stub_scrimlet)
@@ -140,6 +142,7 @@ impl HardwareMonitor {
             bootstrap_etherstub,
             sled_config.stub_scrimlet,
             sled_config.sidecar_revision.clone(),
+            switch_zone_bootstrap_address,
         )
         .await?;
 
