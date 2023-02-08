@@ -8,7 +8,12 @@
 
 use super::HostStartupOptions;
 use super::IgnitionCommand;
+use super::ImageVersion;
+use super::InstallinatorImageId;
 use super::PowerState;
+use super::RotImageDetails;
+use super::RotSlot;
+use super::RotState;
 use super::SpComponentInfo;
 use super::SpComponentList;
 use super::SpComponentPresence;
@@ -94,24 +99,74 @@ impl From<PowerState> for gateway_messages::PowerState {
     }
 }
 
-fn stringify_serial_number(serial: &[u8]) -> String {
-    // We expect serial numbers to be ASCII and 0-padded: find the first 0 byte
-    // and convert to a string. If that fails, hexlify the entire slice.
-    let first_zero =
-        serial.iter().position(|&b| b == 0).unwrap_or(serial.len());
+impl From<gateway_messages::ImageVersion> for ImageVersion {
+    fn from(v: gateway_messages::ImageVersion) -> Self {
+        Self { epoch: v.epoch, version: v.version }
+    }
+}
 
-    str::from_utf8(&serial[..first_zero])
+// We expect serial and model numbers to be ASCII and 0-padded: find the first 0
+// byte and convert to a string. If that fails, hexlify the entire slice.
+fn stringify_byte_string(bytes: &[u8]) -> String {
+    let first_zero = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+
+    str::from_utf8(&bytes[..first_zero])
         .map(|s| s.to_string())
-        .unwrap_or_else(|_err| hex::encode(serial))
+        .unwrap_or_else(|_err| hex::encode(bytes))
 }
 
 impl From<Result<gateway_messages::SpState, SpCommsError>> for SpState {
     fn from(result: Result<gateway_messages::SpState, SpCommsError>) -> Self {
         match result {
             Ok(state) => Self::Enabled {
-                serial_number: stringify_serial_number(&state.serial_number),
+                serial_number: stringify_byte_string(&state.serial_number),
+                model: stringify_byte_string(&state.model),
+                revision: state.revision,
+                hubris_archive_id: hex::encode(&state.hubris_archive_id),
+                base_mac_address: state.base_mac_address,
+                version: ImageVersion::from(state.version),
+                power_state: PowerState::from(state.power_state),
+                rot: RotState::from(state.rot),
             },
             Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
+impl From<Result<gateway_messages::RotState, gateway_messages::RotError>>
+    for RotState
+{
+    fn from(
+        result: Result<gateway_messages::RotState, gateway_messages::RotError>,
+    ) -> Self {
+        match result {
+            Ok(state) => {
+                let boot_state = state.rot_updates.boot_state;
+                Self::Enabled {
+                    active: boot_state.active.into(),
+                    slot_a: boot_state.slot_a.map(Into::into),
+                    slot_b: boot_state.slot_b.map(Into::into),
+                }
+            }
+            Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
+impl From<gateway_messages::RotSlot> for RotSlot {
+    fn from(slot: gateway_messages::RotSlot) -> Self {
+        match slot {
+            gateway_messages::RotSlot::A => Self::A,
+            gateway_messages::RotSlot::B => Self::B,
+        }
+    }
+}
+
+impl From<gateway_messages::RotImageDetails> for RotImageDetails {
+    fn from(details: gateway_messages::RotImageDetails) -> Self {
+        Self {
+            digest: hex::encode(&details.digest),
+            version: details.version.into(),
         }
     }
 }
@@ -306,5 +361,11 @@ impl From<StartupOptions> for HostStartupOptions {
             boot_net: opt.contains(StartupOptions::STARTUP_BOOT_NET),
             verbose: opt.contains(StartupOptions::STARTUP_VERBOSE),
         }
+    }
+}
+
+impl From<InstallinatorImageId> for ipcc_key_value::InstallinatorImageId {
+    fn from(id: InstallinatorImageId) -> Self {
+        Self { host_phase_2: id.host_phase_2, control_plane: id.control_plane }
     }
 }

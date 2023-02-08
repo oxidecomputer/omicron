@@ -48,10 +48,12 @@ use sprockets_rot::RotSprocket;
 use sprockets_rot::RotSprocketError;
 use std::iter;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::task;
 use tokio::task::JoinHandle;
 
@@ -61,7 +63,7 @@ pub struct Sidecar {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
-    serial_number: String,
+    handler: Option<Arc<TokioMutex<Handler>>>,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
     inner_task: Option<JoinHandle<()>>,
@@ -78,8 +80,13 @@ impl Drop for Sidecar {
 
 #[async_trait]
 impl SimulatedSp for Sidecar {
-    fn serial_number(&self) -> String {
-        self.serial_number.clone()
+    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
+        omicron_gateway::http_entrypoints::SpState::from(Ok::<
+            _,
+            omicron_gateway::CommunicationError,
+        >(
+            self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
+        ))
     }
 
     fn manufacturing_public_key(&self) -> Ed25519PublicKey {
@@ -121,7 +128,7 @@ impl Sidecar {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, inner_task) =
+        let (local_addrs, inner_task, handler) =
             if let Some(bind_addrs) = sidecar.common.bind_addrs {
                 // bind to our two local "KSZ" ports
                 assert_eq!(bind_addrs.len(), 2);
@@ -142,7 +149,7 @@ impl Sidecar {
                 let local_addrs =
                     [servers[0].local_addr(), servers[1].local_addr()];
 
-                let inner = Inner::new(
+                let (inner, handler) = Inner::new(
                     servers,
                     sidecar.common.components.clone(),
                     sidecar.common.serial_number.clone(),
@@ -153,9 +160,9 @@ impl Sidecar {
                 let inner_task =
                     task::spawn(async move { inner.run().await.unwrap() });
 
-                (Some(local_addrs), Some(inner_task))
+                (Some(local_addrs), Some(inner_task), Some(handler))
             } else {
-                (None, None)
+                (None, None, None)
             };
 
         let (manufacturing_public_key, rot) =
@@ -164,7 +171,7 @@ impl Sidecar {
             rot: Mutex::new(rot),
             manufacturing_public_key,
             local_addrs,
-            serial_number: sidecar.common.serial_number.clone(),
+            handler,
             commands,
             inner_task,
         })
@@ -196,7 +203,7 @@ enum CommandResponse {
 }
 
 struct Inner {
-    handler: Handler,
+    handler: Arc<TokioMutex<Handler>>,
     udp0: UdpServer,
     udp1: UdpServer,
     commands:
@@ -214,14 +221,15 @@ impl Inner {
             oneshot::Sender<CommandResponse>,
         )>,
         log: Logger,
-    ) -> Self {
+    ) -> (Self, Arc<TokioMutex<Handler>>) {
         let [udp0, udp1] = servers;
-        Self {
-            handler: Handler::new(serial_number, components, ignition, log),
-            udp0,
-            udp1,
-            commands,
-        }
+        let handler = Arc::new(TokioMutex::new(Handler::new(
+            serial_number,
+            components,
+            ignition,
+            log,
+        )));
+        (Self { handler: Arc::clone(&handler), udp0, udp1, commands }, handler)
     }
 
     async fn run(mut self) -> Result<()> {
@@ -231,7 +239,7 @@ impl Inner {
             select! {
                 recv0 = self.udp0.recv_from() => {
                     if let Some((resp, addr)) = server::handle_request(
-                        &mut self.handler,
+                        &mut *self.handler.lock().await,
                         recv0,
                         &mut out_buf,
                         responsiveness,
@@ -243,7 +251,7 @@ impl Inner {
 
                 recv1 = self.udp1.recv_from() => {
                     if let Some((resp, addr)) = server::handle_request(
-                        &mut self.handler,
+                        &mut *self.handler.lock().await,
                         recv1,
                         &mut out_buf,
                         responsiveness,
@@ -264,6 +272,8 @@ impl Inner {
                         Command::CurrentIgnitionState => {
                             tx.send(CommandResponse::CurrentIgnitionState(
                                 self.handler
+                                    .lock()
+                                    .await
                                     .ignition
                                     .state
                                     .clone()
@@ -325,6 +335,34 @@ impl Handler {
             serial_number,
             ignition,
             power_state: PowerState::A2,
+        }
+    }
+
+    fn sp_state_impl(&self) -> SpState {
+        const FAKE_SIDECAR_MODEL: &[u8] = b"FAKE_SIM_SIDECAR";
+
+        let mut model = [0; 32];
+        model[..FAKE_SIDECAR_MODEL.len()].copy_from_slice(FAKE_SIDECAR_MODEL);
+
+        SpState {
+            hubris_archive_id: [0; 8],
+            serial_number: serial_number_padded(&self.serial_number),
+            model,
+            revision: 0,
+            base_mac_address: [0; 6],
+            version: SIM_SIDECAR_VERSION,
+            power_state: self.power_state,
+            rot: Ok(RotState {
+                rot_updates: RotUpdateDetails {
+                    // TODO replace with configurable data once something cares
+                    // about this?
+                    boot_state: RotBootState {
+                        active: RotSlot::A,
+                        slot_a: None,
+                        slot_b: None,
+                    },
+                },
+            }),
         }
     }
 }
@@ -568,31 +606,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, SpError> {
-        const FAKE_SIDECAR_MODEL: &[u8] = b"FAKE_SIM_SIDECAR";
-
-        let mut model = [0; 32];
-        model[..FAKE_SIDECAR_MODEL.len()].copy_from_slice(FAKE_SIDECAR_MODEL);
-
-        let state = SpState {
-            hubris_archive_id: [0; 8],
-            serial_number: serial_number_padded(&self.serial_number),
-            model,
-            revision: 0,
-            base_mac_address: [0; 6],
-            version: SIM_SIDECAR_VERSION,
-            power_state: self.power_state,
-            rot: Ok(RotState {
-                rot_updates: RotUpdateDetails {
-                    // TODO replace with configurable data once something cares
-                    // about this?
-                    boot_state: RotBootState {
-                        active: RotSlot::A,
-                        slot_a: None,
-                        slot_b: None,
-                    },
-                },
-            }),
-        };
+        let state = self.sp_state_impl();
         debug!(
             &self.log, "received state request";
             "sender" => %sender,
@@ -895,6 +909,24 @@ impl SpHandler for Handler {
             "offset" => offset,
             "data_len" => data.len(),
         );
+    }
+
+    fn set_ipcc_key_lookup_value(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        key: u8,
+        value: &[u8],
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received IPCC key/value; not supported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+            "key" => key,
+            "value" => ?value,
+        );
+        Err(SpError::RequestUnsupportedForSp)
     }
 }
 

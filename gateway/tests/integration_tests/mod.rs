@@ -78,7 +78,7 @@ async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
 
         let details =
             if matches!(target_state.power_state, SystemPowerState::On) {
-                SpState::Enabled { serial_number: sp.serial_number() }
+                sp.state().await
             } else {
                 SpState::CommunicationFailed {
                     message: "powered off".to_string(),

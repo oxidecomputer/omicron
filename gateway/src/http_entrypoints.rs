@@ -19,10 +19,11 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
-use dropshot::RawRequest;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use dropshot::UntypedBody;
+use dropshot::WebsocketEndpointResult;
+use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -66,11 +67,76 @@ pub struct SpInfo {
 pub enum SpState {
     Enabled {
         serial_number: String,
-        // TODO more stuff
+        model: String,
+        revision: u32,
+        hubris_archive_id: String,
+        base_mac_address: [u8; 6],
+        version: ImageVersion,
+        power_state: PowerState,
+        rot: RotState,
     },
     CommunicationFailed {
         message: String,
     },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RotState {
+    // TODO gateway_messages's RotState includes a couple nested structures that
+    // I've flattened here because they only contain one field each. When those
+    // structures grow we'll need to expand/change this.
+    Enabled {
+        active: RotSlot,
+        slot_a: Option<RotImageDetails>,
+        slot_b: Option<RotImageDetails>,
+    },
+    CommunicationFailed {
+        message: String,
+    },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "slot", rename_all = "snake_case")]
+pub enum RotSlot {
+    A,
+    B,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotImageDetails {
+    pub digest: String,
+    pub version: ImageVersion,
 }
 
 #[derive(
@@ -309,10 +375,42 @@ pub struct HostStartupOptions {
     Deserialize,
     JsonSchema,
 )]
-enum PowerState {
+pub enum PowerState {
     A0,
     A1,
     A2,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct ImageVersion {
+    pub epoch: u32,
+    pub version: u32,
+}
+
+// This type is a duplicate of the type in `ipcc-key-value`, and we provide a
+// `From<_>` impl to convert to it. We keep these types distinct to allow us to
+// choose different representations for MGS's HTTP API (this type) and the wire
+// format passed through the SP to installinator
+// (`ipcc_key_value::InstallinatorImageId`), although _currently_ they happen to
+// be defined identically.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct InstallinatorImageId {
+    pub host_phase_2: [u8; 32],
+    pub control_plane: [u8; 32],
 }
 
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
@@ -698,6 +796,15 @@ async fn sp_component_active_slot_set(
 
 /// Upgrade into a websocket connection attached to the given SP component's
 /// serial console.
+// This is a websocket endpoint; normally we'd expect to use `dropshot::channel`
+// with `protocol = WEBSOCKETS` instead of `dropshot::endpoint`, but
+// `dropshot::channel` doesn't allow us to return an error _before_ upgrading
+// the connection, and we want to bail out ASAP if the SP doesn't allow us to
+// attach. Therefore, we use `dropshot::endpoint` with the special argument type
+// `WebsocketUpgrade`: this inserts the correct marker for progenitor to know
+// this is a websocket endpoint, and it allows us to call
+// `WebsocketUpgrade::handle()` (the method `dropshot::channel` would call for
+// us to upgrade the connection) by hand after our error checking.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component/{component}/serial-console/attach",
@@ -705,23 +812,25 @@ async fn sp_component_active_slot_set(
 async fn sp_component_serial_console_attach(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
-    raw_request: RawRequest,
-) -> Result<http::Response<hyper::Body>, HttpError> {
+    websocket: WebsocketUpgrade,
+) -> WebsocketEndpointResult {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-
     let component = component_from_str(&component)?;
-    let mut request = raw_request.into_inner();
 
-    let sp = sp.into();
-    Ok(crate::serial_console::attach(
-        &apictx.mgmt_switch,
-        sp,
-        component,
-        &mut request,
-        apictx.log.new(slog::o!("sp" => format!("{sp:?}"))),
-    )
-    .await?)
+    // Ensure we can attach to this SP's serial console.
+    let console = apictx
+        .mgmt_switch
+        .sp(sp.into())?
+        .serial_console_attach(component)
+        .await
+        .map_err(SpCommsError::from)?;
+
+    let log = apictx.log.new(slog::o!("sp" => format!("{sp:?}")));
+
+    // We've successfully attached to the SP's serial console: upgrade the
+    // websocket and run our side of that connection.
+    websocket.handle(move |conn| crate::serial_console::run(console, conn, log))
 }
 
 /// Detach the websocket connection attached to the given SP component's serial
@@ -1012,6 +1121,58 @@ async fn sp_power_state_set(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Set the installinator image ID the sled should use for recovery.
+///
+/// This value can be read by the host via IPCC; see the `ipcc-key-value` crate.
+#[endpoint {
+    method = PUT,
+    path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+}]
+async fn sp_installinator_image_id_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+    body: TypedBody<InstallinatorImageId>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    use ipcc_key_value::Key;
+
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let image_id =
+        ipcc_key_value::InstallinatorImageId::from(body.into_inner());
+
+    sp.set_ipcc_key_lookup_value(
+        Key::InstallinatorImageId as u8,
+        image_id.serialize(),
+    )
+    .await
+    .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Clear any previously-set installinator image ID on the target sled.
+#[endpoint {
+    method = DELETE,
+    path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+}]
+async fn sp_installinator_image_id_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    use ipcc_key_value::Key;
+
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    // We clear the image ID by setting it to a 0-length vec.
+    sp.set_ipcc_key_lookup_value(Key::InstallinatorImageId as u8, Vec::new())
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// Upload a host phase2 image that can be served to recovering hosts via the
 /// host/SP control uart.
 ///
@@ -1072,6 +1233,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_reset)?;
         api.register(sp_power_state_get)?;
         api.register(sp_power_state_set)?;
+        api.register(sp_installinator_image_id_set)?;
+        api.register(sp_installinator_image_id_delete)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_clear_status)?;

@@ -14,6 +14,7 @@ members = [
     "installinator-artifactd",
     "internal-dns",
     "internal-dns-client",
+    "ipcc-key-value",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -58,6 +59,7 @@ default-members = [
     "installinator-artifactd",
     "internal-dns",
     "internal-dns-client",
+    "ipcc-key-value",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -94,7 +96,7 @@ api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
 assert_cmd = "2.0.8"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.63"
+async-trait = "0.1.64"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.0"
@@ -102,8 +104,9 @@ bb8 = "0.8.0"
 bcs = "0.1.4"
 bincode = "1.3.3"
 buf-list = "0.1.3"
-bytes = "1.3.0"
+bytes = "1.4.0"
 camino = "1.1"
+ciborium = "0.2.0"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "4.1", features = ["derive"] }
@@ -127,8 +130,8 @@ fatfs = "0.3.6"
 fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a97fa5f1d19aa3062e0dfa433a5040161c5d9113" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "482bae9bfa704282e981008abae9328344150d36" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "482bae9bfa704282e981008abae9328344150d36" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -141,6 +144,7 @@ installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
 internal-dns = { path = "internal-dns" }
 internal-dns-client = { path = "internal-dns-client" }
+ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = "0.20"
 itertools = "0.10.5"
 lazy_static = "1.4.0"
@@ -194,7 +198,7 @@ proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "880a031fbdd7417cd3a4643f8bf419d8d5ea8224", features = [ "generated-migration" ] }
-proptest = "1.0.0"
+proptest = "1.1.0"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.6"
@@ -211,7 +215,7 @@ schemars = "0.8.10"
 semver = { version = "1.0.16", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
-serde_json = "1.0.91"
+serde_json = "1.0.92"
 serde_tokenstream = "0.1"
 serde_urlencoded = "0.7.1"
 serde_with = "2.2.0"
@@ -261,13 +265,13 @@ trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
 trybuild = "1.0.77"
 tufaceous-lib = { path = "tufaceous-lib" }
-uuid = { version = "1.2.2", features = ["serde", "v4"] }
+uuid = { version = "1.3.0", features = ["serde", "v4"] }
 usdt = "0.3"
 vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
 walkdir = "2.3"
 wicketd-client = { path = "wicketd-client" }
 zeroize = { version = "1.5.7", features = ["zeroize_derive", "std"] }
-zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "0.6.4", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.2", default-features = false, features = ["async"] }
 
 [profile.dev]

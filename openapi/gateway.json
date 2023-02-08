@@ -542,7 +542,8 @@
               }
             }
           }
-        }
+        },
+        "x-dropshot-websocket": {}
       }
     },
     "/sp/{type}/{slot}/component/{component}/serial-console/detach": {
@@ -750,6 +751,89 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/ipcc/installinator-image-id": {
+      "put": {
+        "summary": "Set the installinator image ID the sled should use for recovery.",
+        "description": "This value can be read by the host via IPCC; see the `ipcc-key-value` crate.",
+        "operationId": "sp_installinator_image_id_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallinatorImageId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear any previously-set installinator image ID on the target sled.",
+        "operationId": "sp_installinator_image_id_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1066,6 +1150,54 @@
           "phase2_recovery_mode",
           "prom",
           "verbose"
+        ]
+      },
+      "ImageVersion": {
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "epoch",
+          "version"
+        ]
+      },
+      "InstallinatorImageId": {
+        "type": "object",
+        "properties": {
+          "control_plane": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 32,
+            "maxItems": 32
+          },
+          "host_phase_2": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 32,
+            "maxItems": 32
+          }
+        },
+        "required": [
+          "control_plane",
+          "host_phase_2"
         ]
       },
       "LinkStatus": {
@@ -1683,6 +1815,109 @@
           "A2"
         ]
       },
+      "RotImageDetails": {
+        "type": "object",
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ImageVersion"
+          }
+        },
+        "required": [
+          "digest",
+          "version"
+        ]
+      },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageDetails"
+                  }
+                ]
+              },
+              "slot_b": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageDetails"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "communication_failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
       "SpComponentDetails": {
         "oneOf": [
           {
@@ -2126,6 +2361,33 @@
           {
             "type": "object",
             "properties": {
+              "base_mac_address": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                },
+                "minItems": 6,
+                "maxItems": 6
+              },
+              "hubris_archive_id": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "power_state": {
+                "$ref": "#/components/schemas/PowerState"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "rot": {
+                "$ref": "#/components/schemas/RotState"
+              },
               "serial_number": {
                 "type": "string"
               },
@@ -2134,11 +2396,21 @@
                 "enum": [
                   "enabled"
                 ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ImageVersion"
               }
             },
             "required": [
+              "base_mac_address",
+              "hubris_archive_id",
+              "model",
+              "power_state",
+              "revision",
+              "rot",
               "serial_number",
-              "state"
+              "state",
+              "version"
             ]
           },
           {

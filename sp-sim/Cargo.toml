@@ -10,6 +10,7 @@ async-trait.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+omicron-gateway.path = "../gateway"
 gateway-messages.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
 omicron-common.workspace = true
