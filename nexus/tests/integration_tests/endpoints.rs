@@ -23,8 +23,6 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteCreateParams;
-use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
