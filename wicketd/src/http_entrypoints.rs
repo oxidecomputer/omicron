@@ -14,6 +14,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::UntypedBody;
+use omicron_common::api::internal::nexus::UpdateArtifactId;
 
 use crate::ServerContext;
 
@@ -26,6 +27,7 @@ pub fn api() -> WicketdApiDescription {
     ) -> Result<(), String> {
         api.register(get_inventory)?;
         api.register(put_repository)?;
+        api.register(get_artifacts)?;
         Ok(())
     }
 
@@ -77,4 +79,22 @@ async fn put_repository(
         .artifact_store
         .add_repository(path.into_inner(), body.as_bytes())?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// An endpoint used to report all available artifacts.
+///
+/// The order of the returned artifacts is unspecified, and may change between
+/// calls even if the total set of artifacts has not.
+#[endpoint {
+    method = GET,
+    path = "/artifacts",
+}]
+async fn get_artifacts(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<Vec<UpdateArtifactId>>, HttpError> {
+    let artifacts = rqctx
+        .context()
+        .artifact_store
+        .artifact_ids();
+    Ok(HttpResponseOk(artifacts))
 }

@@ -72,6 +72,10 @@ impl WicketdArtifactStore {
         Ok(())
     }
 
+    pub(crate) fn artifact_ids(&self) -> Vec<UpdateArtifactId> {
+        self.artifacts.lock().unwrap().keys().cloned().collect()
+    }
+
     // ---
     // Helper methods
     // ---
