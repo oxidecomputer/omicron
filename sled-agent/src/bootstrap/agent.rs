@@ -674,12 +674,12 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn test_mac_to_socket_addr() {
+    fn test_mac_to_bootstrap_ip() {
         let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
 
         assert_eq!(
-            mac_to_socket_addr(mac, 1, BOOTSTRAP_AGENT_PORT).ip(),
-            &"fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
+            mac_to_bootstrap_ip(mac, 1),
+            "fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
         );
     }
 

@@ -1176,8 +1176,8 @@ mod test {
     use super::*;
     use crate::illumos::{
         dladm::{
-            Etherstub, MockDladm, UNDERLAY_ETHERSTUB_NAME,
-            UNDERLAY_ETHERSTUB_VNIC_NAME,
+            Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
+            UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
         svc,
         zone::MockZones,
@@ -1186,6 +1186,9 @@ mod test {
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
+
+    // Just a placeholder. Not used.
+    const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
     const EXPECTED_ZONE_NAME: &str = "oxz_oximeter";
 
@@ -1336,8 +1339,10 @@ mod test {
             log,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1371,8 +1376,10 @@ mod test {
             log,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1408,8 +1415,10 @@ mod test {
             logctx.log.clone(),
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1434,8 +1443,10 @@ mod test {
             logctx.log.clone(),
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1468,8 +1479,10 @@ mod test {
             logctx.log.clone(),
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1496,8 +1509,10 @@ mod test {
             logctx.log.clone(),
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
