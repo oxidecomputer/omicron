@@ -152,10 +152,12 @@ impl InstanceSelector {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalInstanceSelector {
+    #[serde(flatten)]
     pub instance_selector: Option<InstanceSelector>,
 }
 
 pub struct NetworkInterfaceSelector {
+    #[serde(flatten)]
     pub instance_selector: Option<InstanceSelector>,
     pub network_interface: NameOrId,
 }
