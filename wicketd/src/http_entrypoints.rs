@@ -16,6 +16,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use dropshot::UntypedBody;
 use gateway_client::types::SpIdentifier;
+use gateway_client::types::SpType;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -36,6 +37,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(get_artifacts)?;
         api.register(post_component_update)?;
         api.register(get_component_update_status)?;
+        api.register(post_component_update_abort)?;
         Ok(())
     }
 
@@ -167,8 +169,9 @@ async fn post_component_update(
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct SpComponentIdentifier {
-    #[serde(flatten)]
-    pub sp: SpIdentifier,
+    #[serde(rename = "type")]
+    pub type_: SpType,
+    pub slot: u32,
     pub component: String,
 }
 
@@ -189,4 +192,24 @@ async fn get_component_update_status(
         .await?;
 
     Ok(HttpResponseOk(response))
+}
+
+/// An endpoint to abort an in-progress, failed, or stalled update being applied
+/// to a component by MGS.
+#[endpoint {
+    method = POST,
+    path = "/update/{type}/{slot}/{component}/abort",
+}]
+async fn post_component_update_abort(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpComponentIdentifier>,
+    body: TypedBody<Uuid>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    rqctx
+        .context()
+        .mgs_handle
+        .component_update_abort(target.into_inner(), body.into_inner())
+        .await?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }

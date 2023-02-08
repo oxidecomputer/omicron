@@ -29,7 +29,7 @@ use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 use uuid::Uuid;
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
-const MGS_TIMEOUT_MS: u32 = 3000;
+const MGS_TIMEOUT: Duration = Duration::from_secs(10);
 
 // We support:
 //   * One outstanding query request from wicket
@@ -225,9 +225,26 @@ impl MgsHandle {
     ) -> Result<SpUpdateStatus, HttpError> {
         self.mgs_client
             .sp_component_update_status(
-                target.sp.type_,
-                target.sp.slot,
+                target.type_,
+                target.slot,
                 &target.component,
+            )
+            .await
+            .map(|resp| resp.into_inner())
+            .map_err(map_mgs_client_error)
+    }
+
+    pub async fn component_update_abort(
+        &self,
+        target: SpComponentIdentifier,
+        update_id: Uuid,
+    ) -> Result<(), HttpError> {
+        self.mgs_client
+            .sp_component_update_abort(
+                target.type_,
+                target.slot,
+                &target.component,
+                &gateway_client::types::UpdateAbortBody { id: update_id },
             )
             .await
             .map(|resp| resp.into_inner())
@@ -265,10 +282,9 @@ impl MgsManager {
         let endpoint =
             format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
         info!(log, "MGS Endpoint: {}", endpoint);
-        let timeout = std::time::Duration::from_millis(MGS_TIMEOUT_MS.into());
         let client = reqwest::ClientBuilder::new()
-            .connect_timeout(timeout)
-            .timeout(timeout)
+            .connect_timeout(MGS_TIMEOUT)
+            .timeout(MGS_TIMEOUT)
             .build()
             .unwrap();
 
