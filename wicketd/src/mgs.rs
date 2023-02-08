@@ -5,17 +5,28 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
+use crate::http_entrypoints::{
+    PostComponentUpdateResponse, SpComponentIdentifier,
+};
 use crate::{RackV1Inventory, SpInventory};
+use buf_list::BufList;
+use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use gateway_client::types::{SpComponentList, SpIdentifier, SpInfo};
+use gateway_client::types::{
+    SpComponentList, SpIdentifier, SpInfo, SpType, SpUpdateStatus, UpdateBody,
+};
+use gateway_messages::SpComponent;
+use omicron_common::api::internal::nexus::UpdateArtifactKind;
 use schemars::JsonSchema;
 use serde::Serialize;
 use slog::{info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
+use uuid::Uuid;
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const MGS_TIMEOUT_MS: u32 = 3000;
@@ -31,6 +42,67 @@ const CHANNEL_CAPACITY: usize = 8;
 #[derive(Debug, PartialEq, Eq)]
 pub struct ShutdownInProgress;
 
+/// Possible errors from attempting to start a component update.
+#[derive(Debug, Error)]
+pub enum StartComponentUpdateError {
+    #[error("cannot apply updates of kind {0:?}")]
+    CannotApplyUpdatesOfKind(UpdateArtifactKind),
+    #[error("artifact kind {kind:?} requires target of type {required:?}, but target is of type {target:?}")]
+    CannotApplyUpdateToTargetType {
+        kind: UpdateArtifactKind,
+        required: SpType,
+        target: SpType,
+    },
+    #[error(transparent)]
+    MgsResponseError(gateway_client::Error<gateway_client::types::Error>),
+}
+
+impl From<StartComponentUpdateError> for HttpError {
+    fn from(err: StartComponentUpdateError) -> Self {
+        match err {
+            StartComponentUpdateError::CannotApplyUpdatesOfKind(_)
+            | StartComponentUpdateError::CannotApplyUpdateToTargetType {
+                ..
+            } => Self::for_bad_request(None, err.to_string()),
+            StartComponentUpdateError::MgsResponseError(err) => {
+                map_mgs_client_error(err)
+            }
+        }
+    }
+}
+
+fn map_mgs_client_error(
+    err: gateway_client::Error<gateway_client::types::Error>,
+) -> HttpError {
+    use gateway_client::Error;
+
+    match err {
+        Error::InvalidRequest(message) => {
+            HttpError::for_bad_request(None, message)
+        }
+        Error::CommunicationError(err) | Error::InvalidResponsePayload(err) => {
+            HttpError::for_internal_error(err.to_string())
+        }
+        Error::UnexpectedResponse(response) => HttpError::for_internal_error(
+            format!("unexpected response from MGS: {:?}", response.status()),
+        ),
+        // Proxy MGS's response to our caller.
+        Error::ErrorResponse(response) => {
+            let status_code = response.status();
+            let response = response.into_inner();
+            HttpError {
+                status_code,
+                error_code: response.error_code,
+                external_message: response.message,
+                internal_message: format!(
+                    "error response from MGS (request_id = {})",
+                    response.request_id
+                ),
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum MgsRequest {
     GetInventory {
@@ -42,12 +114,13 @@ pub enum MgsRequest {
 /// A mechanism for interacting with the  MgsManager
 pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
+    mgs_client: gateway_client::Client,
 }
 
-/// The response to a `get_inventory` call: the inventory of artifacts known to wicketd, or a
+/// The response to a `get_inventory` call: the inventory known to wicketd, or a
 /// notification that data is unavailable.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "kebab-case", tag = "type", content = "data")]
+#[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
     Response { inventory: RackV1Inventory, received_ago: Duration },
     Unavailable,
@@ -76,6 +149,89 @@ impl MgsHandle {
             .await
             .map_err(|_| ShutdownInProgress)?;
         reply_rx.await.map_err(|_| ShutdownInProgress)
+    }
+
+    pub async fn start_component_update(
+        &self,
+        target: SpIdentifier,
+        update_slot: u16,
+        kind: UpdateArtifactKind,
+        data: BufList,
+    ) -> Result<PostComponentUpdateResponse, StartComponentUpdateError> {
+        let (expected_type, component) = match kind {
+            UpdateArtifactKind::GimletSp => {
+                (SpType::Sled, SpComponent::SP_ITSELF.const_as_str())
+            }
+            UpdateArtifactKind::PscSp => {
+                (SpType::Power, SpComponent::SP_ITSELF.const_as_str())
+            }
+            UpdateArtifactKind::SwitchSp => {
+                (SpType::Switch, SpComponent::SP_ITSELF.const_as_str())
+            }
+            UpdateArtifactKind::GimletRot => {
+                (SpType::Sled, SpComponent::ROT.const_as_str())
+            }
+            UpdateArtifactKind::PscRot => {
+                (SpType::Power, SpComponent::ROT.const_as_str())
+            }
+            UpdateArtifactKind::SwitchRot => {
+                (SpType::Switch, SpComponent::ROT.const_as_str())
+            }
+            UpdateArtifactKind::HostPhase1 => {
+                (SpType::Sled, SpComponent::HOST_CPU_BOOT_FLASH.const_as_str())
+            }
+            UpdateArtifactKind::HostPhase2
+            | UpdateArtifactKind::ControlPlane => {
+                return Err(
+                    StartComponentUpdateError::CannotApplyUpdatesOfKind(kind),
+                )
+            }
+        };
+        if expected_type != target.type_ {
+            return Err(
+                StartComponentUpdateError::CannotApplyUpdateToTargetType {
+                    kind,
+                    required: expected_type,
+                    target: target.type_,
+                },
+            );
+        }
+
+        // TODO Convert a BufList into a Vec<u8> - this is a little gross.
+        // Should MGS's endpoint accept a BufList somehow? Should the artifact
+        // store give us something more amenable to conversion?
+        let mut image = Vec::with_capacity(data.num_bytes());
+        for chunk in data {
+            image.extend_from_slice(&*chunk);
+        }
+
+        let update_id = Uuid::new_v4();
+        let request =
+            UpdateBody { id: update_id.clone(), image, slot: update_slot };
+
+        self.mgs_client
+            .sp_component_update(target.type_, target.slot, component, &request)
+            .await
+            .map(|_ok| PostComponentUpdateResponse {
+                update_id,
+                component: component.to_string(),
+            })
+            .map_err(StartComponentUpdateError::MgsResponseError)
+    }
+
+    pub async fn get_component_update_status(
+        &self,
+        target: SpComponentIdentifier,
+    ) -> Result<SpUpdateStatus, HttpError> {
+        self.mgs_client
+            .sp_component_update_status(
+                target.sp.type_,
+                target.sp.slot,
+                &target.component,
+            )
+            .await
+            .map(|resp| resp.into_inner())
+            .map_err(map_mgs_client_error)
     }
 }
 
@@ -126,12 +282,12 @@ impl MgsManager {
     }
 
     pub fn get_handle(&self) -> MgsHandle {
-        MgsHandle { tx: self.tx.clone() }
+        MgsHandle { tx: self.tx.clone(), mgs_client: self.mgs_client.clone() }
     }
 
     pub async fn run(mut self) {
-        let mgs_client = self.mgs_client;
-        let mut inventory_rx = poll_sps(&self.log, mgs_client).await;
+        let mut inventory_rx =
+            poll_sps(&self.log, self.mgs_client.clone()).await;
 
         loop {
             tokio::select! {
@@ -149,8 +305,8 @@ impl MgsManager {
                 Some(request) = self.rx.recv() => {
                     match request {
                         MgsRequest::GetInventory {reply_tx, ..} => {
-                        let response = GetInventoryResponse::new(self.inventory.clone());
-                        let _ = reply_tx.send(response);
+                            let response = GetInventoryResponse::new(self.inventory.clone());
+                            let _ = reply_tx.send(response);
                         }
                     }
                 }

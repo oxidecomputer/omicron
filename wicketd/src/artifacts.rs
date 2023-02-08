@@ -76,15 +76,15 @@ impl WicketdArtifactStore {
         self.artifacts.lock().unwrap().keys().cloned().collect()
     }
 
-    // ---
-    // Helper methods
-    // ---
-
-    fn get(&self, id: &UpdateArtifactId) -> Option<BufList> {
+    pub(crate) fn get(&self, id: &UpdateArtifactId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
         self.artifacts.lock().unwrap().get(id).cloned()
     }
+
+    // ---
+    // Helper methods
+    // ---
 
     fn insert_all(
         &self,

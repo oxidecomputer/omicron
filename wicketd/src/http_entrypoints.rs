@@ -13,8 +13,14 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
+use dropshot::TypedBody;
 use dropshot::UntypedBody;
+use gateway_client::types::SpIdentifier;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use uuid::Uuid;
 
 use crate::ServerContext;
 
@@ -28,6 +34,8 @@ pub fn api() -> WicketdApiDescription {
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts)?;
+        api.register(post_component_update)?;
+        api.register(get_component_update_status)?;
         Ok(())
     }
 
@@ -81,6 +89,14 @@ async fn put_repository(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/// The response to a `get_artifacts` call: the list of all artifacts currently
+/// held by wicketd.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GetArtifactsResponse {
+    pub artifacts: Vec<UpdateArtifactId>,
+}
+
 /// An endpoint used to report all available artifacts.
 ///
 /// The order of the returned artifacts is unspecified, and may change between
@@ -91,10 +107,86 @@ async fn put_repository(
 }]
 async fn get_artifacts(
     rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<Vec<UpdateArtifactId>>, HttpError> {
-    let artifacts = rqctx
+) -> Result<HttpResponseOk<GetArtifactsResponse>, HttpError> {
+    let artifacts = rqctx.context().artifact_store.artifact_ids();
+    Ok(HttpResponseOk(GetArtifactsResponse { artifacts }))
+}
+
+/// Description of an update to apply via the management network.
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ComponentUpdate {
+    pub artifact_id: UpdateArtifactId,
+    pub update_slot: u16,
+}
+
+/// The response to a `post_component_update` call: the UUID of the update, used
+/// to poll for the status of the update.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PostComponentUpdateResponse {
+    pub update_id: Uuid,
+    pub component: String,
+}
+
+/// An endpoint to start a component update via MGS.
+#[endpoint {
+    method = POST,
+    path = "/update/{type}/{slot}",
+}]
+async fn post_component_update(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpIdentifier>,
+    body: TypedBody<ComponentUpdate>,
+) -> Result<HttpResponseOk<PostComponentUpdateResponse>, HttpError> {
+    let rqctx = rqctx.context();
+    let body = body.into_inner();
+
+    let data =
+        rqctx.artifact_store.get(&body.artifact_id).ok_or_else(|| {
+            HttpError::for_bad_request(
+                None,
+                "no artifact found for requested artifact ID".to_string(),
+            )
+        })?;
+
+    let response = rqctx
+        .mgs_handle
+        .start_component_update(
+            target.into_inner(),
+            body.update_slot,
+            body.artifact_id.kind,
+            data,
+        )
+        .await?;
+
+    Ok(HttpResponseOk(response))
+}
+
+/// Description of a specific component on a target SP.
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SpComponentIdentifier {
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    pub component: String,
+}
+
+/// An endpoint to request the current status of an update being applied to a
+/// component by MGS.
+#[endpoint {
+    method = GET,
+    path = "/update/{type}/{slot}/{component}",
+}]
+async fn get_component_update_status(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpComponentIdentifier>,
+) -> Result<HttpResponseOk<gateway_client::types::SpUpdateStatus>, HttpError> {
+    let response = rqctx
         .context()
-        .artifact_store
-        .artifact_ids();
-    Ok(HttpResponseOk(artifacts))
+        .mgs_handle
+        .get_component_update_status(target.into_inner())
+        .await?;
+
+    Ok(HttpResponseOk(response))
 }

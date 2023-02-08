@@ -10,6 +10,31 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/artifacts": {
+      "get": {
+        "summary": "An endpoint used to report all available artifacts.",
+        "description": "The order of the returned artifacts is unspecified, and may change between calls even if the total set of artifacts has not.",
+        "operationId": "get_artifacts",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetArtifactsResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "A status endpoint used to report high level information known to wicketd.",
@@ -82,6 +107,113 @@
           }
         }
       }
+    },
+    "/update/{type}/{slot}": {
+      "post": {
+        "summary": "An endpoint to start a component update via MGS.",
+        "operationId": "post_component_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComponentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostComponentUpdateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/update/{type}/{slot}/{component}": {
+      "get": {
+        "summary": "An endpoint to request the current status of an update being applied to a",
+        "description": "component by MGS.",
+        "operationId": "get_component_update_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpUpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -98,6 +230,24 @@
       }
     },
     "schemas": {
+      "ComponentUpdate": {
+        "description": "Description of an update to apply via the management network.",
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/components/schemas/UpdateArtifactId"
+          },
+          "update_slot": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "artifact_id",
+          "update_slot"
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -136,8 +286,23 @@
           "request_id"
         ]
       },
+      "GetArtifactsResponse": {
+        "description": "The response to a `get_artifacts` call: the list of all artifacts currently held by wicketd.",
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateArtifactId"
+            }
+          }
+        },
+        "required": [
+          "artifacts"
+        ]
+      },
       "GetInventoryResponse": {
-        "description": "The response to a `get_inventory` call: the inventory of artifacts known to wicketd, or a notification that data is unavailable.",
+        "description": "The response to a `get_inventory` call: the inventory known to wicketd, or a notification that data is unavailable.",
         "oneOf": [
           {
             "type": "object",
@@ -202,6 +367,23 @@
         "required": [
           "epoch",
           "version"
+        ]
+      },
+      "PostComponentUpdateResponse": {
+        "description": "The response to a `post_component_update` call: the UUID of the update, used to poll for the status of the update.",
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "update_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "component",
+          "update_id"
         ]
       },
       "PowerState": {
@@ -697,6 +879,212 @@
           "sled",
           "power",
           "switch"
+        ]
+      },
+      "SpUpdateStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is preparing to receive an update.\n\nMay or may not include progress, depending on the capabilities of the component being updated.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "progress": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UpdatePreparationProgress"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is currently receiving an update.",
+            "type": "object",
+            "properties": {
+              "bytes_received": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              },
+              "total_bytes": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "bytes_received",
+              "id",
+              "state",
+              "total_bytes"
+            ]
+          },
+          {
+            "description": "The SP has completed receiving an update.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The SP has aborted an in-progress update.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The update process failed.",
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "id",
+              "state"
+            ]
+          }
+        ]
+      },
+      "UpdateArtifactId": {
+        "description": "An identifier for a single update artifact.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of update artifact this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateArtifactKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "The artifact's name.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The artifact's version.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "version"
+        ]
+      },
+      "UpdateArtifactKind": {
+        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
+        "type": "string",
+        "enum": [
+          "gimlet_sp",
+          "gimlet_rot",
+          "host_phase1",
+          "host_phase2",
+          "control_plane",
+          "psc_sp",
+          "psc_rot",
+          "switch_sp",
+          "switch_rot"
+        ]
+      },
+      "UpdatePreparationProgress": {
+        "description": "Progress of an SP preparing to update.\n\nThe units of `current` and `total` are unspecified and defined by the SP; e.g., if preparing for an update requires erasing a flash device, this may indicate progress of that erasure without defining units (bytes, pages, sectors, etc.).",
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "current",
+          "total"
         ]
       }
     }
