@@ -4269,7 +4269,7 @@ async fn instance_network_interface_view_by_id(
 /// Update a network interface
 #[endpoint {
     method = PUT,
-    path = "/v1/network-interfaces/{interface_name}",
+    path = "/v1/network-interfaces/{interface}",
     tags = ["instances"],
 }]
 async fn instance_network_interface_update_v1(
@@ -5535,7 +5535,7 @@ async fn vpc_router_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// Create a router
+/// Create a VPC router
 #[endpoint {
     method = POST,
     path = "/v1/vpc-routers",

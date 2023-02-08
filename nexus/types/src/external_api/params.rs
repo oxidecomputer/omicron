@@ -156,6 +156,7 @@ pub struct OptionalInstanceSelector {
     pub instance_selector: Option<InstanceSelector>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct NetworkInterfaceSelector {
     #[serde(flatten)]
     pub instance_selector: Option<InstanceSelector>,

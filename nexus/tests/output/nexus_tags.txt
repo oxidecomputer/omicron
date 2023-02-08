@@ -47,11 +47,16 @@ instance_list_v1                         /v1/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 instance_migrate_v1                      /v1/instances/{instance}/migrate
 instance_network_interface_create        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interface_create_v1     /v1/network-interfaces
 instance_network_interface_delete        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interface_delete_v1     /v1/network-interfaces/{interface}
 instance_network_interface_list          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interface_list_v1       /v1/network-interfaces
 instance_network_interface_update        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interface_update_v1     /v1/network-interfaces/{interface}
 instance_network_interface_view          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interface_view_by_id    /by-id/network-interfaces/{id}
+instance_network_interface_view_v1       /v1/network-interfaces/{interface}
 instance_reboot                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
 instance_reboot_v1                       /v1/instances/{instance}/reboot
 instance_serial_console                  /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console
