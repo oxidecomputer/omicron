@@ -14713,7 +14713,7 @@
         ]
       },
       "RouterRouteCreate": {
-        "description": "Create-time parameters for a [`RouterRoute`]",
+        "description": "Create-time parameters for a [`omicron_common::api::external::RouterRoute`]",
         "type": "object",
         "properties": {
           "description": {
@@ -14791,7 +14791,7 @@
         ]
       },
       "RouterRouteUpdate": {
-        "description": "Updateable properties of a [`RouterRoute`]",
+        "description": "Updateable properties of a [`omicron_common::api::external::RouterRoute`]",
         "type": "object",
         "properties": {
           "description": {
