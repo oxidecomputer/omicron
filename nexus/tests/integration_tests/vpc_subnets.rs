@@ -43,12 +43,6 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     let _ = create_project(&client, org_name, project_name).await;
     populate_ip_pool(client, "default", None).await;
 
-    let vpcs_url =
-        format!("/v1/vpcs?organization={}&project={}", org_name, project_name);
-    let vpc_url = format!(
-        "/v1/vpcs/default?organization={}&project={}",
-        org_name, project_name
-    );
     let subnets_url = format!(
         "/v1/vpc-subnets?organization={}&project={}",
         org_name, project_name
