@@ -204,6 +204,11 @@ impl Zones {
         Ok(())
     }
 
+    /// Installs a zone with the provided arguments.
+    ///
+    /// - If a zone with the name `zone_name` exists and is currently running,
+    /// we return immediately.
+    /// - Otherwise, the zone is deleted.
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
@@ -221,11 +226,9 @@ impl Zones {
                 zone.name(),
                 zone.state()
             );
-            if zone.state() == zone::State::Installed
-                || zone.state() == zone::State::Running
-            {
+            if zone.state() == zone::State::Running {
                 // TODO: Admittedly, the zone still might be messed up. However,
-                // for now, we assume that "installed" means "good to go".
+                // for now, we assume that "running" means "good to go".
                 return Ok(());
             } else {
                 info!(
