@@ -15,18 +15,24 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use gateway_client::types::{
     SpComponentList, SpIdentifier, SpInfo, SpType, SpUpdateStatus, UpdateBody,
+    UpdatePreparationProgress,
 };
 use gateway_messages::SpComponent;
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use omicron_common::api::internal::nexus::{
+    UpdateArtifactId, UpdateArtifactKind,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 use slog::{info, o, warn, Logger};
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 use uuid::Uuid;
+
+type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const MGS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -45,6 +51,8 @@ pub struct ShutdownInProgress;
 /// Possible errors from attempting to start a component update.
 #[derive(Debug, Error)]
 pub enum StartComponentUpdateError {
+    #[error("server is shutting down")]
+    ShutdownInProgress,
     #[error("cannot apply updates of kind {0:?}")]
     CannotApplyUpdatesOfKind(UpdateArtifactKind),
     #[error("artifact kind {kind:?} requires target of type {required:?}, but target is of type {target:?}")]
@@ -53,20 +61,21 @@ pub enum StartComponentUpdateError {
         required: SpType,
         target: SpType,
     },
-    #[error(transparent)]
-    MgsResponseError(gateway_client::Error<gateway_client::types::Error>),
+    #[error("the target SP is busy applying an update")]
+    TargetSpBusy,
 }
 
 impl From<StartComponentUpdateError> for HttpError {
     fn from(err: StartComponentUpdateError) -> Self {
         match err {
+            StartComponentUpdateError::ShutdownInProgress
+            | StartComponentUpdateError::TargetSpBusy => {
+                Self::for_unavail(None, err.to_string())
+            }
             StartComponentUpdateError::CannotApplyUpdatesOfKind(_)
             | StartComponentUpdateError::CannotApplyUpdateToTargetType {
                 ..
             } => Self::for_bad_request(None, err.to_string()),
-            StartComponentUpdateError::MgsResponseError(err) => {
-                map_mgs_client_error(err)
-            }
         }
     }
 }
@@ -108,6 +117,15 @@ pub enum MgsRequest {
     GetInventory {
         etag: Option<String>,
         reply_tx: oneshot::Sender<GetInventoryResponse>,
+    },
+    StartComponentUpdate {
+        sp: SpIdentifier,
+        artifact: UpdateArtifactId,
+        update_slot: u16,
+        data: BufList,
+        reply_tx: oneshot::Sender<
+            Result<PostComponentUpdateResponse, StartComponentUpdateError>,
+        >,
     },
 }
 
@@ -155,68 +173,24 @@ impl MgsHandle {
         &self,
         target: SpIdentifier,
         update_slot: u16,
-        kind: UpdateArtifactKind,
+        artifact: UpdateArtifactId,
         data: BufList,
     ) -> Result<PostComponentUpdateResponse, StartComponentUpdateError> {
-        let (expected_type, component) = match kind {
-            UpdateArtifactKind::GimletSp => {
-                (SpType::Sled, SpComponent::SP_ITSELF.const_as_str())
-            }
-            UpdateArtifactKind::PscSp => {
-                (SpType::Power, SpComponent::SP_ITSELF.const_as_str())
-            }
-            UpdateArtifactKind::SwitchSp => {
-                (SpType::Switch, SpComponent::SP_ITSELF.const_as_str())
-            }
-            UpdateArtifactKind::GimletRot => {
-                (SpType::Sled, SpComponent::ROT.const_as_str())
-            }
-            UpdateArtifactKind::PscRot => {
-                (SpType::Power, SpComponent::ROT.const_as_str())
-            }
-            UpdateArtifactKind::SwitchRot => {
-                (SpType::Switch, SpComponent::ROT.const_as_str())
-            }
-            UpdateArtifactKind::HostPhase1 => {
-                (SpType::Sled, SpComponent::HOST_CPU_BOOT_FLASH.const_as_str())
-            }
-            UpdateArtifactKind::HostPhase2
-            | UpdateArtifactKind::ControlPlane => {
-                return Err(
-                    StartComponentUpdateError::CannotApplyUpdatesOfKind(kind),
-                )
-            }
-        };
-        if expected_type != target.type_ {
-            return Err(
-                StartComponentUpdateError::CannotApplyUpdateToTargetType {
-                    kind,
-                    required: expected_type,
-                    target: target.type_,
-                },
-            );
-        }
-
-        // TODO Convert a BufList into a Vec<u8> - this is a little gross.
-        // Should MGS's endpoint accept a BufList somehow? Should the artifact
-        // store give us something more amenable to conversion?
-        let mut image = Vec::with_capacity(data.num_bytes());
-        for chunk in data {
-            image.extend_from_slice(&*chunk);
-        }
-
-        let update_id = Uuid::new_v4();
-        let request =
-            UpdateBody { id: update_id.clone(), image, slot: update_slot };
-
-        self.mgs_client
-            .sp_component_update(target.type_, target.slot, component, &request)
-            .await
-            .map(|_ok| PostComponentUpdateResponse {
-                update_id,
-                component: component.to_string(),
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(MgsRequest::StartComponentUpdate {
+                sp: target,
+                artifact,
+                update_slot,
+                data,
+                reply_tx,
             })
-            .map_err(StartComponentUpdateError::MgsResponseError)
+            .await
+            .map_err(|_| StartComponentUpdateError::ShutdownInProgress)?;
+        reply_rx
+            .await
+            .map_err(|_| StartComponentUpdateError::ShutdownInProgress)
+            .and_then(|res| res)
     }
 
     pub async fn get_component_update_status(
@@ -284,6 +258,11 @@ pub struct MgsManager {
     mgs_client: gateway_client::Client,
     // The Instant indicates the moment at which the inventory was received.
     inventory: Option<(RackV1Inventory, Instant)>,
+    // Any given SP can be in the process of applying at most one update
+    // concurrently; this hash map records that one update (if it exists).
+    inflight_updates: BTreeMap<SpIdentifier, ComponentUpdateStatus>,
+    // TODO-correctness finish commenting why this thing is bad
+    complete_updates: BTreeMap<SpIdentifier, Vec<ComponentUpdateStatus>>,
 }
 
 impl MgsManager {
@@ -304,8 +283,15 @@ impl MgsManager {
             client,
             log.clone(),
         );
-        let inventory = None;
-        MgsManager { log, tx, rx, mgs_client, inventory }
+        MgsManager {
+            log,
+            tx,
+            rx,
+            mgs_client,
+            inventory: None,
+            inflight_updates: BTreeMap::new(),
+            complete_updates: BTreeMap::new(),
+        }
     }
 
     pub fn get_handle(&self) -> MgsHandle {
@@ -315,6 +301,15 @@ impl MgsManager {
     pub async fn run(mut self) {
         let mut inventory_rx =
             poll_sps(&self.log, self.mgs_client.clone()).await;
+
+        // Create a channel on which any SP update progress messages can be
+        // delivered; we set the size to 36 to leave a slot for every SP,
+        // although for the time being we really expect this to have at most one
+        // element in it (since we plan to issue updates sequentially).
+        //
+        // Any time we spawn an updating task, we'll give it a clone of
+        // `update_state_tx`.
+        let (update_state_tx, mut update_state_rx) = mpsc::channel(36);
 
         loop {
             tokio::select! {
@@ -328,6 +323,12 @@ impl MgsManager {
                     self.inventory = Some((inventory, mgs_received));
                 }
 
+                // Handle update progress messages from `DeliverComponentUpdate`
+                // tasks we've spawned.
+                Some(new_state) = update_state_rx.recv() => {
+                    self.handle_new_inflight_update_status(new_state);
+                }
+
                 // Handle requests from clients
                 Some(request) = self.rx.recv() => {
                     match request {
@@ -335,8 +336,137 @@ impl MgsManager {
                             let response = GetInventoryResponse::new(self.inventory.clone());
                             let _ = reply_tx.send(response);
                         }
+                        MgsRequest::StartComponentUpdate {
+                            sp,
+                            artifact,
+                            update_slot,
+                            data,
+                            reply_tx,
+                        } => {
+                            self.start_component_update(
+                                sp,
+                                artifact,
+                                update_slot,
+                                data,
+                                reply_tx,
+                                &update_state_tx,
+                            );
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    fn start_component_update(
+        &mut self,
+        sp: SpIdentifier,
+        artifact: UpdateArtifactId,
+        update_slot: u16,
+        data: BufList,
+        reply_tx: oneshot::Sender<
+            Result<PostComponentUpdateResponse, StartComponentUpdateError>,
+        >,
+        update_state_tx: &mpsc::Sender<ComponentUpdateStatus>,
+    ) {
+        // Map the artifact kind into the expected target SP type and the MGS
+        // component.
+        let (expected_type, component) = match artifact.kind {
+            UpdateArtifactKind::GimletSp => {
+                (SpType::Sled, SpComponent::SP_ITSELF.const_as_str())
+            }
+            UpdateArtifactKind::PscSp => {
+                (SpType::Power, SpComponent::SP_ITSELF.const_as_str())
+            }
+            UpdateArtifactKind::SwitchSp => {
+                (SpType::Switch, SpComponent::SP_ITSELF.const_as_str())
+            }
+            UpdateArtifactKind::GimletRot => {
+                (SpType::Sled, SpComponent::ROT.const_as_str())
+            }
+            UpdateArtifactKind::PscRot => {
+                (SpType::Power, SpComponent::ROT.const_as_str())
+            }
+            UpdateArtifactKind::SwitchRot => {
+                (SpType::Switch, SpComponent::ROT.const_as_str())
+            }
+            UpdateArtifactKind::HostPhase1 => {
+                (SpType::Sled, SpComponent::HOST_CPU_BOOT_FLASH.const_as_str())
+            }
+            UpdateArtifactKind::HostPhase2
+            | UpdateArtifactKind::ControlPlane => {
+                let _ = reply_tx.send(Err(
+                    StartComponentUpdateError::CannotApplyUpdatesOfKind(
+                        artifact.kind,
+                    ),
+                ));
+                return;
+            }
+        };
+
+        if expected_type != sp.type_ {
+            let _ = reply_tx.send(Err(
+                StartComponentUpdateError::CannotApplyUpdateToTargetType {
+                    kind: artifact.kind,
+                    required: expected_type,
+                    target: sp.type_,
+                },
+            ));
+            return;
+        }
+
+        // Reject updates going to this SP if it's currently processing an
+        // update.
+        let slot = match self.inflight_updates.entry(sp) {
+            Entry::Vacant(slot) => slot,
+            Entry::Occupied(_) => {
+                let _ =
+                    reply_tx.send(Err(StartComponentUpdateError::TargetSpBusy));
+                return;
+            }
+        };
+
+        let update_id = Uuid::new_v4();
+
+        slot.insert(ComponentUpdateStatus {
+            sp,
+            artifact: artifact.clone(),
+            update_id,
+            state: ComponentUpdateState::Running(
+                ComponentUpdateRunningState::IssuingRequestToMgs,
+            ),
+        });
+        let updater = DeliverComponentUpdate {
+            mgs_client: self.mgs_client.clone(),
+            sp,
+            artifact,
+            update_id,
+            component: component.to_string(),
+            update_slot,
+            update_state_tx: update_state_tx.clone(),
+        };
+
+        updater.start(data);
+
+        let response = PostComponentUpdateResponse { update_id };
+        let _ = reply_tx.send(Ok(response));
+    }
+
+    fn handle_new_inflight_update_status(
+        &mut self,
+        status: ComponentUpdateStatus,
+    ) {
+        match &status.state {
+            ComponentUpdateState::Running(_) => {
+                self.inflight_updates.insert(status.sp, status);
+            }
+
+            ComponentUpdateState::Terminal(_) => {
+                self.inflight_updates.remove(&status.sp);
+                self.complete_updates
+                    .entry(status.sp)
+                    .or_default()
+                    .push(status);
             }
         }
     }
@@ -480,4 +610,230 @@ async fn poll_sps(
 struct PollSps {
     changed_inventory: Option<RackV1Inventory>,
     mgs_received: Instant,
+}
+
+#[derive(Debug)]
+struct ComponentUpdateStatus {
+    sp: SpIdentifier,
+    artifact: UpdateArtifactId,
+    update_id: Uuid,
+    state: ComponentUpdateState,
+}
+
+#[derive(Debug)]
+enum ComponentUpdateState {
+    Running(ComponentUpdateRunningState),
+    Terminal(ComponentUpdateTerminalState),
+}
+
+#[derive(Debug)]
+enum ComponentUpdateRunningState {
+    IssuingRequestToMgs,
+    WaitingForStatus,
+    Preparing { progress: Option<UpdatePreparationProgress> },
+    InProgress { bytes_received: u32, total_bytes: u32 },
+}
+
+#[derive(Debug)]
+enum ComponentUpdateTerminalState {
+    Complete,
+    UpdateTaskPanicked,
+    Failed { reason: String },
+    GatewayClientError(GatewayClientError),
+}
+
+#[derive(Debug)]
+struct DeliverComponentUpdate {
+    mgs_client: gateway_client::Client,
+    sp: SpIdentifier,
+    artifact: UpdateArtifactId,
+    update_id: Uuid,
+    component: String,
+    update_slot: u16,
+    update_state_tx: mpsc::Sender<ComponentUpdateStatus>,
+}
+
+impl DeliverComponentUpdate {
+    fn start(self, data: BufList) {
+        // Spawn a task and intentionally do not keep a handle to it: it's
+        // important that this task is not cancelled (and important that it not
+        // panic, which we'll catch forcefully below).
+        tokio::spawn(async move {
+            let sp = self.sp;
+            let artifact = self.artifact.clone();
+            let update_id = self.update_id;
+            let update_state_tx = self.update_state_tx.clone();
+
+            // Spawn an inner task to do the work: this may deliver non-terminal
+            // state updates on `update_state_tx`, but we will always be the one
+            // to deliver a terminal state when it completes.
+            let inner_task = tokio::spawn(self.run_impl(data));
+
+            let terminal_state = match inner_task.await {
+                Ok(Ok(state)) => state,
+                Ok(Err(err)) => {
+                    ComponentUpdateTerminalState::GatewayClientError(err)
+                }
+                Err(err) => {
+                    // We never cancel `inner_task`, so the only way it we
+                    // should fail to await it is if it panics.
+                    assert!(
+                        err.is_panic(),
+                        "update task died without panicking"
+                    );
+                    ComponentUpdateTerminalState::UpdateTaskPanicked
+                }
+            };
+
+            // Send the terminal state to `MgsManager` so it knows this update
+            // has finished.
+            _ = update_state_tx
+                .send(ComponentUpdateStatus {
+                    sp,
+                    artifact,
+                    update_id,
+                    state: ComponentUpdateState::Terminal(terminal_state),
+                })
+                .await;
+        });
+    }
+
+    async fn run_impl(
+        self,
+        data: BufList,
+    ) -> Result<ComponentUpdateTerminalState, GatewayClientError> {
+        // How often we poll MGS for the progress of an update once it starts.
+        const STATUS_POLL_FREQ: Duration = Duration::from_millis(500);
+
+        // TODO Convert a BufList into a Vec<u8> - this is a little gross.
+        // Should MGS's endpoint accept a BufList somehow? Should the artifact
+        // store give us something more amenable to conversion?
+        let mut image = Vec::with_capacity(data.num_bytes());
+        for chunk in data {
+            image.extend_from_slice(&*chunk);
+        }
+
+        let request =
+            UpdateBody { id: self.update_id, image, slot: self.update_slot };
+
+        self.mgs_client
+            .sp_component_update(
+                self.sp.type_,
+                self.sp.slot,
+                &self.component,
+                &request,
+            )
+            .await?;
+        self.send_state_update(ComponentUpdateRunningState::WaitingForStatus)
+            .await;
+
+        loop {
+            let status = self
+                .mgs_client
+                .sp_component_update_status(
+                    self.sp.type_,
+                    self.sp.slot,
+                    &self.component,
+                )
+                .await?
+                .into_inner();
+
+            let new_state = match status {
+                // Happy path, non-terminal states
+                SpUpdateStatus::Preparing { id, progress } => {
+                    if id == self.update_id {
+                        ComponentUpdateRunningState::Preparing { progress }
+                    } else {
+                        return Ok(ComponentUpdateTerminalState::Failed {
+                            reason: format!(
+                                "unexpected update preparing (ID: {id})"
+                            ),
+                        });
+                    }
+                }
+                SpUpdateStatus::InProgress {
+                    bytes_received,
+                    id,
+                    total_bytes,
+                } => {
+                    if id == self.update_id {
+                        ComponentUpdateRunningState::InProgress {
+                            bytes_received,
+                            total_bytes,
+                        }
+                    } else {
+                        return Ok(ComponentUpdateTerminalState::Failed {
+                            reason: format!(
+                                "unexpected update in progress (ID: {id})"
+                            ),
+                        });
+                    }
+                }
+
+                // Happy path terminal state
+                SpUpdateStatus::Complete { id } => {
+                    if id == self.update_id {
+                        return Ok(ComponentUpdateTerminalState::Complete);
+                    } else {
+                        return Ok(ComponentUpdateTerminalState::Failed {
+                            reason: format!(
+                                "unexpected update completed (ID: {id})"
+                            ),
+                        });
+                    }
+                }
+
+                // Non-happy path states (all terminal)
+                SpUpdateStatus::None => {
+                    return Ok(ComponentUpdateTerminalState::Failed {
+                        reason: "update no longer in progress (SP reset?)"
+                            .to_string(),
+                    });
+                }
+                SpUpdateStatus::Aborted { id } => {
+                    let state = if id == self.update_id {
+                        ComponentUpdateTerminalState::Failed {
+                            reason: "update aborted".to_string(),
+                        }
+                    } else {
+                        ComponentUpdateTerminalState::Failed {
+                            reason: format!(
+                                "unexpected update aborted (ID: {id})"
+                            ),
+                        }
+                    };
+                    return Ok(state);
+                }
+                SpUpdateStatus::Failed { code, id } => {
+                    let state = if id == self.update_id {
+                        ComponentUpdateTerminalState::Failed {
+                            reason: format!("update failed (code {code})"),
+                        }
+                    } else {
+                        ComponentUpdateTerminalState::Failed {
+                            reason: format!(
+                                "unexpected update failed (ID: {id}, code {code})"
+                            ),
+                        }
+                    };
+                    return Ok(state);
+                }
+            };
+
+            self.send_state_update(new_state).await;
+            tokio::time::sleep(STATUS_POLL_FREQ).await;
+        }
+    }
+
+    // Helper method called by `run_impl` to send intermediate update progress
+    // messages.
+    async fn send_state_update(&self, new_state: ComponentUpdateRunningState) {
+        let status = ComponentUpdateStatus {
+            sp: self.sp,
+            artifact: self.artifact.clone(),
+            update_id: self.update_id,
+            state: ComponentUpdateState::Running(new_state),
+        };
+        _ = self.update_state_tx.send(status).await;
+    }
 }

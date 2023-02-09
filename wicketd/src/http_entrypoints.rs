@@ -129,7 +129,6 @@ pub struct ComponentUpdate {
 #[serde(rename_all = "snake_case")]
 pub struct PostComponentUpdateResponse {
     pub update_id: Uuid,
-    pub component: String,
 }
 
 /// An endpoint to start a component update via MGS.
@@ -158,7 +157,7 @@ async fn post_component_update(
         .start_component_update(
             target.into_inner(),
             body.update_slot,
-            body.artifact_id.kind,
+            body.artifact_id,
             data,
         )
         .await?;
