@@ -148,7 +148,7 @@
     "/update": {
       "get": {
         "summary": "An endpoint to get the status of all updates being performed or recently",
-        "description": "completed.",
+        "description": "completed on all SPs.",
         "operationId": "get_update_all",
         "responses": {
           "200": {
@@ -171,6 +171,49 @@
       }
     },
     "/update/{type}/{slot}": {
+      "get": {
+        "summary": "An endpoint to get the status of any update being performed or recently",
+        "description": "completed on a single SP.",
+        "operationId": "get_update_sp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatusSp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "post": {
         "summary": "An endpoint to start updating a sled.",
         "operationId": "post_start_update",
@@ -1384,6 +1427,29 @@
         "required": [
           "completed",
           "in_flight"
+        ]
+      },
+      "UpdateStatusSp": {
+        "description": "The response to a `get_update_sp` call: the list of any updates (in-flight or completed) targeting a single SP known by wicketd.",
+        "type": "object",
+        "properties": {
+          "completed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentUpdateTerminalStatus"
+            }
+          },
+          "in_flight": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ComponentUpdateRunningStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "completed"
         ]
       }
     }

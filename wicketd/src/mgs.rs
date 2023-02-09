@@ -8,7 +8,7 @@
 use crate::http_entrypoints::{
     ComponentUpdateRunningState, ComponentUpdateRunningStatus,
     ComponentUpdateTerminalState, ComponentUpdateTerminalStatus,
-    SpComponentIdentifier, UpdateStatusAll,
+    SpComponentIdentifier, UpdateStatusAll, UpdateStatusSp,
 };
 use crate::{RackV1Inventory, SpInventory};
 use buf_list::BufList;
@@ -136,6 +136,10 @@ enum MgsRequest {
     UpdateStatusAll {
         reply_tx: oneshot::Sender<UpdateStatusAll>,
     },
+    UpdateStatusSp {
+        sp: SpIdentifier,
+        reply_tx: oneshot::Sender<UpdateStatusSp>,
+    },
 }
 
 /// A mechanism for interacting with the  MgsManager
@@ -215,6 +219,18 @@ impl MgsHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
             .send(MgsRequest::UpdateStatusAll { reply_tx })
+            .await
+            .map_err(|_| ShutdownInProgress)?;
+        reply_rx.await.map_err(|_| ShutdownInProgress)
+    }
+
+    pub async fn update_status_sp(
+        &self,
+        sp: SpIdentifier,
+    ) -> Result<UpdateStatusSp, ShutdownInProgress> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(MgsRequest::UpdateStatusSp { sp, reply_tx })
             .await
             .map_err(|_| ShutdownInProgress)?;
         reply_rx.await.map_err(|_| ShutdownInProgress)
@@ -388,6 +404,9 @@ impl MgsManager {
                         }
                         MgsRequest::UpdateStatusAll { reply_tx } => {
                             _ = reply_tx.send(self.update_status_all());
+                        }
+                        MgsRequest::UpdateStatusSp { sp, reply_tx } => {
+                            _ = reply_tx.send(self.update_status_sp(sp));
                         }
                     }
                 }
@@ -563,6 +582,46 @@ impl MgsManager {
         }
 
         UpdateStatusAll { in_flight, completed }
+    }
+
+    fn update_status_sp(&self, sp: SpIdentifier) -> UpdateStatusSp {
+        let in_flight = self.inflight_updates.get(&sp).map(|update| {
+            match &update.status.state {
+                ComponentUpdateState::Running(state) => {
+                    ComponentUpdateRunningStatus {
+                        sp: update.status.sp,
+                        artifact: update.status.artifact.clone(),
+                        update_id: update.status.update_id,
+                        state: state.clone(),
+                    }
+                }
+                ComponentUpdateState::Terminal(_) => {
+                    unreachable!("inflight_updates contains terminal state")
+                }
+            }
+        });
+
+        let completed = self
+            .complete_updates
+            .get(&sp)
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|status| match &status.state {
+                ComponentUpdateState::Terminal(state) => {
+                    ComponentUpdateTerminalStatus {
+                        sp: status.sp,
+                        artifact: status.artifact.clone(),
+                        update_id: status.update_id,
+                        state: state.clone(),
+                    }
+                }
+                ComponentUpdateState::Running(_) => {
+                    unreachable!("complete_updates contains non-terminal state")
+                }
+            })
+            .collect();
+
+        UpdateStatusSp { in_flight, completed }
     }
 }
 

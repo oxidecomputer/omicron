@@ -41,6 +41,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(get_artifacts)?;
         api.register(post_start_update)?;
         api.register(get_update_all)?;
+        api.register(get_update_sp)?;
         api.register(get_component_update_status)?;
         api.register(post_component_update_abort)?;
         api.register(post_reset_sp)?;
@@ -150,6 +151,15 @@ pub struct UpdateStatusAll {
         BTreeMap<SpType, BTreeMap<u32, Vec<ComponentUpdateTerminalStatus>>>,
 }
 
+/// The response to a `get_update_sp` call: the list of any updates (in-flight
+/// or completed) targeting a single SP known by wicketd.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct UpdateStatusSp {
+    pub in_flight: Option<ComponentUpdateRunningStatus>,
+    pub completed: Vec<ComponentUpdateTerminalStatus>,
+}
+
 #[derive(Debug, Clone, JsonSchema, Serialize)]
 pub struct ComponentUpdateRunningStatus {
     pub sp: SpIdentifier,
@@ -184,7 +194,7 @@ pub enum ComponentUpdateTerminalState {
 }
 
 /// An endpoint to get the status of all updates being performed or recently
-/// completed.
+/// completed on all SPs.
 #[endpoint {
     method = GET,
     path = "/update",
@@ -193,6 +203,24 @@ async fn get_update_all(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<UpdateStatusAll>, HttpError> {
     let status = rqctx.context().mgs_handle.update_status_all().await?;
+    Ok(HttpResponseOk(status))
+}
+
+/// An endpoint to get the status of any update being performed or recently
+/// completed on a single SP.
+#[endpoint {
+    method = GET,
+    path = "/update/{type}/{slot}",
+}]
+async fn get_update_sp(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpIdentifier>,
+) -> Result<HttpResponseOk<UpdateStatusSp>, HttpError> {
+    let status = rqctx
+        .context()
+        .mgs_handle
+        .update_status_sp(target.into_inner())
+        .await?;
     Ok(HttpResponseOk(status))
 }
 
