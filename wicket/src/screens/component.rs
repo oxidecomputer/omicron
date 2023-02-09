@@ -233,7 +233,7 @@ impl ComponentScreen {
                 if self.help_menu_state.is_closed() {
                     return vec![Action::SwitchScreen(ScreenId::Rack)];
                 } else {
-                    self.help_menu_state.toggle();
+                    self.help_menu_state.close();
                 }
             }
             _ => (),

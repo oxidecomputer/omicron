@@ -172,7 +172,7 @@ impl RackScreen {
                 if self.help_menu_state.is_closed() {
                     state.rack_state.clear_tab_index();
                 } else {
-                    self.help_menu_state.toggle();
+                    self.help_menu_state.close();
                 }
             }
             KeyCode::Enter => {
