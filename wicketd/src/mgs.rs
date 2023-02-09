@@ -6,7 +6,9 @@
 //! runtime state.
 
 use crate::http_entrypoints::{
-    PostComponentUpdateResponse, SpComponentIdentifier,
+    ComponentUpdateRunningState, ComponentUpdateRunningStatus,
+    ComponentUpdateTerminalState, ComponentUpdateTerminalStatus,
+    SpComponentIdentifier, UpdateStatusAll,
 };
 use crate::{RackV1Inventory, SpInventory};
 use buf_list::BufList;
@@ -15,7 +17,6 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use gateway_client::types::{
     SpComponentList, SpIdentifier, SpInfo, SpType, SpUpdateStatus, UpdateBody,
-    UpdatePreparationProgress,
 };
 use gateway_messages::SpComponent;
 use omicron_common::api::internal::nexus::{
@@ -47,6 +48,12 @@ const CHANNEL_CAPACITY: usize = 8;
 /// satisfy function calls, so we define an error type here.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ShutdownInProgress;
+
+impl From<ShutdownInProgress> for HttpError {
+    fn from(_: ShutdownInProgress) -> Self {
+        HttpError::for_unavail(None, "Server is shutting down".into())
+    }
+}
 
 /// Possible errors from attempting to start a component update.
 #[derive(Debug, Error)]
@@ -113,7 +120,7 @@ fn map_mgs_client_error(
 }
 
 #[derive(Debug)]
-pub enum MgsRequest {
+enum MgsRequest {
     GetInventory {
         etag: Option<String>,
         reply_tx: oneshot::Sender<GetInventoryResponse>,
@@ -123,13 +130,16 @@ pub enum MgsRequest {
         artifact: UpdateArtifactId,
         update_slot: u16,
         data: BufList,
-        reply_tx: oneshot::Sender<
-            Result<PostComponentUpdateResponse, StartComponentUpdateError>,
-        >,
+        reply_tx: oneshot::Sender<Result<(), StartComponentUpdateError>>,
+        completion_tx: oneshot::Sender<ComponentUpdateTerminalState>,
+    },
+    UpdateStatusAll {
+        reply_tx: oneshot::Sender<UpdateStatusAll>,
     },
 }
 
 /// A mechanism for interacting with the  MgsManager
+#[derive(Debug, Clone)]
 pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
     mgs_client: gateway_client::Client,
@@ -169,14 +179,18 @@ impl MgsHandle {
         reply_rx.await.map_err(|_| ShutdownInProgress)
     }
 
-    pub async fn start_component_update(
+    pub(crate) async fn start_component_update(
         &self,
         target: SpIdentifier,
         update_slot: u16,
         artifact: UpdateArtifactId,
         data: BufList,
-    ) -> Result<PostComponentUpdateResponse, StartComponentUpdateError> {
+    ) -> Result<
+        oneshot::Receiver<ComponentUpdateTerminalState>,
+        StartComponentUpdateError,
+    > {
         let (reply_tx, reply_rx) = oneshot::channel();
+        let (completion_tx, completion_rx) = oneshot::channel();
         self.tx
             .send(MgsRequest::StartComponentUpdate {
                 sp: target,
@@ -184,13 +198,26 @@ impl MgsHandle {
                 update_slot,
                 data,
                 reply_tx,
+                completion_tx,
             })
             .await
             .map_err(|_| StartComponentUpdateError::ShutdownInProgress)?;
         reply_rx
             .await
             .map_err(|_| StartComponentUpdateError::ShutdownInProgress)
-            .and_then(|res| res)
+            .and_then(|res| res)?;
+        Ok(completion_rx)
+    }
+
+    pub async fn update_status_all(
+        &self,
+    ) -> Result<UpdateStatusAll, ShutdownInProgress> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(MgsRequest::UpdateStatusAll { reply_tx })
+            .await
+            .map_err(|_| ShutdownInProgress)?;
+        reply_rx.await.map_err(|_| ShutdownInProgress)
     }
 
     pub async fn get_component_update_status(
@@ -237,6 +264,11 @@ impl MgsHandle {
     }
 }
 
+struct InFlightUpdate {
+    status: ComponentUpdateStatus,
+    completion_tx: oneshot::Sender<ComponentUpdateTerminalState>,
+}
+
 /// The entity responsible for interacting with MGS
 ///
 /// `MgsManager` will poll MGS periodically to update its local information,
@@ -260,7 +292,7 @@ pub struct MgsManager {
     inventory: Option<(RackV1Inventory, Instant)>,
     // Any given SP can be in the process of applying at most one update
     // concurrently; this hash map records that one update (if it exists).
-    inflight_updates: BTreeMap<SpIdentifier, ComponentUpdateStatus>,
+    inflight_updates: BTreeMap<SpIdentifier, InFlightUpdate>,
     // TODO-correctness finish commenting why this thing is bad
     complete_updates: BTreeMap<SpIdentifier, Vec<ComponentUpdateStatus>>,
 }
@@ -342,6 +374,7 @@ impl MgsManager {
                             update_slot,
                             data,
                             reply_tx,
+                            completion_tx,
                         } => {
                             self.start_component_update(
                                 sp,
@@ -349,8 +382,12 @@ impl MgsManager {
                                 update_slot,
                                 data,
                                 reply_tx,
+                                completion_tx,
                                 &update_state_tx,
                             );
+                        }
+                        MgsRequest::UpdateStatusAll { reply_tx } => {
+                            _ = reply_tx.send(self.update_status_all());
                         }
                     }
                 }
@@ -364,9 +401,8 @@ impl MgsManager {
         artifact: UpdateArtifactId,
         update_slot: u16,
         data: BufList,
-        reply_tx: oneshot::Sender<
-            Result<PostComponentUpdateResponse, StartComponentUpdateError>,
-        >,
+        reply_tx: oneshot::Sender<Result<(), StartComponentUpdateError>>,
+        completion_tx: oneshot::Sender<ComponentUpdateTerminalState>,
         update_state_tx: &mpsc::Sender<ComponentUpdateStatus>,
     ) {
         // Map the artifact kind into the expected target SP type and the MGS
@@ -427,15 +463,15 @@ impl MgsManager {
         };
 
         let update_id = Uuid::new_v4();
-
-        slot.insert(ComponentUpdateStatus {
+        let initial_status = ComponentUpdateStatus {
             sp,
             artifact: artifact.clone(),
             update_id,
             state: ComponentUpdateState::Running(
                 ComponentUpdateRunningState::IssuingRequestToMgs,
             ),
-        });
+        };
+
         let updater = DeliverComponentUpdate {
             mgs_client: self.mgs_client.clone(),
             sp,
@@ -446,10 +482,9 @@ impl MgsManager {
             update_state_tx: update_state_tx.clone(),
         };
 
+        slot.insert(InFlightUpdate { status: initial_status, completion_tx });
         updater.start(data);
-
-        let response = PostComponentUpdateResponse { update_id };
-        let _ = reply_tx.send(Ok(response));
+        let _ = reply_tx.send(Ok(()));
     }
 
     fn handle_new_inflight_update_status(
@@ -458,17 +493,76 @@ impl MgsManager {
     ) {
         match &status.state {
             ComponentUpdateState::Running(_) => {
-                self.inflight_updates.insert(status.sp, status);
+                let sp = status.sp;
+                self.inflight_updates
+                    .get_mut(&sp)
+                    .expect("missing inflight update for SP")
+                    .status = status;
             }
 
-            ComponentUpdateState::Terminal(_) => {
-                self.inflight_updates.remove(&status.sp);
+            ComponentUpdateState::Terminal(state) => {
+                let update = self
+                    .inflight_updates
+                    .remove(&status.sp)
+                    .expect("missing inflight update for SP");
+                _ = update.completion_tx.send(state.clone());
                 self.complete_updates
                     .entry(status.sp)
                     .or_default()
                     .push(status);
             }
         }
+    }
+
+    fn update_status_all(&self) -> UpdateStatusAll {
+        let mut in_flight = BTreeMap::new();
+        for (sp, update) in &self.inflight_updates {
+            let status = match &update.status.state {
+                ComponentUpdateState::Running(state) => {
+                    ComponentUpdateRunningStatus {
+                        sp: update.status.sp,
+                        artifact: update.status.artifact.clone(),
+                        update_id: update.status.update_id,
+                        state: state.clone(),
+                    }
+                }
+                ComponentUpdateState::Terminal(_) => {
+                    unreachable!("inflight_updates contains terminal state")
+                }
+            };
+
+            let inner: &mut BTreeMap<_, _> =
+                in_flight.entry(sp.type_).or_default();
+            inner.insert(sp.slot, status);
+        }
+
+        let mut completed = BTreeMap::new();
+        for (sp, statuses) in &self.complete_updates {
+            let statuses = statuses
+                .iter()
+                .map(|status| match &status.state {
+                    ComponentUpdateState::Terminal(state) => {
+                        ComponentUpdateTerminalStatus {
+                            sp: status.sp,
+                            artifact: status.artifact.clone(),
+                            update_id: status.update_id,
+                            state: state.clone(),
+                        }
+                    }
+                    ComponentUpdateState::Running(_) => {
+                        unreachable!(
+                            "complete_updates contains non-terminal state"
+                        )
+                    }
+                })
+                .collect();
+
+            let inner: &mut BTreeMap<_, _> =
+                completed.entry(sp.type_).or_default();
+            inner.insert(sp.slot, statuses);
+        }
+
+        UpdateStatusAll { in_flight, completed }
     }
 }
 
@@ -612,34 +706,18 @@ struct PollSps {
     mgs_received: Instant,
 }
 
-#[derive(Debug)]
-struct ComponentUpdateStatus {
-    sp: SpIdentifier,
-    artifact: UpdateArtifactId,
-    update_id: Uuid,
-    state: ComponentUpdateState,
+#[derive(Debug, Clone)]
+pub(crate) struct ComponentUpdateStatus {
+    pub(crate) sp: SpIdentifier,
+    pub(crate) artifact: UpdateArtifactId,
+    pub(crate) update_id: Uuid,
+    pub(crate) state: ComponentUpdateState,
 }
 
-#[derive(Debug)]
-enum ComponentUpdateState {
+#[derive(Debug, Clone)]
+pub(crate) enum ComponentUpdateState {
     Running(ComponentUpdateRunningState),
     Terminal(ComponentUpdateTerminalState),
-}
-
-#[derive(Debug)]
-enum ComponentUpdateRunningState {
-    IssuingRequestToMgs,
-    WaitingForStatus,
-    Preparing { progress: Option<UpdatePreparationProgress> },
-    InProgress { bytes_received: u32, total_bytes: u32 },
-}
-
-#[derive(Debug)]
-enum ComponentUpdateTerminalState {
-    Complete,
-    UpdateTaskPanicked,
-    Failed { reason: String },
-    GatewayClientError(GatewayClientError),
 }
 
 #[derive(Debug)]
@@ -671,9 +749,9 @@ impl DeliverComponentUpdate {
 
             let terminal_state = match inner_task.await {
                 Ok(Ok(state)) => state,
-                Ok(Err(err)) => {
-                    ComponentUpdateTerminalState::GatewayClientError(err)
-                }
+                Ok(Err(err)) => ComponentUpdateTerminalState::Failed {
+                    reason: format!("request to MGS failed: {err}"),
+                },
                 Err(err) => {
                     // We never cancel `inner_task`, so the only way it we
                     // should fail to await it is if it panics.
@@ -703,7 +781,7 @@ impl DeliverComponentUpdate {
         data: BufList,
     ) -> Result<ComponentUpdateTerminalState, GatewayClientError> {
         // How often we poll MGS for the progress of an update once it starts.
-        const STATUS_POLL_FREQ: Duration = Duration::from_millis(500);
+        const STATUS_POLL_FREQ: Duration = Duration::from_millis(300);
 
         // TODO Convert a BufList into a Vec<u8> - this is a little gross.
         // Should MGS's endpoint accept a BufList somehow? Should the artifact

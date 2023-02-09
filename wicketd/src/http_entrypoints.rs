@@ -4,8 +4,11 @@
 
 //! HTTP entrypoint functions for wicketd
 
+use std::collections::BTreeMap;
+
 use crate::artifacts::TufRepositoryId;
 use crate::mgs::GetInventoryResponse;
+use crate::update_planner::UpdatePlanError;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -17,6 +20,7 @@ use dropshot::TypedBody;
 use dropshot::UntypedBody;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
+use gateway_client::types::UpdatePreparationProgress;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -35,7 +39,8 @@ pub fn api() -> WicketdApiDescription {
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts)?;
-        api.register(post_component_update)?;
+        api.register(post_start_update)?;
+        api.register(get_update_all)?;
         api.register(get_component_update_status)?;
         api.register(post_component_update_abort)?;
         api.register(post_reset_sp)?;
@@ -63,12 +68,8 @@ pub fn api() -> WicketdApiDescription {
 async fn get_inventory(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
-    match rqctx.context().mgs_handle.get_inventory().await {
-        Ok(response) => Ok(HttpResponseOk(response)),
-        Err(_) => {
-            Err(HttpError::for_unavail(None, "Server is shutting down".into()))
-        }
-    }
+    let inventory = rqctx.context().mgs_handle.get_inventory().await?;
+    Ok(HttpResponseOk(inventory))
 }
 
 /// An endpoint used to upload TUF repositories to the server.
@@ -115,54 +116,84 @@ async fn get_artifacts(
     Ok(HttpResponseOk(GetArtifactsResponse { artifacts }))
 }
 
-/// Description of an update to apply via the management network.
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct ComponentUpdate {
-    pub artifact_id: UpdateArtifactId,
-    pub update_slot: u16,
-}
-
-/// The response to a `post_component_update` call: the UUID of the update, used
-/// to poll for the status of the update.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct PostComponentUpdateResponse {
-    pub update_id: Uuid,
-}
-
-/// An endpoint to start a component update via MGS.
+/// An endpoint to start updating a sled.
 #[endpoint {
     method = POST,
     path = "/update/{type}/{slot}",
 }]
-async fn post_component_update(
+async fn post_start_update(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
-    body: TypedBody<ComponentUpdate>,
-) -> Result<HttpResponseOk<PostComponentUpdateResponse>, HttpError> {
-    let rqctx = rqctx.context();
-    let body = body.into_inner();
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    match rqctx.context().update_planner.start(target.into_inner()) {
+        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+        Err(err) => match err {
+            UpdatePlanError::DuplicateArtifacts(_)
+            | UpdatePlanError::MissingArtifact(_) => {
+                // TODO-correctness for_bad_request may not be right - both of
+                // these errors are issues with the TUF repository, not this
+                // request itself.
+                Err(HttpError::for_bad_request(None, err.to_string()))
+            }
+        },
+    }
+}
 
-    let data =
-        rqctx.artifact_store.get(&body.artifact_id).ok_or_else(|| {
-            HttpError::for_bad_request(
-                None,
-                "no artifact found for requested artifact ID".to_string(),
-            )
-        })?;
+/// The response to a `get_update_all` call: the list of all updates (in-flight
+/// or completed) known by wicketd.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct UpdateStatusAll {
+    pub in_flight:
+        BTreeMap<SpType, BTreeMap<u32, ComponentUpdateRunningStatus>>,
+    pub completed:
+        BTreeMap<SpType, BTreeMap<u32, Vec<ComponentUpdateTerminalStatus>>>,
+}
 
-    let response = rqctx
-        .mgs_handle
-        .start_component_update(
-            target.into_inner(),
-            body.update_slot,
-            body.artifact_id,
-            data,
-        )
-        .await?;
+#[derive(Debug, Clone, JsonSchema, Serialize)]
+pub struct ComponentUpdateRunningStatus {
+    pub sp: SpIdentifier,
+    pub artifact: UpdateArtifactId,
+    pub update_id: Uuid,
+    pub state: ComponentUpdateRunningState,
+}
 
-    Ok(HttpResponseOk(response))
+#[derive(Debug, Clone, JsonSchema, Serialize)]
+pub struct ComponentUpdateTerminalStatus {
+    pub sp: SpIdentifier,
+    pub artifact: UpdateArtifactId,
+    pub update_id: Uuid,
+    pub state: ComponentUpdateTerminalState,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state", content = "data")]
+pub enum ComponentUpdateRunningState {
+    IssuingRequestToMgs,
+    WaitingForStatus,
+    Preparing { progress: Option<UpdatePreparationProgress> },
+    InProgress { bytes_received: u32, total_bytes: u32 },
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state", content = "data")]
+pub enum ComponentUpdateTerminalState {
+    Complete,
+    UpdateTaskPanicked,
+    Failed { reason: String },
+}
+
+/// An endpoint to get the status of all updates being performed or recently
+/// completed.
+#[endpoint {
+    method = GET,
+    path = "/update",
+}]
+async fn get_update_all(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<UpdateStatusAll>, HttpError> {
+    let status = rqctx.context().mgs_handle.update_status_all().await?;
+    Ok(HttpResponseOk(status))
 }
 
 /// Description of a specific component on a target SP.
@@ -172,7 +203,7 @@ pub struct SpComponentIdentifier {
     #[serde(rename = "type")]
     pub type_: SpType,
     pub slot: u32,
-    pub component: String,
+    pub component: String, // TODO should this be UpdateArtifactKind?
 }
 
 /// An endpoint to request the current status of an update being applied to a
