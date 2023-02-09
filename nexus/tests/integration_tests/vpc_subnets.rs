@@ -44,11 +44,11 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     populate_ip_pool(client, "default", None).await;
 
     let subnets_url = format!(
-        "/v1/vpc-subnets?organization={}&project={}",
+        "/v1/vpc-subnets?organization={}&project={}&vpc=default",
         org_name, project_name
     );
     let subnet_url = format!(
-        "/v1/vpc-subnets/default?organization={}&project={}",
+        "/v1/vpc-subnets/default?organization={}&project={}&vpc=default",
         org_name, project_name
     );
 
@@ -96,7 +96,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     NexusRequest::object_delete(
         &client,
         &format!(
-            "/v1/vpc-subnets/{}?organization={org_name}&project={project_name}",
+            "/v1/vpc-subnets/{}?organization={org_name}&project={project_name}&vpc=default",
             subnets[0].identity.name
         ),
     )
@@ -124,8 +124,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
 
     let subnets_url = format!(
-        "/v1/vpc-subnets?organization={}&project={}",
-        org_name, project_name
+        "/v1/vpc-subnets?organization={}&project={}&vpc={}",
+        org_name, project_name, vpc_name
     );
 
     // get subnets should return the default subnet
@@ -136,7 +136,10 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     // delete default subnet
     NexusRequest::object_delete(
         &client,
-        &format!("{}/{}", subnets_url, subnets[0].identity.name),
+        &format!(
+            "/v1/vpc-subnets/{}?organization={}&project={}&vpc={}",
+            subnets[0].identity.name, org_name, project_name, vpc_name
+        ),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -150,8 +153,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     let subnet_name = "subnet1";
     let subnet_url = format!(
-        "/v1/vpc-subnets/{}?organization={}&project={}",
-        subnet_name, org_name, project_name
+        "/v1/vpc-subnets/{}?organization={}&project={}&vpc={}",
+        subnet_name, org_name, project_name, vpc_name
     );
 
     // fetching a particular subnet should 404
@@ -271,8 +274,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     let subnet2_name = "subnet2";
     let subnet2_url = format!(
-        "/v1/vpc-subnets/{}?organization={}&project={}",
-        subnet2_name, org_name, project_name
+        "/v1/vpc-subnets/{}?organization={}&project={}&vpc={}",
+        subnet2_name, org_name, project_name, vpc_name
     );
 
     // second subnet 404s before it's created
@@ -349,7 +352,10 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
     assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
-    let subnet_url = format!("{}/{}", subnets_url, "new-name");
+    let subnet_url = format!(
+        "/v1/vpc-subnets/new-name?organization={}&project={}&vpc={}",
+        org_name, project_name, vpc_name
+    );
 
     // fetching by new name works
     let updated_subnet: VpcSubnet =
