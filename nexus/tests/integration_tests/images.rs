@@ -351,10 +351,7 @@ async fn test_make_disk_from_global_image_too_small(
         Expectation::matching(request::method_path("HEAD", "/alpine/edge.raw"))
             .times(1..)
             .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
+                status_code(200).append_header("Content-Length", "2147483648"),
             ),
     );
 
@@ -398,7 +395,7 @@ async fn test_make_disk_from_global_image_too_small(
         disk_source: params::DiskSource::GlobalImage {
             image_id: alpine_image.identity.id,
         },
-        size: ByteCount::from(4096 * 500),
+        size: ByteCount::from(1073741824),
     };
 
     let error = NexusRequest::new(
@@ -420,8 +417,7 @@ async fn test_make_disk_from_global_image_too_small(
         error.message,
         format!(
             "disk size {} must be greater than or equal to image size {}",
-            4096 * 500,
-            4096 * 1000,
+            1073741824_u32, 2147483648_u32,
         )
     );
 }

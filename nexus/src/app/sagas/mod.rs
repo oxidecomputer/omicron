@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 pub mod disk_create;
 pub mod disk_delete;
+pub mod finalize_disk;
+pub mod import_blocks_from_url;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_migrate;
@@ -62,8 +64,12 @@ pub trait NexusSaga {
 pub enum SagaInitError {
     #[error("internal error building saga graph: {0:#}")]
     DagBuildError(steno::DagBuilderError),
+
     #[error("failed to serialize {0:?}: {1:#}")]
     SerializeError(String, serde_json::Error),
+
+    #[error("invalid parameter: {0}")]
+    InvalidParameter(String),
 }
 
 impl From<steno::DagBuilderError> for SagaInitError {
@@ -74,12 +80,21 @@ impl From<steno::DagBuilderError> for SagaInitError {
 
 impl From<SagaInitError> for omicron_common::api::external::Error {
     fn from(error: SagaInitError) -> Self {
-        // All of these errors reflect things that shouldn't be possible.
-        // They're basically bugs.
-        omicron_common::api::external::Error::internal_error(&format!(
-            "creating saga: {:#}",
-            error
-        ))
+        match error {
+            SagaInitError::DagBuildError(_)
+            | SagaInitError::SerializeError(_, _) => {
+                // All of these errors reflect things that shouldn't be possible.
+                // They're basically bugs.
+                omicron_common::api::external::Error::internal_error(&format!(
+                    "creating saga: {:#}",
+                    error
+                ))
+            }
+
+            SagaInitError::InvalidParameter(s) => {
+                omicron_common::api::external::Error::invalid_request(&s)
+            }
+        }
     }
 }
 
@@ -95,6 +110,10 @@ fn make_action_registry() -> ActionRegistry {
 
     <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
     <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
+    <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <import_blocks_from_url::SagaImportBlocksFromUrl as NexusSaga>::register_actions(&mut registry);
     <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
         &mut registry,
     );

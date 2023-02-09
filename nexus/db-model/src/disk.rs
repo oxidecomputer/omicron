@@ -12,6 +12,7 @@ use omicron_common::api::external;
 use omicron_common::api::internal;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// A Disk (network block device).
@@ -59,6 +60,11 @@ pub struct Disk {
     /// disk)
     #[diesel(column_name = origin_image)]
     pub create_image_id: Option<Uuid>,
+
+    /// If this disk is attached to a Pantry for longer than the lifetime of a
+    /// saga, then this field will contain the serialized SocketAddrV6 of that
+    /// Pantry.
+    pub pantry_address: Option<String>,
 }
 
 impl Disk {
@@ -94,6 +100,7 @@ impl Disk {
             block_size,
             create_snapshot_id,
             create_image_id,
+            pantry_address: None,
         })
     }
 
@@ -107,6 +114,10 @@ impl Disk {
 
     pub fn id(&self) -> Uuid {
         self.identity.id
+    }
+
+    pub fn pantry_address(&self) -> Option<SocketAddrV6> {
+        self.pantry_address.as_ref().map(|x| x.parse().unwrap())
     }
 }
 
@@ -192,6 +203,46 @@ impl DiskRuntimeState {
         }
     }
 
+    pub fn import_ready(self) -> Self {
+        Self {
+            disk_state: external::DiskState::ImportReady.label().to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn importing_from_url(self) -> Self {
+        Self {
+            disk_state: external::DiskState::ImportingFromUrl
+                .label()
+                .to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn importing_from_bulk_writes(self) -> Self {
+        Self {
+            disk_state: external::DiskState::ImportingFromBulkWrites
+                .label()
+                .to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
+    pub fn finalizing(self) -> Self {
+        Self {
+            disk_state: external::DiskState::Finalizing.label().to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
     pub fn state(&self) -> DiskState {
         // TODO: If we could store disk state in-line, we could avoid the
         // unwrap. Would prefer to parse it as such.
@@ -238,4 +289,11 @@ impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
             time_updated: self.time_updated,
         }
     }
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = disk)]
+#[diesel(treat_none_as_null = true)]
+pub struct DiskUpdate {
+    pub pantry_address: Option<String>,
 }

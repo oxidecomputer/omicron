@@ -111,7 +111,11 @@ impl DiskStates {
                 return Ok(Some(Action::Detach(uuid)));
             }
             // Cannot detach.
-            DiskState::Maintenance
+            DiskState::Finalizing
+            | DiskState::Maintenance
+            | DiskState::ImportReady
+            | DiskState::ImportingFromUrl
+            | DiskState::ImportingFromBulkWrites
             | DiskState::Destroyed
             | DiskState::Faulted => {
                 return Err(Error::InvalidRequest {
@@ -145,7 +149,11 @@ impl DiskStates {
                 return Ok(Some(Action::Attach(uuid)));
             }
             // Cannot attach.
-            DiskState::Maintenance
+            DiskState::Finalizing
+            | DiskState::Maintenance
+            | DiskState::ImportReady
+            | DiskState::ImportingFromUrl
+            | DiskState::ImportingFromBulkWrites
             | DiskState::Detaching(_)
             | DiskState::Destroyed
             | DiskState::Faulted => {

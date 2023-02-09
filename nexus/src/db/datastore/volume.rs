@@ -335,6 +335,99 @@ impl DataStore {
             })
     }
 
+    /// Create new UUIDs for the volume construction request layers
+    pub fn randomize_ids(
+        vcr: &VolumeConstructionRequest,
+    ) -> anyhow::Result<VolumeConstructionRequest> {
+        match vcr {
+            VolumeConstructionRequest::Volume {
+                id: _,
+                block_size,
+                sub_volumes,
+                read_only_parent,
+            } => Ok(VolumeConstructionRequest::Volume {
+                id: Uuid::new_v4(),
+                block_size: *block_size,
+                sub_volumes: sub_volumes
+                    .iter()
+                    .map(
+                        |subvol| -> anyhow::Result<VolumeConstructionRequest> {
+                            Self::randomize_ids(&subvol)
+                        },
+                    )
+                    .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>(
+                    )?,
+                read_only_parent: if let Some(read_only_parent) =
+                    read_only_parent
+                {
+                    Some(Box::new(Self::randomize_ids(read_only_parent)?))
+                } else {
+                    None
+                },
+            }),
+
+            VolumeConstructionRequest::Url { id: _, block_size, url } => {
+                Ok(VolumeConstructionRequest::Url {
+                    id: Uuid::new_v4(),
+                    block_size: *block_size,
+                    url: url.clone(),
+                })
+            }
+
+            VolumeConstructionRequest::Region {
+                block_size,
+                blocks_per_extent,
+                extent_count,
+                opts,
+                gen,
+            } => {
+                let mut opts = opts.clone();
+                opts.id = Uuid::new_v4();
+
+                Ok(VolumeConstructionRequest::Region {
+                    block_size: *block_size,
+                    blocks_per_extent: *blocks_per_extent,
+                    extent_count: *extent_count,
+                    opts,
+                    gen: *gen,
+                })
+            }
+
+            VolumeConstructionRequest::File { id: _, block_size, path } => {
+                Ok(VolumeConstructionRequest::File {
+                    id: Uuid::new_v4(),
+                    block_size: *block_size,
+                    path: path.clone(),
+                })
+            }
+        }
+    }
+
+    /// Checkout a copy of the Volume from the database using `volume_checkout`,
+    /// then randomize the UUIDs in the construction request. Because this is a
+    /// new volume, it is immediately passed to `volume_create` so that the
+    /// accounting for Crucible resources stays correct.
+    pub async fn volume_checkout_randomize_ids(
+        &self,
+        volume_id: Uuid,
+    ) -> CreateResult<Volume> {
+        let volume = self.volume_checkout(volume_id).await?;
+
+        let vcr: sled_agent_client::types::VolumeConstructionRequest =
+            serde_json::from_str(volume.data())?;
+
+        let randomized_vcr = serde_json::to_string(
+            &Self::randomize_ids(&vcr)
+                .map_err(|e| Error::internal_error(&e.to_string()))?,
+        )?;
+
+        self.volume_create(db::model::Volume::new(
+            Uuid::new_v4(),
+            randomized_vcr,
+        ))
+        .await
+    }
+
     /// Find regions for deleted volumes that do not have associated region
     /// snapshots.
     pub async fn find_deleted_volume_regions(

@@ -4,7 +4,9 @@
 
 use super::{
     common_storage::{
+        call_pantry_attach_for_disk, call_pantry_detach_for_disk,
         delete_crucible_regions, ensure_all_datasets_and_regions,
+        get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
@@ -21,6 +23,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
 use std::convert::TryFrom;
+use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -61,6 +64,13 @@ declare_saga_actions! {
     FINALIZE_DISK_RECORD -> "disk_runtime" {
         + sdc_finalize_disk_record
     }
+    GET_PANTRY_ADDRESS -> "pantry_address" {
+        + sdc_get_pantry_address
+    }
+    CALL_PANTRY_ATTACH_FOR_DISK -> "call_pantry_attach_for_disk" {
+        + sdc_call_pantry_attach_for_disk
+        - sdc_call_pantry_attach_for_disk_undo
+    }
 }
 
 // disk create saga: definition
@@ -76,7 +86,7 @@ impl NexusSaga for SagaDiskCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(Node::action(
@@ -97,6 +107,15 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(regions_ensure_action());
         builder.append(create_volume_record_action());
         builder.append(finalize_disk_record_action());
+
+        match &params.create_params.disk_source {
+            params::DiskSource::ImportingBlocks { .. } => {
+                builder.append(get_pantry_address_action());
+                builder.append(call_pantry_attach_for_disk_action());
+            }
+
+            _ => {}
+        }
 
         Ok(builder.build()?)
     }
@@ -155,6 +174,13 @@ async fn sdc_create_disk_record(
                     .map_err(ActionError::action_failed)?;
 
             global_image.block_size
+        }
+        params::DiskSource::ImportingBlocks { block_size } => {
+            db::model::BlockSize::try_from(*block_size).map_err(|e| {
+                ActionError::action_failed(Error::internal_error(
+                    &e.to_string(),
+                ))
+            })?
         }
     };
 
@@ -407,6 +433,7 @@ async fn sdc_regions_ensure(
                     },
                 )?))
             }
+            params::DiskSource::ImportingBlocks { block_size: _ } => None,
         };
 
     // Each ID should be unique to this disk
@@ -553,14 +580,99 @@ async fn sdc_finalize_disk_record(
     // Action::Modify on Disks within the Project.  So this shouldn't break in
     // practice.  However, that's brittle.  It would be better if this were
     // better guaranteed.
-    datastore
-        .disk_update_runtime(
-            &opctx,
-            &authz_disk,
-            &disk_created.runtime().detach(),
-        )
+    match &params.create_params.disk_source {
+        params::DiskSource::ImportingBlocks { block_size: _ } => {
+            datastore
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &disk_created.runtime().import_ready(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+
+        _ => {
+            datastore
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &disk_created.runtime().detach(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn sdc_get_pantry_address(
+    sagactx: NexusActionContext,
+) -> Result<SocketAddrV6, ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let datastore = osagactx.datastore();
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    // Pick a random Pantry and use it for this disk. This will be the
+    // Pantry used for all subsequent import operations until the disk
+    // is "finalized".
+    let pantry_address = get_pantry_address(osagactx.nexus()).await?;
+
+    info!(
+        log,
+        "using pantry at {} for importing to disk {}", pantry_address, disk_id
+    );
+
+    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
+
+    datastore
+        .disk_set_pantry(&opctx, &authz_disk, pantry_address)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(pantry_address)
+}
+
+async fn sdc_call_pantry_attach_for_disk(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
+    call_pantry_attach_for_disk(
+        &log,
+        &opctx,
+        &osagactx.nexus(),
+        disk_id,
+        pantry_address,
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn sdc_call_pantry_attach_for_disk_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
+    call_pantry_detach_for_disk(&log, disk_id, pantry_address).await?;
 
     Ok(())
 }

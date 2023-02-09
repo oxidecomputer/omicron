@@ -25,6 +25,7 @@ table! {
         block_size -> crate::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
+        pantry_address -> Nullable<Text>,
     }
 }
 

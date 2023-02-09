@@ -570,7 +570,7 @@ async fn test_reject_creating_disk_from_snapshot(
     .unwrap();
     assert_eq!(
         error.message,
-        "unsupported value for \"size and block_size\": total size must be a multiple of snapshot's block size",
+        "unsupported value for \"size and block_size\": total size must be a multiple of block size 4096",
     );
 
     // Reject where size of snapshot is greater than the disk's

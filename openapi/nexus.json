@@ -8001,6 +8001,255 @@
         }
       }
     },
+    "/v1/disks/{disk}/bulk-write": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Import blocks into a disk",
+        "operationId": "disk_bulk_write_import_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportBlocksBulkWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/bulk-write-start": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Start the process of importing blocks into a disk",
+        "operationId": "disk_bulk_write_import_start_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/bulk-write-stop": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Stop the process of importing blocks into a disk",
+        "operationId": "disk_bulk_write_import_stop_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/finalize": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Finalize disk when imports are done",
+        "operationId": "disk_finalize_import_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "snapshot_name",
+            "description": "an optional snapshot name",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/import": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Send request to import blocks from URL",
+        "operationId": "disk_import_blocks_from_url_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportBlocksFromUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/instances": {
       "get": {
         "tags": [
@@ -13182,6 +13431,25 @@
               "image_id",
               "type"
             ]
+          },
+          {
+            "description": "Create a blank disk that will accept bulk writes or pull blocks from an external source.",
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "$ref": "#/components/schemas/BlockSize"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "importing_blocks"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "type"
+            ]
           }
         ]
       },
@@ -13211,6 +13479,66 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is ready to receive blocks from an external source",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "import_ready"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from a URL",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_url"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from bulk writes",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_bulk_writes"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being finalized to state Detached",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "finalizing"
                 ]
               }
             },
@@ -13364,6 +13692,22 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "ExpectedDigest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "ExternalIp": {
@@ -14080,6 +14424,46 @@
               "type"
             ]
           }
+        ]
+      },
+      "ImportBlocksBulkWrite": {
+        "description": "Parameters for importing blocks with a bulk write",
+        "type": "object",
+        "properties": {
+          "base64_encoded_data": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "base64_encoded_data",
+          "offset"
+        ]
+      },
+      "ImportBlocksFromUrl": {
+        "description": "Parameters for importing blocks from a URL to a disk",
+        "type": "object",
+        "properties": {
+          "expected_digest": {
+            "nullable": true,
+            "description": "Expected digest of all blocks when importing from a URL",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExpectedDigest"
+              }
+            ]
+          },
+          "url": {
+            "description": "the source to pull blocks from",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
         ]
       },
       "Instance": {

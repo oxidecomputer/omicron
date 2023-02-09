@@ -17,6 +17,7 @@ mod ip_pools;
 mod metrics;
 mod organizations;
 mod oximeter;
+mod pantry;
 mod password_login;
 mod projects;
 mod rack;

@@ -837,7 +837,7 @@ CREATE TABLE omicron.public.disk (
      */
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
-    disk_state STRING(15) NOT NULL,
+    disk_state STRING(32) NOT NULL,
     /*
      * Every Disk may be attaching to, attached to, or detaching from at most
      * one Instance at a time.
@@ -850,7 +850,9 @@ CREATE TABLE omicron.public.disk (
     size_bytes INT NOT NULL,
     block_size omicron.public.block_size NOT NULL,
     origin_snapshot UUID,
-    origin_image UUID
+    origin_image UUID,
+
+    pantry_address TEXT
 );
 
 CREATE UNIQUE INDEX ON omicron.public.disk (

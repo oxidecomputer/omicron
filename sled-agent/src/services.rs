@@ -663,7 +663,9 @@ impl ServiceManager {
 
                         dropshot_external: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(*external_ip, 80),
-                            request_body_max_bytes: 1048576,
+                            // This has to be large enough to support:
+                            // - bulk writes to disks
+                            request_body_max_bytes: 8192 * 1024,
                             ..Default::default()
                         },
                         dropshot_internal: dropshot::ConfigDropshot {

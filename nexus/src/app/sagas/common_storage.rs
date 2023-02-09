@@ -6,17 +6,24 @@
 
 use super::*;
 
+use crate::authz;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
+use crate::db::lookup::LookupPath;
+use crate::Nexus;
 use anyhow::anyhow;
 use crucible_agent_client::{
     types::{CreateRegion, RegionId, State as RegionState},
     Client as CrucibleAgentClient,
 };
 use futures::StreamExt;
+use internal_dns_client::names::ServiceName;
+use internal_dns_client::names::SRV;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
 use slog::Logger;
+use std::net::SocketAddrV6;
 
 // Arbitrary limit on concurrency, for operations issued on multiple regions
 // within a disk at the same time.
@@ -257,6 +264,154 @@ pub(super) async fn delete_crucible_snapshots(
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(())
+}
+
+pub async fn get_pantry_address(
+    nexus: &Arc<Nexus>,
+) -> Result<SocketAddrV6, ActionError> {
+    nexus
+        .resolver()
+        .await
+        .lookup_socket_v6(SRV::Service(ServiceName::CruciblePantry))
+        .await
+        .map_err(|e| e.to_string())
+        .map_err(ActionError::action_failed)
+}
+
+// Common Pantry operations
+
+#[macro_export]
+macro_rules! retry_until_known_result {
+    ( $log:ident, $func:block ) => {{
+        use omicron_common::backoff;
+
+        #[derive(Debug, thiserror::Error)]
+        enum InnerError {
+            #[error("Reqwest error: {0}")]
+            Reqwest(#[from] reqwest::Error),
+
+            #[error("Pantry client error: {0}")]
+            PantryClient(
+                #[from]
+                crucible_pantry_client::Error<
+                    crucible_pantry_client::types::Error,
+                >,
+            ),
+        }
+
+        backoff::retry_notify(
+            backoff::retry_policy_internal_service(),
+            || async {
+                match ($func).await {
+                    Err(crucible_pantry_client::Error::CommunicationError(
+                        e,
+                    )) => {
+                        warn!(
+                            $log,
+                            "saw transient communication error {}, retrying...",
+                            e,
+                        );
+
+                        Err(backoff::BackoffError::<InnerError>::transient(
+                            e.into(),
+                        ))
+                    }
+
+                    Err(e) => {
+                        warn!($log, "saw permanent error {}, aborting", e,);
+
+                        Err(backoff::BackoffError::<InnerError>::Permanent(
+                            e.into(),
+                        ))
+                    }
+
+                    Ok(v) => Ok(v),
+                }
+            },
+            |error: InnerError, delay| {
+                warn!(
+                    $log,
+                    "failed external call ({:?}), will retry in {:?}",
+                    error,
+                    delay,
+                );
+            },
+        )
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "gave up on external call due to {:?}",
+                e
+            ))
+        })
+    }};
+}
+
+pub async fn call_pantry_attach_for_disk(
+    log: &slog::Logger,
+    opctx: &OpContext,
+    nexus: &Arc<Nexus>,
+    disk_id: Uuid,
+    pantry_address: SocketAddrV6,
+) -> Result<(), ActionError> {
+    let endpoint = format!("http://{}", pantry_address);
+
+    let (.., disk) = LookupPath::new(opctx, &nexus.datastore())
+        .disk_id(disk_id)
+        .fetch_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let disk_volume = nexus
+        .datastore()
+        .volume_checkout(disk.volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    info!(
+        log,
+        "sending attach for disk {} volume {} to endpoint {}",
+        disk_id,
+        disk.volume_id,
+        endpoint,
+    );
+
+    let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
+        serde_json::from_str(&disk_volume.data()).map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "failed to deserialize disk {} volume data: {}",
+                disk.id(),
+                e,
+            )))
+        })?;
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    let attach_request = crucible_pantry_client::types::AttachRequest {
+        volume_construction_request,
+    };
+
+    retry_until_known_result!(log, {
+        client.attach(&disk_id.to_string(), &attach_request)
+    })?;
+
+    Ok(())
+}
+
+pub async fn call_pantry_detach_for_disk(
+    log: &slog::Logger,
+    disk_id: Uuid,
+    pantry_address: SocketAddrV6,
+) -> Result<(), ActionError> {
+    let endpoint = format!("http://{}", pantry_address);
+
+    info!(log, "sending detach for disk {} to endpoint {}", disk_id, endpoint,);
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    retry_until_known_result!(log, { client.detach(&disk_id.to_string()) })?;
 
     Ok(())
 }

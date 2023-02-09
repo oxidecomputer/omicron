@@ -49,11 +49,11 @@ rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 # available port) because the test suite will be running many servers
 # concurrently.
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 1048576
+request_body_max_bytes = 8388608
 
 [deployment.dropshot_internal]
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 1048576
+request_body_max_bytes = 8388608
 
 [deployment.subnet]
 net = "fd00:1122:3344:0100::/56"

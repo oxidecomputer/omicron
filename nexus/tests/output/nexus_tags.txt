@@ -1,9 +1,14 @@
 API operations found with tag "disks"
 OPERATION ID                             URL PATH
+disk_bulk_write_import_start_v1          /v1/disks/{disk}/bulk-write-start
+disk_bulk_write_import_stop_v1           /v1/disks/{disk}/bulk-write-stop
+disk_bulk_write_import_v1                /v1/disks/{disk}/bulk-write
 disk_create                              /organizations/{organization_name}/projects/{project_name}/disks
 disk_create_v1                           /v1/disks
 disk_delete                              /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 disk_delete_v1                           /v1/disks/{disk}
+disk_finalize_import_v1                  /v1/disks/{disk}/finalize
+disk_import_blocks_from_url_v1           /v1/disks/{disk}/import
 disk_list                                /organizations/{organization_name}/projects/{project_name}/disks
 disk_list_v1                             /v1/disks
 disk_metrics_list                        /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}

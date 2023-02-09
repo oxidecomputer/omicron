@@ -89,6 +89,10 @@ impl DataStore {
 
                 Ok(db_global_image.block_size)
             }
+            params::DiskSource::ImportingBlocks { block_size } => {
+                Ok(db::model::BlockSize::try_from(*block_size)
+                    .map_err(|e| Error::invalid_request(&e.to_string()))?)
+            }
         }
     }
 

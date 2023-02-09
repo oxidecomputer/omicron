@@ -1521,6 +1521,47 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
+#[nexus_test]
+async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+    let disks_url = get_disks_url();
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::ImportingBlocks {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Disk>()
+    .unwrap();
+
+    let disk_url = get_disk_url(DISK_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+
+    assert_eq!(disk.state, DiskState::ImportReady);
+
+    // List disks again and expect to find the one we just created.
+    let disks = disks_list(&client, &disks_url).await;
+    assert_eq!(disks.len(), 1);
+    disks_eq(&disks[0], &disk);
+}
+
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
     NexusRequest::object_get(client, disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
