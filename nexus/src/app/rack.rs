@@ -65,21 +65,37 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // Convert from parameter -> DB type.
         let services: Vec<_> = request
             .services
-            .into_iter()
+            .iter()
             .map(|svc| {
-                db::model::Service::new(
-                    svc.service_id,
-                    svc.sled_id,
-                    svc.address,
-                    svc.kind.into(),
+                // We rely on a pool already being set up during Nexus' "populate"
+                // phase, where it adds a service pool named "oxide-service-pool".
+                //
+                // During initialization, we accept an IP Pool implicitly through Nexus's
+                // configuration. This may be made more explicit in the future, through
+                // a separate "IP pool range".
+                let external_ip =
+                    if let crate::internal_api::params::ServiceKind::Nexus {
+                        external_address,
+                    } = svc.kind
+                    {
+                        Some(external_address)
+                    } else {
+                        None
+                    };
+
+                (
+                    db::model::Service::new(
+                        svc.service_id,
+                        svc.sled_id,
+                        svc.address,
+                        svc.kind.into(),
+                    ),
+                    external_ip,
                 )
             })
             .collect();
-
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1958): If nexus, add a pool?
 
         let datasets: Vec<_> = request
             .datasets

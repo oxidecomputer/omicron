@@ -133,6 +133,14 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
+-- Extended information for services where "service.kind = nexus"
+-- The UUID should match the "omicron.public.service" table exactly.
+CREATE TABLE omicron.public.nexus_service (
+    id UUID PRIMARY KEY,
+    -- The external IP address used for Nexus' external interface.
+    external_ip_id UUID NOT NULL
+);
+
 CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
   'm2',
   'u2'

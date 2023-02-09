@@ -1023,7 +1023,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_insert_external_ip_for_service_is_idempoent() {
+    async fn test_insert_external_ip_for_service_is_idempotent() {
         let context = TestContext::new(
             "test_insert_external_ip_for_service_is_idempotent",
         )

@@ -409,6 +409,13 @@ table! {
 }
 
 table! {
+    nexus_service (id) {
+        id -> Uuid,
+        external_ip_id -> Uuid,
+    }
+}
+
+table! {
     physical_disk (id) {
         id -> Uuid,
         time_created -> Timestamptz,

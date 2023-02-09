@@ -236,12 +236,20 @@ pub async fn datastore_test(
         authn::Context::internal_db_init(),
         Arc::clone(&datastore),
     );
+
+    // TODO: Can we just call "Populate" instead of doing this?
+    let rack_id = Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap();
     datastore.load_builtin_users(&opctx).await.unwrap();
     datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
     datastore.load_builtin_silos(&opctx).await.unwrap();
     datastore.load_silo_users(&opctx).await.unwrap();
     datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
+    datastore
+        .load_builtin_fleet_virtual_provisioning_collection(&opctx)
+        .await
+        .unwrap();
+    datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
 
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
