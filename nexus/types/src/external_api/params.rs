@@ -1087,7 +1087,7 @@ pub struct VpcRouterUpdate {
 
 // VPC ROUTER ROUTES
 
-/// Create-time parameters for a [`RouterRoute`]
+/// Create-time parameters for a [`omicron_common::api::external::RouterRoute`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteCreate {
     #[serde(flatten)]
@@ -1096,7 +1096,7 @@ pub struct RouterRouteCreate {
     pub destination: RouteDestination,
 }
 
-/// Updateable properties of a [`RouterRoute`]
+/// Updateable properties of a [`omicron_common::api::external::RouterRoute`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteUpdate {
     #[serde(flatten)]
