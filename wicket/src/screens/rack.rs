@@ -39,7 +39,7 @@ impl RackScreen {
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
             ("<Enter> | left mouse click", "Select hovered object"),
-            ("<ESC>", "Reset the TabIndex of the Rack"),
+            ("<ESC>", "Exit help menu | Reset the TabIndex of the Rack"),
             ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
@@ -169,7 +169,11 @@ impl RackScreen {
                 state.rack_state.dec_tab_index();
             }
             KeyCode::Esc => {
-                state.rack_state.clear_tab_index();
+                if self.help_menu_state.is_closed() {
+                    state.rack_state.clear_tab_index();
+                } else {
+                    self.help_menu_state.close();
+                }
             }
             KeyCode::Enter => {
                 if state.rack_state.tab_index.is_set() {
