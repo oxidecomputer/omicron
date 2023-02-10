@@ -134,7 +134,6 @@ impl HardwareMonitor {
             HardwareManager::new(log.clone(), sled_config.stub_scrimlet)
                 .map_err(|e| Error::Hardware(e))?;
 
-        // TODO: Add the etherstub for the bootstrap network here
         let service_manager = ServiceManager::new(
             log.clone(),
             underlay_etherstub.clone(),
