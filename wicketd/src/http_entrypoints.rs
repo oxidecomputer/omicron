@@ -4,10 +4,9 @@
 
 //! HTTP entrypoint functions for wicketd
 
-use std::collections::BTreeMap;
-
 use crate::artifacts::TufRepositoryId;
 use crate::mgs::GetInventoryResponse;
+use crate::update_events::UpdateLog;
 use crate::update_planner::UpdatePlanError;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -20,11 +19,11 @@ use dropshot::TypedBody;
 use dropshot::UntypedBody;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
-use gateway_client::types::UpdatePreparationProgress;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::ServerContext;
@@ -126,7 +125,7 @@ async fn post_start_update(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    match rqctx.context().update_planner.start(target.into_inner()) {
+    match rqctx.context().update_planner.start(target.into_inner()).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => match err {
             UpdatePlanError::DuplicateArtifacts(_)
@@ -136,6 +135,9 @@ async fn post_start_update(
                 // request itself.
                 Err(HttpError::for_bad_request(None, err.to_string()))
             }
+            UpdatePlanError::UpdateInProgress(_) => {
+                Err(HttpError::for_unavail(None, err.to_string()))
+            }
         },
     }
 }
@@ -144,53 +146,8 @@ async fn post_start_update(
 /// or completed) known by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct UpdateStatusAll {
-    pub in_flight:
-        BTreeMap<SpType, BTreeMap<u32, ComponentUpdateRunningStatus>>,
-    pub completed:
-        BTreeMap<SpType, BTreeMap<u32, Vec<ComponentUpdateTerminalStatus>>>,
-}
-
-/// The response to a `get_update_sp` call: the list of any updates (in-flight
-/// or completed) targeting a single SP known by wicketd.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct UpdateStatusSp {
-    pub in_flight: Option<ComponentUpdateRunningStatus>,
-    pub completed: Vec<ComponentUpdateTerminalStatus>,
-}
-
-#[derive(Debug, Clone, JsonSchema, Serialize)]
-pub struct ComponentUpdateRunningStatus {
-    pub sp: SpIdentifier,
-    pub artifact: UpdateArtifactId,
-    pub update_id: Uuid,
-    pub state: ComponentUpdateRunningState,
-}
-
-#[derive(Debug, Clone, JsonSchema, Serialize)]
-pub struct ComponentUpdateTerminalStatus {
-    pub sp: SpIdentifier,
-    pub artifact: UpdateArtifactId,
-    pub update_id: Uuid,
-    pub state: ComponentUpdateTerminalState,
-}
-
-#[derive(Debug, Clone, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case", tag = "state", content = "data")]
-pub enum ComponentUpdateRunningState {
-    IssuingRequestToMgs,
-    WaitingForStatus,
-    Preparing { progress: Option<UpdatePreparationProgress> },
-    InProgress { bytes_received: u32, total_bytes: u32 },
-}
-
-#[derive(Debug, Clone, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case", tag = "state", content = "data")]
-pub enum ComponentUpdateTerminalState {
-    Complete,
-    UpdateTaskPanicked,
-    Failed { reason: String },
+pub struct UpdateLogAll {
+    pub sps: BTreeMap<SpType, BTreeMap<u32, UpdateLog>>,
 }
 
 /// An endpoint to get the status of all updates being performed or recently
@@ -201,9 +158,9 @@ pub enum ComponentUpdateTerminalState {
 }]
 async fn get_update_all(
     rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<UpdateStatusAll>, HttpError> {
-    let status = rqctx.context().mgs_handle.update_status_all().await?;
-    Ok(HttpResponseOk(status))
+) -> Result<HttpResponseOk<UpdateLogAll>, HttpError> {
+    let sps = rqctx.context().update_planner.update_log_all().await;
+    Ok(HttpResponseOk(UpdateLogAll { sps }))
 }
 
 /// An endpoint to get the status of any update being performed or recently
@@ -215,13 +172,10 @@ async fn get_update_all(
 async fn get_update_sp(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
-) -> Result<HttpResponseOk<UpdateStatusSp>, HttpError> {
-    let status = rqctx
-        .context()
-        .mgs_handle
-        .update_status_sp(target.into_inner())
-        .await?;
-    Ok(HttpResponseOk(status))
+) -> Result<HttpResponseOk<UpdateLog>, HttpError> {
+    let update_log =
+        rqctx.context().update_planner.update_log(target.into_inner()).await;
+    Ok(HttpResponseOk(update_log))
 }
 
 /// Description of a specific component on a target SP.

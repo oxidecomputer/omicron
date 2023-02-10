@@ -156,7 +156,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateStatusAll"
+                  "$ref": "#/components/schemas/UpdateLogAll"
                 }
               }
             }
@@ -201,7 +201,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateStatusSp"
+                  "$ref": "#/components/schemas/UpdateLog"
                 }
               }
             }
@@ -376,206 +376,6 @@
       }
     },
     "schemas": {
-      "ComponentUpdateRunningState": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "issuing_request_to_mgs"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "waiting_for_status"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "progress": {
-                    "nullable": true,
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/UpdatePreparationProgress"
-                      }
-                    ]
-                  }
-                }
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "preparing"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "bytes_received": {
-                    "type": "integer",
-                    "format": "uint32",
-                    "minimum": 0
-                  },
-                  "total_bytes": {
-                    "type": "integer",
-                    "format": "uint32",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "bytes_received",
-                  "total_bytes"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "in_progress"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "state"
-            ]
-          }
-        ]
-      },
-      "ComponentUpdateRunningStatus": {
-        "type": "object",
-        "properties": {
-          "artifact": {
-            "$ref": "#/components/schemas/UpdateArtifactId"
-          },
-          "sp": {
-            "$ref": "#/components/schemas/SpIdentifier"
-          },
-          "state": {
-            "$ref": "#/components/schemas/ComponentUpdateRunningState"
-          },
-          "update_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "artifact",
-          "sp",
-          "state",
-          "update_id"
-        ]
-      },
-      "ComponentUpdateTerminalState": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "complete"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "update_task_panicked"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "failed"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "state"
-            ]
-          }
-        ]
-      },
-      "ComponentUpdateTerminalStatus": {
-        "type": "object",
-        "properties": {
-          "artifact": {
-            "$ref": "#/components/schemas/UpdateArtifactId"
-          },
-          "sp": {
-            "$ref": "#/components/schemas/SpIdentifier"
-          },
-          "state": {
-            "$ref": "#/components/schemas/ComponentUpdateTerminalState"
-          },
-          "update_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "artifact",
-          "sp",
-          "state",
-          "update_id"
-        ]
-      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -1378,6 +1178,205 @@
           "switch_rot"
         ]
       },
+      "UpdateEvent": {
+        "type": "object",
+        "properties": {
+          "age": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/UpdateEventKind"
+          }
+        },
+        "required": [
+          "age",
+          "kind"
+        ]
+      },
+      "UpdateEventFailureKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sp_reset_failed"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "$ref": "#/components/schemas/UpdateArtifactId"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "artifact",
+                  "reason"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artifact_update_failed"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "UpdateEventKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/UpdateEventSuccessKind"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/UpdateEventFailureKind"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "failure"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "UpdateEventSuccessKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sp_reset_complete"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "$ref": "#/components/schemas/UpdateArtifactId"
+                  }
+                },
+                "required": [
+                  "artifact"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artifact_update_complete"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "UpdateLog": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateState"
+              }
+            ]
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateEvent"
+            }
+          }
+        },
+        "required": [
+          "events"
+        ]
+      },
+      "UpdateLogAll": {
+        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
+        "type": "object",
+        "properties": {
+          "sps": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/UpdateLog"
+              }
+            }
+          }
+        },
+        "required": [
+          "sps"
+        ]
+      },
       "UpdatePreparationProgress": {
         "description": "Progress of an SP preparing to update.\n\nThe units of `current` and `total` are unspecified and defined by the SP; e.g., if preparing for an update requires erasing a flash device, this may indicate progress of that erasure without defining units (bytes, pages, sectors, etc.).",
         "type": "object",
@@ -1398,58 +1397,157 @@
           "total"
         ]
       },
-      "UpdateStatusAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
+      "UpdateState": {
         "type": "object",
         "properties": {
-          "completed": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ComponentUpdateTerminalStatus"
-                }
-              }
-            }
+          "age": {
+            "$ref": "#/components/schemas/Duration"
           },
-          "in_flight": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/ComponentUpdateRunningStatus"
-              }
-            }
+          "kind": {
+            "$ref": "#/components/schemas/UpdateStateKind"
           }
         },
         "required": [
-          "completed",
-          "in_flight"
+          "age",
+          "kind"
         ]
       },
-      "UpdateStatusSp": {
-        "description": "The response to a `get_update_sp` call: the list of any updates (in-flight or completed) targeting a single SP known by wicketd.",
-        "type": "object",
-        "properties": {
-          "completed": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ComponentUpdateTerminalStatus"
-            }
-          },
-          "in_flight": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ComponentUpdateRunningStatus"
+      "UpdateStateKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "resetting_sp"
+                ]
               }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "$ref": "#/components/schemas/UpdateArtifactId"
+                  }
+                },
+                "required": [
+                  "artifact"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "sending_artifact_to_mgs"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "$ref": "#/components/schemas/UpdateArtifactId"
+                  },
+                  "progress": {
+                    "nullable": true,
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/UpdatePreparationProgress"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "artifact"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing_for_artifact"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "bytes_received": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "total_bytes": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "bytes_received",
+                  "total_bytes"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "artifact_update_progress"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "$ref": "#/components/schemas/UpdateArtifactId"
+                  }
+                },
+                "required": [
+                  "artifact"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_status"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
             ]
           }
-        },
-        "required": [
-          "completed"
         ]
       }
     }

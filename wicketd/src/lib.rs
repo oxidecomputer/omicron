@@ -8,6 +8,7 @@ mod context;
 mod http_entrypoints;
 mod inventory;
 mod mgs;
+mod update_events;
 mod update_planner;
 
 use artifacts::WicketdArtifactStore;
@@ -68,13 +69,13 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
 
     let mgs_manager = MgsManager::new(&log, args.mgs_address);
     let mgs_handle = mgs_manager.get_handle();
+    let mgs_client = mgs_manager.get_client();
     tokio::spawn(async move {
         mgs_manager.run().await;
     });
 
     let store = WicketdArtifactStore::new(&log);
-    let update_planner =
-        UpdatePlanner::new(mgs_handle.clone(), store.clone(), &log);
+    let update_planner = UpdatePlanner::new(mgs_client, store.clone(), &log);
 
     let wicketd_server_fut = dropshot::HttpServerStarter::new(
         &dropshot_config,
