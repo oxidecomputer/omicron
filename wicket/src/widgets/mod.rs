@@ -17,8 +17,8 @@ mod help_menu;
 mod list;
 mod liveness;
 mod rack;
-mod screen_button;
 mod status_bar;
+mod update;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
@@ -28,8 +28,8 @@ pub use help_menu::HelpMenuState;
 pub use list::{Indicator, List, ListEntry, ListState};
 pub use liveness::{LivenessState, LivenessStyles};
 pub use rack::{KnightRiderMode, Rack, RackState};
-pub use screen_button::{ScreenButton, ScreenButtonState};
 pub use status_bar::{StatusBar, StatusBarStyles};
+pub use update::{Update, UpdateState};
 
 /// A unique id for a [`Control`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
