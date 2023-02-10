@@ -22,14 +22,15 @@ use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -108,22 +109,31 @@ impl DataStore {
             })
     }
 
-    pub async fn project_list_snapshots(
+    pub async fn snapshot_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Snapshot> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::snapshot::dsl;
-        paginated(dsl::snapshot, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Snapshot::as_select())
-            .load_async::<Snapshot>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::snapshot, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::snapshot,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .select(Snapshot::as_select())
+        .load_async::<Snapshot>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn project_delete_snapshot(
