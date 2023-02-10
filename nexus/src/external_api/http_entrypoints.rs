@@ -4285,7 +4285,7 @@ async fn snapshot_create_v1(
         let new_snapshot_params = &new_snapshot.into_inner();
         let project_lookup = nexus.project_lookup(&opctx, &query)?;
         let snapshot = nexus
-            .snapshot_create(&opctx, &project_lookup, &new_snapshot_params)
+            .snapshot_create(&opctx, project_lookup, &new_snapshot_params)
             .await?;
         Ok(HttpResponseCreated(snapshot.into()))
     };
@@ -4317,7 +4317,7 @@ async fn snapshot_create(
         );
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let snapshot = nexus
-            .snapshot_create(&opctx, &project_lookup, &new_snapshot_params)
+            .snapshot_create(&opctx, project_lookup, &new_snapshot_params)
             .await?;
         Ok(HttpResponseCreated(snapshot.into()))
     };

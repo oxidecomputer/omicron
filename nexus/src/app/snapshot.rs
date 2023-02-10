@@ -61,7 +61,8 @@ impl super::Nexus {
     pub async fn snapshot_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
+        // Is passed by value due to `disk_name` taking ownership of `self` below
+        project_lookup: lookup::Project<'_>,
         params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
         let authz_silo: authz::Silo;
@@ -70,10 +71,9 @@ impl super::Nexus {
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
 
-        // FIXME: Borrowing error here with project_lookup due some issue with disk_name?
         (authz_silo, _authz_org, authz_project, authz_disk, db_disk) =
             project_lookup
-                .disk_name(Name::ref_cast(&params.disk.clone()))
+                .disk_name(&db::model::Name(params.disk.clone()))
                 .fetch_for(authz::Action::Read)
                 .await?;
 
