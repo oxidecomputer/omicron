@@ -111,7 +111,10 @@ CREATE INDEX ON omicron.public.sled (
 CREATE TYPE omicron.public.service_kind AS ENUM (
   'internal_dns',
   'nexus',
-  'oximeter'
+  'oximeter',
+  'dendrite',
+  'tfport',
+  'crucible_pantry'
 );
 
 CREATE TABLE omicron.public.service (
@@ -1570,18 +1573,13 @@ CREATE TABLE omicron.public.system_update (
     -- this resource different from every other resource for little benefit.
 
     -- Unique semver version
-    version STRING(64) NOT NULL, -- TODO: length
-    -- version string with maj/min/patch 0-padded to be string sortable
-    version_sort STRING(64) NOT NULL -- TODO: length
+    version STRING(64) NOT NULL -- TODO: length
 );
 
 CREATE UNIQUE INDEX ON omicron.public.system_update (
     version
 );
 
-CREATE UNIQUE INDEX ON omicron.public.system_update (
-    version_sort
-);
  
 CREATE TYPE omicron.public.updateable_component_type AS ENUM (
     'bootloader_for_rot',
@@ -1665,8 +1663,6 @@ CREATE TABLE omicron.public.updateable_component (
     -- This may need to be nullable if we are registering components before we
     -- know about system versions at all
     system_version STRING(64) NOT NULL, -- TODO: length
-    -- version string with maj/min/patch 0-padded to be string sortable
-    system_version_sort STRING(64) NOT NULL, -- TODO: length
 
     status omicron.public.update_status NOT NULL
     -- TODO: status reason for updateable_component
@@ -1678,7 +1674,7 @@ CREATE UNIQUE INDEX ON omicron.public.updateable_component (
 );
 
 CREATE INDEX ON omicron.public.updateable_component (
-    system_version_sort
+    system_version
 );
 
 /*

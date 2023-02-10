@@ -39,6 +39,7 @@ use crate::smf_helper::SmfHelper;
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
+use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
@@ -849,6 +850,17 @@ impl ServiceManager {
                         smfh.setprop("config/host", &format!("[{}]", address))?;
                     }
                     smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
+                    smfh.refresh()?;
+                }
+                ServiceType::CruciblePantry => {
+                    info!(self.inner.log, "Setting up Crucible pantry service");
+
+                    if let Some(address) = request.addresses.get(0) {
+                        smfh.setprop(
+                            "config/listen",
+                            &format!("[{}]:{}", address, CRUCIBLE_PANTRY_PORT),
+                        )?;
+                    }
                     smfh.refresh()?;
                 }
             }

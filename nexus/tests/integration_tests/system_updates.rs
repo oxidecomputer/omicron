@@ -206,14 +206,14 @@ async fn test_update_deployments(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(deployments.items.len(), 2);
 
-    // TODO: test fetch deployment by ID
-    //
-    // let deployment_id = dbg!(deployments.items.get(0).unwrap().identity.id);
-    // let deployment = NexusRequest::object_get(
-    //     &client,
-    //     &format!("/v1/system/update/deployments/{}", deployment_id.to_string()),
-    // )
-    // .authn_as(AuthnMode::PrivilegedUser)
-    // .execute_and_parse_unwrap::<views::UpdateDeployment>()
-    // .await;
+    let first_dep = deployments.items.get(0).unwrap();
+
+    let dep_id = first_dep.identity.id.to_string();
+    let dep_url = format!("/v1/system/update/deployments/{}", dep_id);
+    let deployment = NexusRequest::object_get(&client, &dep_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::UpdateDeployment>()
+        .await;
+
+    assert_eq!(deployment.version, first_dep.version);
 }

@@ -21,7 +21,6 @@ instance_disk_list                       (get    "/organizations/{organization_n
 instance_serial_console                  (get    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console")
 instance_serial_console_stream           (get    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream")
 project_policy_view                      (get    "/organizations/{organization_name}/projects/{project_name}/policy")
-system_version                           (get    "/v1/system/update/version")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")
