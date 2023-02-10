@@ -7,10 +7,6 @@
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
 use crate::hardware::HardwareManager;
-use crate::illumos::link::LinkKind;
-use crate::illumos::zfs::{
-    Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
-};
 use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
@@ -23,7 +19,6 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use dropshot::HttpError;
-use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -40,14 +35,10 @@ use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crucible_client_types::VolumeConstructionRequest;
-
 #[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
+use crate::illumos::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
-use crate::illumos::{
-    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
-};
+use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 use crate::serial::ByteOffset;
 
 #[derive(thiserror::Error, Debug)]
@@ -64,11 +55,8 @@ pub enum Error {
     #[error("Failed to acquire etherstub VNIC: {0}")]
     EtherstubVnic(crate::illumos::dladm::CreateVnicError),
 
-    #[error("Failed to lookup VNICs on boot: {0}")]
-    GetVnics(#[from] crate::illumos::dladm::GetVnicError),
-
-    #[error("Failed to delete VNIC on boot: {0}")]
-    DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
+    #[error("Bootstrap error: {0}")]
+    Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
     DeleteAddress(#[from] crate::illumos::ExecutionError),
@@ -79,14 +67,8 @@ pub enum Error {
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
-    #[error(transparent)]
-    ZoneOperation(#[from] crate::illumos::zone::AdmError),
-
     #[error("Failed to create Sled Subnet: {err}")]
     SledSubnet { err: crate::illumos::zone::EnsureGzAddressError },
-
-    #[error(transparent)]
-    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
 
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
@@ -221,17 +203,6 @@ impl SledAgent {
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
             .map_err(|e| Error::EtherstubVnic(e))?;
 
-        // Before we start creating zones, we need to ensure that the
-        // necessary ZFS and Zone resources are ready.
-        Zfs::ensure_zoned_filesystem(
-            ZONE_ZFS_DATASET,
-            Mountpoint::Path(std::path::PathBuf::from(
-                ZONE_ZFS_DATASET_MOUNTPOINT,
-            )),
-            // do_format=
-            true,
-        )?;
-
         // Ensure the global zone has a functioning IPv6 address.
         //
         // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
@@ -248,49 +219,6 @@ impl SledAgent {
 
         // Initialize the xde kernel driver with the underlay devices.
         crate::opte::initialize_xde_driver(&log)?;
-
-        // Identify all existing zones which should be managed by the Sled
-        // Agent.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/725):
-        // Currently, we're removing these zones. In the future, we should
-        // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
-        // to leave the running Zones intact).
-        let zones = Zones::get().await?;
-        stream::iter(zones)
-            .zip(stream::iter(std::iter::repeat(log.clone())))
-            .map(Ok::<_, crate::zone::AdmError>)
-            .try_for_each_concurrent(
-                None,
-                |(zone, log)| async move {
-                    warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-                    Zones::halt_and_remove_logged(&log, zone.name()).await
-                }
-            ).await?;
-
-        // Identify all VNICs which should be managed by the Sled Agent.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/725)
-        // Currently, we're removing these VNICs. In the future, we should
-        // identify if they're being used by the aforementioned existing zones,
-        // and track them once more.
-        //
-        // This should be accessible via:
-        // $ dladm show-linkprop -c -p zone -o LINK,VALUE
-        //
-        // Note that we don't currently delete the VNICs in any particular
-        // order. That should be OK, since we're definitely deleting the guest
-        // VNICs before the xde devices, which is the main constraint.
-        delete_omicron_vnics(&log).await?;
-
-        // Also delete any extant xde devices. These should also eventually be
-        // recovered / tracked, to avoid interruption of any guests that are
-        // still running. That's currently irrelevant, since we're deleting the
-        // zones anyway.
-        //
-        // This is also tracked by
-        // https://github.com/oxidecomputer/omicron/issues/725.
-        crate::opte::delete_all_xde_devices(&log)?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
@@ -653,20 +581,6 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    /// Issue a snapshot request for a Crucible disk not attached to an
-    /// instance.
-    pub async fn issue_disk_snapshot_request(
-        &self,
-        _disk_id: Uuid,
-        _volume_construction_request: VolumeConstructionRequest,
-        _snapshot_id: Uuid,
-    ) -> Result<(), Error> {
-        // For a disk not attached to an instance, implementation requires
-        // constructing a volume and performing a snapshot through some other
-        // means. Currently unimplemented.
-        todo!();
-    }
-
     pub async fn firewall_rules_ensure(
         &self,
         _vpc_id: Uuid,
@@ -733,31 +647,6 @@ fn delete_addresses_matching_prefixes(
     Ok(())
 }
 
-// Delete all VNICs that can be managed by the control plane.
-//
-// These are currently those that match the prefix `ox` or `vopte`.
-async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
-    let vnics = Dladm::get_vnics()?;
-    stream::iter(vnics)
-        .zip(stream::iter(std::iter::repeat(log.clone())))
-        .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
-        .try_for_each_concurrent(None, |(vnic, log)| async {
-            tokio::task::spawn_blocking(move || {
-                warn!(
-                  log,
-                  "Deleting existing VNIC";
-                    "vnic_name" => &vnic,
-                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
-                );
-                Dladm::delete_vnic(&vnic)
-            })
-            .await
-            .unwrap()
-        })
-        .await?;
-    Ok(())
-}
-
 // Delete the etherstub and underlay VNIC used for interzone communication
 fn delete_etherstub(log: &Logger) -> Result<(), Error> {
     use crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME;
@@ -780,7 +669,7 @@ fn delete_etherstub(log: &Logger) -> Result<(), Error> {
 pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
     delete_etherstub_addresses(log)?;
     delete_underlay_addresses(log)?;
-    delete_omicron_vnics(log).await?;
+    crate::bootstrap::agent::delete_omicron_vnics(log).await?;
     delete_etherstub(log)?;
     crate::opte::delete_all_xde_devices(log)?;
     Ok(())

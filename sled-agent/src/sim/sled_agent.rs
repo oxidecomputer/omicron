@@ -28,7 +28,8 @@ use super::collection::SimCollection;
 use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
-use super::storage::{CrucibleData, Storage};
+use super::storage::CrucibleData;
+use super::storage::Storage;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -38,6 +39,7 @@ use super::storage::{CrucibleData, Storage};
 /// server.  The tighter the coupling that exists now, the harder this will be to
 /// move later.
 pub struct SledAgent {
+    pub id: Uuid,
     /// collection of simulated instances, indexed by instance uuid
     instances: Arc<SimCollection<SimInstance>>,
     /// collection of simulated disks, indexed by disk uuid
@@ -96,12 +98,12 @@ impl SledAgent {
     // TODO-cleanup should this instantiate the NexusClient it needs?
     // Should it take a Config object instead of separate id, sim_mode, etc?
     /// Constructs a simulated SledAgent with the given uuid.
-    pub fn new_simulated_with_id(
+    pub async fn new_simulated_with_id(
         config: &Config,
         log: Logger,
         nexus_address: SocketAddr,
         nexus_client: Arc<NexusClient>,
-    ) -> SledAgent {
+    ) -> Arc<SledAgent> {
         let id = config.id;
         let sim_mode = config.sim_mode;
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
@@ -110,7 +112,8 @@ impl SledAgent {
         let disk_log = log.new(o!("kind" => "disks"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        SledAgent {
+        Arc::new(SledAgent {
+            id,
             instances: Arc::new(SimCollection::new(
                 Arc::clone(&nexus_client),
                 instance_log,
@@ -130,7 +133,7 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
-        }
+        })
     }
 
     /// Map disk id to regions for later lookup
@@ -140,7 +143,7 @@ impl SledAgent {
     /// three crucible regions). Extract the region addresses, lookup the
     /// region from the port (which should be unique), and pair disk id with
     /// region ids. This map is referred to later when making snapshots.
-    async fn map_disk_ids_to_region_ids(
+    pub async fn map_disk_ids_to_region_ids(
         &self,
         volume_construction_request: &VolumeConstructionRequest,
     ) -> Result<(), Error> {
@@ -220,7 +223,7 @@ impl SledAgent {
             let target = DiskStateRequested::Attached(instance_id);
 
             let id = match disk.volume_construction_request {
-                VolumeConstructionRequest::Volume { id, .. } => id,
+                propolis_client::instance_spec::VolumeConstructionRequest::Volume { id, .. } => id,
                 _ => panic!("Unexpected construction type"),
             };
             self.disks.sim_ensure(&id, initial_state, target).await?;
@@ -235,10 +238,18 @@ impl SledAgent {
             .await?;
 
         for disk_request in &initial_hardware.disks {
-            self.map_disk_ids_to_region_ids(
-                &disk_request.volume_construction_request,
-            )
-            .await?;
+            // disk_request.volume_construction_request is of type
+            // propolis_client::instance_spec::VolumeConstructionRequest, where
+            // map_disk_ids_to_region_ids expects
+            // crucible_client_types::VolumeConstructionRequest, so take a round
+            // trip through JSON serialization -> deserialization to make this
+            // work.
+            let vcr: crucible_client_types::VolumeConstructionRequest =
+                serde_json::from_str(&serde_json::to_string(
+                    &disk_request.volume_construction_request,
+                )?)?;
+
+            self.map_disk_ids_to_region_ids(&vcr).await?;
         }
 
         Ok(instance_run_time_state)
@@ -433,27 +444,5 @@ impl SledAgent {
         }
 
         Ok(())
-    }
-
-    /// Issue a snapshot request for a Crucible disk not attached to an
-    /// instance.
-    pub async fn issue_disk_snapshot_request(
-        &self,
-        disk_id: Uuid,
-        volume_construction_request: VolumeConstructionRequest,
-        snapshot_id: Uuid,
-    ) -> Result<(), Error> {
-        // Perform the disk id -> region id mapping just as was done by during
-        // the simulated instance ensure, then call
-        // [`instance_issue_disk_snapshot_request`] as the snapshot logic is the
-        // same.
-        self.map_disk_ids_to_region_ids(&volume_construction_request).await?;
-
-        self.instance_issue_disk_snapshot_request(
-            Uuid::new_v4(), // instance id, not used by function
-            disk_id,
-            snapshot_id,
-        )
-        .await
     }
 }

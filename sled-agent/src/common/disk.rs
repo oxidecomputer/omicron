@@ -111,7 +111,9 @@ impl DiskStates {
                 return Ok(Some(Action::Detach(uuid)));
             }
             // Cannot detach.
-            DiskState::Destroyed | DiskState::Faulted => {
+            DiskState::Maintenance
+            | DiskState::Destroyed
+            | DiskState::Faulted => {
                 return Err(Error::InvalidRequest {
                     message: format!(
                         "cannot detach from {}",
@@ -143,7 +145,8 @@ impl DiskStates {
                 return Ok(Some(Action::Attach(uuid)));
             }
             // Cannot attach.
-            DiskState::Detaching(_)
+            DiskState::Maintenance
+            | DiskState::Detaching(_)
             | DiskState::Destroyed
             | DiskState::Faulted => {
                 return Err(Error::InvalidRequest {

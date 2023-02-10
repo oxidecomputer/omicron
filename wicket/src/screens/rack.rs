@@ -38,8 +38,9 @@ impl RackScreen {
         let help_data = vec![
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
+            ("<ARROWS>", "Cycle through components directionally"),
             ("<Enter> | left mouse click", "Select hovered object"),
-            ("<ESC>", "Reset the TabIndex of the Rack"),
+            ("<ESC>", "Exit help menu | Reset the TabIndex of the Rack"),
             ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
@@ -168,8 +169,21 @@ impl RackScreen {
             KeyCode::BackTab => {
                 state.rack_state.dec_tab_index();
             }
+            KeyCode::Up => {
+                state.rack_state.up_arrow();
+            }
+            KeyCode::Down => {
+                state.rack_state.down_arrow();
+            }
+            KeyCode::Left | KeyCode::Right => {
+                state.rack_state.left_or_right_arrow();
+            }
             KeyCode::Esc => {
-                state.rack_state.clear_tab_index();
+                if self.help_menu_state.is_closed() {
+                    state.rack_state.clear_tab_index();
+                } else {
+                    self.help_menu_state.close();
+                }
             }
             KeyCode::Enter => {
                 if state.rack_state.tab_index.is_set() {

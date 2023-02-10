@@ -19,10 +19,15 @@ use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::hardware::HardwareManager;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
+use crate::illumos::link::LinkKind;
+use crate::illumos::zfs::{
+    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
@@ -74,6 +79,21 @@ pub enum BootstrapError {
 
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
+
+    #[error("Failed to lookup VNICs on boot: {0}")]
+    GetVnics(#[from] crate::illumos::dladm::GetVnicError),
+
+    #[error("Failed to delete VNIC on boot: {0}")]
+    DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
+
+    #[error("Failed to ensure ZFS filesystem: {0}")]
+    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
+
+    #[error("Failed to perform Zone operation: {0}")]
+    ZoneOperation(#[from] crate::illumos::zone::AdmError),
+
+    #[error("Error managing guest networking: {0}")]
+    Opte(#[from] crate::opte::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -145,6 +165,84 @@ pub fn bootstrap_address(
     Ok(mac_to_socket_addr(mac))
 }
 
+// Delete all VNICs that can be managed by the control plane.
+//
+// These are currently those that match the prefix `ox` or `vopte`.
+pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), BootstrapError> {
+    let vnics = Dladm::get_vnics()?;
+    stream::iter(vnics)
+        .zip(stream::iter(std::iter::repeat(log.clone())))
+        .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
+        .try_for_each_concurrent(None, |(vnic, log)| async {
+            tokio::task::spawn_blocking(move || {
+                warn!(
+                  log,
+                  "Deleting existing VNIC";
+                    "vnic_name" => &vnic,
+                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
+                );
+                Dladm::delete_vnic(&vnic)
+            })
+            .await
+            .unwrap()
+        })
+        .await?;
+    Ok(())
+}
+
+// Deletes all state which may be left-over from a previous execution of the
+// Sled Agent.
+//
+// This may re-establish contact in the future, and re-construct a picture of
+// the expected state of each service. However, at the moment, "starting from a
+// known clean slate" is easier to work with.
+async fn cleanup_all_old_global_state(
+    log: &Logger,
+) -> Result<(), BootstrapError> {
+    // Identify all existing zones which should be managed by the Sled
+    // Agent.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+    // Currently, we're removing these zones. In the future, we should
+    // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
+    // to leave the running Zones intact).
+    let zones = Zones::get().await?;
+    stream::iter(zones)
+        .zip(stream::iter(std::iter::repeat(log.clone())))
+        .map(Ok::<_, crate::zone::AdmError>)
+        .try_for_each_concurrent(None, |(zone, log)| async move {
+            warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
+            Zones::halt_and_remove_logged(&log, zone.name()).await
+        })
+        .await?;
+
+    // Identify all VNICs which should be managed by the Sled Agent.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/725)
+    // Currently, we're removing these VNICs. In the future, we should
+    // identify if they're being used by the aforementioned existing zones,
+    // and track them once more.
+    //
+    // This should be accessible via:
+    // $ dladm show-linkprop -c -p zone -o LINK,VALUE
+    //
+    // Note that we don't currently delete the VNICs in any particular
+    // order. That should be OK, since we're definitely deleting the guest
+    // VNICs before the xde devices, which is the main constraint.
+    delete_omicron_vnics(&log).await?;
+
+    // Also delete any extant xde devices. These should also eventually be
+    // recovered / tracked, to avoid interruption of any guests that are
+    // still running. That's currently irrelevant, since we're deleting the
+    // zones anyway.
+    //
+    // This is also tracked by
+    // https://github.com/oxidecomputer/omicron/issues/725.
+    crate::opte::delete_all_xde_devices(&log)?;
+
+    Ok(())
+}
+
 impl Agent {
     pub async fn new(
         log: Logger,
@@ -202,9 +300,20 @@ impl Agent {
         let ddmd_client = DdmAdminClient::new(log.clone())?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(address));
 
+        // Before we start creating zones, we need to ensure that the
+        // necessary ZFS and Zone resources are ready.
+        //
         // TODO(https://github.com/oxidecomputer/omicron/issues/1934):
-        // Initialize ZFS and Zone resources before we can safely launch the
-        // switch zone. See: Zfs::ensure_zoned_filesystem.
+        // We should carefully consider which dataset this is using; it's
+        // currently part of the ramdisk.
+        Zfs::ensure_zoned_filesystem(
+            ZONE_ZFS_DATASET,
+            Mountpoint::Path(std::path::PathBuf::from(
+                ZONE_ZFS_DATASET_MOUNTPOINT,
+            )),
+            // do_format=
+            true,
+        )?;
 
         // HardwareMonitor must be on the underlay network like all services
         let underlay_etherstub = Dladm::ensure_etherstub(
@@ -224,6 +333,12 @@ impl Agent {
                     e
                 ))
             })?;
+
+        // Before we start monitoring for hardware, ensure we're running from a
+        // predictable state.
+        //
+        // This means all VNICs, zones, etc.
+        cleanup_all_old_global_state(&log).await?;
 
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
