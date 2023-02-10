@@ -14,6 +14,7 @@ use std::str::FromStr;
 
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
+pub const VNIC_PREFIX_BOOTSTRAP: &str = "oxBootstrap";
 
 /// Prefix used to name VNICs over xde devices / OPTE ports.
 // TODO-correctness: Remove this when `xde` devices can be directly used beneath
