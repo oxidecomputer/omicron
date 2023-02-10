@@ -13732,14 +13732,8 @@
             "type": "string",
             "format": "uuid"
           },
-          "online_logical_cpus": {
-            "description": "The number of online logical processors available to the sled.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "rack_id": {
-            "description": "The rack to which this Sled is currently attached.",
+            "description": "The rack to which this Sled is currently attached",
             "type": "string",
             "format": "uuid"
           },
@@ -13753,8 +13747,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "usable_hardware_threads": {
+            "description": "The number of hardware threads which can execute on this sled",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "usable_physical_ram": {
-            "description": "Amount of RAM which may be used by the Sled's OS.",
+            "description": "Amount of RAM which may be used by the Sled's OS",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -13765,10 +13765,10 @@
         "required": [
           "baseboard",
           "id",
-          "online_logical_cpus",
           "rack_id",
           "time_created",
           "time_modified",
+          "usable_hardware_threads",
           "usable_physical_ram"
         ]
       },

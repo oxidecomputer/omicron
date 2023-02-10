@@ -26,7 +26,7 @@ pub struct SledBaseboard {
 /// Hardware information about the sled.
 pub struct SledSystemHardware {
     pub is_scrimlet: bool,
-    pub online_logical_cpus: u32,
+    pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
 }
 
@@ -46,7 +46,7 @@ pub struct Sled {
     part_number: String,
     revision: i64,
 
-    online_logical_cpus: SqlU32,
+    usable_hardware_threads: SqlU32,
     usable_physical_ram: ByteCount,
 
     // ServiceAddress (Sled Agent).
@@ -79,7 +79,9 @@ impl Sled {
             serial_number: baseboard.serial_number,
             part_number: baseboard.part_number,
             revision: baseboard.revision,
-            online_logical_cpus: SqlU32::new(hardware.online_logical_cpus),
+            usable_hardware_threads: SqlU32::new(
+                hardware.usable_hardware_threads,
+            ),
             usable_physical_ram: hardware.usable_physical_ram,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
@@ -114,7 +116,7 @@ impl From<Sled> for views::Sled {
                 part: sled.part_number,
                 revision: sled.revision,
             },
-            online_logical_cpus: sled.online_logical_cpus.0,
+            usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
         }
     }

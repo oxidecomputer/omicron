@@ -94,7 +94,7 @@ impl Server {
                             model: String::from("Unknown"),
                             revision: 0,
                         },
-                        online_logical_cpus: 4,
+                        usable_hardware_threads: 4,
                         usable_physical_ram: NexusTypes::ByteCount(1 << 30),
                     },
                 )

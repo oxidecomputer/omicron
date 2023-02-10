@@ -298,11 +298,11 @@ pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub baseboard: Baseboard,
-    /// The rack to which this Sled is currently attached.
+    /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
-    /// The number of online logical processors available to the sled.
-    pub online_logical_cpus: u32,
-    /// Amount of RAM which may be used by the Sled's OS.
+    /// The number of hardware threads which can execute on this sled
+    pub usable_hardware_threads: u32,
+    /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
 }
 
