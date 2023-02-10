@@ -706,7 +706,6 @@ table! {
         time_modified -> Timestamptz,
 
         version -> Text,
-        version_sort -> Text,
     }
 }
 
@@ -742,7 +741,6 @@ table! {
         device_id -> Text,
         version -> Text,
         system_version -> Text,
-        system_version_sort -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
         status -> crate::UpdateStatusEnum,
         // TODO: status reason for updateable_component

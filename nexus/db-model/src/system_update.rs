@@ -34,9 +34,6 @@ pub struct SystemUpdate {
     #[diesel(embed)]
     pub identity: SystemUpdateIdentity,
     pub version: SemverVersion,
-    /// Semver version string with 0-padding on the numeric parts to make it
-    /// DB-sortable. See `to_sortable_string` on `SemverVersion`
-    pub version_sort: String,
 }
 
 impl SystemUpdate {
@@ -44,11 +41,9 @@ impl SystemUpdate {
     pub fn new(
         version: external::SemverVersion,
     ) -> Result<Self, external::Error> {
-        let db_version = SemverVersion(version);
         Ok(Self {
             identity: SystemUpdateIdentity::new(Uuid::new_v4()),
-            version: db_version.clone(),
-            version_sort: db_version.to_sortable_string()?,
+            version: SemverVersion(version),
         })
     }
 }
@@ -248,9 +243,6 @@ pub struct UpdateableComponent {
     pub component_type: UpdateableComponentType,
     pub version: SemverVersion,
     pub system_version: SemverVersion,
-    /// Semver version string with 0-padding on the numeric parts to make it
-    /// DB-sortable. See `to_sortable_string` on `SemverVersion`
-    pub system_version_sort: String,
     pub status: UpdateStatus,
     // TODO: point to the actual update artifact
 }
@@ -261,12 +253,10 @@ impl TryFrom<params::UpdateableComponentCreate> for UpdateableComponent {
     fn try_from(
         create: params::UpdateableComponentCreate,
     ) -> Result<Self, Self::Error> {
-        let system_version = SemverVersion(create.system_version);
         Ok(Self {
             identity: UpdateableComponentIdentity::new(Uuid::new_v4()),
             version: SemverVersion(create.version),
-            system_version: system_version.clone(),
-            system_version_sort: system_version.to_sortable_string()?,
+            system_version: SemverVersion(create.system_version),
             component_type: create.component_type.into(),
             device_id: create.device_id,
             status: UpdateStatus::Steady,
