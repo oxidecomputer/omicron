@@ -257,7 +257,7 @@ lazy_static! {
 
     // To be migrated...
     pub static ref DEMO_INSTANCE_NICS_URL: String =
-        format!("/organizations/{}/projects/{}/instances/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
+        format!("/v1/network-interfaces?organization={}&project={}&instance={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
         format!("/organizations/{}/projects/{}/instances/{}/external-ips", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
@@ -283,7 +283,7 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_NIC_NAME: Name =
         nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
-        format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
+        format!("/v1/network-interfaces/{}?organization={}&project={}&instance={}", *DEMO_INSTANCE_NIC_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
         params::NetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -1373,15 +1373,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE).unwrap()
                 ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/network-interfaces/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 
