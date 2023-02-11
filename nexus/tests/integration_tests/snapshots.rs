@@ -43,12 +43,8 @@ type ControlPlaneTestContext =
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
-fn get_project_url() -> String {
-    format!("/organizations/{}/projects/{}", ORG_NAME, PROJECT_NAME)
-}
-
 fn get_disks_url() -> String {
-    format!("{}/disks", get_project_url())
+    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -135,7 +131,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
 
     // Boot instance with disk
     let instances_url = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORG_NAME, PROJECT_NAME,
     );
     let instance_name = "base-instance";
@@ -171,7 +167,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
 
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -269,7 +265,10 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Assert disk is detached
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
     let disk: Disk = NexusRequest::object_get(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -282,7 +281,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
 
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -303,7 +302,10 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.size, base_disk.size);
 
     // Assert disk is still detached
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
     let disk: Disk = NexusRequest::object_get(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -361,7 +363,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -426,8 +428,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     // Delete snapshot
     let snapshot_url = format!(
-        "/organizations/{}/projects/{}/snapshots/not-attached",
-        ORG_NAME, PROJECT_NAME,
+        "/v1/snapshots/not-attached?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
     );
 
     NexusRequest::new(
@@ -449,7 +451,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Delete the disk using the snapshot
-    let disk_url = format!("{}/{}", disks_url, snap_disk_name);
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        snap_disk_name, ORG_NAME, PROJECT_NAME
+    );
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -462,7 +467,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
 
     // Delete the original base disk
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -764,7 +772,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
 
     // Issue snapshot request, expect it to fail
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
