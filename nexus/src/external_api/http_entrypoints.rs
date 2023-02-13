@@ -2350,8 +2350,7 @@ async fn disk_list(
             Some(path.organization_name.into()),
             path.project_name.into(),
         );
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let authz_project = nexus.project_lookup(&opctx, &project_selector)?;
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let disks = nexus
             .disk_list(
                 &opctx,

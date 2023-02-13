@@ -154,27 +154,6 @@ impl SnapshotSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct SnapshotSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-    pub snapshot: NameOrId,
-}
-
-impl SnapshotSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        snapshot: NameOrId,
-    ) -> Self {
-        SnapshotSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
-            snapshot,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
     #[serde(flatten)]
