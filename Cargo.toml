@@ -113,9 +113,10 @@ clap = { version = "4.1", features = ["derive"] }
 cookie = "0.16"
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "0e2bea7741c6bdc34e8e08addb941ee31e4ac9ec" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "5f06c7ebc320c19846670e9d745a4d44f78901b4" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
 display-error-chain = "0.1.1"
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
@@ -190,13 +191,13 @@ parse-display = "0.7.0"
 paste = "1.0.11"
 percent-encoding = "2.2.0"
 pem = "1.1"
-petgraph = "0.6.2"
+petgraph = "0.6.3"
 postgres-protocol = "0.6.4"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "92508d573529a1ee50a9422fbca045a5e980a2b5", features = [ "generated-migration" ] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "880a031fbdd7417cd3a4643f8bf419d8d5ea8224", features = [ "generated-migration" ] }
 proptest = "1.1.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -214,7 +215,7 @@ schemars = "0.8.10"
 semver = { version = "1.0.16", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
-serde_json = "1.0.92"
+serde_json = "1.0.93"
 serde_tokenstream = "0.1"
 serde_urlencoded = "0.7.1"
 serde_with = "2.2.0"
@@ -255,7 +256,7 @@ tokio = "1.25"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.18"
-tokio-util = "0.7.4"
+tokio-util = "0.7.7"
 toml = "0.5.11"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
@@ -318,6 +319,7 @@ panic = "abort"
 #[patch."https://github.com/oxidecomputer/crucible"]
 #crucible-agent-client = { path = "../crucible/agent-client" }
 #crucible-client-types = { path = "../crucible/crucible-client-types" }
+#crucible-pantry-client = { path = "../crucible/pantry-client" }
 
 #
 # Local client generation during development.
