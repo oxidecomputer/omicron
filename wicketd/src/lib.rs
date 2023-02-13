@@ -15,6 +15,7 @@ use artifacts::WicketdArtifactStore;
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use inventory::{RackV1Inventory, SpInventory};
+use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 
 use dropshot::ConfigDropshot;
@@ -69,26 +70,31 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
 
     let mgs_manager = MgsManager::new(&log, args.mgs_address);
     let mgs_handle = mgs_manager.get_handle();
-    let mgs_client = mgs_manager.get_client();
     tokio::spawn(async move {
         mgs_manager.run().await;
     });
 
     let store = WicketdArtifactStore::new(&log);
-    let update_planner = UpdatePlanner::new(mgs_client, store.clone(), &log);
+    let update_planner =
+        UpdatePlanner::new(store.clone(), args.mgs_address, &log);
 
-    let wicketd_server_fut = dropshot::HttpServerStarter::new(
-        &dropshot_config,
-        http_entrypoints::api(),
-        ServerContext {
-            mgs_handle,
-            artifact_store: store.clone(),
-            update_planner,
-        },
-        &log.new(o!("component" => "dropshot (wicketd)")),
-    )
-    .map_err(|err| format!("initializing http server: {}", err))?
-    .start();
+    let wicketd_server_fut = {
+        let log = log.new(o!("component" => "dropshot (wicketd)"));
+        let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
+        dropshot::HttpServerStarter::new(
+            &dropshot_config,
+            http_entrypoints::api(),
+            ServerContext {
+                mgs_handle,
+                mgs_client,
+                artifact_store: store.clone(),
+                update_planner,
+            },
+            &log,
+        )
+        .map_err(|err| format!("initializing http server: {}", err))?
+        .start()
+    };
 
     let artifact_server_fut = installinator_artifactd::ArtifactServer::new(
         store,

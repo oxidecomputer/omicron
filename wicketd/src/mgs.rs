@@ -5,24 +5,17 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
-use crate::http_entrypoints::SpComponentIdentifier;
 use crate::{RackV1Inventory, SpInventory};
-use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use gateway_client::types::{
-    SpComponentList, SpIdentifier, SpInfo, SpType, SpUpdateStatus,
-};
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use gateway_client::types::{SpComponentList, SpIdentifier, SpInfo};
 use schemars::JsonSchema;
 use serde::Serialize;
 use slog::{info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
-use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
-use uuid::Uuid;
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const MGS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -38,76 +31,6 @@ const CHANNEL_CAPACITY: usize = 8;
 #[derive(Debug, PartialEq, Eq)]
 pub struct ShutdownInProgress;
 
-impl From<ShutdownInProgress> for HttpError {
-    fn from(_: ShutdownInProgress) -> Self {
-        HttpError::for_unavail(None, "Server is shutting down".into())
-    }
-}
-
-/// Possible errors from attempting to start a component update.
-#[derive(Debug, Error)]
-pub enum StartComponentUpdateError {
-    #[error("server is shutting down")]
-    ShutdownInProgress,
-    #[error("cannot apply updates of kind {0:?}")]
-    CannotApplyUpdatesOfKind(UpdateArtifactKind),
-    #[error("artifact kind {kind:?} requires target of type {required:?}, but target is of type {target:?}")]
-    CannotApplyUpdateToTargetType {
-        kind: UpdateArtifactKind,
-        required: SpType,
-        target: SpType,
-    },
-    #[error("the target SP is busy applying an update")]
-    TargetSpBusy,
-}
-
-impl From<StartComponentUpdateError> for HttpError {
-    fn from(err: StartComponentUpdateError) -> Self {
-        match err {
-            StartComponentUpdateError::ShutdownInProgress
-            | StartComponentUpdateError::TargetSpBusy => {
-                Self::for_unavail(None, err.to_string())
-            }
-            StartComponentUpdateError::CannotApplyUpdatesOfKind(_)
-            | StartComponentUpdateError::CannotApplyUpdateToTargetType {
-                ..
-            } => Self::for_bad_request(None, err.to_string()),
-        }
-    }
-}
-
-fn map_mgs_client_error(
-    err: gateway_client::Error<gateway_client::types::Error>,
-) -> HttpError {
-    use gateway_client::Error;
-
-    match err {
-        Error::InvalidRequest(message) => {
-            HttpError::for_bad_request(None, message)
-        }
-        Error::CommunicationError(err) | Error::InvalidResponsePayload(err) => {
-            HttpError::for_internal_error(err.to_string())
-        }
-        Error::UnexpectedResponse(response) => HttpError::for_internal_error(
-            format!("unexpected response from MGS: {:?}", response.status()),
-        ),
-        // Proxy MGS's response to our caller.
-        Error::ErrorResponse(response) => {
-            let status_code = response.status();
-            let response = response.into_inner();
-            HttpError {
-                status_code,
-                error_code: response.error_code,
-                external_message: response.message,
-                internal_message: format!(
-                    "error response from MGS (request_id = {})",
-                    response.request_id
-                ),
-            }
-        }
-    }
-}
-
 #[derive(Debug)]
 enum MgsRequest {
     GetInventory {
@@ -120,7 +43,6 @@ enum MgsRequest {
 #[derive(Debug, Clone)]
 pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
-    mgs_client: gateway_client::Client,
 }
 
 /// The response to a `get_inventory` call: the inventory known to wicketd, or a
@@ -156,49 +78,24 @@ impl MgsHandle {
             .map_err(|_| ShutdownInProgress)?;
         reply_rx.await.map_err(|_| ShutdownInProgress)
     }
+}
 
-    pub async fn get_component_update_status(
-        &self,
-        target: SpComponentIdentifier,
-    ) -> Result<SpUpdateStatus, HttpError> {
-        self.mgs_client
-            .sp_component_update_status(
-                target.type_,
-                target.slot,
-                &target.component,
-            )
-            .await
-            .map(|resp| resp.into_inner())
-            .map_err(map_mgs_client_error)
-    }
+pub fn make_mgs_client(
+    log: Logger,
+    mgs_addr: SocketAddrV6,
+) -> gateway_client::Client {
+    // TODO-correctness Do all users of this client (including both direct API
+    // calls by `UpdatePlanner` and polling by `MgsManager`) want the same
+    // timeout?
+    let endpoint = format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
+    info!(log, "MGS Endpoint: {}", endpoint);
+    let client = reqwest::ClientBuilder::new()
+        .connect_timeout(MGS_TIMEOUT)
+        .timeout(MGS_TIMEOUT)
+        .build()
+        .unwrap();
 
-    pub async fn component_update_abort(
-        &self,
-        target: SpComponentIdentifier,
-        update_id: Uuid,
-    ) -> Result<(), HttpError> {
-        self.mgs_client
-            .sp_component_update_abort(
-                target.type_,
-                target.slot,
-                &target.component,
-                &gateway_client::types::UpdateAbortBody { id: update_id },
-            )
-            .await
-            .map(|resp| resp.into_inner())
-            .map_err(map_mgs_client_error)
-    }
-
-    pub async fn sp_reset(
-        &self,
-        target: SpIdentifier,
-    ) -> Result<(), HttpError> {
-        self.mgs_client
-            .sp_reset(target.type_, target.slot)
-            .await
-            .map(|resp| resp.into_inner())
-            .map_err(map_mgs_client_error)
-    }
+    gateway_client::Client::new_with_client(&endpoint, client, log)
 }
 
 /// The entity responsible for interacting with MGS
@@ -228,29 +125,13 @@ impl MgsManager {
     pub fn new(log: &Logger, mgs_addr: SocketAddrV6) -> MgsManager {
         let log = log.new(o!("component" => "wicketd MgsManager"));
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
-        let endpoint =
-            format!("http://[{}]:{}", mgs_addr.ip(), mgs_addr.port());
-        info!(log, "MGS Endpoint: {}", endpoint);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(MGS_TIMEOUT)
-            .timeout(MGS_TIMEOUT)
-            .build()
-            .unwrap();
-
-        let mgs_client = gateway_client::Client::new_with_client(
-            &endpoint,
-            client,
-            log.clone(),
-        );
-        MgsManager { log, tx, rx, mgs_client, inventory: None }
-    }
-
-    pub fn get_client(&self) -> gateway_client::Client {
-        self.mgs_client.clone()
+        let mgs_client = make_mgs_client(log.clone(), mgs_addr);
+        let inventory = None;
+        MgsManager { log, tx, rx, mgs_client, inventory }
     }
 
     pub fn get_handle(&self) -> MgsHandle {
-        MgsHandle { tx: self.tx.clone(), mgs_client: self.mgs_client.clone() }
+        MgsHandle { tx: self.tx.clone() }
     }
 
     pub async fn run(mut self) {

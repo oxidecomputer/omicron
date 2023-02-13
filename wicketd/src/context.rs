@@ -11,6 +11,7 @@ use crate::MgsHandle;
 /// Shared state used by API handlers
 pub struct ServerContext {
     pub mgs_handle: MgsHandle,
+    pub mgs_client: gateway_client::Client,
     pub(crate) artifact_store: WicketdArtifactStore,
     pub(crate) update_planner: UpdatePlanner,
 }

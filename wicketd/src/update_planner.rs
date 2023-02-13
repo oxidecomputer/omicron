@@ -5,6 +5,7 @@
 // Copyright 2023 Oxide Computer Company
 
 use crate::artifacts::WicketdArtifactStore;
+use crate::mgs::make_mgs_client;
 use crate::update_events::UpdateEventFailureKind;
 use crate::update_events::UpdateEventKind;
 use crate::update_events::UpdateEventSuccessKind;
@@ -25,6 +26,7 @@ use slog::o;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -92,13 +94,14 @@ pub(crate) struct UpdatePlanner {
 
 impl UpdatePlanner {
     pub(crate) fn new(
-        mgs_client: gateway_client::Client,
         artifact_store: WicketdArtifactStore,
+        mgs_addr: SocketAddrV6,
         log: &Logger,
     ) -> Self {
         let log = log.new(o!("component" => "wicketd update planner"));
         let running_updates = Mutex::default();
         let update_logs = Mutex::default();
+        let mgs_client = make_mgs_client(log.clone(), mgs_addr);
         Self { mgs_client, artifact_store, log, running_updates, update_logs }
     }
 

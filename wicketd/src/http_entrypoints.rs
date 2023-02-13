@@ -15,16 +15,13 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::TypedBody;
 use dropshot::UntypedBody;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use uuid::Uuid;
 
 use crate::ServerContext;
 
@@ -41,8 +38,6 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_start_update)?;
         api.register(get_update_all)?;
         api.register(get_update_sp)?;
-        api.register(get_component_update_status)?;
-        api.register(post_component_update_abort)?;
         api.register(post_reset_sp)?;
         Ok(())
     }
@@ -68,8 +63,12 @@ pub fn api() -> WicketdApiDescription {
 async fn get_inventory(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
-    let inventory = rqctx.context().mgs_handle.get_inventory().await?;
-    Ok(HttpResponseOk(inventory))
+    match rqctx.context().mgs_handle.get_inventory().await {
+        Ok(response) => Ok(HttpResponseOk(response)),
+        Err(_) => {
+            Err(HttpError::for_unavail(None, "Server is shutting down".into()))
+        }
+    }
 }
 
 /// An endpoint used to upload TUF repositories to the server.
@@ -178,55 +177,6 @@ async fn get_update_sp(
     Ok(HttpResponseOk(update_log))
 }
 
-/// Description of a specific component on a target SP.
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct SpComponentIdentifier {
-    #[serde(rename = "type")]
-    pub type_: SpType,
-    pub slot: u32,
-    pub component: String, // TODO should this be UpdateArtifactKind?
-}
-
-/// An endpoint to request the current status of an update being applied to a
-/// component by MGS.
-#[endpoint {
-    method = GET,
-    path = "/update/{type}/{slot}/{component}",
-}]
-async fn get_component_update_status(
-    rqctx: RequestContext<ServerContext>,
-    target: Path<SpComponentIdentifier>,
-) -> Result<HttpResponseOk<gateway_client::types::SpUpdateStatus>, HttpError> {
-    let response = rqctx
-        .context()
-        .mgs_handle
-        .get_component_update_status(target.into_inner())
-        .await?;
-
-    Ok(HttpResponseOk(response))
-}
-
-/// An endpoint to abort an in-progress, failed, or stalled update being applied
-/// to a component by MGS.
-#[endpoint {
-    method = POST,
-    path = "/update/{type}/{slot}/{component}/abort",
-}]
-async fn post_component_update_abort(
-    rqctx: RequestContext<ServerContext>,
-    target: Path<SpComponentIdentifier>,
-    body: TypedBody<Uuid>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    rqctx
-        .context()
-        .mgs_handle
-        .component_update_abort(target.into_inner(), body.into_inner())
-        .await?;
-
-    Ok(HttpResponseUpdatedNoContent {})
-}
-
 /// An endpoint to reset an SP.
 #[endpoint {
     method = POST,
@@ -236,7 +186,45 @@ async fn post_reset_sp(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    rqctx.context().mgs_handle.sp_reset(target.into_inner()).await?;
+    let sp = target.into_inner();
+    rqctx
+        .context()
+        .mgs_client
+        .sp_reset(sp.type_, sp.slot)
+        .await
+        .map_err(map_mgs_client_error)?;
 
     Ok(HttpResponseUpdatedNoContent {})
+}
+
+fn map_mgs_client_error(
+    err: gateway_client::Error<gateway_client::types::Error>,
+) -> HttpError {
+    use gateway_client::Error;
+
+    match err {
+        Error::InvalidRequest(message) => {
+            HttpError::for_bad_request(None, message)
+        }
+        Error::CommunicationError(err) | Error::InvalidResponsePayload(err) => {
+            HttpError::for_internal_error(err.to_string())
+        }
+        Error::UnexpectedResponse(response) => HttpError::for_internal_error(
+            format!("unexpected response from MGS: {:?}", response.status()),
+        ),
+        // Proxy MGS's response to our caller.
+        Error::ErrorResponse(response) => {
+            let status_code = response.status();
+            let response = response.into_inner();
+            HttpError {
+                status_code,
+                error_code: response.error_code,
+                external_message: response.message,
+                internal_message: format!(
+                    "error response from MGS (request_id = {})",
+                    response.request_id
+                ),
+            }
+        }
+    }
 }
