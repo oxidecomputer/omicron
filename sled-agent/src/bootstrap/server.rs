@@ -20,8 +20,6 @@ use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
 use slog::Drain;
 use slog::Logger;
-use std::net::Ipv6Addr;
-use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
@@ -48,7 +46,6 @@ pub struct Server {
 
 impl Server {
     pub async fn start(
-        address: Ipv6Addr,
         config: Config,
         sled_config: SledConfig,
     ) -> Result<Self, String> {
@@ -90,15 +87,18 @@ impl Server {
         .map_err(|err| format!("Failed to detect local SP: {err}"))?;
 
         info!(log, "setting up bootstrap agent server");
-        let (bootstrap_agent, trust_quorum) =
-            Agent::new(log.clone(), sled_config, address, sp.clone())
-                .await
-                .map_err(|e| e.to_string())?;
+        let (bootstrap_agent, trust_quorum) = Agent::new(
+            log.clone(),
+            sled_config,
+            config.link.clone(),
+            sp.clone(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         let bootstrap_agent = Arc::new(bootstrap_agent);
 
         let ba_log = log.new(o!("component" => "BootstrapAgentServer"));
         let inner = Inner::start(
-            config.bind_address,
             sp.clone(),
             trust_quorum,
             Arc::clone(&bootstrap_agent),
@@ -152,7 +152,6 @@ struct Inner {
 
 impl Inner {
     async fn start(
-        bind_address: SocketAddrV6,
         // TODO-cleanup `sp` is optional because we support running without an
         // SP / any trust quorum mechanisms. Eventually it should be required.
         sp: Option<SpHandle>,
@@ -160,6 +159,8 @@ impl Inner {
         bootstrap_agent: Arc<Agent>,
         log: Logger,
     ) -> Result<JoinHandle<Result<(), String>>, String> {
+        let bind_address = bootstrap_agent.address();
+
         let listener =
             TcpListener::bind(bind_address).await.map_err(|err| {
                 format!("could not bind to {bind_address}: {err}")

@@ -4,11 +4,11 @@
 
 //! Interfaces for working with bootstrap agent configuration
 
+use crate::illumos::dladm::PhysicalLink;
 use crate::sp::SimSpConfig;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
-use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub const BOOTSTRAP_AGENT_PORT: u16 = 12346;
@@ -17,10 +17,8 @@ pub const BOOTSTRAP_AGENT_PORT: u16 = 12346;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Config {
     pub id: Uuid,
-    pub bind_address: SocketAddrV6,
+    pub link: PhysicalLink,
     pub log: ConfigLogging,
-
     pub rss_config: Option<crate::rack_setup::config::SetupServiceConfig>,
-
     pub sp_config: Option<SimSpConfig>,
 }

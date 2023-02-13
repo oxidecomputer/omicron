@@ -179,7 +179,7 @@ impl DataStore {
 
         paginated(system_update, id, pagparams)
             .select(SystemUpdate::as_select())
-            .order(version_sort.desc())
+            .order(version.desc())
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
@@ -259,7 +259,7 @@ impl DataStore {
 
         updateable_component
             .select(system_version)
-            .order(system_version_sort.asc())
+            .order(system_version.asc())
             .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
@@ -275,7 +275,7 @@ impl DataStore {
 
         updateable_component
             .select(system_version)
-            .order(system_version_sort.desc())
+            .order(system_version.desc())
             .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))

@@ -250,6 +250,7 @@
           "snapshots"
         ],
         "summary": "Fetch a snapshot by id",
+        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
         "operationId": "snapshot_view_by_id",
         "parameters": [
           {
@@ -279,7 +280,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/vpc-router-routes/{id}": {
@@ -3214,6 +3216,7 @@
           "snapshots"
         ],
         "summary": "List snapshots",
+        "description": "Use `GET /v1/snapshots` instead.",
         "operationId": "snapshot_list",
         "parameters": [
           {
@@ -3280,6 +3283,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -3287,7 +3291,7 @@
           "snapshots"
         ],
         "summary": "Create a snapshot",
-        "description": "Creates a point-in-time snapshot from a disk.",
+        "description": "Use `POST /v1/snapshots` instead.",
         "operationId": "snapshot_create",
         "parameters": [
           {
@@ -3336,7 +3340,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}": {
@@ -3345,6 +3350,7 @@
           "snapshots"
         ],
         "summary": "Fetch a snapshot",
+        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
         "operationId": "snapshot_view",
         "parameters": [
           {
@@ -3389,13 +3395,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "snapshots"
         ],
         "summary": "Delete a snapshot",
+        "description": "Use `DELETE /v1/snapshots/{snapshot}` instead.",
         "operationId": "snapshot_delete",
         "parameters": [
           {
@@ -3433,7 +3441,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
@@ -9273,6 +9282,223 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/snapshots": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "List snapshots",
+        "operationId": "snapshot_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Create a snapshot",
+        "description": "Creates a point-in-time snapshot from a disk.",
+        "operationId": "snapshot_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/snapshots/{snapshot}": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Fetch a snapshot",
+        "operationId": "snapshot_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Delete a snapshot",
+        "operationId": "snapshot_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
