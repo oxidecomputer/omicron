@@ -376,15 +376,6 @@ impl DataStore {
     }
 }
 
-// TODO tests for rack_set_initialized:
-//
-// - helpers to inspect services, datasets, certs, ip ranges
-//
-// Tests:
-// - insert "empty" vecs for everything, what happens?
-// - insert services & datasets (no IPs)
-// - insert a nexus service, observe service IP pool gets provisioned
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -599,7 +590,8 @@ mod test {
 
         let sled = create_test_sled(&datastore).await;
 
-        let services = vec![
+        // Ask for two Nexus services, with different external IPs.
+        let mut services = vec![
             (
                 Service::new(
                     Uuid::new_v4(),
@@ -619,6 +611,8 @@ mod test {
                 Some(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))),
             ),
         ];
+        services.sort_by(|a, b| a.0.id().partial_cmp(&b.0.id()).unwrap());
+
         let datasets = vec![];
         let certificates = vec![];
 
@@ -636,51 +630,62 @@ mod test {
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);
 
-        let observed_services = get_all_services(&datastore).await;
-        let observed_nexus_services = get_all_nexus_services(&datastore).await;
+        let mut observed_services = get_all_services(&datastore).await;
+        let mut observed_nexus_services =
+            get_all_nexus_services(&datastore).await;
         let observed_datasets = get_all_datasets(&datastore).await;
 
-        // TODO: UPDATE THIS TEST
+        // We should see both of the Nexus services we provisioned.
+        assert_eq!(observed_services.len(), 2);
+        observed_services.sort_by(|a, b| a.id().partial_cmp(&b.id()).unwrap());
 
-        // We should only see the one nexus we inserted earlier
-        assert_eq!(observed_services.len(), 1);
         assert_eq!(observed_services[0].sled_id, sled.id());
+        assert_eq!(observed_services[1].sled_id, sled.id());
         assert_eq!(observed_services[0].kind, ServiceKind::Nexus);
+        assert_eq!(observed_services[1].kind, ServiceKind::Nexus);
 
         // It should have a corresponding "Nexus service record"
-        assert_eq!(observed_nexus_services.len(), 1);
+        assert_eq!(observed_nexus_services.len(), 2);
+        observed_nexus_services
+            .sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
         assert_eq!(observed_services[0].id(), observed_nexus_services[0].id);
+        assert_eq!(observed_services[1].id(), observed_nexus_services[1].id);
 
-        // We should also see the single external IP allocated for this nexus
-        // interface.
-        let observed_external_ips = get_all_external_ips(&datastore).await;
-        assert_eq!(observed_external_ips.len(), 1);
+        // We should see both IPs allocated for these services.
+        let observed_external_ips: HashMap<_, _> =
+            get_all_external_ips(&datastore)
+                .await
+                .into_iter()
+                .map(|ip| (ip.id, ip))
+                .collect();
+        assert_eq!(observed_external_ips.len(), 2);
+
+        // The address referenced by the "NexusService" should match the input.
         assert_eq!(
-            observed_external_ips[0].id,
-            observed_nexus_services[0].external_ip_id
+            observed_external_ips[&observed_nexus_services[0].external_ip_id]
+                .ip
+                .ip(),
+            services[0].1.unwrap()
         );
-        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
+        assert_eq!(
+            observed_external_ips[&observed_nexus_services[1].external_ip_id]
+                .ip
+                .ip(),
+            services[1].1.unwrap()
+        );
 
-        // Furthermore, we should be able to see that this IP address has been
+        // Furthermore, we should be able to see that this IP addresses have been
         // allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
         assert!(svc_pool.internal);
 
+        // NOTE: Theoretically, this could be provisioned as part of a single IP
+        // pool range in the future.
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
-        assert_eq!(observed_ip_pool_ranges.len(), 1);
+        assert_eq!(observed_ip_pool_ranges.len(), 2);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
-
-        assert_eq!(observed_external_ips[0].ip_pool_id, svc_pool.id());
-        assert_eq!(
-            observed_external_ips[0].ip_pool_range_id,
-            observed_ip_pool_ranges[0].id
-        );
-        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
-        assert_eq!(
-            observed_external_ips[0].ip.ip(),
-            *services[0].1.as_ref().unwrap()
-        );
+        assert_eq!(observed_ip_pool_ranges[1].ip_pool_id, svc_pool.id());
 
         assert!(observed_datasets.is_empty());
 
@@ -688,8 +693,108 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // TODO: Multiple nexii?
+    #[tokio::test]
+    async fn rack_set_initialized_nexus_service_without_ip_throws_error() {
+        let logctx = dev::test_setup_log(
+            "rack_set_initialized_nexus_service_without_ip_throws_error",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-    // TODO: Put something in the services IP pool before hitting rack
-    // initialize? Check that an error occurs?
+        let sled = create_test_sled(&datastore).await;
+
+        let services = vec![(
+            Service::new(
+                Uuid::new_v4(),
+                sled.id(),
+                Ipv6Addr::LOCALHOST,
+                ServiceKind::Nexus,
+            ),
+            None,
+        )];
+        let datasets = vec![];
+        let certificates = vec![];
+
+        let result = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                certificates.clone(),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Internal Error: Missing necessary External IP"
+        );
+
+        assert!(get_all_services(&datastore).await.is_empty());
+        assert!(get_all_nexus_services(&datastore).await.is_empty());
+        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_external_ips(&datastore).await.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_overlapping_ips_throws_error() {
+        let logctx = dev::test_setup_log(
+            "rack_set_initialized_overlapping_ips_throws_error",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled = create_test_sled(&datastore).await;
+
+        // Request two services which happen to be using the same IP address.
+        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let services = vec![
+            (
+                Service::new(
+                    Uuid::new_v4(),
+                    sled.id(),
+                    Ipv6Addr::LOCALHOST,
+                    ServiceKind::Nexus,
+                ),
+                Some(nexus_ip),
+            ),
+            (
+                Service::new(
+                    Uuid::new_v4(),
+                    sled.id(),
+                    Ipv6Addr::LOCALHOST,
+                    ServiceKind::Nexus,
+                ),
+                Some(nexus_ip),
+            ),
+        ];
+        let datasets = vec![];
+        let certificates = vec![];
+
+        let result = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                certificates.clone(),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid Request: The provided IP range 1.2.3.4-1.2.3.4 overlaps with an existing range"
+        );
+
+        assert!(get_all_services(&datastore).await.is_empty());
+        assert!(get_all_nexus_services(&datastore).await.is_empty());
+        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_external_ips(&datastore).await.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
 }
