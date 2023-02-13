@@ -713,12 +713,7 @@ mod tests {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let expected = external::Error::InvalidValue {
-            label: "version".to_string(),
-            message:
-                "Major, minor, and patch version must be less than 99999999"
-                    .to_string(),
-        };
+        let expected = "Invalid Value: version, Major, minor, and patch version must be less than 99999999";
 
         // major, minor, and patch are all capped
 
@@ -727,21 +722,21 @@ mod tests {
         };
         let error =
             nexus.create_system_update(&opctx, su_create).await.unwrap_err();
-        assert_eq!(error, expected);
+        assert!(error.to_string().contains(expected));
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 100000000, 0),
         };
         let error =
             nexus.create_system_update(&opctx, su_create).await.unwrap_err();
-        assert_eq!(error, expected);
+        assert!(error.to_string().contains(expected));
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 0, 100000000),
         };
         let error =
             nexus.create_system_update(&opctx, su_create).await.unwrap_err();
-        assert_eq!(error, expected);
+        assert!(error.to_string().contains(expected));
     }
 
     #[nexus_test(server = crate::Server)]

@@ -117,7 +117,7 @@ lazy_static! {
         format!("/organizations/{}/projects/{}/images", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
-        format!("/organizations/{}/projects/{}/snapshots", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/snapshots?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
         format!("/v1/vpcs?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
@@ -393,7 +393,7 @@ lazy_static! {
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
     pub static ref DEMO_SNAPSHOT_URL: String =
-        format!("{}/{}", *DEMO_PROJECT_URL_SNAPSHOTS, *DEMO_SNAPSHOT_NAME);
+        format!("/v1/snapshots/{}?organization={}&project={}", *DEMO_SNAPSHOT_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_SNAPSHOT_CREATE: params::SnapshotCreate =
         params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
@@ -1266,15 +1266,6 @@ lazy_static! {
                     serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
                 )
             ]
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/snapshots/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
         },
 
         VerifyEndpoint {

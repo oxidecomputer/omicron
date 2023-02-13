@@ -66,6 +66,11 @@ pub struct DiskPath {
     pub disk: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SnapshotPath {
+    pub snapshot: NameOrId,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
@@ -124,6 +129,48 @@ impl DiskSelector {
             project_selector: project
                 .map(|p| ProjectSelector::new(organization, p)),
             disk,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SnapshotSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub snapshot: NameOrId,
+}
+
+impl SnapshotSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        snapshot: NameOrId,
+    ) -> Self {
+        SnapshotSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            snapshot,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SnapshotSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub snapshot: NameOrId,
+}
+
+impl SnapshotSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        snapshot: NameOrId,
+    ) -> Self {
+        SnapshotSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            snapshot,
         }
     }
 }
