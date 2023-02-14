@@ -50,6 +50,7 @@ sprockets-common.workspace = true
 sprockets-host.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+tofino.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-tungstenite.workspace = true
 toml.workspace = true
