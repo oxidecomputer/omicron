@@ -1535,6 +1535,8 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
     'gimlet_rot',
     'host_phase_1',
     'host_phase_2',
+    'host_trampoline_phase_1',
+    'host_trampoline_phase_2',
     'control_plane',
 
     -- PSC artifacts

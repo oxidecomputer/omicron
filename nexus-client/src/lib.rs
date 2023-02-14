@@ -190,6 +190,12 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
             UpdateArtifactKind::HostPhase2 => {
                 types::UpdateArtifactKind::HostPhase2
             }
+            UpdateArtifactKind::HostTrampolinePhase1 => {
+                types::UpdateArtifactKind::HostTrampolinePhase1
+            }
+            UpdateArtifactKind::HostTrampolinePhase2 => {
+                types::UpdateArtifactKind::HostTrampolinePhase2
+            }
             UpdateArtifactKind::ControlPlane => {
                 types::UpdateArtifactKind::ControlPlane
             }

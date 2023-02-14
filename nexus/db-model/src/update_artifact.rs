@@ -26,6 +26,8 @@ impl_enum_wrapper!(
     GimletRot => b"gimlet_rot"
     HostPhase1 => b"host_phase_1"
     HostPhase2 => b"host_phase_2"
+    HostTrampolinePhase1 => b"host_trampoline_phase_1"
+    HostTrampolinePhase2 => b"host_trampoline_phase_2"
     ControlPlane => b"control_plane"
     PscSp => b"psc_sp"
     PscRot => b"psc_rot"

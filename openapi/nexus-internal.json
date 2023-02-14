@@ -2207,6 +2207,8 @@
           "gimlet_rot",
           "host_phase1",
           "host_phase2",
+          "host_trampoline_phase1",
+          "host_trampoline_phase2",
           "control_plane",
           "psc_sp",
           "psc_rot",
