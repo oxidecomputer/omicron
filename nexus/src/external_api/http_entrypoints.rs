@@ -84,6 +84,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_policy_view)?;
         api.register(system_policy_update)?;
 
+        api.register(system_policy_view_v1)?;
+        api.register(system_policy_update_v1)?;
+
         api.register(policy_view)?;
         api.register(policy_update)?;
 
@@ -356,26 +359,21 @@ pub fn external_api() -> NexusApiDescription {
 // Generally, HTTP resources are grouped within some collection.  For a
 // relatively simple example:
 //
-//   GET    /organizations            (list the organizations in the collection)
-//   POST   /organizations            (create a organization in the collection)
-//   GET    /organizations/{org_name} (look up a organization in the collection)
-//   DELETE /organizations/{org_name} (delete a organization in the collection)
-//   PUT    /organizations/{org_name} (update a organization in the collection)
-//
-// An exception to this are id lookup operations which have a different top-level route
-// but will still be grouped with the collection.  For example:
-//
-//  GET    /by-id/organizations/{id} (look up a organization in the collection by id)
+//   GET    v1/organizations                (list the organizations in the collection)
+//   POST   v1/organizations                (create a organization in the collection)
+//   GET    v1/organizations/{organization} (look up a organization in the collection)
+//   DELETE v1/organizations/{organization} (delete a organization in the collection)
+//   PUT    v1/organizations/{organization} (update a organization in the collection)
 //
 // We pick a name for the function that implements a given API entrypoint
 // based on how we expect it to appear in the CLI subcommand hierarchy. For
 // example:
 //
-//   GET    /organizations                    -> organization_list()
-//   POST   /organizations                    -> organization_create()
-//   GET    /organizations/{org_name}         -> organization_view()
-//   DELETE /organizations/{org_name}         -> organization_delete()
-//   PUT    /organizations/{org_name}         -> organization_update()
+//   GET    v1/organizations                    -> organization_list()
+//   POST   v1/organizations                    -> organization_create()
+//   GET    v1/organizations/{organization}     -> organization_view()
+//   DELETE v1/organizations/{organization}     -> organization_delete()
+//   PUT    v1/organizations/{organization}     -> organization_update()
 //
 // Note that the path typically uses the entity's plural form while the
 // function name uses its singular.
@@ -396,8 +394,29 @@ pub fn external_api() -> NexusApiDescription {
 /// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
+    path = "/v1/system/policy",
+    tags = ["policy"],
+}]
+async fn system_policy_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus.fleet_fetch_policy(&opctx).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the top-level IAM policy
+/// Use `GET /v1/system/policy` instead
+#[endpoint {
+    method = GET,
     path = "/system/policy",
     tags = ["policy"],
+    deprecated = true
 }]
 async fn system_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -420,6 +439,31 @@ struct ByIdPathParams {
 }
 
 /// Update the top-level IAM policy
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/policy",
+    tags = ["policy"],
+}]
+async fn system_policy_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let new_policy = new_policy.into_inner();
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the top-level IAM policy
+/// Use 'PUT /v1/system/policy' instead
 #[endpoint {
     method = PUT,
     path = "/system/policy",

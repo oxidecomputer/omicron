@@ -97,7 +97,9 @@ organization_view_v1                     /v1/organizations/{organization}
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
 system_policy_update                     /system/policy
+system_policy_update_v1                  /v1/system/policy
 system_policy_view                       /system/policy
+system_policy_view_v1                    /v1/system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             URL PATH

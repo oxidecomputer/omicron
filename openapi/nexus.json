@@ -6693,6 +6693,7 @@
           "policy"
         ],
         "summary": "Fetch the top-level IAM policy",
+        "description": "Use `GET /v1/system/policy` instead",
         "operationId": "system_policy_view",
         "responses": {
           "200": {
@@ -6711,13 +6712,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "policy"
         ],
         "summary": "Update the top-level IAM policy",
+        "description": "Use 'PUT /v1/system/policy' instead",
         "operationId": "system_policy_update",
         "requestBody": {
           "content": {
@@ -9835,6 +9838,68 @@
           }
         },
         "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/policy": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Fetch the top-level IAM policy",
+        "operationId": "system_policy_view_v1",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Update the top-level IAM policy",
+        "operationId": "system_policy_update_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/system/update/components": {
