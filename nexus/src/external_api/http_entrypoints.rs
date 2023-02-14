@@ -5988,10 +5988,10 @@ async fn saga_view_v1(
     path_params: Path<SagaPathParam>,
 ) -> Result<HttpResponseOk<Saga>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let saga = nexus.saga_get(&opctx, path.saga_id).await?;
         Ok(HttpResponseOk(saga))
     };
@@ -5999,7 +5999,7 @@ async fn saga_view_v1(
 }
 
 /// Fetch a saga
-/// /// Use `GET v1/system/sagas/{saga_id}` instead
+/// Use `GET v1/system/sagas/{saga_id}` instead
 #[endpoint {
     method = GET,
     path = "/system/sagas/{saga_id}",
