@@ -25,6 +25,7 @@ instance_serial_console_stream           (get    "/organizations/{organization_n
 project_policy_view                      (get    "/organizations/{organization_name}/projects/{project_name}/policy")
 snapshot_list                            (get    "/organizations/{organization_name}/projects/{project_name}/snapshots")
 snapshot_view                            (get    "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}")
+policy_view                              (get    "/policy")
 physical_disk_list                       (get    "/system/hardware/disks")
 rack_list                                (get    "/system/hardware/racks")
 rack_view                                (get    "/system/hardware/racks/{rack_id}")
@@ -54,4 +55,5 @@ organization_update                      (put    "/organizations/{organization_n
 organization_policy_update               (put    "/organizations/{organization_name}/policy")
 project_update                           (put    "/organizations/{organization_name}/projects/{project_name}")
 project_policy_update                    (put    "/organizations/{organization_name}/projects/{project_name}/policy")
+policy_update                            (put    "/policy")
 system_policy_update                     (put    "/system/policy")

@@ -90,6 +90,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(policy_view)?;
         api.register(policy_update)?;
 
+        api.register(policy_view_v1)?;
+        api.register(policy_update_v1)?;
+
         api.register(organization_list)?;
         api.register(organization_create)?;
         api.register(organization_view)?;
@@ -491,8 +494,35 @@ async fn system_policy_update(
 /// Fetch the current silo's IAM policy
 #[endpoint {
     method = GET,
+    path = "/v1/policy",
+    tags = ["silos"],
+ }]
+pub async fn policy_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy = nexus.silo_fetch_policy(&opctx, lookup).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the current silo's IAM policy
+/// Use `GET /v1/policy` instead
+#[endpoint {
+    method = GET,
     path = "/policy",
     tags = ["silos"],
+    deprecated = true,
  }]
 pub async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -516,8 +546,40 @@ pub async fn policy_view(
 /// Update the current silo's IAM policy
 #[endpoint {
     method = PUT,
+    path = "/v1/policy",
+    tags = ["silos"],
+}]
+async fn policy_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let new_policy = new_policy.into_inner();
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy =
+            nexus.silo_update_policy(&opctx, lookup, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the current silo's IAM policy
+/// Use `PUT /v1/policy` instead
+#[endpoint {
+    method = PUT,
     path = "/policy",
     tags = ["silos"],
+    deprecated = true,
 }]
 async fn policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,

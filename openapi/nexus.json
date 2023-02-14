@@ -4955,6 +4955,7 @@
           "silos"
         ],
         "summary": "Fetch the current silo's IAM policy",
+        "description": "Use `GET /v1/policy` instead",
         "operationId": "policy_view",
         "responses": {
           "200": {
@@ -4973,13 +4974,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "silos"
         ],
         "summary": "Update the current silo's IAM policy",
+        "description": "Use `PUT /v1/policy` instead",
         "operationId": "policy_update",
         "requestBody": {
           "content": {
@@ -5008,7 +5011,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/roles": {
@@ -8958,6 +8962,68 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrganizationRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/policy": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch the current silo's IAM policy",
+        "operationId": "policy_view_v1",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Update the current silo's IAM policy",
+        "operationId": "policy_update_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
