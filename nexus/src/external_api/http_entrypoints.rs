@@ -247,6 +247,13 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
 
+        api.register(rack_list_v1)?;
+        api.register(rack_view_v1)?;
+        api.register(sled_list_v1)?;
+        api.register(sled_view_v1)?;
+        api.register(sled_physical_disk_list_v1)?;
+        api.register(physical_disk_list_v1)?;
+
         api.register(saga_list)?;
         api.register(saga_view)?;
 
@@ -5362,8 +5369,40 @@ async fn vpc_router_route_update(
 /// List racks
 #[endpoint {
     method = GET,
+    path = "/v1/system/hardware/racks",
+    tags = ["system"],
+}]
+async fn rack_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let racks = nexus
+            .racks_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            racks,
+            &|_, rack: &Rack| rack.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List racks
+/// Use `GET /v1/system/hardware/racks` instead
+#[endpoint {
+    method = GET,
     path = "/system/hardware/racks",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn rack_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5399,8 +5438,31 @@ struct RackPathParam {
 /// Fetch a rack
 #[endpoint {
     method = GET,
+    path = "/v1/system/hardware/racks/{rack_id}",
+    tags = ["system"],
+}]
+async fn rack_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<RackPathParam>,
+) -> Result<HttpResponseOk<Rack>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let rack_info = nexus.rack_lookup(&opctx, &path.rack_id).await?;
+        Ok(HttpResponseOk(rack_info.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a rack
+/// Use `GET /v1/system/hardware/racks/{rack_id}` instead
+#[endpoint {
+    method = GET,
     path = "/system/hardware/racks/{rack_id}",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn rack_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5422,8 +5484,40 @@ async fn rack_view(
 /// List sleds
 #[endpoint {
     method = GET,
+    path = "/v1/system/hardware/sleds",
+    tags = ["system"],
+}]
+async fn sled_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let sleds = nexus
+            .sleds_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            sleds,
+            &|_, sled: &Sled| sled.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List sleds
+/// Use `GET /v1/system/hardware/sleds instead`
+#[endpoint {
+    method = GET,
     path = "/system/hardware/sleds",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn sled_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5459,8 +5553,31 @@ struct SledPathParam {
 /// Fetch a sled
 #[endpoint {
     method = GET,
+    path = "/v1/system/hardware/sleds/{sled_id}",
+    tags = ["system"],
+}]
+async fn sled_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledPathParam>,
+) -> Result<HttpResponseOk<Sled>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let sled_info = nexus.sled_lookup(&opctx, &path.sled_id).await?;
+        Ok(HttpResponseOk(sled_info.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a sled
+/// Use `GET /v1/system/hardware/sleds/{sled_id}` instead
+#[endpoint {
+    method = GET,
     path = "/system/hardware/sleds/{sled_id}",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn sled_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5482,8 +5599,40 @@ async fn sled_view(
 /// List physical disks
 #[endpoint {
     method = GET,
+    path = "/v1/system/hardware/disks",
+    tags = ["system"],
+}]
+async fn physical_disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .physical_disk_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List physical disks
+/// Use `GET /v1/system/hardware/disks` instead
+#[endpoint {
+    method = GET,
     path = "/system/hardware/disks",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5512,8 +5661,46 @@ async fn physical_disk_list(
 /// List physical disks attached to sleds
 #[endpoint {
     method = GET,
+    path = "/v1/system/hardware/sleds/{sled_id}/disks",
+    tags = ["system"],
+}]
+async fn sled_physical_disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledPathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .sled_list_physical_disks(
+                &opctx,
+                path.sled_id,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List physical disks attached to sleds
+/// Use `GET /v1/system/hardware/sleds/{sled_id}/disks` instead
+#[endpoint {
+    method = GET,
     path = "/system/hardware/sleds/{sled_id}/disks",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn sled_physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
