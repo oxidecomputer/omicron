@@ -69,12 +69,8 @@ impl super::Nexus {
             .services
             .iter()
             .map(|svc| {
-                // We rely on a pool already being set up during Nexus' "populate"
-                // phase, where it adds a service pool named "oxide-service-pool".
-                //
-                // During initialization, we accept an IP Pool implicitly through Nexus's
-                // configuration. This may be made more explicit in the future, through
-                // a separate "IP pool range".
+                // Pull the external IP address out of the service request so
+                // it can be passed to the rack initialization method.
                 let external_ip =
                     if let crate::internal_api::params::ServiceKind::Nexus {
                         external_address,
