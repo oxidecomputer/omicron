@@ -5999,10 +5999,12 @@ async fn saga_view_v1(
 }
 
 /// Fetch a saga
+/// /// Use `GET v1/system/sagas/{saga_id}` instead
 #[endpoint {
     method = GET,
     path = "/system/sagas/{saga_id}",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn saga_view(
     rqctx: RequestContext<Arc<ServerContext>>,

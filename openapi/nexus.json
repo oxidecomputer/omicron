@@ -6802,6 +6802,7 @@
           "system"
         ],
         "summary": "Fetch a saga",
+        "description": "/// Use `GET v1/system/sagas/{saga_id}` instead",
         "operationId": "saga_view",
         "parameters": [
           {
@@ -6831,7 +6832,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos": {
