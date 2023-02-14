@@ -595,8 +595,8 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         // Ask for two Nexus services, with different external IPs.
-        let nexus_ip4_first = Ipv4Addr::new(1, 2, 3, 4);
-        let nexus_ip4_second = Ipv4Addr::new(5, 6, 7, 8);
+        let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
+        let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
         let mut services = vec![
             (
                 Service::new(
@@ -605,7 +605,7 @@ mod test {
                     Ipv6Addr::LOCALHOST,
                     ServiceKind::Nexus,
                 ),
-                Some(IpAddr::V4(nexus_ip4_first)),
+                Some(IpAddr::V4(nexus_ip_start)),
             ),
             (
                 Service::new(
@@ -614,19 +614,15 @@ mod test {
                     Ipv6Addr::LOCALHOST,
                     ServiceKind::Nexus,
                 ),
-                Some(IpAddr::V4(nexus_ip4_second)),
+                Some(IpAddr::V4(nexus_ip_end)),
             ),
         ];
         services.sort_by(|a, b| a.0.id().partial_cmp(&b.0.id()).unwrap());
 
         let datasets = vec![];
-        let service_ip_pool_ranges = vec![
-            IpRange::try_from((nexus_ip4_first, nexus_ip4_first))
-                .expect("Cannot create IP Range"),
-            IpRange::try_from((nexus_ip4_second, nexus_ip4_second))
-                .expect("Cannot create IP Range"),
-        ];
-
+        let service_ip_pool_ranges =
+            vec![IpRange::try_from((nexus_ip_start, nexus_ip_end))
+                .expect("Cannot create IP Range")];
         let certificates = vec![];
 
         let rack = datastore
@@ -694,12 +690,9 @@ mod test {
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
         assert!(svc_pool.internal);
 
-        // NOTE: Theoretically, this could be provisioned as part of a single IP
-        // pool range in the future.
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
-        assert_eq!(observed_ip_pool_ranges.len(), 2);
+        assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
-        assert_eq!(observed_ip_pool_ranges[1].ip_pool_id, svc_pool.id());
 
         assert!(observed_datasets.is_empty());
 
