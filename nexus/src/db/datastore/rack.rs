@@ -38,7 +38,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use std::collections::HashMap;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -92,8 +91,10 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
+        // Service and corresponding external IP address, if any.
         services: Vec<(Service, Option<IpAddr>)>,
         datasets: Vec<Dataset>,
+        service_ip_pool_ranges: Vec<IpRange>,
         certificates: Vec<Certificate>,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
@@ -138,35 +139,20 @@ impl DataStore {
 
                 // Otherwise, insert services and datasets.
 
-                // Allocate external service IPs.
-                let mut ips = HashMap::new();
-                for (_, external_ip) in &services {
-                    let Some(external_ip) = external_ip else { continue; };
-                    // Add that IP address to the "services pool"
+                // Set up the IP pool for internal services.
+                for range in service_ip_pool_ranges {
                     Self::ip_pool_add_range_on_connection(
                         &conn,
                         opctx,
                         &authz_service_pool,
-                        &IpRange::from(*external_ip),
+                        &range,
                     ).await.map_err(|err| {
                         warn!(log, "Initializing Rack: Failed to add IP pool range");
                         TxnError::CustomError(RackInitError::AddingIp(err))
                     })?;
-
-                    // Allocate an IP address for the service.
-                    let ip_id = Uuid::new_v4();
-                    let incomplete_external_ip = IncompleteExternalIp::for_service(ip_id, service_pool.id());
-                    let allocated_ip = Self::allocate_external_ip_on_connection(
-                        &conn,
-                        incomplete_external_ip,
-                    ).await.map_err(|err| {
-                        warn!(log, "Initializing Rack: Failed to allocate IP address");
-                        TxnError::CustomError(RackInitError::AddingIp(err))
-                    })?;
-                    assert_eq!(allocated_ip.ip.ip(), *external_ip);
-                    ips.insert(*external_ip, allocated_ip);
                 }
 
+                // Allocate records for all services all services.
                 for (svc, external_ip) in services {
                     use db::schema::service::dsl;
                     let sled_id = svc.sled_id;
@@ -202,10 +188,22 @@ impl DataStore {
                             TxnError::CustomError(RackInitError::MissingExternalIp)
                         })?;
 
-                        let allocated_ip = ips.get(&external_ip).ok_or_else(|| {
-                            warn!(log, "Initializing Rack: Nexus IP address not allocated");
-                            TxnError::CustomError(RackInitError::MissingExternalIp)
+                        // Allocate the explicit IP address that is currently
+                        // in-use by this Nexus service.
+                        let ip_id = Uuid::new_v4();
+                        let data = IncompleteExternalIp::for_service_explicit(
+                            ip_id,
+                            service_pool.id(),
+                            external_ip
+                        );
+                        let allocated_ip = Self::allocate_external_ip_on_connection(
+                            &conn,
+                            data
+                        ).await.map_err(|err| {
+                            warn!(log, "Initializing Rack: Failed to allocate IP address");
+                            TxnError::CustomError(RackInitError::AddingIp(err))
                         })?;
+                        assert_eq!(allocated_ip.ip.ip(), external_ip);
 
                         // Add a service record for Nexus.
                         let nexus_service = NexusService::new(svc.id(), allocated_ip.id);
@@ -280,7 +278,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(RackInitError::MissingExternalIp) => {
-                    Error::internal_error("Missing necessary External IP")
+                    Error::invalid_request("Missing necessary External IP")
                 },
                 TxnError::CustomError(RackInitError::AddingIp(err)) => err,
                 TxnError::CustomError(RackInitError::DatasetInsert {
@@ -387,6 +385,7 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_test_utils::dev;
+    use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 
     fn rack_id() -> Uuid {
@@ -401,6 +400,7 @@ mod test {
 
         let services = vec![];
         let datasets = vec![];
+        let service_ip_pool_ranges = vec![];
         let certificates = vec![];
 
         // Initializing the rack with no data is odd, but allowed.
@@ -410,6 +410,7 @@ mod test {
                 rack_id(),
                 services.clone(),
                 datasets.clone(),
+                service_ip_pool_ranges.clone(),
                 certificates.clone(),
             )
             .await
@@ -425,6 +426,7 @@ mod test {
                 rack_id(),
                 services,
                 datasets,
+                service_ip_pool_ranges,
                 certificates,
             )
             .await
@@ -513,6 +515,7 @@ mod test {
             Some(nexus_ip),
         )];
         let datasets = vec![];
+        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
         let certificates = vec![];
 
         let rack = datastore
@@ -521,6 +524,7 @@ mod test {
                 rack_id(),
                 services.clone(),
                 datasets.clone(),
+                service_ip_pool_ranges,
                 certificates.clone(),
             )
             .await
@@ -591,6 +595,8 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         // Ask for two Nexus services, with different external IPs.
+        let nexus_ip4_first = Ipv4Addr::new(1, 2, 3, 4);
+        let nexus_ip4_second = Ipv4Addr::new(5, 6, 7, 8);
         let mut services = vec![
             (
                 Service::new(
@@ -599,7 +605,7 @@ mod test {
                     Ipv6Addr::LOCALHOST,
                     ServiceKind::Nexus,
                 ),
-                Some(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4))),
+                Some(IpAddr::V4(nexus_ip4_first)),
             ),
             (
                 Service::new(
@@ -608,12 +614,19 @@ mod test {
                     Ipv6Addr::LOCALHOST,
                     ServiceKind::Nexus,
                 ),
-                Some(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))),
+                Some(IpAddr::V4(nexus_ip4_second)),
             ),
         ];
         services.sort_by(|a, b| a.0.id().partial_cmp(&b.0.id()).unwrap());
 
         let datasets = vec![];
+        let service_ip_pool_ranges = vec![
+            IpRange::try_from((nexus_ip4_first, nexus_ip4_first))
+                .expect("Cannot create IP Range"),
+            IpRange::try_from((nexus_ip4_second, nexus_ip4_second))
+                .expect("Cannot create IP Range"),
+        ];
+
         let certificates = vec![];
 
         let rack = datastore
@@ -622,6 +635,7 @@ mod test {
                 rack_id(),
                 services.clone(),
                 datasets.clone(),
+                service_ip_pool_ranges,
                 certificates.clone(),
             )
             .await
@@ -713,6 +727,10 @@ mod test {
             None,
         )];
         let datasets = vec![];
+        // Even if we supply an address in the pool, the corresponding nexus
+        // doesn't claim to have it - we throw an error.
+        let service_ip_pool_ranges =
+            vec![IpRange::from(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)))];
         let certificates = vec![];
 
         let result = datastore
@@ -721,13 +739,62 @@ mod test {
                 rack_id(),
                 services.clone(),
                 datasets.clone(),
+                service_ip_pool_ranges,
                 certificates.clone(),
             )
             .await;
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
-            "Internal Error: Missing necessary External IP"
+            "Invalid Request: Missing necessary External IP"
+        );
+
+        assert!(get_all_services(&datastore).await.is_empty());
+        assert!(get_all_nexus_services(&datastore).await.is_empty());
+        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_external_ips(&datastore).await.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_missing_service_pool_ip_throws_error() {
+        let logctx = dev::test_setup_log(
+            "rack_set_initialized_missing_service_pool_ip_throws_error",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled = create_test_sled(&datastore).await;
+
+        let services = vec![(
+            Service::new(
+                Uuid::new_v4(),
+                sled.id(),
+                Ipv6Addr::LOCALHOST,
+                ServiceKind::Nexus,
+            ),
+            Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        )];
+        let datasets = vec![];
+        let service_ip_pool_ranges = vec![];
+        let certificates = vec![];
+
+        let result = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                service_ip_pool_ranges,
+                certificates.clone(),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid Request: Requested external IP address not available"
         );
 
         assert!(get_all_services(&datastore).await.is_empty());
@@ -772,6 +839,7 @@ mod test {
             ),
         ];
         let datasets = vec![];
+        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
         let certificates = vec![];
 
         let result = datastore
@@ -780,13 +848,14 @@ mod test {
                 rack_id(),
                 services.clone(),
                 datasets.clone(),
+                service_ip_pool_ranges,
                 certificates.clone(),
             )
             .await;
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
-            "Invalid Request: The provided IP range 1.2.3.4-1.2.3.4 overlaps with an existing range"
+            "Invalid Request: Requested external IP address not available",
         );
 
         assert!(get_all_services(&datastore).await.is_empty());

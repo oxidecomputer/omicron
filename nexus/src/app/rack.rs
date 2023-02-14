@@ -110,6 +110,7 @@ impl super::Nexus {
             })
             .collect();
 
+        let service_ip_pool_ranges = request.internal_services_ip_pool;
         let certificates: Vec<_> = request
             .certs
             .into_iter()
@@ -144,6 +145,7 @@ impl super::Nexus {
                 rack_id,
                 services,
                 datasets,
+                service_ip_pool_ranges,
                 certificates,
             )
             .await?;

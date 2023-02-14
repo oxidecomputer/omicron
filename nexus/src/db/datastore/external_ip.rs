@@ -26,6 +26,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name as ExternalName;
+use std::net::IpAddr;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -99,6 +100,7 @@ impl DataStore {
         ConnErr: From<diesel::result::Error> + Send + 'static,
         PoolError: From<ConnErr>,
     {
+        let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
             use async_bb8_diesel::ConnectionError::Query;
             use async_bb8_diesel::PoolError::Connection;
@@ -106,11 +108,35 @@ impl DataStore {
             let e = PoolError::from(e);
             match e {
                 Connection(Query(NotFound)) => {
-                    Error::invalid_request("No external IP addresses available")
+                    if explicit_ip {
+                        Error::invalid_request(
+                            "Requested external IP address not available",
+                        )
+                    } else {
+                        Error::invalid_request(
+                            "No external IP addresses available",
+                        )
+                    }
                 }
                 _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
             }
         })
+    }
+
+    /// Allocates an explicit IP address for an internal service.
+    ///
+    /// Unlike the other IP allocation requests, this does not search for an
+    /// available IP address, it asks for one explicitly.
+    pub async fn allocate_explicit_service_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        ip: IpAddr,
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let data =
+            IncompleteExternalIp::for_service_explicit(ip_id, pool.id(), ip);
+        self.allocate_external_ip(opctx, data).await
     }
 
     /// Deallocate the external IP address with the provided ID.

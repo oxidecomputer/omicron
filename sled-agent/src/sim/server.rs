@@ -214,6 +214,7 @@ impl Server {
         let rack_init_request = NexusTypes::RackInitializationRequest {
             services: vec![],
             datasets,
+            internal_services_ip_pool: vec![],
             certs: vec![],
         };
 

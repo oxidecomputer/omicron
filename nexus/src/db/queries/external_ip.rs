@@ -85,7 +85,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///         CAST(candidate_first_port AS INT4) AS first_port,
 ///         CAST(candidate_last_port AS INT4) AS last_port
 ///     FROM
-///         (
+///         SELECT * FROM (
 ///             -- Select all IP addresses by pool and range.
 ///             SELECT
 ///                 ip_pool_id,
@@ -98,7 +98,8 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///             WHERE
 ///                 <pool restriction clause> AND
 ///                 time_deleted IS NULL
-///         )
+///         ) AS candidates
+///         <Optional WHERE restriction clause on explicit IP>
 ///     CROSS JOIN
 ///         (
 ///             -- Cartesian product with all first/last port values
@@ -392,23 +393,34 @@ impl NextExternalIp {
     // each IP Pool, along with the pool/range IDs.
     //
     // ```sql
-    // SELECT
-    //     ip_pool_id,
-    //     id AS ip_pool_range_id,
-    //     first_address +
-    //         generate_series(0, last_address - first_address)
-    //         AS candidate_ip
-    // FROM
-    //     ip_pool_range
-    // WHERE
-    //     <pool_restriction> AND
-    //     time_deleted IS NULL
+    // SELECT * FROM (
+    //   SELECT
+    //       ip_pool_id,
+    //       id AS ip_pool_range_id,
+    //       first_address +
+    //           generate_series(0, last_address - first_address)
+    //           AS candidate_ip
+    //   FROM
+    //       ip_pool_range
+    //   WHERE
+    //       <pool_restriction> AND
+    //       time_deleted IS NULL
+    // ) AS candidates
     // ```
+    //
+    // This has the optional addendum:
+    // ```sql
+    // WHERE candidates.candidate_ip = <explicit_ip>
+    // ```
+    //
+    // Which filters candidate IPs that only match the input explicit IP.
     fn push_address_sequence_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         use schema::ip_pool_range::dsl;
+        out.push_sql("SELECT * FROM (");
+
         out.push_sql("SELECT ");
         out.push_identifier(dsl::ip_pool_id::NAME)?;
         out.push_sql(", ");
@@ -428,6 +440,14 @@ impl NextExternalIp {
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
+        out.push_sql(") AS candidates ");
+
+        if let Some(explicit_ip) = self.ip.explicit_ip() {
+            out.push_sql("WHERE candidates.candidate_ip = ");
+            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+                explicit_ip,
+            )?;
+        }
         Ok(())
     }
 
@@ -591,6 +611,7 @@ mod tests {
     use crate::db::model::Name;
     use crate::external_api::shared::IpRange;
     use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Error;
@@ -624,12 +645,8 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool_internal(
-            &self,
-            name: &str,
-            range: IpRange,
-            internal: bool,
-        ) {
+        async fn create_ip_pool(&self, name: &str, range: IpRange) {
+            let internal = false;
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
@@ -638,7 +655,8 @@ mod tests {
                 internal,
             );
 
-            diesel::insert_into(crate::db::schema::ip_pool::dsl::ip_pool)
+            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            diesel::insert_into(ip_pool_dsl::ip_pool)
                 .values(pool.clone())
                 .execute_async(
                     self.db_datastore
@@ -649,6 +667,26 @@ mod tests {
                 .await
                 .expect("Failed to create IP Pool");
 
+            self.initialize_ip_pool(name, range).await;
+        }
+
+        async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
+            // Find the target IP pool
+            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            let pool = ip_pool_dsl::ip_pool
+                .filter(ip_pool_dsl::name.eq(name.to_string()))
+                .filter(ip_pool_dsl::time_deleted.is_null())
+                .select(IpPool::as_select())
+                .get_result_async(
+                    self.db_datastore
+                        .pool_authorized(&self.opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .expect("Failed to 'SELECT' IP Pool");
+
+            // Insert a range into this IP pool
             let pool_range = IpPoolRange::new(&range, pool.id());
             diesel::insert_into(
                 crate::db::schema::ip_pool_range::dsl::ip_pool_range,
@@ -659,15 +697,6 @@ mod tests {
             )
             .await
             .expect("Failed to create IP Pool range");
-        }
-
-        async fn create_service_ip_pool(&self, name: &str, range: IpRange) {
-            self.create_ip_pool_internal(name, range, /*internal=*/ true).await;
-        }
-
-        async fn create_ip_pool(&self, name: &str, range: IpRange) {
-            self.create_ip_pool_internal(name, range, /*internal=*/ false)
-                .await;
         }
 
         async fn default_pool_id(&self) -> Uuid {
@@ -698,7 +727,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
         for first_port in
             (0..super::MAX_PORT).step_by(super::NUM_SOURCE_NAT_PORTS)
         {
@@ -755,7 +784,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
@@ -839,7 +868,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         // TODO-completess: Implementing Iterator for IpRange would be nice.
         let addresses = [
@@ -942,7 +971,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
@@ -976,7 +1005,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.create_service_ip_pool("for-nexus", ip_range).await;
+        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1023,6 +1052,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_explicit_external_ip_for_service_is_idempotent() {
+        let context = TestContext::new(
+            "test_explicit_external_ip_for_service_is_idempotent",
+        )
+        .await;
+
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 4),
+        ))
+        .unwrap();
+        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
+
+        // Allocate an IP address as we would for an external, rack-associated
+        // service.
+        let id = Uuid::new_v4();
+        let ip = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip.kind, IpKind::Service);
+        assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)));
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+        assert!(ip.instance_id.is_none());
+
+        // Try allocating the same service IP again.
+        let ip_again = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip.id, ip_again.id);
+        assert_eq!(ip.ip.ip(), ip_again.ip.ip());
+
+        // Try allocating the same service IP once more, but do it with a
+        // different input address.
+        let ip_again = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+
+        // We return success, but with the address requested the first time.
+        assert_eq!(ip.id, ip_again.id);
+        assert_eq!(ip.ip.ip(), ip_again.ip.ip());
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_explicit_external_ip_for_service_out_of_range() {
+        let context = TestContext::new(
+            "test_explicit_external_ip_for_service_out_of_range",
+        )
+        .await;
+
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 4),
+        ))
+        .unwrap();
+        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
+
+        let id = Uuid::new_v4();
+        let err = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+            )
+            .await
+            .expect_err("Should have failed to allocate out-of-bounds IP");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Requested external IP address not available"
+        );
+
+        context.success().await;
+    }
+
+    #[tokio::test]
     async fn test_insert_external_ip_for_service_is_idempotent() {
         let context = TestContext::new(
             "test_insert_external_ip_for_service_is_idempotent",
@@ -1034,7 +1159,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.create_service_ip_pool("for-nexus", ip_range).await;
+        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1078,7 +1203,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_service_ip_pool("for-nexus", ip_range).await;
+        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1117,7 +1242,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         // Create one SNAT IP address.
         let instance_id = Uuid::new_v4();
@@ -1182,7 +1307,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", first_range).await;
+        context.initialize_ip_pool("default", first_range).await;
         let second_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 4),
             Ipv4Addr::new(10, 0, 0, 6),
@@ -1226,7 +1351,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", first_range).await;
+        context.initialize_ip_pool("default", first_range).await;
         let first_address = Ipv4Addr::new(10, 0, 0, 4);
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
