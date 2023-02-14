@@ -250,6 +250,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(saga_list)?;
         api.register(saga_view)?;
 
+        api.register(saga_list_v1)?;
+        api.register(saga_view_v1)?;
+
         api.register(system_user_list)?;
         api.register(system_user_view)?;
 
@@ -5915,8 +5918,37 @@ async fn update_deployment_view(
 /// List sagas
 #[endpoint {
     method = GET,
+    path = "/v1/system/sagas",
+    tags = ["system"],
+}]
+async fn saga_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
+        let view_list = to_list(saga_stream).await;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &|_, saga: &Saga| saga.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List sagas
+/// Use `GET v1/system/sagas` instead
+#[endpoint {
+    method = GET,
     path = "/system/sagas",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn saga_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5943,6 +5975,27 @@ async fn saga_list(
 #[derive(Deserialize, JsonSchema)]
 struct SagaPathParam {
     saga_id: Uuid,
+}
+
+/// Fetch a saga
+#[endpoint {
+    method = GET,
+    path = "/v1/system/sagas/{saga_id}",
+    tags = ["system"],
+}]
+async fn saga_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SagaPathParam>,
+) -> Result<HttpResponseOk<Saga>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let saga = nexus.saga_get(&opctx, path.saga_id).await?;
+        Ok(HttpResponseOk(saga))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch a saga
