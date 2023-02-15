@@ -39,16 +39,16 @@ use std::str::FromStr;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
-        format!("/system/hardware/racks/{}", RACK_UUID);
+        format!("/v1/system/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_SLED_URL: String =
-        format!("/system/hardware/sleds/{}", SLED_AGENT_UUID);
+        format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
     pub static ref HARDWARE_DISK_URL: String =
-        format!("/system/hardware/disks");
+        format!("/v1/system/hardware/disks");
     pub static ref HARDWARE_SLED_DISK_URL: String =
-        format!("/system/hardware/sleds/{}/disks", SLED_AGENT_UUID);
+        format!("/v1/system/hardware/sleds/{}/disks", SLED_AGENT_UUID);
 
     // Global policy
-    pub static ref SYSTEM_POLICY_URL: &'static str = "/system/policy";
+    pub static ref SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
 
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
@@ -776,7 +776,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: "/policy",
+            url: "/v1/policy",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
@@ -1419,7 +1419,7 @@ lazy_static! {
         /* Hardware */
 
         VerifyEndpoint {
-            url: "/system/hardware/racks",
+            url: "/v1/system/hardware/racks",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
@@ -1433,7 +1433,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/system/hardware/sleds",
+            url: "/v1/system/hardware/sleds",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
@@ -1463,14 +1463,14 @@ lazy_static! {
         /* Sagas */
 
         VerifyEndpoint {
-            url: "/system/sagas",
+            url: "/v1/system/sagas",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
-            url: "/system/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
+            url: "/v1/system/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::GetNonexistent],
