@@ -6148,10 +6148,12 @@ async fn vpc_router_route_list_v1(
 /// List routes
 ///
 /// List the routes associated with a router in a particular VPC.
+/// Use `GET /v1/vpc-router-routes` instead.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -6237,6 +6239,7 @@ struct RouterRoutePathParam {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -6264,10 +6267,12 @@ async fn vpc_router_route_view(
 }
 
 /// Fetch a route by id
+/// Use `GET /v1/vpc-router-routes/{route}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/vpc-router-routes/{id}",
-    tags = ["vpcs"]
+    tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_view_by_id(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -6323,10 +6328,12 @@ async fn vpc_router_route_create_v1(
 }
 
 /// Create a router
+/// Use `POST /v1/vpc-router-routes` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_create(
     rqctx: RequestContext<Arc<ServerContext>>,
