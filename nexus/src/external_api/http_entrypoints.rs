@@ -84,8 +84,14 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_policy_view)?;
         api.register(system_policy_update)?;
 
+        api.register(system_policy_view_v1)?;
+        api.register(system_policy_update_v1)?;
+
         api.register(policy_view)?;
         api.register(policy_update)?;
+
+        api.register(policy_view_v1)?;
+        api.register(policy_update_v1)?;
 
         api.register(organization_list)?;
         api.register(organization_create)?;
@@ -257,6 +263,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(saga_list)?;
         api.register(saga_view)?;
 
+        api.register(saga_list_v1)?;
+        api.register(saga_view_v1)?;
+
         api.register(system_user_list)?;
         api.register(system_user_view)?;
 
@@ -361,26 +370,21 @@ pub fn external_api() -> NexusApiDescription {
 // Generally, HTTP resources are grouped within some collection.  For a
 // relatively simple example:
 //
-//   GET    /organizations            (list the organizations in the collection)
-//   POST   /organizations            (create a organization in the collection)
-//   GET    /organizations/{org_name} (look up a organization in the collection)
-//   DELETE /organizations/{org_name} (delete a organization in the collection)
-//   PUT    /organizations/{org_name} (update a organization in the collection)
-//
-// An exception to this are id lookup operations which have a different top-level route
-// but will still be grouped with the collection.  For example:
-//
-//  GET    /by-id/organizations/{id} (look up a organization in the collection by id)
+//   GET    v1/organizations                (list the organizations in the collection)
+//   POST   v1/organizations                (create a organization in the collection)
+//   GET    v1/organizations/{organization} (look up a organization in the collection)
+//   DELETE v1/organizations/{organization} (delete a organization in the collection)
+//   PUT    v1/organizations/{organization} (update a organization in the collection)
 //
 // We pick a name for the function that implements a given API entrypoint
 // based on how we expect it to appear in the CLI subcommand hierarchy. For
 // example:
 //
-//   GET    /organizations                    -> organization_list()
-//   POST   /organizations                    -> organization_create()
-//   GET    /organizations/{org_name}         -> organization_view()
-//   DELETE /organizations/{org_name}         -> organization_delete()
-//   PUT    /organizations/{org_name}         -> organization_update()
+//   GET    v1/organizations                    -> organization_list()
+//   POST   v1/organizations                    -> organization_create()
+//   GET    v1/organizations/{organization}     -> organization_view()
+//   DELETE v1/organizations/{organization}     -> organization_delete()
+//   PUT    v1/organizations/{organization}     -> organization_update()
 //
 // Note that the path typically uses the entity's plural form while the
 // function name uses its singular.
@@ -401,8 +405,29 @@ pub fn external_api() -> NexusApiDescription {
 /// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
+    path = "/v1/system/policy",
+    tags = ["policy"],
+}]
+async fn system_policy_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus.fleet_fetch_policy(&opctx).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the top-level IAM policy
+/// Use `GET /v1/system/policy` instead
+#[endpoint {
+    method = GET,
     path = "/system/policy",
     tags = ["policy"],
+    deprecated = true
 }]
 async fn system_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -425,6 +450,31 @@ struct ByIdPathParams {
 }
 
 /// Update the top-level IAM policy
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/policy",
+    tags = ["policy"],
+}]
+async fn system_policy_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let new_policy = new_policy.into_inner();
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the top-level IAM policy
+/// Use 'PUT /v1/system/policy' instead
 #[endpoint {
     method = PUT,
     path = "/system/policy",
@@ -452,8 +502,35 @@ async fn system_policy_update(
 /// Fetch the current silo's IAM policy
 #[endpoint {
     method = GET,
+    path = "/v1/policy",
+    tags = ["silos"],
+ }]
+pub async fn policy_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy = nexus.silo_fetch_policy(&opctx, lookup).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the current silo's IAM policy
+/// Use `GET /v1/policy` instead
+#[endpoint {
+    method = GET,
     path = "/policy",
     tags = ["silos"],
+    deprecated = true,
  }]
 pub async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -477,8 +554,40 @@ pub async fn policy_view(
 /// Update the current silo's IAM policy
 #[endpoint {
     method = PUT,
+    path = "/v1/policy",
+    tags = ["silos"],
+}]
+async fn policy_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let new_policy = new_policy.into_inner();
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy =
+            nexus.silo_update_policy(&opctx, lookup, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the current silo's IAM policy
+/// Use `PUT /v1/policy` instead
+#[endpoint {
+    method = PUT,
     path = "/policy",
     tags = ["silos"],
+    deprecated = true,
 }]
 async fn policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -6227,8 +6336,37 @@ async fn update_deployment_view(
 /// List sagas
 #[endpoint {
     method = GET,
+    path = "/v1/system/sagas",
+    tags = ["system"],
+}]
+async fn saga_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
+        let view_list = to_list(saga_stream).await;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &|_, saga: &Saga| saga.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List sagas
+/// Use `GET v1/system/sagas` instead
+#[endpoint {
+    method = GET,
     path = "/system/sagas",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn saga_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -6260,8 +6398,31 @@ struct SagaPathParam {
 /// Fetch a saga
 #[endpoint {
     method = GET,
+    path = "/v1/system/sagas/{saga_id}",
+    tags = ["system"],
+}]
+async fn saga_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SagaPathParam>,
+) -> Result<HttpResponseOk<Saga>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let saga = nexus.saga_get(&opctx, path.saga_id).await?;
+        Ok(HttpResponseOk(saga))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a saga
+/// Use `GET v1/system/sagas/{saga_id}` instead
+#[endpoint {
+    method = GET,
     path = "/system/sagas/{saga_id}",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn saga_view(
     rqctx: RequestContext<Arc<ServerContext>>,
