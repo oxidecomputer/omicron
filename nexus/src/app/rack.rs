@@ -65,34 +65,6 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        let services: Vec<_> = request
-            .services
-            .iter()
-            .map(|svc| {
-                // Pull the external IP address out of the service request so
-                // it can be passed to the rack initialization method.
-                let external_ip =
-                    if let crate::internal_api::params::ServiceKind::Nexus {
-                        external_address,
-                    } = svc.kind
-                    {
-                        Some(external_address)
-                    } else {
-                        None
-                    };
-
-                (
-                    db::model::Service::new(
-                        svc.service_id,
-                        svc.sled_id,
-                        svc.address,
-                        svc.kind.into(),
-                    ),
-                    external_ip,
-                )
-            })
-            .collect();
-
         let datasets: Vec<_> = request
             .datasets
             .into_iter()
@@ -139,7 +111,7 @@ impl super::Nexus {
             .rack_set_initialized(
                 opctx,
                 rack_id,
-                services,
+                request.services,
                 datasets,
                 service_ip_pool_ranges,
                 certificates,
