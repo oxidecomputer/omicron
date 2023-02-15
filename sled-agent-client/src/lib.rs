@@ -310,7 +310,23 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
         use omicron_common::api::internal::nexus::UpdateArtifactKind;
 
         match s {
-            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+            UpdateArtifactKind::GimletSp => types::UpdateArtifactKind::GimletSp,
+            UpdateArtifactKind::GimletRot => {
+                types::UpdateArtifactKind::GimletRot
+            }
+            UpdateArtifactKind::Host => types::UpdateArtifactKind::Host,
+            UpdateArtifactKind::Trampoline => {
+                types::UpdateArtifactKind::Trampoline
+            }
+            UpdateArtifactKind::ControlPlane => {
+                types::UpdateArtifactKind::ControlPlane
+            }
+            UpdateArtifactKind::PscSp => types::UpdateArtifactKind::PscSp,
+            UpdateArtifactKind::PscRot => types::UpdateArtifactKind::PscRot,
+            UpdateArtifactKind::SwitchSp => types::UpdateArtifactKind::SwitchSp,
+            UpdateArtifactKind::SwitchRot => {
+                types::UpdateArtifactKind::SwitchRot
+            }
         }
     }
 }

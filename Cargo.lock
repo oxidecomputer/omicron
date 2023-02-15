@@ -3698,6 +3698,7 @@ dependencies = [
  "serde_with",
  "slog",
  "steno",
+ "strum",
  "thiserror",
  "tokio",
  "tokio-postgres",

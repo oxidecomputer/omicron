@@ -1533,7 +1533,20 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
-    'zone'
+    -- Sled artifacts
+    'gimlet_sp',
+    'gimlet_rot',
+    'host',
+    'trampoline',
+    'control_plane',
+
+    -- PSC artifacts
+    'psc_sp',
+    'psc_rot',
+
+    -- Switch artifacts
+    'switch_sp',
+    'switch_rot'
 );
 
 CREATE TABLE omicron.public.update_available_artifact (
