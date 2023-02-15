@@ -6,9 +6,10 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DiskRuntimeState, InstanceRuntimeState, PhysicalDiskDeleteRequest,
-    PhysicalDiskPutRequest, RackInitializationRequest, SledAgentStartupInfo,
-    UpdateArtifactKind, ZpoolPutRequest, ZpoolPutResponse,
+    DiskRuntimeState, InstanceRuntimeState, KnownArtifactKind,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
+    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
+    ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -48,7 +49,7 @@ mock! {
             ) -> Result<()>;
         pub async fn cpapi_artifact_download(
             &self,
-            kind: UpdateArtifactKind,
+            kind: KnownArtifactKind,
             name: &str,
             version: &str,
         ) -> Result<progenitor::progenitor_client::ByteStream>;

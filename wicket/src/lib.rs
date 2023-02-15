@@ -13,7 +13,6 @@ pub(crate) mod defaults;
 mod dispatch;
 pub(crate) mod inventory;
 mod screens;
-pub mod update;
 mod upload;
 mod wicketd;
 mod widgets;

@@ -8,7 +8,7 @@ use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
     RequestContext,
 };
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::update::ArtifactId;
 
 use crate::context::ServerContext;
 
@@ -37,7 +37,10 @@ pub fn api() -> ArtifactServerApiDesc {
 }]
 async fn get_artifact(
     rqctx: RequestContext<ServerContext>,
-    path: Path<UpdateArtifactId>,
+    // NOTE: this is an `ArtifactId` and not an `UpdateArtifactId`, because this
+    // code might be dealing with an unknown artifact kind. This can happen
+    // if a new artifact kind is introduced across version changes.
+    path: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     match rqctx.context().artifact_store.get_artifact(&path.into_inner()).await
     {

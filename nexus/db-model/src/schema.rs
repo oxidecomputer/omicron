@@ -690,7 +690,7 @@ table! {
     update_available_artifact (name, version, kind) {
         name -> Text,
         version -> Text,
-        kind -> crate::UpdateArtifactKindEnum,
+        kind -> crate::KnownArtifactKindEnum,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,
         target_name -> Text,
@@ -706,7 +706,6 @@ table! {
         time_modified -> Timestamptz,
 
         version -> Text,
-        version_sort -> Text,
     }
 }
 
@@ -742,7 +741,6 @@ table! {
         device_id -> Text,
         version -> Text,
         system_version -> Text,
-        system_version_sort -> Text,
         component_type -> crate::UpdateableComponentTypeEnum,
         status -> crate::UpdateStatusEnum,
         // TODO: status reason for updateable_component

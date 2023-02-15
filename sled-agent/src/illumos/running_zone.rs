@@ -51,6 +51,11 @@ pub enum EnsureAddressError {
 
     #[error(transparent)]
     EnsureAddressError(#[from] crate::illumos::zone::EnsureAddressError),
+
+    #[error(
+        "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
+    )]
+    MissingBootstrapVnic { address: String, zone: String },
 }
 
 /// Erros returned from [`RunningZone::get`].
@@ -92,6 +97,15 @@ pub enum GetZoneError {
         name: String,
         #[source]
         err: crate::illumos::zone::EnsureAddressError,
+    },
+
+    #[error(
+        "Cannot get zone '{name}': Incorrect bootstrap interface access {err}"
+    )]
+    BootstrapInterface {
+        name: String,
+        #[source]
+        err: crate::illumos::zone::GetBootstrapInterfaceError,
     },
 }
 
@@ -180,6 +194,33 @@ impl RunningZone {
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
+    }
+
+    /// This is the API for creating a bootstrap address on the switch zone.
+    pub async fn ensure_bootstrap_address(
+        &self,
+        address: Ipv6Addr,
+    ) -> Result<(), EnsureAddressError> {
+        info!(self.inner.log, "Adding bootstrap address");
+        let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
+            EnsureAddressError::MissingBootstrapVnic {
+                address: address.to_string(),
+                zone: self.inner.name.clone(),
+            }
+        })?;
+        let addrtype =
+            AddressRequest::new_static(std::net::IpAddr::V6(address), None);
+        let addrobj =
+            AddrObject::new(vnic.name(), "bootstrap6").map_err(|err| {
+                EnsureAddressError::AddrObject {
+                    request: addrtype,
+                    zone: self.inner.name.clone(),
+                    err,
+                }
+            })?;
+        let _ =
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        Ok(())
     }
 
     // TODO: Remove once Nexus uses OPTE - external addresses should generally
@@ -290,6 +331,19 @@ impl RunningZone {
         let control_vnic = Link::wrap_existing(vnic_name)
             .expect("Failed to wrap valid control VNIC");
 
+        // The bootstrap address for a running zone never changes,
+        // so there's no need to call `Zones::ensure_address`.
+        // Currently, only the switch zone has a bootstrap interface.
+        let bootstrap_vnic = Zones::get_bootstrap_interface(zone_name)
+            .map_err(|err| GetZoneError::BootstrapInterface {
+                name: zone_name.to_string(),
+                err,
+            })?
+            .map(|name| {
+                Link::wrap_existing(name)
+                    .expect("Failed to wrap valid bootstrap VNIC")
+            });
+
         Ok(Self {
             running: true,
             inner: InstalledZone {
@@ -301,6 +355,7 @@ impl RunningZone {
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
                 link: None,
+                bootstrap_vnic,
             },
         })
     }
@@ -373,6 +428,9 @@ pub struct InstalledZone {
     // NIC used for control plane communication.
     control_vnic: Link,
 
+    // Nic used for bootstrap network communication
+    bootstrap_vnic: Option<Link>,
+
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<Port>,
 
@@ -402,18 +460,23 @@ impl InstalledZone {
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
-        vnic_allocator: &VnicAllocator<Etherstub>,
+        underlay_vnic_allocator: &VnicAllocator<Etherstub>,
         zone_name: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         opte_ports: Vec<Port>,
+        bootstrap_vnic: Option<Link>,
         link: Option<Link>,
         limit_priv: Vec<String>,
     ) -> Result<InstalledZone, InstallZoneError> {
-        let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
-            InstallZoneError::CreateVnic { zone: zone_name.to_string(), err }
-        })?;
+        let control_vnic =
+            underlay_vnic_allocator.new_control(None).map_err(|err| {
+                InstallZoneError::CreateVnic {
+                    zone: zone_name.to_string(),
+                    err,
+                }
+            })?;
 
         let full_zone_name = Self::get_zone_name(zone_name, unique_name);
         let zone_image_path =
@@ -423,6 +486,7 @@ impl InstalledZone {
             .iter()
             .map(|port| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
+            .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(link.as_ref().map(|vnic| vnic.name().to_string()))
             .collect();
 
@@ -446,6 +510,7 @@ impl InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
             name: full_zone_name,
             control_vnic,
+            bootstrap_vnic,
             opte_ports,
             link,
         })

@@ -77,15 +77,21 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
     // This is the desired behavior because those are populated by rack startup
     // before the external API starts, so it really is a problem if we can hit
     // this endpoint without any data backing it.
-    let _ = NexusRequest::expect_failure(
-        &client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::GET,
-        "/v1/system/update/version",
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await;
+    //
+    // Because this data is now populated at rack init, this doesn't work as a
+    // test. If we really wanted to test it, we would have to run the tests
+    // without that bit of setup.
+    //
+    // NexusRequest::expect_failure(
+    //     &client,
+    //     StatusCode::INTERNAL_SERVER_ERROR,
+    //     Method::GET,
+    //     "/v1/system/update/version",
+    // )
+    // .authn_as(AuthnMode::PrivilegedUser)
+    // .execute()
+    // .await
+    // .expect("Failed to 500 with no system version data");
 
     // create two updateable components
     populate_db(&cptestctx).await;
@@ -103,7 +109,7 @@ async fn test_system_version(cptestctx: &ControlPlaneTestContext) {
                 low: SemverVersion::new(0, 2, 0),
                 high: SemverVersion::new(2, 0, 0),
             },
-            status: views::UpdateStatus::Steady,
+            status: views::UpdateStatus::Updating,
         }
     );
 }
@@ -185,7 +191,7 @@ async fn test_list_update_components(cptestctx: &ControlPlaneTestContext) {
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to make request");
+    .expect("Failed to 404 on components of nonexistent system update");
 }
 
 #[nexus_test]
@@ -198,16 +204,16 @@ async fn test_update_deployments(cptestctx: &ControlPlaneTestContext) {
             .execute_and_parse_unwrap::<ResultsPage<views::UpdateDeployment>>()
             .await;
 
-    assert_eq!(deployments.items.len(), 1);
+    assert_eq!(deployments.items.len(), 2);
 
-    // TODO: test fetch deployment by ID
-    //
-    // let deployment_id = dbg!(deployments.items.get(0).unwrap().identity.id);
-    // let deployment = NexusRequest::object_get(
-    //     &client,
-    //     &format!("/v1/system/update/deployments/{}", deployment_id.to_string()),
-    // )
-    // .authn_as(AuthnMode::PrivilegedUser)
-    // .execute_and_parse_unwrap::<views::UpdateDeployment>()
-    // .await;
+    let first_dep = deployments.items.get(0).unwrap();
+
+    let dep_id = first_dep.identity.id.to_string();
+    let dep_url = format!("/v1/system/update/deployments/{}", dep_id);
+    let deployment = NexusRequest::object_get(&client, &dep_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::UpdateDeployment>()
+        .await;
+
+    assert_eq!(deployment.version, first_dep.version);
 }

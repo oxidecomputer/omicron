@@ -8,7 +8,7 @@ use anyhow::Result;
 use assert_cmd::Command;
 use camino::Utf8PathBuf;
 use omicron_common::{
-    api::internal::nexus::UpdateArtifactKind, update::ArtifactKind,
+    api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
 };
 use tufaceous_lib::{Key, OmicronRepo};
 
@@ -26,7 +26,7 @@ fn test_init_and_add() -> Result<()> {
     fs_err::write(&nexus_path, "test")?;
 
     let mut cmd = make_cmd(tempdir.path(), &key);
-    cmd.arg("add-zone");
+    cmd.args(["add", "gimlet_sp"]);
     cmd.arg(&nexus_path);
     cmd.arg("42.0.0");
     cmd.assert().success();
@@ -46,7 +46,7 @@ fn test_init_and_add() -> Result<()> {
     assert_eq!(artifact.version, "42.0.0", "artifact version");
     assert_eq!(
         artifact.kind,
-        ArtifactKind::Known(UpdateArtifactKind::Zone),
+        ArtifactKind::from_known(KnownArtifactKind::GimletSp),
         "artifact kind"
     );
     assert_eq!(

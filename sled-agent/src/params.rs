@@ -4,7 +4,8 @@
 
 use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
-    DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
+    OXIMETER_PORT,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
@@ -378,8 +379,10 @@ pub enum ServiceType {
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
     ManagementGatewayService,
+    Wicketd,
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
+    CruciblePantry,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -389,8 +392,10 @@ impl std::fmt::Display for ServiceType {
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
+            ServiceType::Wicketd => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
+            ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
         }
     }
 }
@@ -412,8 +417,10 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Oximeter => AutoSt::Oximeter,
             St::ManagementGatewayService => AutoSt::ManagementGatewayService,
+            St::Wicketd => AutoSt::Wicketd,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
+            St::CruciblePantry => AutoSt::CruciblePantry,
         }
     }
 }
@@ -431,6 +438,8 @@ pub enum ZoneType {
     Oximeter,
     #[serde(rename = "switch")]
     Switch,
+    #[serde(rename = "crucible_pantry")]
+    CruciblePantry,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
@@ -440,6 +449,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
         }
     }
 }
@@ -452,6 +462,7 @@ impl std::fmt::Display for ZoneType {
             Nexus => "nexus",
             Oximeter => "oximeter",
             Switch => "switch",
+            CruciblePantry => "crucible_pantry",
         };
         write!(f, "{name}")
     }
@@ -497,8 +508,12 @@ impl ServiceZoneRequest {
             ServiceType::ManagementGatewayService => {
                 SRV::Service(ServiceName::ManagementGatewayService)
             }
+            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
             ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
             ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
+            ServiceType::CruciblePantry { .. } => {
+                SRV::Service(ServiceName::CruciblePantry)
+            }
         }
     }
 
@@ -516,10 +531,18 @@ impl ServiceZoneRequest {
             ServiceType::ManagementGatewayService => {
                 Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
             }
+            // TODO: Is this correct?
+            ServiceType::Wicketd => None,
             ServiceType::Dendrite { .. } => {
                 Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
             }
             ServiceType::Tfport { .. } => None,
+            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
+                self.addresses[0],
+                CRUCIBLE_PANTRY_PORT,
+                0,
+                0,
+            )),
         }
     }
 }

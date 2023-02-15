@@ -18,8 +18,10 @@ pub enum ServiceName {
     Nexus,
     Oximeter,
     ManagementGatewayService,
+    Wicketd,
     Dendrite,
     Tfport,
+    CruciblePantry,
 }
 
 impl fmt::Display for ServiceName {
@@ -31,8 +33,10 @@ impl fmt::Display for ServiceName {
             ServiceName::Nexus => write!(f, "nexus"),
             ServiceName::Oximeter => write!(f, "oximeter"),
             ServiceName::ManagementGatewayService => write!(f, "mgs"),
+            ServiceName::Wicketd => write!(f, "wicketd"),
             ServiceName::Dendrite => write!(f, "dendrite"),
             ServiceName::Tfport => write!(f, "tfport"),
+            ServiceName::CruciblePantry => write!(f, "crucible-pantry"),
         }
     }
 }
@@ -131,6 +135,10 @@ mod test {
         assert_eq!(
             SRV::Service(ServiceName::Dendrite).to_string(),
             "_dendrite._tcp.control-plane.oxide.internal",
+        );
+        assert_eq!(
+            SRV::Service(ServiceName::CruciblePantry).to_string(),
+            "_crucible-pantry._tcp.control-plane.oxide.internal",
         );
     }
 

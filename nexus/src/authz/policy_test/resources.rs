@@ -126,6 +126,14 @@ pub async fn make_resources(
         LookupType::ById(system_update_id),
     ));
 
+    let update_deployment_id =
+        "c617a035-7c42-49ff-a36a-5dfeee382832".parse().unwrap();
+    builder.new_resource(authz::UpdateDeployment::new(
+        authz::FLEET,
+        update_deployment_id,
+        LookupType::ById(update_deployment_id),
+    ));
+
     builder.build()
 }
 

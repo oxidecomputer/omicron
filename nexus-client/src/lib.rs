@@ -26,6 +26,7 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             types::DiskState::Creating => Self::Creating,
             types::DiskState::Detached => Self::Detached,
+            types::DiskState::Maintenance => Self::Maintenance,
             types::DiskState::Attaching(u) => Self::Attaching(u),
             types::DiskState::Attached(u) => Self::Attached(u),
             types::DiskState::Detaching(u) => Self::Detaching(u),
@@ -128,6 +129,7 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             DiskState::Creating => Self::Creating,
             DiskState::Detached => Self::Detached,
+            DiskState::Maintenance => Self::Maintenance,
             DiskState::Attaching(u) => Self::Attaching(u),
             DiskState::Attached(u) => Self::Attached(u),
             DiskState::Detaching(u) => Self::Detaching(u),
@@ -171,16 +173,28 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
-    for types::UpdateArtifactKind
+impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
+    for types::KnownArtifactKind
 {
     fn from(
-        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+        s: omicron_common::api::internal::nexus::KnownArtifactKind,
     ) -> Self {
-        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+        use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
-            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+            KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
+            KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
+            KnownArtifactKind::Host => types::KnownArtifactKind::Host,
+            KnownArtifactKind::Trampoline => {
+                types::KnownArtifactKind::Trampoline
+            }
+            KnownArtifactKind::ControlPlane => {
+                types::KnownArtifactKind::ControlPlane
+            }
+            KnownArtifactKind::PscSp => types::KnownArtifactKind::PscSp,
+            KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
+            KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
+            KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
         }
     }
 }

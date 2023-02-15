@@ -14,15 +14,23 @@ use std::io::Write;
 impl_enum_wrapper!(
     #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "update_artifact_kind"))]
-    pub struct UpdateArtifactKindEnum;
+    pub struct KnownArtifactKindEnum;
 
     #[derive(Clone, Copy, Debug, Display, AsExpression, FromSqlRow, PartialEq, Eq, Serialize, Deserialize)]
     #[display("{0}")]
-    #[diesel(sql_type = UpdateArtifactKindEnum)]
-    pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
+    #[diesel(sql_type = KnownArtifactKindEnum)]
+    pub struct KnownArtifactKind(pub internal::nexus::KnownArtifactKind);
 
     // Enum values
-    Zone => b"zone"
+    GimletSp => b"gimlet_sp"
+    GimletRot => b"gimlet_rot"
+    Host => b"host"
+    Trampoline => b"trampoline"
+    ControlPlane => b"control_plane"
+    PscSp => b"psc_sp"
+    PscRot => b"psc_rot"
+    SwitchSp => b"switch_sp"
+    SwitchRot => b"switch_rot"
 );
 
 #[derive(
@@ -34,7 +42,7 @@ pub struct UpdateAvailableArtifact {
     pub name: String,
     /// Version of the artifact itself
     pub version: String,
-    pub kind: UpdateArtifactKind,
+    pub kind: KnownArtifactKind,
     /// `version` field of targets.json from the repository
     // FIXME this *should* be a NonZeroU64
     pub targets_role_version: i64,
@@ -47,7 +55,7 @@ pub struct UpdateAvailableArtifact {
 }
 
 impl UpdateAvailableArtifact {
-    pub fn id(&self) -> (String, String, UpdateArtifactKind) {
+    pub fn id(&self) -> (String, String, KnownArtifactKind) {
         (self.name.clone(), self.version.clone(), self.kind)
     }
 }

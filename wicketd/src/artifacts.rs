@@ -19,9 +19,7 @@ use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
-use omicron_common::{
-    api::internal::nexus::UpdateArtifactId, update::ArtifactKind,
-};
+use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
@@ -50,7 +48,7 @@ pub(crate) struct WicketdArtifactStore {
     log: slog::Logger,
     // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex` because the critical
     // sections are extremely small.
-    artifacts: Arc<Mutex<DebugIgnore<HashMap<UpdateArtifactId, BufList>>>>,
+    artifacts: Arc<Mutex<DebugIgnore<HashMap<ArtifactId, BufList>>>>,
 }
 
 impl WicketdArtifactStore {
@@ -59,7 +57,7 @@ impl WicketdArtifactStore {
         Self { log, artifacts: Default::default() }
     }
 
-    pub(crate) fn add_repository(
+    pub(crate) fn put_repository(
         &self,
         id: TufRepositoryId,
         bytes: &[u8],
@@ -68,7 +66,7 @@ impl WicketdArtifactStore {
 
         let new_artifacts = extract_and_validate(&bytes, &self.log)
             .map_err(|error| error.to_http_error())?;
-        self.insert_all(new_artifacts);
+        self.replace(new_artifacts);
         Ok(())
     }
 
@@ -76,26 +74,25 @@ impl WicketdArtifactStore {
     // Helper methods
     // ---
 
-    fn get(&self, id: &UpdateArtifactId) -> Option<BufList> {
+    fn get(&self, id: &ArtifactId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
         self.artifacts.lock().unwrap().get(id).cloned()
     }
 
-    fn insert_all(
+    /// Replaces the artifact hash map, returning the previous map.
+    fn replace(
         &self,
-        new_artifacts: impl IntoIterator<Item = (UpdateArtifactId, BufList)>,
-    ) {
+        new_artifacts: HashMap<ArtifactId, BufList>,
+    ) -> HashMap<ArtifactId, BufList> {
         let mut artifacts = self.artifacts.lock().unwrap();
-        for (id, buf) in new_artifacts {
-            artifacts.insert(id, buf);
-        }
+        std::mem::replace(&mut **artifacts, new_artifacts)
     }
 }
 
 #[async_trait]
 impl ArtifactGetter for WicketdArtifactStore {
-    async fn get(&self, id: &UpdateArtifactId) -> Option<Body> {
+    async fn get(&self, id: &ArtifactId) -> Option<Body> {
         // This is a test artifact name used by the installinator.
         if id.name == "__installinator-test" {
             // For testing, the version is the size of the artifact.
@@ -126,7 +123,7 @@ impl ArtifactGetter for WicketdArtifactStore {
 fn extract_and_validate(
     zip_bytes: &[u8],
     log: &slog::Logger,
-) -> Result<HashMap<UpdateArtifactId, BufList>, RepositoryError> {
+) -> Result<HashMap<ArtifactId, BufList>, RepositoryError> {
     let mut extractor = ArchiveExtractor::from_borrowed_bytes(zip_bytes)
         .map_err(RepositoryError::OpenArchive)?;
 
@@ -136,6 +133,8 @@ fn extract_and_validate(
     let temp_path = <&Utf8Path>::try_from(dir.path()).map_err(|error| {
         RepositoryError::TempDirCreate(error.into_io_error())
     })?;
+
+    slog::info!(log, "extracting uploaded archive to {temp_path}");
 
     // XXX: might be worth differentiating between server-side issues (503)
     // and issues with the uploaded archive (400).
@@ -173,23 +172,10 @@ fn extract_and_validate(
     //    write our own TUF implementation, we should switch to that approach.
     let mut new_artifacts = HashMap::new();
     for artifact in artifacts.artifacts {
-        let kind = match artifact.kind {
-            ArtifactKind::Known(kind) => kind,
-            ArtifactKind::Unknown(unknown) => {
-                slog::debug!(
-                    log,
-                    "ignoring artifact {}:{} with kind {unknown}",
-                    artifact.name,
-                    artifact.version
-                );
-                continue;
-            }
-        };
-        let artifact_id = UpdateArtifactId {
-            name: artifact.name,
-            version: artifact.version,
-            kind,
-        };
+        // The artifact kind might be unknown here: possibly attempting to do an
+        // update where the current version of wicketd isn't aware of a new
+        // artifact kind.
+        let artifact_id = artifact.id();
 
         let target_name = TargetName::try_from(artifact.target.as_str())
             .map_err(|error| RepositoryError::LocateTarget {
@@ -268,7 +254,7 @@ enum RepositoryError {
     #[error(
         "duplicate entries found in artifacts.json for kind `{}`, `{}:{}`", .0.kind, .0.name, .0.version
     )]
-    DuplicateEntry(UpdateArtifactId),
+    DuplicateEntry(ArtifactId),
 }
 
 impl RepositoryError {

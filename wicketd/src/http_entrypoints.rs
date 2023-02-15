@@ -58,7 +58,10 @@ async fn get_inventory(
     }
 }
 
-/// An endpoint used to upload TUF repositories to the server.
+/// Upload TUF repositories to the server.
+///
+/// At any given time, wicketd will keep at most one repository in memory. Any
+/// previously-uploaded repositories will be discarded.
 #[endpoint {
     method = PUT,
     path = "/repositories/{name}/{version}",
@@ -75,6 +78,6 @@ async fn put_repository(
     rqctx
         .context()
         .artifact_store
-        .add_repository(path.into_inner(), body.as_bytes())?;
+        .put_repository(path.into_inner(), body.as_bytes())?;
     Ok(HttpResponseUpdatedNoContent())
 }

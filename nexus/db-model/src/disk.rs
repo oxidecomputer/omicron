@@ -183,6 +183,15 @@ impl DiskRuntimeState {
         }
     }
 
+    pub fn maintenance(self) -> Self {
+        Self {
+            disk_state: external::DiskState::Maintenance.label().to_string(),
+            attach_instance_id: None,
+            gen: self.gen.next().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
     pub fn state(&self) -> DiskState {
         // TODO: If we could store disk state in-line, we could avoid the
         // unwrap. Would prefer to parse it as such.

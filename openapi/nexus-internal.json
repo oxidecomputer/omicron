@@ -21,7 +21,7 @@
             "description": "The kind of update artifact this is.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/UpdateArtifactKind"
+              "$ref": "#/components/schemas/KnownArtifactKind"
             }
           },
           {
@@ -1053,6 +1053,21 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
                 ]
               }
             },
@@ -2093,6 +2108,20 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -2199,11 +2228,19 @@
       "ZpoolPutResponse": {
         "type": "object"
       },
-      "UpdateArtifactKind": {
+      "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
         "type": "string",
         "enum": [
-          "zone"
+          "gimlet_sp",
+          "gimlet_rot",
+          "host",
+          "trampoline",
+          "control_plane",
+          "psc_sp",
+          "psc_rot",
+          "switch_sp",
+          "switch_rot"
         ]
       }
     }
