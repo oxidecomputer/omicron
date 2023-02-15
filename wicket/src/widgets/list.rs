@@ -24,10 +24,7 @@ pub struct Indicator {
     pub symbol: &'static str,
 }
 
-/// TODO: Paramaterize this with an item that is `Display`, like `ComponentId`?
-/// It's a tradeoff between time to stringify during rendering, vs parse during input
-/// Also, stringify is infallible, while parse is not, although we can almost certainly always unwrap.
-/// Hmm, if the list moves around, stringify may make more sense
+/// An entry in a list along with a styled indicator
 #[derive(Debug)]
 pub struct ListEntry<T> {
     pub item: T,
@@ -331,7 +328,7 @@ mod tests {
 
         // We can only be hovering over a non-item or an item, not both
         if state.item_hovered_offset.is_some() {
-            prop_assert!(state.non_item_hovered == false);
+            prop_assert!(!state.non_item_hovered);
         }
         Ok(())
     }
