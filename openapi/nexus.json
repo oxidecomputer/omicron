@@ -6762,6 +6762,7 @@
           "system"
         ],
         "summary": "List sagas",
+        "description": "Use `GET v1/system/sagas` instead",
         "operationId": "saga_list",
         "parameters": [
           {
@@ -6810,6 +6811,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -6819,6 +6821,7 @@
           "system"
         ],
         "summary": "Fetch a saga",
+        "description": "Use `GET v1/system/sagas/{saga_id}` instead",
         "operationId": "saga_view",
         "parameters": [
           {
@@ -6848,7 +6851,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos": {
@@ -9955,6 +9959,101 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/sagas": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List sagas",
+        "operationId": "saga_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/sagas/{saga_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a saga",
+        "operationId": "saga_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "saga_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Saga"
                 }
               }
             }
