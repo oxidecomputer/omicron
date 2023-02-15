@@ -55,10 +55,10 @@ impl super::Nexus {
                 router: NameOrId::Id(_),
                 vpc_selector: Some(_),
             } => Err(Error::invalid_request(
-                "when providing subnet as an ID, vpc should not be specified",
+                "when providing vpc_router as an ID, vpc should not be specified",
             )),
             _ => Err(Error::invalid_request(
-                "router should either be an ID or vpc should be specified",
+                "vpc_router should either be an ID or vpc should be specified",
             )),
         }
     }

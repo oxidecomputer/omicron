@@ -189,6 +189,7 @@ pub struct NetworkInterfaceSelector {
     pub network_interface: NameOrId,
 }
 
+// TODO-v1: delete this post migration
 impl NetworkInterfaceSelector {
     pub fn new(
         organization: Option<NameOrId>,
