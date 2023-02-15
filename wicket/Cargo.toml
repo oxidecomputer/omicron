@@ -39,7 +39,3 @@ tempfile.workspace = true
 [[bin]]
 name = "wicket"
 doc = false
-
-[[bin]]
-name = "mupdate-pkg"
-doc = false

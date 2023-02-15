@@ -14,17 +14,29 @@ use tui::widgets::Paragraph;
 use tui::widgets::Widget;
 use tui::widgets::{Block, Borders};
 
-#[derive(Default)]
-pub struct HelpMenuState(Option<AnimationState>);
+pub type HelpText = Vec<(&'static str, &'static str)>;
+
+pub struct HelpMenuState {
+    animation_state: Option<AnimationState>,
+    help: HelpText,
+}
 
 impl HelpMenuState {
+    pub fn new(help: HelpText) -> HelpMenuState {
+        HelpMenuState { animation_state: None, help }
+    }
+
+    pub fn help_text(&self) -> &HelpText {
+        &self.help
+    }
+
     pub fn get_animation_state(&self) -> Option<AnimationState> {
-        self.0
+        self.animation_state
     }
 
     // Return true if there is no [`AnimationState`]
     pub fn is_closed(&self) -> bool {
-        self.0.is_none()
+        self.animation_state.is_none()
     }
 
     // Toggle the display of the help menu
@@ -38,30 +50,31 @@ impl HelpMenuState {
 
     // Perform an animation step
     pub fn step(&mut self) {
-        let state = self.0.as_mut().unwrap();
+        let state = self.animation_state.as_mut().unwrap();
         let done = state.step();
         let is_closed = state.is_closing() && done;
         if is_closed {
-            self.0 = None;
+            self.animation_state = None;
         }
     }
 
     pub fn open(&mut self) {
-        self.0
+        self.animation_state
             .get_or_insert(AnimationState::Opening { frame: 0, frame_max: 8 });
     }
 
     pub fn close(&mut self) {
-        let state = self.0.take();
+        let state = self.animation_state.take();
         match state {
             None => (), // Already closed
             Some(AnimationState::Opening { frame, frame_max }) => {
                 // Transition to closing at the same position in the animation
-                self.0 = Some(AnimationState::Closing { frame, frame_max });
+                self.animation_state =
+                    Some(AnimationState::Closing { frame, frame_max });
             }
             Some(s) => {
                 // Already closing. Maintain same state
-                self.0 = Some(s);
+                self.animation_state = Some(s);
             }
         }
     }
