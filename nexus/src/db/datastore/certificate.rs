@@ -18,11 +18,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use ref_cast::RefCast;
 
 impl DataStore {
     /// Stores a new certificate in the database.
@@ -59,14 +60,27 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         kind: Option<ServiceKind>,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Certificate> {
         use db::schema::certificate::dsl;
 
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        let query = paginated(dsl::certificate, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null());
+        let query;
+        match pagparams {
+            PaginatedBy::Id(params) => {
+                query = paginated(dsl::certificate, dsl::id, &params)
+                    .filter(dsl::time_deleted.is_null());
+            }
+            PaginatedBy::Name(params) => {
+                query = paginated(
+                    dsl::certificate,
+                    dsl::name,
+                    &params.map_name(|n| Name::ref_cast(n)),
+                )
+                .filter(dsl::time_deleted.is_null())
+            }
+        }
 
         let query = if let Some(kind) = kind {
             query.filter(dsl::service.eq(kind))
