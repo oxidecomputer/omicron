@@ -31,6 +31,8 @@ rack_view                                (get    "/system/hardware/racks/{rack_i
 sled_list                                (get    "/system/hardware/sleds")
 sled_view                                (get    "/system/hardware/sleds/{sled_id}")
 sled_physical_disk_list                  (get    "/system/hardware/sleds/{sled_id}/disks")
+saga_list                                (get    "/system/sagas")
+saga_view                                (get    "/system/sagas/{saga_id}")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")
