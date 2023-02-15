@@ -5468,7 +5468,7 @@
           "system"
         ],
         "summary": "List system-wide certificates",
-        "description": "Returns a list of all the system-wide certificates. System-wide certificates are returned sorted by creation date, with the most recent certificates appearing first.",
+        "description": "Returns a list of all the system-wide certificates. System-wide certificates are returned sorted by creation date, with the most recent certificates appearing first. Use `GET /v1/system/certificates` instead",
         "operationId": "certificate_list",
         "parameters": [
           {
@@ -5495,7 +5495,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -5517,6 +5517,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -5524,7 +5525,7 @@
           "system"
         ],
         "summary": "Create a new system-wide x.509 certificate.",
-        "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
+        "description": "This certificate is automatically used by the Oxide Control plane to serve external connections. Use `POST /v1/system/certificates` instead",
         "operationId": "certificate_create",
         "requestBody": {
           "content": {
@@ -5553,7 +5554,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/certificates/{certificate}": {
@@ -5562,7 +5564,7 @@
           "system"
         ],
         "summary": "Fetch a certificate",
-        "description": "Returns the details of a specific certificate",
+        "description": "Returns the details of a specific certificate Use `GET /v1/system/certificates/{certificate}` instead",
         "operationId": "certificate_view",
         "parameters": [
           {
@@ -5591,14 +5593,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "system"
         ],
         "summary": "Delete a certificate",
-        "description": "Permanently delete a certificate. This operation cannot be undone.",
+        "description": "Permanently delete a certificate. This operation cannot be undone. Use `DELETE /v1/system/certificates/{certificate}` instead",
         "operationId": "certificate_delete",
         "parameters": [
           {
@@ -5620,7 +5623,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/hardware/disks": {
@@ -9576,6 +9580,167 @@
           {
             "in": "query",
             "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/certificates": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List system-wide certificates",
+        "description": "Returns a list of all the system-wide certificates. System-wide certificates are returned sorted by creation date, with the most recent certificates appearing first.",
+        "operationId": "certificate_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a new system-wide x.509 certificate.",
+        "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
+        "operationId": "certificate_create_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/certificates/{certificate}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a certificate",
+        "description": "Returns the details of a specific certificate",
+        "operationId": "certificate_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete a certificate",
+        "description": "Permanently delete a certificate. This operation cannot be undone.",
+        "operationId": "certificate_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate",
+            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
