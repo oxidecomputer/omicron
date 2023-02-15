@@ -95,7 +95,7 @@ pub(crate) struct UpdatePlanner {
     mgs_client: gateway_client::Client,
     artifact_store: WicketdArtifactStore,
     running_updates: Mutex<BTreeMap<SpIdentifier, JoinHandle<()>>>,
-    snapshot: Arc<StdMutex<Option<Snapshot>>>,
+    snapshot: Arc<StdMutex<Option<SnapshotState>>>,
     // Note: Our inner mutex here is a standard mutex, not a tokio mutex. We
     // generally hold it only log enough to update its state or push a new
     // update event into its running log; occasionally we hold it long enough to
@@ -133,7 +133,7 @@ impl UpdatePlanner {
             }
         };
 
-        let snapshot = Snapshot {
+        let snapshot = SnapshotState {
             snapshot,
             uploaded_trampoline_phase_2_to_mgs: Arc::new(AtomicBool::new(
                 false,
@@ -250,7 +250,7 @@ struct UpdateDriver {
 }
 
 impl UpdateDriver {
-    async fn run(self, snapshot: Snapshot) {
+    async fn run(self, snapshot: SnapshotState) {
         if let Err(err) = self.run_impl(&snapshot).await {
             error!(self.log, "update failed"; "err" => ?err);
             self.push_update_failure(err);
@@ -286,7 +286,7 @@ impl UpdateDriver {
 
     async fn run_impl(
         &self,
-        snapshot: &Snapshot,
+        snapshot: &SnapshotState,
     ) -> Result<(), UpdateEventFailureKind> {
         let sp_artifact = match self.sp.type_ {
             SpType::Sled => &snapshot.snapshot.gimlet_sp,
@@ -365,7 +365,7 @@ impl UpdateDriver {
 
     async fn run_sled(
         &self,
-        snapshot: &Snapshot,
+        snapshot: &SnapshotState,
     ) -> Result<(), UpdateEventFailureKind> {
         info!(self.log, "starting host recovery");
 
@@ -488,7 +488,7 @@ impl UpdateDriver {
 
     async fn drive_installinator(
         &self,
-        snapshot: &Snapshot,
+        snapshot: &SnapshotState,
     ) -> anyhow::Result<()> {
         // Set the installinator image ID, so installinator knows the hashes of
         // the real phase2 and control plane images it needs to fetch.
@@ -653,7 +653,7 @@ impl UpdateDriver {
 }
 
 #[derive(Debug, Clone)]
-struct Snapshot {
+struct SnapshotState {
     snapshot: ArtifactSnapshot,
     uploaded_trampoline_phase_2_to_mgs: Arc<AtomicBool>,
 }
@@ -666,8 +666,8 @@ struct InstallinatorImageIdHashes {
     control_plane_hash: [u8; 32],
 }
 
-impl From<&'_ Snapshot> for InstallinatorImageIdHashes {
-    fn from(snapshot: &'_ Snapshot) -> Self {
+impl From<&'_ SnapshotState> for InstallinatorImageIdHashes {
+    fn from(snapshot: &'_ SnapshotState) -> Self {
         let mut digest = Sha3_256::new();
         for chunk in &snapshot.snapshot.host_phase_2.data {
             digest.update(chunk);
