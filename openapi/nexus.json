@@ -290,6 +290,7 @@
           "vpcs"
         ],
         "summary": "Fetch a route by id",
+        "description": "Use `GET /v1/vpc-router-routes/{route}` instead",
         "operationId": "vpc_router_route_view_by_id",
         "parameters": [
           {
@@ -319,7 +320,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/vpc-routers/{id}": {
@@ -2634,6 +2636,7 @@
           "instances"
         ],
         "summary": "Fetch a network interface",
+        "description": "Use `GET /v1/network-interfaces/{interface}` instead",
         "operationId": "instance_network_interface_view",
         "parameters": [
           {
@@ -2694,6 +2697,7 @@
           "instances"
         ],
         "summary": "Update a network interface",
+        "description": "Use `PUT /v1/network-interfaces/{interface}` instead",
         "operationId": "instance_network_interface_update",
         "parameters": [
           {
@@ -2756,7 +2760,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -4203,7 +4208,7 @@
           "vpcs"
         ],
         "summary": "List routes",
-        "description": "List the routes associated with a router in a particular VPC.",
+        "description": "List the routes associated with a router in a particular VPC. Use `GET /v1/vpc-router-routes` instead.",
         "operationId": "vpc_router_route_list",
         "parameters": [
           {
@@ -4284,6 +4289,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -4291,6 +4297,7 @@
           "vpcs"
         ],
         "summary": "Create a router",
+        "description": "Use `POST /v1/vpc-router-routes` instead",
         "operationId": "vpc_router_route_create",
         "parameters": [
           {
@@ -4353,7 +4360,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}": {
@@ -4423,7 +4431,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
