@@ -309,16 +309,16 @@ impl UpdateDriver {
             Some(UpdateStateKind::ResettingSp),
         );
 
-        info!(self.log, "all updates complete; resetting SP");
+        info!(self.log, "SP update delivery complete; resetting SP");
         self.reset_sp().await.map_err(|err| {
             UpdateEventFailureKind::SpResetFailed { reason: format!("{err:#}") }
         })?;
-        self.push_update_success(UpdateEventSuccessKind::SpResetComplete, None);
 
         if self.sp.type_ == SpType::Sled {
             self.run_sled(snapshot).await?;
         }
 
+        self.push_update_success(UpdateEventSuccessKind::Done, None);
         Ok(())
     }
 
@@ -386,6 +386,9 @@ impl UpdateDriver {
 
         // Ensure we've finished sending the trampoline phase 2 to MGS, or wait
         // until we have.
+        self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
+            artifact: snapshot.snapshot.trampoline_phase_2.id.clone(),
+        });
         loop {
             if snapshot
                 .uploaded_trampoline_phase_2_to_mgs
@@ -407,6 +410,29 @@ impl UpdateDriver {
         info!(self.log, "starting installinator portion of host recovery");
         self.drive_installinator(snapshot).await.map_err(|err| {
             UpdateEventFailureKind::InstallinatorFailed {
+                reason: format!("{err:#}"),
+            }
+        })?;
+
+        // TODO-correctness Which M.2 slot does installinator use? This assumes
+        // it writes to the 0 slot, so we overwrite the trampoline phase 1 with
+        // the real phase 1, now that installinator is finished.
+        self.deliver_host_phase1(
+            &snapshot.snapshot.host_phase_1,
+            trampoline_phase_1_boot_slot,
+        )
+        .await
+        .map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                artifact: snapshot.snapshot.host_phase_1.id.clone(),
+                reason: format!("{err:#}"),
+            }
+        })?;
+
+        // Recovery complete! Boot the host.
+        self.set_host_power_state(PowerState::A0).await.map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                artifact: snapshot.snapshot.host_phase_1.id.clone(),
                 reason: format!("{err:#}"),
             }
         })?;

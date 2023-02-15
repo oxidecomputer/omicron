@@ -60,8 +60,8 @@ pub enum UpdateEventKind {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
 pub enum UpdateEventSuccessKind {
-    SpResetComplete,
     ArtifactUpdateComplete { artifact: UpdateArtifactId },
+    Done,
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
