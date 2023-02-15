@@ -89,6 +89,16 @@ async fn put_repository(
         .context()
         .artifact_store
         .add_repository(path.into_inner(), body.as_bytes())?;
+
+    // Ensure this repository is valid by taking a snapshot of its contents for
+    // future update requests.
+    rqctx
+        .context()
+        .update_planner
+        .take_artifact_snapshot()
+        .await
+        .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -127,11 +137,10 @@ async fn post_start_update(
     match rqctx.context().update_planner.start(target.into_inner()).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => match err {
-            UpdatePlanError::DuplicateArtifacts(_)
-            | UpdatePlanError::MissingArtifact(_) => {
-                // TODO-correctness for_bad_request may not be right - both of
-                // these errors are issues with the TUF repository, not this
-                // request itself.
+            UpdatePlanError::NoValidRepository => {
+                // TODO-correctness for_bad_request may not be right - this is
+                // an issue with the TUF repository, not this request itself,
+                // but the client does need to fix it by uploading a valid repo.
                 Err(HttpError::for_bad_request(None, err.to_string()))
             }
             UpdatePlanError::UpdateInProgress(_) => {

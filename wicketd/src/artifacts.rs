@@ -6,9 +6,12 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     convert::Infallible,
     io::Read,
+    mem,
     sync::{Arc, Mutex},
 };
 
+use anyhow::anyhow;
+use anyhow::Context;
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -20,7 +23,8 @@ use futures::stream;
 use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
 use omicron_common::{
-    api::internal::nexus::UpdateArtifactId, update::ArtifactKind,
+    api::internal::nexus::{UpdateArtifactId, UpdateArtifactKind},
+    update::ArtifactKind,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -39,6 +43,22 @@ pub struct TufRepositoryId {
 
     /// The version of the repository.
     pub version: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Artifact {
+    pub(crate) id: UpdateArtifactId,
+    pub(crate) data: BufList,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ArtifactSnapshot {
+    pub(crate) gimlet_sp: Artifact,
+    pub(crate) trampoline_phase_1: Artifact,
+    pub(crate) trampoline_phase_2: Artifact,
+    pub(crate) host_phase_1: Artifact,
+    pub(crate) host_phase_2: Artifact,
+    pub(crate) control_plane: Artifact,
 }
 
 /// The artifact store for wicketd.
@@ -80,6 +100,82 @@ impl WicketdArtifactStore {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
         self.artifacts.lock().unwrap().get(id).cloned()
+    }
+
+    // Get a complete set of artifacts, assuming exactly one artifact of each
+    // `UpdateArtifactKind` we need to do sled recovery.
+    pub(crate) fn get_snapshot(&self) -> anyhow::Result<ArtifactSnapshot> {
+        let mut gimlet_sp = None;
+        let mut trampoline_phase_1 = None;
+        let mut trampoline_phase_2 = None;
+        let mut host_phase_1 = None;
+        let mut host_phase_2 = None;
+        let mut control_plane = None;
+
+        let replace_ensuring_one =
+            |option: &mut Option<Artifact>,
+             id: &UpdateArtifactId,
+             data: &BufList| match option
+                .replace(Artifact { id: id.clone(), data: data.clone() })
+            {
+                None => Ok(()),
+                Some(_) => Err(anyhow!(
+                    "multiple artifacts of kind {:?} in uploaded repo",
+                    id.kind
+                )),
+            };
+
+        let artifacts = self.artifacts.lock().unwrap();
+        for (id, data) in artifacts.iter() {
+            match id.kind {
+                UpdateArtifactKind::GimletSp => {
+                    replace_ensuring_one(&mut gimlet_sp, id, data)?;
+                }
+                UpdateArtifactKind::HostTrampolinePhase1 => {
+                    replace_ensuring_one(&mut trampoline_phase_1, id, data)?;
+                }
+                UpdateArtifactKind::HostTrampolinePhase2 => {
+                    replace_ensuring_one(&mut trampoline_phase_2, id, data)?;
+                }
+                UpdateArtifactKind::HostPhase1 => {
+                    replace_ensuring_one(&mut host_phase_1, id, data)?;
+                }
+                UpdateArtifactKind::HostPhase2 => {
+                    replace_ensuring_one(&mut host_phase_2, id, data)?;
+                }
+                UpdateArtifactKind::ControlPlane => {
+                    replace_ensuring_one(&mut control_plane, id, data)?;
+                }
+                UpdateArtifactKind::GimletRot => todo!(),
+                UpdateArtifactKind::PscSp => todo!(),
+                UpdateArtifactKind::PscRot => todo!(),
+                UpdateArtifactKind::SwitchSp => todo!(),
+                UpdateArtifactKind::SwitchRot => todo!(),
+            }
+        }
+        mem::drop(artifacts); // unlock self.artifacts mutex
+
+        let gimlet_sp =
+            gimlet_sp.with_context(|| "missing GimletSp artifact")?;
+        let trampoline_phase_1 = trampoline_phase_1
+            .with_context(|| "missing TrampolinePhase1 artifact")?;
+        let trampoline_phase_2 = trampoline_phase_2
+            .with_context(|| "missing TrampolinePhase2 artifact")?;
+        let host_phase_1 =
+            host_phase_1.with_context(|| "missing HostPhase1 artifact")?;
+        let host_phase_2 =
+            host_phase_2.with_context(|| "missing HostPhase2 artifact")?;
+        let control_plane =
+            control_plane.with_context(|| "missing ControlPlane artifact")?;
+
+        Ok(ArtifactSnapshot {
+            gimlet_sp,
+            trampoline_phase_1,
+            trampoline_phase_2,
+            host_phase_1,
+            host_phase_2,
+            control_plane,
+        })
     }
 
     // ---

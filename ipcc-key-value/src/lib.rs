@@ -43,10 +43,10 @@ pub struct InstallinatorImageId {
     /// the progress message with a running recovery.
     #[cfg_attr(test, strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes)))]
     pub update_id: Uuid,
-    /// SHA-256 hash of the host phase 2 image to fetch.
+    /// SHA3-256 hash of the host phase 2 image to fetch.
     #[serde(with = "serde_bytes_array")]
     pub host_phase_2: [u8; 32],
-    /// SHA-256 hash of the control plane image to fetch.
+    /// SHA3-256 hash of the control plane image to fetch.
     #[serde(with = "serde_bytes_array")]
     pub control_plane: [u8; 32],
 }

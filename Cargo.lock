@@ -7604,6 +7604,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha3",
  "slog",
  "slog-dtrace",
  "snafu",

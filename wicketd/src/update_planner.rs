@@ -4,6 +4,8 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use crate::artifacts::Artifact;
+use crate::artifacts::ArtifactSnapshot;
 use crate::artifacts::WicketdArtifactStore;
 use crate::mgs::make_mgs_client;
 use crate::update_events::UpdateEventFailureKind;
@@ -13,20 +15,29 @@ use crate::update_events::UpdateStateKind;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
+use buf_list::BufList;
+use gateway_client::types::HostStartupOptions;
+use gateway_client::types::InstallinatorImageId;
+use gateway_client::types::PowerState;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateBody;
 use gateway_messages::SpComponent;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use omicron_common::backoff;
+use sha3::Digest;
+use sha3::Sha3_256;
 use slog::error;
 use slog::info;
 use slog::o;
+use slog::warn;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -84,6 +95,7 @@ pub(crate) struct UpdatePlanner {
     mgs_client: gateway_client::Client,
     artifact_store: WicketdArtifactStore,
     running_updates: Mutex<BTreeMap<SpIdentifier, JoinHandle<()>>>,
+    snapshot: Arc<StdMutex<Option<Snapshot>>>,
     // Note: Our inner mutex here is a standard mutex, not a tokio mutex. We
     // generally hold it only log enough to update its state or push a new
     // update event into its running log; occasionally we hold it long enough to
@@ -99,17 +111,59 @@ impl UpdatePlanner {
         log: &Logger,
     ) -> Self {
         let log = log.new(o!("component" => "wicketd update planner"));
-        let running_updates = Mutex::default();
-        let update_logs = Mutex::default();
-        let mgs_client = make_mgs_client(log.clone(), mgs_addr);
-        Self { mgs_client, artifact_store, log, running_updates, update_logs }
+        Self {
+            mgs_client: make_mgs_client(log.clone(), mgs_addr),
+            artifact_store,
+            running_updates: Mutex::default(),
+            snapshot: Arc::default(),
+            update_logs: Mutex::default(),
+            log,
+        }
+    }
+
+    pub(crate) async fn take_artifact_snapshot(&self) -> anyhow::Result<()> {
+        let snapshot = match self.artifact_store.get_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                // Our artifact store is now invalid; if we had a snapshot,
+                // clear it out, so we don't try to start new updates moving
+                // forward.
+                *self.snapshot.lock().unwrap() = None;
+                return Err(err);
+            }
+        };
+
+        let snapshot = Snapshot {
+            snapshot,
+            uploaded_trampoline_phase_2_to_mgs: Arc::new(AtomicBool::new(
+                false,
+            )),
+        };
+
+        // Immediately spawn a task to upload the trampoline phase 2 to MGS
+        // under the assumption that this snapshot will be used for recovery.
+        tokio::spawn(upload_trampoline_phase_2_to_mgs(
+            self.mgs_client.clone(),
+            snapshot.snapshot.trampoline_phase_2.clone(),
+            Arc::clone(&snapshot.uploaded_trampoline_phase_2_to_mgs),
+            self.log.clone(),
+        ));
+
+        *self.snapshot.lock().unwrap() = Some(snapshot);
+
+        Ok(())
     }
 
     pub(crate) async fn start(
         &self,
         sp: SpIdentifier,
     ) -> Result<(), UpdatePlanError> {
-        let plan = UpdatePlan::new(sp.type_, &self.artifact_store)?;
+        let snapshot = self
+            .snapshot
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(UpdatePlanError::NoValidRepository)?;
 
         let spawn_update_driver = || async {
             // Get a reference to the update log for this SP...
@@ -124,11 +178,10 @@ impl UpdatePlanner {
             let update_driver = UpdateDriver {
                 sp,
                 mgs_client: self.mgs_client.clone(),
-                artifact_store: self.artifact_store.clone(),
                 update_log,
                 log: self.log.new(o!("sp" => format!("{sp:?}"))),
             };
-            tokio::spawn(update_driver.run(plan))
+            tokio::spawn(update_driver.run(snapshot))
         };
 
         let mut running_updates = self.running_updates.lock().await;
@@ -182,68 +235,23 @@ impl UpdatePlanner {
 
 #[derive(Debug, Error)]
 pub(crate) enum UpdatePlanError {
-    #[error(
-        "invalid TUF repository: more than one artifact present of kind {0:?}"
-    )]
-    DuplicateArtifacts(UpdateArtifactKind),
-    #[error("invalid TUF repository: no artifact present of kind {0:?}")]
-    MissingArtifact(UpdateArtifactKind),
+    #[error("no valid TUF repository has been uploaded")]
+    NoValidRepository,
     #[error("target is already being updated: {0:?}")]
     UpdateInProgress(SpIdentifier),
-}
-
-#[derive(Debug)]
-struct UpdatePlan {
-    sp: UpdateArtifactId,
-}
-
-impl UpdatePlan {
-    fn new(
-        sp_type: SpType,
-        artifact_store: &WicketdArtifactStore,
-    ) -> Result<Self, UpdatePlanError> {
-        // Given the list of available artifacts, ensure we have exactly 1
-        // choice for each kind we need.
-        let artifacts = artifact_store.artifact_ids();
-
-        let sp_kind = match sp_type {
-            SpType::Sled => UpdateArtifactKind::GimletSp,
-            SpType::Power => UpdateArtifactKind::PscSp,
-            SpType::Switch => UpdateArtifactKind::SwitchSp,
-        };
-
-        let sp = Self::find_exactly_one(sp_kind, &artifacts)?;
-
-        Ok(Self { sp })
-    }
-
-    fn find_exactly_one(
-        kind: UpdateArtifactKind,
-        artifacts: &[UpdateArtifactId],
-    ) -> Result<UpdateArtifactId, UpdatePlanError> {
-        let mut found = None;
-        for artifact in artifacts.iter().filter(|id| id.kind == kind) {
-            if found.replace(artifact.clone()).is_some() {
-                return Err(UpdatePlanError::DuplicateArtifacts(kind));
-            }
-        }
-
-        found.ok_or(UpdatePlanError::MissingArtifact(kind))
-    }
 }
 
 #[derive(Debug)]
 struct UpdateDriver {
     sp: SpIdentifier,
     mgs_client: gateway_client::Client,
-    artifact_store: WicketdArtifactStore,
     update_log: Arc<StdMutex<UpdateLog>>,
     log: Logger,
 }
 
 impl UpdateDriver {
-    async fn run(self, plan: UpdatePlan) {
-        if let Err(err) = self.run_impl(plan).await {
+    async fn run(self, snapshot: Snapshot) {
+        if let Err(err) = self.run_impl(&snapshot).await {
             error!(self.log, "update failed"; "err" => ?err);
             self.push_update_failure(err);
         }
@@ -278,18 +286,25 @@ impl UpdateDriver {
 
     async fn run_impl(
         &self,
-        plan: UpdatePlan,
+        snapshot: &Snapshot,
     ) -> Result<(), UpdateEventFailureKind> {
-        info!(self.log, "starting SP update"; "artifact" => ?plan.sp);
-        self.update_sp(plan.sp.clone()).await.map_err(|err| {
+        let sp_artifact = match self.sp.type_ {
+            SpType::Sled => &snapshot.snapshot.gimlet_sp,
+            SpType::Power => todo!(),
+            SpType::Switch => todo!(),
+        };
+
+        // TODO-correctness Confirm the order of updates here - do we update and
+        // reset the SP before updating the host?
+        self.update_sp(sp_artifact).await.map_err(|err| {
             UpdateEventFailureKind::ArtifactUpdateFailed {
-                artifact: plan.sp.clone(),
+                artifact: sp_artifact.id.clone(),
                 reason: format!("{err:#}"),
             }
         })?;
         self.push_update_success(
             UpdateEventSuccessKind::ArtifactUpdateComplete {
-                artifact: plan.sp,
+                artifact: sp_artifact.id.clone(),
             },
             Some(UpdateStateKind::ResettingSp),
         );
@@ -300,20 +315,21 @@ impl UpdateDriver {
         })?;
         self.push_update_success(UpdateEventSuccessKind::SpResetComplete, None);
 
+        if self.sp.type_ == SpType::Sled {
+            self.run_sled(snapshot).await?;
+        }
+
         Ok(())
     }
 
-    async fn update_sp(
-        &self,
-        artifact: UpdateArtifactId,
-    ) -> anyhow::Result<()> {
+    async fn update_sp(&self, artifact: &Artifact) -> anyhow::Result<()> {
         const SP_COMPONENT: &str = SpComponent::SP_ITSELF.const_as_str();
 
-        let image = self.artifact_data(&artifact)?;
+        let image = buf_list_to_vec(&artifact.data);
         let update_id = Uuid::new_v4();
         let body = UpdateBody { id: update_id, image, slot: 0 };
         self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
-            artifact: artifact.clone(),
+            artifact: artifact.id.clone(),
         });
         self.mgs_client
             .sp_component_update(
@@ -327,10 +343,10 @@ impl UpdateDriver {
 
         info!(self.log, "waiting for SP update to complete");
         self.set_current_update_state(UpdateStateKind::WaitingForStatus {
-            artifact: artifact.clone(),
+            artifact: artifact.id.clone(),
         });
         self.poll_for_component_update_completion(
-            artifact,
+            &artifact.id,
             update_id,
             SP_COMPONENT,
         )
@@ -347,25 +363,207 @@ impl UpdateDriver {
             .map(|res| res.into_inner())
     }
 
-    fn artifact_data(&self, id: &UpdateArtifactId) -> anyhow::Result<Vec<u8>> {
-        let data = self.artifact_store.get(id).with_context(|| {
-            format!("missing artifact {id:?}: did the TUF repository change?")
+    async fn run_sled(
+        &self,
+        snapshot: &Snapshot,
+    ) -> Result<(), UpdateEventFailureKind> {
+        info!(self.log, "starting host recovery");
+
+        // We arbitrarily choose to store the trampoline phase 1 in host boot
+        // slot 0.
+        let trampoline_phase_1_boot_slot = 0;
+        self.deliver_host_phase1(
+            &snapshot.snapshot.trampoline_phase_1,
+            trampoline_phase_1_boot_slot,
+        )
+        .await
+        .map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                artifact: snapshot.snapshot.trampoline_phase_1.id.clone(),
+                reason: format!("{err:#}"),
+            }
         })?;
 
-        // TODO Convert a BufList into a Vec<u8> - this is a little gross.
-        // Should MGS's endpoint accept a BufList somehow? Should the artifact
-        // store give us something more amenable to conversion?
-        let mut image = Vec::with_capacity(data.num_bytes());
-        for chunk in data {
-            image.extend_from_slice(&*chunk);
+        // Ensure we've finished sending the trampoline phase 2 to MGS, or wait
+        // until we have.
+        loop {
+            if snapshot
+                .uploaded_trampoline_phase_2_to_mgs
+                .load(Ordering::Relaxed)
+            {
+                break;
+            }
+
+            info!(
+                self.log,
+                "waiting for trampoline phase 2 upload to MGS to complete"
+            );
+
+            // TODO this time is completely arbitrary - replace with a broadcast
+            // channel or watch channel?
+            tokio::time::sleep(Duration::from_secs(10)).await;
         }
 
-        Ok(image)
+        info!(self.log, "starting installinator portion of host recovery");
+        self.drive_installinator(snapshot).await.map_err(|err| {
+            UpdateEventFailureKind::InstallinatorFailed {
+                reason: format!("{err:#}"),
+            }
+        })?;
+
+        Ok(())
+    }
+
+    async fn deliver_host_phase1(
+        &self,
+        artifact: &Artifact,
+        host_flash_slot: u16,
+    ) -> anyhow::Result<()> {
+        const HOST_BOOT_FLASH: &str =
+            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
+
+        let phase1_image = buf_list_to_vec(&artifact.data);
+
+        // Ensure host is in A2.
+        self.set_host_power_state(PowerState::A2).await?;
+
+        // Start delivering image.
+        info!(self.log, "sending trampoline phase 1");
+        let update_id = Uuid::new_v4();
+        self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
+            artifact: artifact.id.clone(),
+        });
+        self.mgs_client
+            .sp_component_update(
+                self.sp.type_,
+                self.sp.slot,
+                HOST_BOOT_FLASH,
+                &UpdateBody {
+                    id: update_id,
+                    image: phase1_image,
+                    slot: host_flash_slot,
+                },
+            )
+            .await
+            .context("failed to write host boot flash slot A")?;
+
+        // Wait for image delivery to complete.
+        info!(self.log, "waiting for trampoline phase 1 deliver to complete");
+        self.set_current_update_state(UpdateStateKind::WaitingForStatus {
+            artifact: artifact.id.clone(),
+        });
+        self.poll_for_component_update_completion(
+            &artifact.id,
+            update_id,
+            HOST_BOOT_FLASH,
+        )
+        .await
+    }
+
+    async fn drive_installinator(
+        &self,
+        snapshot: &Snapshot,
+    ) -> anyhow::Result<()> {
+        // Set the installinator image ID, so installinator knows the hashes of
+        // the real phase2 and control plane images it needs to fetch.
+        let update_id = Uuid::new_v4();
+
+        // TODO-performance Every update recomputes these hashes; host phase 2
+        // is large, so maybe we should only do it once?
+        let hashes = InstallinatorImageIdHashes::from(snapshot);
+
+        let installinator_image_id = InstallinatorImageId {
+            update_id,
+            host_phase_2: hashes.host_phase_2_hash.to_vec(),
+            control_plane: hashes.control_plane_hash.to_vec(),
+        };
+        info!(
+            self.log, "setting installinator image ID";
+            "update_id" => %update_id,
+        );
+        self.set_current_update_state(
+            UpdateStateKind::SettingInstallinatorOptions,
+        );
+        self.mgs_client
+            .sp_installinator_image_id_set(
+                self.sp.type_,
+                self.sp.slot,
+                &installinator_image_id,
+            )
+            .await
+            .context("failed to set installinator image ID")?;
+
+        // Tell the host to boot in phase 2 recovery mode (i.e., fetch the host
+        // phase 2 image from MGS over the management network).
+        // TODO-completeness We may decide to push this startup option into the
+        // phase1 recovery image itself, which would remove the need for this
+        // call.
+        info!(self.log, "setting host startup option for phase 2 recovery");
+        self.set_current_update_state(
+            UpdateStateKind::SettingHostStartupOptions,
+        );
+        self.mgs_client
+            .sp_startup_options_set(
+                self.sp.type_,
+                self.sp.slot,
+                &HostStartupOptions {
+                    boot_net: false,
+                    boot_ramdisk: false,
+                    bootrd: false,
+                    kbm: false,
+                    kmdb: false,
+                    kmdb_boot: false,
+                    phase2_recovery_mode: true,
+                    prom: false,
+                    verbose: false,
+                },
+            )
+            .await
+            .context("failed to set trampoline recovery startup options")?;
+
+        // Boot the host.
+        self.set_host_power_state(PowerState::A0).await?;
+
+        // TODO-completeness We now have to wait for the host to boot, which
+        // involves the SP feeding the trampoline phase 2 image to the host over
+        // the UART. We could ask MGS for (indirect) progress here, but it's not
+        // strictly necessary - we need to wait until installinator finishes, so
+        // for now we'll skip trampoline phase 2 progress and move on to that.
+
+        info!(self.log, "waiting for installinator to complete");
+        // TODO How do we wait for installinator?
+
+        // Cleanup: Tell the SP to forget this installinator ID.
+        info!(self.log, "clearing installinator image ID");
+        self.set_current_update_state(
+            UpdateStateKind::SettingInstallinatorOptions,
+        );
+        self.mgs_client
+            .sp_installinator_image_id_delete(self.sp.type_, self.sp.slot)
+            .await
+            .context("failed to clear installinator image ID")?;
+
+        Ok(())
+    }
+
+    async fn set_host_power_state(
+        &self,
+        power_state: PowerState,
+    ) -> anyhow::Result<()> {
+        info!(self.log, "moving host to {power_state:?}");
+        self.set_current_update_state(UpdateStateKind::SettingHostPowerState {
+            power_state,
+        });
+        self.mgs_client
+            .sp_power_state_set(self.sp.type_, self.sp.slot, power_state)
+            .await
+            .with_context(|| format!("failed to put sled into {power_state:?}"))
+            .map(|response| response.into_inner())
     }
 
     async fn poll_for_component_update_completion(
         &self,
-        artifact: UpdateArtifactId,
+        artifact: &UpdateArtifactId,
         update_id: Uuid,
         component: &str,
     ) -> anyhow::Result<()> {
@@ -426,4 +624,89 @@ impl UpdateDriver {
             tokio::time::sleep(STATUS_POLL_FREQ).await;
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct Snapshot {
+    snapshot: ArtifactSnapshot,
+    uploaded_trampoline_phase_2_to_mgs: Arc<AtomicBool>,
+}
+
+// Information we need to extract exactly once from a given TUF repository that
+// we use across multiple recovery operations.
+#[derive(Debug, Clone, Copy)]
+struct InstallinatorImageIdHashes {
+    host_phase_2_hash: [u8; 32],
+    control_plane_hash: [u8; 32],
+}
+
+impl From<&'_ Snapshot> for InstallinatorImageIdHashes {
+    fn from(snapshot: &'_ Snapshot) -> Self {
+        let mut digest = Sha3_256::new();
+        for chunk in &snapshot.snapshot.host_phase_2.data {
+            digest.update(chunk);
+        }
+        let host_phase_2_hash = digest.finalize().into();
+
+        let mut digest = Sha3_256::new();
+        for chunk in &snapshot.snapshot.control_plane.data {
+            digest.update(chunk);
+        }
+        let control_plane_hash = digest.finalize().into();
+
+        Self { host_phase_2_hash, control_plane_hash }
+    }
+}
+
+fn buf_list_to_vec(data: &BufList) -> Vec<u8> {
+    let mut image = Vec::with_capacity(data.num_bytes());
+    for chunk in data {
+        image.extend_from_slice(&*chunk);
+    }
+    image
+}
+
+async fn upload_trampoline_phase_2_to_mgs(
+    mgs_client: gateway_client::Client,
+    artifact: Artifact,
+    done: Arc<AtomicBool>,
+    log: Logger,
+) {
+    let data = artifact.data;
+    let upload_task = move || {
+        let mgs_client = mgs_client.clone();
+        let data = data.clone();
+
+        // TODO Convert a BufList into a Vec<u8> - this is a little gross.
+        // Should MGS's endpoint accept a BufList somehow?
+        let image = buf_list_to_vec(&data);
+
+        async move {
+            mgs_client
+                .recovery_host_phase2_upload(image)
+                .await
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+        }
+    };
+
+    let log_failure = move |err, delay| {
+        warn!(
+            log,
+            "failed to upload trampoline phase 2 to MGS, will retry in {:?}",
+            delay;
+            "err" => err,
+        );
+    };
+
+    // retry_policy_internal_service_aggressive() retries forever, so we can
+    // unwrap this call to retry_notify
+    backoff::retry_notify(
+        backoff::retry_policy_internal_service_aggressive(),
+        upload_task,
+        log_failure,
+    )
+    .await
+    .unwrap();
+
+    done.store(true, Ordering::Relaxed);
 }

@@ -4,6 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use gateway_client::types::PowerState;
 use gateway_client::types::UpdatePreparationProgress;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
@@ -35,6 +36,11 @@ pub enum UpdateStateKind {
     WaitingForStatus {
         artifact: UpdateArtifactId,
     },
+    SettingHostPowerState {
+        power_state: PowerState,
+    },
+    SettingInstallinatorOptions,
+    SettingHostStartupOptions,
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -63,6 +69,7 @@ pub enum UpdateEventSuccessKind {
 pub enum UpdateEventFailureKind {
     SpResetFailed { reason: String },
     ArtifactUpdateFailed { artifact: UpdateArtifactId, reason: String },
+    InstallinatorFailed { reason: String },
 }
 
 #[derive(Clone, Debug, Default, JsonSchema, Serialize)]
