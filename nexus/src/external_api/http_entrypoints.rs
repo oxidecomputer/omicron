@@ -4454,6 +4454,7 @@ async fn instance_network_interface_view_v1(
 }
 
 /// Fetch a network interface
+/// Use `/v1/network-interfaces/{interface}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
