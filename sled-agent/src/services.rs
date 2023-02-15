@@ -801,6 +801,23 @@ impl ServiceManager {
                     }
                     match *asic {
                         DendriteAsic::TofinoAsic => {
+                            // There should be exactly one device_name
+                            // associated with this zone: the /dev path for
+                            // the tofino ASIC.
+                            let dev_cnt = device_names.len();
+                            if dev_cnt == 1 {
+                                smfh.setprop(
+                                    "config/dev_path",
+                                    device_names[0].clone(),
+                                )?;
+                            } else {
+                                return Err(Error::SwitchZone(
+                                    anyhow::anyhow!(
+                                    "{dev_cnt} devices needed for tofino asic"
+                                ),
+                                ));
+                            }
+
                             smfh.setprop(
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",

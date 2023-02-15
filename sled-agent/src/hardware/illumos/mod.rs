@@ -217,24 +217,21 @@ fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
 }
 
 fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
-    let mut exists = false;
-    let mut driver_loaded = false;
-
-    match tofino::get_tofino_from_devinfo(devinfo) {
-        Ok(node) => {
-            if let Some(node) = node {
-                exists = node.has_asic();
-                driver_loaded = node.has_driver();
-                debug!(
-                    log,
-                    "Found tofino node, with driver {}loaded",
-                    if driver_loaded { "" } else { "not " }
-                );
-            }
-        }
+    let (exists, driver_loaded) = match tofino::get_tofino_from_devinfo(devinfo)
+    {
+        Ok(None) => (false, false),
+        Ok(Some(node)) => (node.has_asic(), node.has_driver()),
         Err(e) => {
             error!(log, "failed to get tofino state: {e:?}");
+            (false, false)
         }
+    };
+    if exists {
+        debug!(
+            log,
+            "Found tofino node, with driver {}loaded",
+            if driver_loaded { "" } else { "not " }
+        );
     }
     TofinoSnapshot { exists, driver_loaded }
 }
