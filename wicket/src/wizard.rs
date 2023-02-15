@@ -141,13 +141,6 @@ impl Wizard {
     fn mainloop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
         let rect = self.terminal.get_frame().size();
-        // Size the rack for the initial draw
-        self.state.rack_state.resize(
-            rect.width,
-            rect.height,
-            TOP_MARGIN,
-            BOTTOM_MARGIN,
-        );
 
         // Draw the initial screen
         let screen = self.screens.get_mut(self.active_screen);
@@ -175,12 +168,6 @@ impl Wizard {
                     self.handle_actions(actions)?;
                 }
                 Event::Term(TermEvent::Resize(width, height)) => {
-                    self.state.rack_state.resize(
-                        width,
-                        height,
-                        TOP_MARGIN,
-                        BOTTOM_MARGIN,
-                    );
                     screen.resize(&mut self.state, width, height);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }

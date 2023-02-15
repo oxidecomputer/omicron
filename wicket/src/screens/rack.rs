@@ -13,6 +13,7 @@ use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
 use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
 use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
+use crate::{BOTTOM_MARGIN, TOP_MARGIN};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -28,7 +29,6 @@ pub struct RackScreen {
     log: Logger,
     watermark: &'static str,
     hovered: Option<ControlId>,
-    help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
     help_menu_state: HelpMenuState,
 }
@@ -49,9 +49,8 @@ impl RackScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
             hovered: None,
-            help_data,
             help_button_state: HelpButtonState::new(1, 0),
-            help_menu_state: HelpMenuState::default(),
+            help_menu_state: HelpMenuState::new(help_data),
         }
     }
 
@@ -85,7 +84,7 @@ impl RackScreen {
         // help menu
         if !self.help_menu_state.is_closed() {
             let menu = HelpMenu {
-                help: &self.help_data,
+                help: self.help_menu_state.help_text(),
                 style: help_menu_style,
                 command_style: help_menu_command_style,
                 state: self.help_menu_state.get_animation_state().unwrap(),
@@ -325,6 +324,15 @@ impl Screen for RackScreen {
                 } else {
                     vec![]
                 }
+            }
+            ScreenEvent::Term(TermEvent::Resize(width, height)) => {
+                state.rack_state.resize(
+                    width,
+                    height,
+                    TOP_MARGIN,
+                    BOTTOM_MARGIN,
+                );
+                vec![Action::Redraw]
             }
             _ => vec![],
         }
