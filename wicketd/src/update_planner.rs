@@ -36,13 +36,12 @@ use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
+use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -95,7 +94,7 @@ pub(crate) struct UpdatePlanner {
     mgs_client: gateway_client::Client,
     artifact_store: WicketdArtifactStore,
     running_updates: Mutex<BTreeMap<SpIdentifier, JoinHandle<()>>>,
-    snapshot: Arc<StdMutex<Option<SnapshotState>>>,
+    snapshot_state: Arc<StdMutex<Option<SnapshotState>>>,
     // Note: Our inner mutex here is a standard mutex, not a tokio mutex. We
     // generally hold it only log enough to update its state or push a new
     // update event into its running log; occasionally we hold it long enough to
@@ -115,7 +114,7 @@ impl UpdatePlanner {
             mgs_client: make_mgs_client(log.clone(), mgs_addr),
             artifact_store,
             running_updates: Mutex::default(),
-            snapshot: Arc::default(),
+            snapshot_state: Arc::default(),
             update_logs: Mutex::default(),
             log,
         }
@@ -128,28 +127,28 @@ impl UpdatePlanner {
                 // Our artifact store is now invalid; if we had a snapshot,
                 // clear it out, so we don't try to start new updates moving
                 // forward.
-                *self.snapshot.lock().unwrap() = None;
+                *self.snapshot_state.lock().unwrap() = None;
                 return Err(err);
             }
         };
 
-        let snapshot = SnapshotState {
-            snapshot,
-            uploaded_trampoline_phase_2_to_mgs: Arc::new(AtomicBool::new(
-                false,
-            )),
-        };
+        let (upload_done_tx, upload_done_rx) = watch::channel(false);
 
         // Immediately spawn a task to upload the trampoline phase 2 to MGS
         // under the assumption that this snapshot will be used for recovery.
         tokio::spawn(upload_trampoline_phase_2_to_mgs(
             self.mgs_client.clone(),
-            snapshot.snapshot.trampoline_phase_2.clone(),
-            Arc::clone(&snapshot.uploaded_trampoline_phase_2_to_mgs),
+            snapshot.trampoline_phase_2.clone(),
+            upload_done_tx,
             self.log.clone(),
         ));
 
-        *self.snapshot.lock().unwrap() = Some(snapshot);
+        let snapshot_state = SnapshotState {
+            snapshot,
+            uploaded_trampoline_phase_2_to_mgs: upload_done_rx,
+        };
+
+        *self.snapshot_state.lock().unwrap() = Some(snapshot_state);
 
         Ok(())
     }
@@ -158,8 +157,8 @@ impl UpdatePlanner {
         &self,
         sp: SpIdentifier,
     ) -> Result<(), UpdatePlanError> {
-        let snapshot = self
-            .snapshot
+        let snapshot_state = self
+            .snapshot_state
             .lock()
             .unwrap()
             .clone()
@@ -181,7 +180,10 @@ impl UpdatePlanner {
                 update_log,
                 log: self.log.new(o!("sp" => format!("{sp:?}"))),
             };
-            tokio::spawn(update_driver.run(snapshot))
+            tokio::spawn(update_driver.run(
+                snapshot_state.snapshot,
+                snapshot_state.uploaded_trampoline_phase_2_to_mgs,
+            ))
         };
 
         let mut running_updates = self.running_updates.lock().await;
@@ -250,8 +252,15 @@ struct UpdateDriver {
 }
 
 impl UpdateDriver {
-    async fn run(self, snapshot: SnapshotState) {
-        if let Err(err) = self.run_impl(&snapshot).await {
+    async fn run(
+        self,
+        snapshot: ArtifactSnapshot,
+        mut uploaded_trampoline_phase_2_to_mgs: watch::Receiver<bool>,
+    ) {
+        if let Err(err) = self
+            .run_impl(&snapshot, &mut uploaded_trampoline_phase_2_to_mgs)
+            .await
+        {
             error!(self.log, "update failed"; "err" => ?err);
             self.push_update_failure(err);
         }
@@ -286,10 +295,11 @@ impl UpdateDriver {
 
     async fn run_impl(
         &self,
-        snapshot: &SnapshotState,
+        snapshot: &ArtifactSnapshot,
+        uploaded_trampoline_phase_2_to_mgs: &mut watch::Receiver<bool>,
     ) -> Result<(), UpdateEventFailureKind> {
         let sp_artifact = match self.sp.type_ {
-            SpType::Sled => &snapshot.snapshot.gimlet_sp,
+            SpType::Sled => &snapshot.gimlet_sp,
             SpType::Power => todo!(),
             SpType::Switch => todo!(),
         };
@@ -315,7 +325,7 @@ impl UpdateDriver {
         })?;
 
         if self.sp.type_ == SpType::Sled {
-            self.run_sled(snapshot).await?;
+            self.run_sled(snapshot, uploaded_trampoline_phase_2_to_mgs).await?;
         }
 
         self.push_update_success(UpdateEventSuccessKind::Done, None);
@@ -365,7 +375,8 @@ impl UpdateDriver {
 
     async fn run_sled(
         &self,
-        snapshot: &SnapshotState,
+        snapshot: &ArtifactSnapshot,
+        uploaded_trampoline_phase_2_to_mgs: &mut watch::Receiver<bool>,
     ) -> Result<(), UpdateEventFailureKind> {
         info!(self.log, "starting host recovery");
 
@@ -373,13 +384,13 @@ impl UpdateDriver {
         // slot 0.
         let trampoline_phase_1_boot_slot = 0;
         self.deliver_host_phase1(
-            &snapshot.snapshot.trampoline_phase_1,
+            &snapshot.trampoline_phase_1,
             trampoline_phase_1_boot_slot,
         )
         .await
         .map_err(|err| {
             UpdateEventFailureKind::ArtifactUpdateFailed {
-                artifact: snapshot.snapshot.trampoline_phase_1.id.clone(),
+                artifact: snapshot.trampoline_phase_1.id.clone(),
                 reason: format!("{err:#}"),
             }
         })?;
@@ -387,24 +398,18 @@ impl UpdateDriver {
         // Ensure we've finished sending the trampoline phase 2 to MGS, or wait
         // until we have.
         self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
-            artifact: snapshot.snapshot.trampoline_phase_2.id.clone(),
+            artifact: snapshot.trampoline_phase_2.id.clone(),
         });
-        loop {
-            if snapshot
-                .uploaded_trampoline_phase_2_to_mgs
-                .load(Ordering::Relaxed)
-            {
-                break;
-            }
-
+        while !*uploaded_trampoline_phase_2_to_mgs.borrow() {
             info!(
                 self.log,
                 "waiting for trampoline phase 2 upload to MGS to complete"
             );
 
-            // TODO this time is completely arbitrary - replace with a broadcast
-            // channel or watch channel?
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            // `upload_trampoline_phase_2_to_mgs()` waits for all receivers to
+            // be dropped, so the only way `changed()` can fail is if that task
+            // has panicked; unwrap to propogate such panics.
+            uploaded_trampoline_phase_2_to_mgs.changed().await.unwrap();
         }
 
         info!(self.log, "starting installinator portion of host recovery");
@@ -418,13 +423,13 @@ impl UpdateDriver {
         // it writes to the 0 slot, so we overwrite the trampoline phase 1 with
         // the real phase 1, now that installinator is finished.
         self.deliver_host_phase1(
-            &snapshot.snapshot.host_phase_1,
+            &snapshot.host_phase_1,
             trampoline_phase_1_boot_slot,
         )
         .await
         .map_err(|err| {
             UpdateEventFailureKind::ArtifactUpdateFailed {
-                artifact: snapshot.snapshot.host_phase_1.id.clone(),
+                artifact: snapshot.host_phase_1.id.clone(),
                 reason: format!("{err:#}"),
             }
         })?;
@@ -432,7 +437,7 @@ impl UpdateDriver {
         // Recovery complete! Boot the host.
         self.set_host_power_state(PowerState::A0).await.map_err(|err| {
             UpdateEventFailureKind::ArtifactUpdateFailed {
-                artifact: snapshot.snapshot.host_phase_1.id.clone(),
+                artifact: snapshot.host_phase_1.id.clone(),
                 reason: format!("{err:#}"),
             }
         })?;
@@ -488,7 +493,7 @@ impl UpdateDriver {
 
     async fn drive_installinator(
         &self,
-        snapshot: &SnapshotState,
+        snapshot: &ArtifactSnapshot,
     ) -> anyhow::Result<()> {
         // Set the installinator image ID, so installinator knows the hashes of
         // the real phase2 and control plane images it needs to fetch.
@@ -655,7 +660,7 @@ impl UpdateDriver {
 #[derive(Debug, Clone)]
 struct SnapshotState {
     snapshot: ArtifactSnapshot,
-    uploaded_trampoline_phase_2_to_mgs: Arc<AtomicBool>,
+    uploaded_trampoline_phase_2_to_mgs: watch::Receiver<bool>,
 }
 
 // Information we need to extract exactly once from a given TUF repository that
@@ -666,16 +671,16 @@ struct InstallinatorImageIdHashes {
     control_plane_hash: [u8; 32],
 }
 
-impl From<&'_ SnapshotState> for InstallinatorImageIdHashes {
-    fn from(snapshot: &'_ SnapshotState) -> Self {
+impl From<&'_ ArtifactSnapshot> for InstallinatorImageIdHashes {
+    fn from(snapshot: &'_ ArtifactSnapshot) -> Self {
         let mut digest = Sha3_256::new();
-        for chunk in &snapshot.snapshot.host_phase_2.data {
+        for chunk in &snapshot.host_phase_2.data {
             digest.update(chunk);
         }
         let host_phase_2_hash = digest.finalize().into();
 
         let mut digest = Sha3_256::new();
-        for chunk in &snapshot.snapshot.control_plane.data {
+        for chunk in &snapshot.control_plane.data {
             digest.update(chunk);
         }
         let control_plane_hash = digest.finalize().into();
@@ -695,7 +700,7 @@ fn buf_list_to_vec(data: &BufList) -> Vec<u8> {
 async fn upload_trampoline_phase_2_to_mgs(
     mgs_client: gateway_client::Client,
     artifact: Artifact,
-    done: Arc<AtomicBool>,
+    done: watch::Sender<bool>,
     log: Logger,
 ) {
     let data = artifact.data;
@@ -734,5 +739,10 @@ async fn upload_trampoline_phase_2_to_mgs(
     .await
     .unwrap();
 
-    done.store(true, Ordering::Relaxed);
+    // Notify all receivers that we've uploaded the image.
+    _ = done.send(true);
+
+    // Wait for all receivers to be gone before we exit, so they never get recv
+    // errors.
+    done.closed().await;
 }
