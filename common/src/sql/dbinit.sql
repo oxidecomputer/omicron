@@ -137,7 +137,8 @@ CREATE INDEX ON omicron.public.service (
 );
 
 -- Extended information for services where "service.kind = nexus"
--- The UUID should match the "omicron.public.service" table exactly.
+-- The "id" columng of this table should match "id" column of the
+-- "omicron.public.service" table exactly.
 CREATE TABLE omicron.public.nexus_service (
     id UUID PRIMARY KEY,
     -- The external IP address used for Nexus' external interface.
