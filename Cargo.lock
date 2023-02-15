@@ -7635,6 +7635,7 @@ dependencies = [
  "futures",
  "hex",
  "libsw",
+ "proptest",
  "reqwest",
  "semver 1.0.16",
  "serde",
