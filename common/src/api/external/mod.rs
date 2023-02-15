@@ -1557,24 +1557,6 @@ pub struct RouterRoute {
     pub destination: RouteDestination,
 }
 
-/// Create-time parameters for a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
-/// Updateable properties of a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
 /// A single rule in a VPC firewall
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
