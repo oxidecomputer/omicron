@@ -8,7 +8,7 @@ use anyhow::Result;
 use assert_cmd::Command;
 use camino::Utf8PathBuf;
 use omicron_common::{
-    api::internal::nexus::UpdateArtifactKind, update::ArtifactKind,
+    api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
 };
 use tufaceous_lib::{Key, OmicronRepo};
 
@@ -46,13 +46,29 @@ fn test_init_and_add() -> Result<()> {
     assert_eq!(artifact.version, "42.0.0", "artifact version");
     assert_eq!(
         artifact.kind,
-        ArtifactKind::Known(UpdateArtifactKind::GimletSp),
+        ArtifactKind::from_known(KnownArtifactKind::GimletSp),
         "artifact kind"
     );
     assert_eq!(
         artifact.target, "omicron-nexus-42.0.0.tar.gz",
         "artifact target"
     );
+
+    // Create an archive from the given path.
+    let archive_path = tempdir.path().join("archive.zip");
+    let mut cmd = make_cmd(tempdir.path(), &key);
+    cmd.arg("archive");
+    cmd.arg(&archive_path);
+    cmd.assert().success();
+
+    // Extract the archive to a new directory.
+    let dest_path = tempdir.path().join("dest");
+    let mut cmd = make_cmd(tempdir.path(), &key);
+    cmd.arg("extract");
+    cmd.arg(&archive_path);
+    cmd.arg(&dest_path);
+
+    cmd.assert().success();
 
     Ok(())
 }

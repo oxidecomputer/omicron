@@ -1571,7 +1571,7 @@
             "description": "The kind of update artifact this is.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/UpdateArtifactKind"
+                "$ref": "#/components/schemas/KnownArtifactKind"
               }
             ]
           },
@@ -1590,7 +1590,7 @@
           "version"
         ]
       },
-      "UpdateArtifactKind": {
+      "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
         "type": "string",
         "enum": [

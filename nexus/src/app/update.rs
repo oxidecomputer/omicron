@@ -9,7 +9,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
-use crate::db::model::UpdateArtifactKind;
+use crate::db::model::KnownArtifactKind;
 use chrono::Utc;
 use hex;
 use nexus_types::external_api::{params, shared};
@@ -154,7 +154,7 @@ impl super::Nexus {
             .update_available_artifact_tuple(
                 &artifact.name,
                 &artifact.version,
-                UpdateArtifactKind(artifact.kind),
+                KnownArtifactKind(artifact.kind),
             )
             .fetch()
             .await?;

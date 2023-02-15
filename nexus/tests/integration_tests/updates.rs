@@ -17,7 +17,7 @@ use http::{Method, Response, StatusCode};
 use hyper::Body;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{Artifact, ArtifactKind, ArtifactsDocument};
 use omicron_nexus::config::UpdatesConfig;
 use ring::pkcs8::Document;
@@ -240,7 +240,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
         artifacts: vec![Artifact {
             name: "omicron-test-component".into(),
             version: "0.0.0".into(),
-            kind: ArtifactKind::Known(UpdateArtifactKind::ControlPlane),
+            kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
             target: "omicron-test-component-1".into(),
         }],
     };
