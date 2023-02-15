@@ -151,8 +151,8 @@ pub enum UpdateArtifactKind {
     // Sled Artifacts
     GimletSp,
     GimletRot,
-    HostPhase1,
-    HostPhase2,
+    Host,
+    Trampoline,
     ControlPlane,
 
     // PSC Artifacts

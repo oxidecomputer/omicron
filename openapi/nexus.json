@@ -250,6 +250,7 @@
           "snapshots"
         ],
         "summary": "Fetch a snapshot by id",
+        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
         "operationId": "snapshot_view_by_id",
         "parameters": [
           {
@@ -279,7 +280,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/vpc-router-routes/{id}": {
@@ -3214,6 +3216,7 @@
           "snapshots"
         ],
         "summary": "List snapshots",
+        "description": "Use `GET /v1/snapshots` instead.",
         "operationId": "snapshot_list",
         "parameters": [
           {
@@ -3280,6 +3283,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -3287,7 +3291,7 @@
           "snapshots"
         ],
         "summary": "Create a snapshot",
-        "description": "Creates a point-in-time snapshot from a disk.",
+        "description": "Use `POST /v1/snapshots` instead.",
         "operationId": "snapshot_create",
         "parameters": [
           {
@@ -3336,7 +3340,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}": {
@@ -3345,6 +3350,7 @@
           "snapshots"
         ],
         "summary": "Fetch a snapshot",
+        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
         "operationId": "snapshot_view",
         "parameters": [
           {
@@ -3389,13 +3395,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "snapshots"
         ],
         "summary": "Delete a snapshot",
+        "description": "Use `DELETE /v1/snapshots/{snapshot}` instead.",
         "operationId": "snapshot_delete",
         "parameters": [
           {
@@ -3433,7 +3441,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
@@ -4946,6 +4955,7 @@
           "silos"
         ],
         "summary": "Fetch the current silo's IAM policy",
+        "description": "Use `GET /v1/policy` instead",
         "operationId": "policy_view",
         "responses": {
           "200": {
@@ -4964,13 +4974,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "silos"
         ],
         "summary": "Update the current silo's IAM policy",
+        "description": "Use `PUT /v1/policy` instead",
         "operationId": "policy_update",
         "requestBody": {
           "content": {
@@ -4999,7 +5011,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/roles": {
@@ -5616,6 +5629,7 @@
           "system"
         ],
         "summary": "List physical disks",
+        "description": "Use `GET /v1/system/hardware/disks` instead",
         "operationId": "physical_disk_list",
         "parameters": [
           {
@@ -5664,6 +5678,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -5673,6 +5688,7 @@
           "system"
         ],
         "summary": "List racks",
+        "description": "Use `GET /v1/system/hardware/racks` instead",
         "operationId": "rack_list",
         "parameters": [
           {
@@ -5721,6 +5737,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -5730,6 +5747,7 @@
           "system"
         ],
         "summary": "Fetch a rack",
+        "description": "Use `GET /v1/system/hardware/racks/{rack_id}` instead",
         "operationId": "rack_view",
         "parameters": [
           {
@@ -5760,7 +5778,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/hardware/sleds": {
@@ -5769,6 +5788,7 @@
           "system"
         ],
         "summary": "List sleds",
+        "description": "Use `GET /v1/system/hardware/sleds instead`",
         "operationId": "sled_list",
         "parameters": [
           {
@@ -5817,6 +5837,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -5826,6 +5847,7 @@
           "system"
         ],
         "summary": "Fetch a sled",
+        "description": "Use `GET /v1/system/hardware/sleds/{sled_id}` instead",
         "operationId": "sled_view",
         "parameters": [
           {
@@ -5856,7 +5878,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/hardware/sleds/{sled_id}/disks": {
@@ -5865,6 +5888,7 @@
           "system"
         ],
         "summary": "List physical disks attached to sleds",
+        "description": "Use `GET /v1/system/hardware/sleds/{sled_id}/disks` instead",
         "operationId": "sled_physical_disk_list",
         "parameters": [
           {
@@ -5923,6 +5947,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -6672,6 +6697,7 @@
           "policy"
         ],
         "summary": "Fetch the top-level IAM policy",
+        "description": "Use `GET /v1/system/policy` instead",
         "operationId": "system_policy_view",
         "responses": {
           "200": {
@@ -6690,13 +6716,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "policy"
         ],
         "summary": "Update the top-level IAM policy",
+        "description": "Use 'PUT /v1/system/policy' instead",
         "operationId": "system_policy_update",
         "requestBody": {
           "content": {
@@ -6734,6 +6762,7 @@
           "system"
         ],
         "summary": "List sagas",
+        "description": "Use `GET v1/system/sagas` instead",
         "operationId": "saga_list",
         "parameters": [
           {
@@ -6782,6 +6811,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -6791,6 +6821,7 @@
           "system"
         ],
         "summary": "Fetch a saga",
+        "description": "Use `GET v1/system/sagas/{saga_id}` instead",
         "operationId": "saga_view",
         "parameters": [
           {
@@ -6820,7 +6851,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos": {
@@ -8947,6 +8979,68 @@
         }
       }
     },
+    "/v1/policy": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch the current silo's IAM policy",
+        "operationId": "policy_view_v1",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Update the current silo's IAM policy",
+        "operationId": "policy_update_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/projects": {
       "get": {
         "tags": [
@@ -9270,6 +9364,696 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProjectRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/snapshots": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "List snapshots",
+        "operationId": "snapshot_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Create a snapshot",
+        "description": "Creates a point-in-time snapshot from a disk.",
+        "operationId": "snapshot_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/snapshots/{snapshot}": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Fetch a snapshot",
+        "operationId": "snapshot_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Delete a snapshot",
+        "operationId": "snapshot_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/disks": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List physical disks",
+        "operationId": "physical_disk_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/hardware/racks": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List racks",
+        "operationId": "rack_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/hardware/racks/{rack_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a rack",
+        "operationId": "rack_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "The rack's unique ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rack"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/sleds": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List sleds",
+        "operationId": "sled_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/hardware/sleds/{sled_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a sled",
+        "operationId": "sled_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "The sled's unique ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sled"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/sleds/{sled_id}/disks": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List physical disks attached to sleds",
+        "operationId": "sled_physical_disk_list_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "The sled's unique ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/policy": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Fetch the top-level IAM policy",
+        "operationId": "system_policy_view_v1",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Update the top-level IAM policy",
+        "operationId": "system_policy_update_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/sagas": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List sagas",
+        "operationId": "saga_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/sagas/{saga_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a saga",
+        "operationId": "saga_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "saga_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Saga"
                 }
               }
             }
@@ -10646,6 +11430,21 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
                 ]
               }
             },

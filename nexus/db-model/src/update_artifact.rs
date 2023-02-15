@@ -24,8 +24,8 @@ impl_enum_wrapper!(
     // Enum values
     GimletSp => b"gimlet_sp"
     GimletRot => b"gimlet_rot"
-    HostPhase1 => b"host_phase_1"
-    HostPhase2 => b"host_phase_2"
+    Host => b"host"
+    Trampoline => b"trampoline"
     ControlPlane => b"control_plane"
     PscSp => b"psc_sp"
     PscRot => b"psc_rot"

@@ -24,8 +24,6 @@ use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
 
-use crucible_client_types::VolumeConstructionRequest;
-
 type SledApiDescription = ApiDescription<SledAgent>;
 
 /// Returns a description of the sled agent API
@@ -39,7 +37,6 @@ pub fn api() -> SledApiDescription {
         api.register(update_artifact)?;
         api.register(instance_serial_get)?;
         api.register(instance_issue_disk_snapshot_request)?;
-        api.register(issue_disk_snapshot_request)?;
         api.register(vpc_firewall_rules_put)?;
 
         Ok(())
@@ -231,8 +228,6 @@ pub struct InstanceIssueDiskSnapshotRequestResponse {
 }
 
 /// Take a snapshot of a disk that is attached to an instance
-///
-/// For disks not attached to an instance, see [`issue_disk_snapshot_request`]
 #[endpoint {
     method = POST,
     path = "/instances/{instance_id}/disks/{disk_id}/snapshot",
@@ -255,51 +250,6 @@ async fn instance_issue_disk_snapshot_request(
     .await?;
 
     Ok(HttpResponseOk(InstanceIssueDiskSnapshotRequestResponse {
-        snapshot_id: body.snapshot_id,
-    }))
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct IssueDiskSnapshotRequestPathParam {
-    disk_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskSnapshotRequestBody {
-    volume_construction_request: VolumeConstructionRequest,
-    snapshot_id: Uuid,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct DiskSnapshotRequestResponse {
-    snapshot_id: Uuid,
-}
-
-/// Take a snapshot of a disk that is not attached to an instance.
-///
-/// For disks attached to an instance, see
-/// [`instance_issue_disk_snapshot_request`]
-#[endpoint {
-    method = POST,
-    path = "/disks/{disk_id}/snapshot",
-}]
-async fn issue_disk_snapshot_request(
-    rqctx: RequestContext<SledAgent>,
-    path_params: Path<IssueDiskSnapshotRequestPathParam>,
-    body: TypedBody<DiskSnapshotRequestBody>,
-) -> Result<HttpResponseOk<DiskSnapshotRequestResponse>, HttpError> {
-    let sa = rqctx.context();
-    let path_params = path_params.into_inner();
-    let body = body.into_inner();
-
-    sa.issue_disk_snapshot_request(
-        path_params.disk_id,
-        body.volume_construction_request,
-        body.snapshot_id,
-    )
-    .await?;
-
-    Ok(HttpResponseOk(DiskSnapshotRequestResponse {
         snapshot_id: body.snapshot_id,
     }))
 }
