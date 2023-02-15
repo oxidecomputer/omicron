@@ -221,8 +221,9 @@ pub struct RackInitializationRequest {
     pub services: Vec<ServicePutRequest>,
     /// Datasets on the rack which have been provisioned by RSS.
     pub datasets: Vec<DatasetCreateRequest>,
-    /// IP pools which may be used for internal services, such as Nexus.
-    pub internal_services_ip_pool: Vec<IpRange>,
+    /// Ranges of the service IP pool which may be used for internal services,
+    /// such as Nexus.
+    pub internal_services_ip_pool_ranges: Vec<IpRange>,
     /// x.509 Certificates used to encrypt communication with the external API.
     pub certs: Vec<Certificate>,
 }

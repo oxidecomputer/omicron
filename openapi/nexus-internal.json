@@ -2038,8 +2038,8 @@
               "$ref": "#/components/schemas/DatasetCreateRequest"
             }
           },
-          "internal_services_ip_pool": {
-            "description": "IP pools which may be used for internal services, such as Nexus.",
+          "internal_services_ip_pool_ranges": {
+            "description": "Ranges of the service IP pool which may be used for internal services, such as Nexus.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpRange"
@@ -2056,7 +2056,7 @@
         "required": [
           "certs",
           "datasets",
-          "internal_services_ip_pool",
+          "internal_services_ip_pool_ranges",
           "services"
         ]
       },

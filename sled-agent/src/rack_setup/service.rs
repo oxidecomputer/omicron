@@ -471,7 +471,8 @@ impl ServiceInner {
         // a format which can be processed by Nexus.
         let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
-        let mut internal_services_ip_pool: Vec<NexusTypes::IpRange> = vec![];
+        let mut internal_services_ip_pool_ranges: Vec<NexusTypes::IpRange> =
+            vec![];
         for (addr, service_request) in service_plan.services.iter() {
             let sled_id = *id_map
                 .get(addr)
@@ -498,7 +499,7 @@ impl ServiceInner {
                                     },
                                 ),
                             };
-                            internal_services_ip_pool.push(range);
+                            internal_services_ip_pool_ranges.push(range);
 
                             NexusTypes::ServiceKind::Nexus {
                                 external_address: *external_ip,
@@ -552,7 +553,7 @@ impl ServiceInner {
             // Currently, we're passing the addresses to accomodate Nexus
             // services, but the operator may want to supply additional
             // addresses.
-            internal_services_ip_pool,
+            internal_services_ip_pool_ranges,
             // TODO(https://github.com/oxidecomputer/omicron/issues/1959): Plumb
             // these paths through RSS's API.
             //

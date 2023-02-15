@@ -78,7 +78,7 @@ impl super::Nexus {
             })
             .collect();
 
-        let service_ip_pool_ranges = request.internal_services_ip_pool;
+        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         let certificates: Vec<_> = request
             .certs
             .into_iter()
