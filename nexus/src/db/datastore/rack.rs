@@ -152,7 +152,7 @@ impl DataStore {
                     })?;
                 }
 
-                // Allocate records for all services all services.
+                // Allocate records for all services.
                 for (svc, external_ip) in services {
                     use db::schema::service::dsl;
                     let sled_id = svc.sled_id;
