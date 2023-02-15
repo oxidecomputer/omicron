@@ -2861,6 +2861,7 @@ dependencies = [
  "proptest",
  "serde",
  "test-strategy",
+ "uuid",
 ]
 
 [[package]]

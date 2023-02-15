@@ -408,6 +408,7 @@ pub struct ImageVersion {
 )]
 #[serde(rename_all = "snake_case")]
 pub struct InstallinatorImageId {
+    pub update_id: Uuid,
     pub host_phase_2: [u8; 32],
     pub control_plane: [u8; 32],
 }
