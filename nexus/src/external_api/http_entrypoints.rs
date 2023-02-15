@@ -4454,7 +4454,7 @@ async fn instance_network_interface_view_v1(
 }
 
 /// Fetch a network interface
-/// Use `/v1/network-interfaces/{interface}` instead
+/// Use `GET /v1/network-interfaces/{interface}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
@@ -4551,10 +4551,12 @@ async fn instance_network_interface_update_v1(
 }
 
 /// Update a network interface
+/// Use `PUT /v1/network-interfaces/{interface}` instead
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_network_interface_update(
     rqctx: RequestContext<Arc<ServerContext>>,
