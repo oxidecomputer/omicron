@@ -7,7 +7,7 @@
 use crate::nexus::NexusClient;
 use futures::{TryFutureExt, TryStreamExt};
 use omicron_common::api::internal::nexus::{
-    UpdateArtifactId, UpdateArtifactKind,
+    KnownArtifactKind, UpdateArtifactId,
 };
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -22,6 +22,12 @@ pub enum Error {
         err: std::io::Error,
     },
 
+    #[error(
+        "sled-agent only supports applying zones, found artifact ID {}/{} with kind {}",
+        .0.name, .0.version, .0.kind
+    )]
+    UnsupportedKind(UpdateArtifactId),
+
     #[error("Failed request to Nexus: {0}")]
     Response(nexus_client::Error<nexus_client::types::Error>),
 }
@@ -31,11 +37,12 @@ pub async fn download_artifact(
     nexus: &NexusClient,
 ) -> Result<(), Error> {
     match artifact.kind {
-        UpdateArtifactKind::Zone => {
-            let directory = PathBuf::from("/var/tmp/zones");
+        // TODO This is a demo for tests, for now.
+        KnownArtifactKind::ControlPlane => {
+            let directory = PathBuf::from("/var/tmp/control-plane");
             tokio::fs::create_dir_all(&directory).await.map_err(|err| {
                 Error::Io {
-                    message: format!("creating diretory {directory:?}"),
+                    message: format!("creating directory {directory:?}"),
                     err,
                 }
             })?;
@@ -56,7 +63,7 @@ pub async fn download_artifact(
 
             let response = nexus
                 .cpapi_artifact_download(
-                    nexus_client::types::UpdateArtifactKind::Zone,
+                    nexus_client::types::KnownArtifactKind::ControlPlane,
                     &artifact.name,
                     &artifact.version,
                 )
@@ -91,6 +98,7 @@ pub async fn download_artifact(
 
             Ok(())
         }
+        _ => Err(Error::UnsupportedKind(artifact)),
     }
 }
 
@@ -112,9 +120,10 @@ mod test {
         let artifact = UpdateArtifactId {
             name: expected_name.to_string(),
             version: "0.0.0".to_string(),
-            kind: UpdateArtifactKind::Zone,
+            kind: KnownArtifactKind::ControlPlane,
         };
-        let expected_path = PathBuf::from("/var/tmp/zones").join(expected_name);
+        let expected_path =
+            PathBuf::from("/var/tmp/control-plane").join(expected_name);
 
         // Remove the file if it already exists.
         let _ = tokio::fs::remove_file(&expected_path).await;
@@ -125,7 +134,7 @@ mod test {
             move |kind, name, version| {
                 assert_eq!(name, "test_artifact");
                 assert_eq!(version, "0.0.0");
-                assert_eq!(kind.to_string(), "zone");
+                assert_eq!(kind.to_string(), "control_plane");
                 let response = ByteStream::new(Box::pin(
                     futures::stream::once(futures::future::ready(Result::Ok(
                         Bytes::from(expected_contents),

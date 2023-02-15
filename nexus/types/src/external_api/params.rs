@@ -9,7 +9,8 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, SemverVersion,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, RouteDestination,
+    RouteTarget, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -35,9 +36,39 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct NetworkInterfacePath {
+    pub interface: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct VpcPath {
+    pub vpc: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetPath {
+    pub subnet: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouterPath {
+    pub router: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RoutePath {
+    pub route: NameOrId,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskPath {
     pub disk: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SnapshotPath {
+    pub snapshot: NameOrId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -103,6 +134,27 @@ impl DiskSelector {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct SnapshotSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub snapshot: NameOrId,
+}
+
+impl SnapshotSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        snapshot: NameOrId,
+    ) -> Self {
+        SnapshotSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            snapshot,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
@@ -120,6 +172,141 @@ impl InstanceSelector {
             project_selector: project
                 .map(|p| ProjectSelector::new(organization, p)),
             instance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalInstanceSelector {
+    #[serde(flatten)]
+    pub instance_selector: Option<InstanceSelector>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct NetworkInterfaceSelector {
+    #[serde(flatten)]
+    pub instance_selector: Option<InstanceSelector>,
+    pub network_interface: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl NetworkInterfaceSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        instance: Option<NameOrId>,
+        network_interface: NameOrId,
+    ) -> Self {
+        NetworkInterfaceSelector {
+            instance_selector: instance.map(|instance| {
+                InstanceSelector::new(organization, project, instance)
+            }),
+            network_interface,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct VpcSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub vpc: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalVpcSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+}
+
+// TODO-v1: delete this post migration
+impl VpcSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: NameOrId,
+    ) -> Self {
+        VpcSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            vpc,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+    pub subnet: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SubnetSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        subnet: NameOrId,
+    ) -> Self {
+        SubnetSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            subnet,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct RouterSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+    pub router: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouterSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: NameOrId,
+    ) -> Self {
+        RouterSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            router,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalRouterSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouteSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+    pub route: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouteSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: Option<NameOrId>,
+        route: NameOrId,
+    ) -> Self {
+        RouteSelector {
+            router_selector: router.map(|router| {
+                RouterSelector::new(organization, project, vpc, router)
+            }),
+            route,
         }
     }
 }
@@ -923,6 +1110,26 @@ pub struct VpcRouterCreate {
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+// VPC ROUTER ROUTES
+
+/// Create-time parameters for a [`omicron_common::api::external::RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Updateable properties of a [`omicron_common::api::external::RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
 }
 
 // DISKS

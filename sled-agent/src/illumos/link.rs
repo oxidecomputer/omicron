@@ -6,7 +6,7 @@
 
 use crate::illumos::dladm::{
     CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
-    VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
+    VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
@@ -71,6 +71,12 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         }
     }
 
+    pub fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
+        let name = self.next();
+        Dladm::create_vnic(&self.data_link, &name, None, None)?;
+        Ok(Link { name, deleted: false, kind: LinkKind::OxideBootstrapVnic })
+    }
+
     /// Allocates a new VNIC name, which should be unique within the
     /// scope of this allocator.
     fn next(&self) -> String {
@@ -89,6 +95,7 @@ pub enum LinkKind {
     Physical,
     OxideControlVnic,
     GuestVnic,
+    OxideBootstrapVnic,
 }
 
 impl LinkKind {
@@ -99,6 +106,8 @@ impl LinkKind {
             Some(LinkKind::OxideControlVnic)
         } else if name.starts_with(VNIC_PREFIX_GUEST) {
             Some(LinkKind::GuestVnic)
+        } else if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
+            Some(LinkKind::OxideBootstrapVnic)
         } else {
             None
         }

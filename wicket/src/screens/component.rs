@@ -4,95 +4,51 @@
 
 //! Inventory and control of individual rack components: sled,switch,psc
 
+use super::common::CommonScreenState;
 use super::Screen;
 use crate::defaults::colors::*;
 use crate::defaults::dimensions::RectExt;
 use crate::defaults::dimensions::MENUBAR_HEIGHT;
 use crate::defaults::style;
 use crate::screens::ScreenId;
-use crate::widgets::Control;
-use crate::widgets::ControlId;
+use crate::widgets::HelpButtonState;
 use crate::widgets::HelpMenuState;
-use crate::widgets::{HelpButton, HelpButtonState, HelpMenu};
-use crate::widgets::{ScreenButton, ScreenButtonState};
+use crate::widgets::ScreenButtonState;
 use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
-    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind,
 };
 use tui::layout::Alignment;
 use tui::style::Modifier;
-use tui::style::{Color, Style};
+use tui::style::Style;
 use tui::text::{Span, Spans, Text};
-use tui::widgets::Block;
-use tui::widgets::Paragraph;
+use tui::widgets::{Block, Paragraph};
 
 pub struct ComponentScreen {
-    hovered: Option<ControlId>,
-    help_data: Vec<(&'static str, &'static str)>,
-    help_button_state: HelpButtonState,
-    help_menu_state: HelpMenuState,
-    rack_screen_button_state: ScreenButtonState,
+    common: CommonScreenState,
 }
 
 impl ComponentScreen {
     pub fn new() -> ComponentScreen {
-        let help_data = vec![
+        let help_text = vec![
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
-            ("<ESC>", "Go back to the rack screen"),
+            ("<ESC>", "Exit help menu | Go back to the rack screen"),
             ("<CTRL-r>", "Go back to the rack screen"),
             ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
         ComponentScreen {
-            hovered: None,
-            help_data,
-            help_button_state: HelpButtonState::new(1, 0),
-            help_menu_state: HelpMenuState::default(),
-            rack_screen_button_state: ScreenButtonState::new(ScreenId::Rack),
+            common: CommonScreenState {
+                hovered: None,
+                help_button_state: HelpButtonState::new(1, 0),
+                help_menu_state: HelpMenuState::new(help_text),
+                rack_screen_button_state: ScreenButtonState::new(
+                    ScreenId::Rack,
+                ),
+            },
         }
-    }
-
-    fn draw_background(&self, f: &mut Frame) {
-        let style = Style::default().fg(OX_GREEN_DARK).bg(Color::Black);
-        let block = Block::default().style(style);
-        f.render_widget(block, f.size());
-    }
-
-    fn draw_menubar(&self, f: &mut Frame, state: &State) {
-        let mut rect = f.size();
-        rect.height = MENUBAR_HEIGHT;
-
-        let bar_block = Block::default().style(style::menu_bar());
-        f.render_widget(bar_block, rect);
-
-        self.draw_component_list(f, state);
-        self.draw_power_state(f, state);
-        self.draw_help_menu(f, state);
-        self.draw_screen_selection_buttons(f, state);
-    }
-
-    fn draw_power_state(&self, f: &mut Frame, state: &State) {
-        let current = state.rack_state.get_current_component_id();
-        let title = match state.inventory.get_power_state(&current) {
-            Some(s) => {
-                format!(
-                    "⌁ Power State: {}",
-                    s.description().to_ascii_uppercase()
-                )
-            }
-            None => "⌁ Power State: UNKNOWN".to_string(),
-        };
-
-        let mut rect = f.size();
-        rect.height = 1;
-        rect.y = 3;
-        let power_state_block = Block::default()
-            .style(style::menu_bar_selected())
-            .title(title)
-            .title_alignment(Alignment::Center);
-        f.render_widget(power_state_block, rect);
     }
 
     fn draw_component_list(&self, f: &mut Frame, state: &State) {
@@ -125,50 +81,26 @@ impl ComponentScreen {
         f.render_widget(title_block, rect);
     }
 
-    fn draw_help_menu(&self, f: &mut Frame, _: &State) {
-        // Draw the help button if the help menu is closed, otherwise draw the
-        // help menu
-        if !self.help_menu_state.is_closed() {
-            let menu = HelpMenu {
-                help: &self.help_data,
-                style: style::help_menu(),
-                command_style: style::help_menu_command(),
-                // Unwrap is safe because we check that the menu is open (and
-                // thus has an AnimationState).
-                state: self.help_menu_state.get_animation_state().unwrap(),
-            };
-            f.render_widget(menu, f.size());
-        } else {
-            let border_style =
-                if self.hovered == Some(self.help_button_state.id()) {
-                    style::button_hovered()
-                } else {
-                    style::button()
-                };
-            let button = HelpButton::new(
-                &self.help_button_state,
-                style::button(),
-                border_style,
-            );
+    fn draw_power_state(&self, f: &mut Frame, state: &State) {
+        let current = state.rack_state.get_current_component_id();
+        let title = match state.inventory.get_power_state(&current) {
+            Some(s) => {
+                format!(
+                    "⌁ Power State: {}",
+                    s.description().to_ascii_uppercase()
+                )
+            }
+            None => "⌁ Power State: UNKNOWN".to_string(),
+        };
 
-            f.render_widget(button, f.size());
-        }
-    }
-
-    fn draw_screen_selection_buttons(&self, f: &mut Frame, _: &State) {
-        // Draw the RackSreenButton
-        let border_style =
-            if self.hovered == Some(self.rack_screen_button_state.id()) {
-                style::button_hovered()
-            } else {
-                style::button()
-            };
-        let button = ScreenButton::new(
-            &self.rack_screen_button_state,
-            style::button(),
-            border_style,
-        );
-        f.render_widget(button, f.size());
+        let mut rect = f.size();
+        rect.height = 1;
+        rect.y = 3;
+        let power_state_block = Block::default()
+            .style(style::menu_bar_selected())
+            .title(title)
+            .title_alignment(Alignment::Center);
+        f.render_widget(power_state_block, rect);
     }
 
     fn draw_inventory(&self, f: &mut Frame, state: &State) {
@@ -219,24 +151,17 @@ impl ComponentScreen {
             KeyCode::BackTab => {
                 state.rack_state.dec_tab_index();
             }
-            KeyCode::Char('r') => {
-                if event.modifiers.contains(KeyModifiers::CONTROL) {
+            KeyCode::Esc => {
+                if self.common.help_menu_state.is_closed() {
                     return vec![Action::SwitchScreen(ScreenId::Rack)];
+                } else {
+                    self.common.help_menu_state.close();
                 }
             }
-            KeyCode::Char('h') => {
-                if event.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.help_menu_state.toggle();
-                }
-            }
-            _ => (),
+            // Delegate to common handler
+            _ => return self.common.handle_key_event(event),
         }
         vec![Action::Redraw]
-    }
-
-    fn resize(&mut self, width: u16, _height: u16) {
-        self.rack_screen_button_state.rect.x =
-            width - ScreenButtonState::width();
     }
 
     fn handle_mouse_event(
@@ -249,22 +174,7 @@ impl ComponentScreen {
                 self.set_hover_state(state, event.column, event.row)
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                self.handle_mouse_click(state)
-            }
-            _ => vec![],
-        }
-    }
-
-    fn handle_mouse_click(&mut self, _: &mut State) -> Vec<Action> {
-        match self.hovered {
-            Some(control_id) if control_id == self.help_button_state.id() => {
-                self.help_menu_state.open();
-                vec![]
-            }
-            Some(control_id)
-                if control_id == self.rack_screen_button_state.id() =>
-            {
-                vec![Action::SwitchScreen(ScreenId::Rack)]
+                self.common.handle_mouse_click()
             }
             _ => vec![],
         }
@@ -276,25 +186,13 @@ impl ComponentScreen {
         x: u16,
         y: u16,
     ) -> Vec<Action> {
-        let current_id = self.find_intersection(x, y);
-        if current_id == self.hovered {
+        let current_id = self.common.find_intersection(x, y);
+        if current_id == self.common.hovered {
             // No change
             vec![]
         } else {
-            self.hovered = current_id;
+            self.common.hovered = current_id;
             vec![Action::Redraw]
-        }
-    }
-
-    // Return if the coordinates interesct a given control.
-    // This assumes disjoint control rectangles.
-    fn find_intersection(&self, x: u16, y: u16) -> Option<ControlId> {
-        if self.help_button_state.intersects_point(x, y) {
-            Some(self.help_button_state.id())
-        } else if self.rack_screen_button_state.intersects_point(x, y) {
-            Some(self.rack_screen_button_state.id())
-        } else {
-            None
         }
     }
 }
@@ -302,8 +200,12 @@ impl ComponentScreen {
 impl Screen for ComponentScreen {
     fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()> {
         terminal.draw(|f| {
-            self.draw_background(f);
-            self.draw_menubar(f, state);
+            self.common.draw_background(f);
+            self.common.draw_menubar(f, state);
+            self.draw_component_list(f, state);
+            self.draw_power_state(f, state);
+            self.common.draw_help_menu(f);
+            self.common.draw_screen_selection_buttons(f);
             self.draw_inventory(f, state);
             state.status_bar.draw(f);
         })?;
@@ -319,18 +221,12 @@ impl Screen for ComponentScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Term(TermEvent::Resize(width, height)) => {
-                self.resize(width, height);
+                self.common.resize(width, height);
                 // A redraw always occurs in the wizard
                 vec![]
             }
             ScreenEvent::Tick => {
-                let mut redraw = false;
-
-                if !self.help_menu_state.is_closed() {
-                    self.help_menu_state.step();
-                    redraw = true;
-                }
-
+                let mut redraw = self.common.tick();
                 redraw |= state.status_bar.should_redraw();
 
                 if redraw {

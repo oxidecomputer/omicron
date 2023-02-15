@@ -170,6 +170,20 @@ pub async fn test_setup_with_config<N: NexusServer>(
     .await
     .unwrap();
 
+    // Set Nexus' shared resolver to point to the simulated sled agent's
+    // internal DNS server
+    server
+        .set_resolver(
+            internal_dns_client::multiclient::Resolver::new(
+                &internal_dns_client::multiclient::ServerAddresses {
+                    dropshot_server_addrs: vec![],
+                    dns_server_addrs: vec![sled_agent.dns_server.address],
+                },
+            )
+            .unwrap(),
+        )
+        .await;
+
     // Set up an Oximeter collector server
     let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
     let oximeter = start_oximeter(

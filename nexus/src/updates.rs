@@ -49,7 +49,7 @@ pub fn read_artifacts(
         // name isn't in the repository
         let target =
             repository.targets().signed.targets.get(&artifact.target.parse()?);
-        let (kind, target) = match (artifact.kind.known(), target) {
+        let (kind, target) = match (artifact.kind.to_known(), target) {
             (Some(kind), Some(target)) => (kind, target),
             _ => break,
         };
@@ -57,7 +57,7 @@ pub fn read_artifacts(
         v.push(db::model::UpdateAvailableArtifact {
             name: artifact.name,
             version: artifact.version,
-            kind: db::model::UpdateArtifactKind(kind),
+            kind: db::model::KnownArtifactKind(kind),
             targets_role_version: repository
                 .targets()
                 .signed

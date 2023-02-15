@@ -16,8 +16,8 @@ use crate::{
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use nexus_db_model::KnownArtifactKind;
 use nexus_db_model::Name;
-use nexus_db_model::UpdateArtifactKind;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
@@ -389,7 +389,7 @@ impl<'a> LookupPath<'a> {
         self,
         name: &str,
         version: &str,
-        kind: UpdateArtifactKind,
+        kind: KnownArtifactKind,
     ) -> UpdateAvailableArtifact<'a> {
         UpdateAvailableArtifact::PrimaryKey(
             Root { lookup_root: self },
@@ -718,7 +718,7 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "name", rust_type = String },
         { column_name = "version", rust_type = String },
-        { column_name = "kind", rust_type = UpdateArtifactKind }
+        { column_name = "kind", rust_type = KnownArtifactKind }
     ]
 }
 

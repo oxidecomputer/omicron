@@ -4,6 +4,7 @@
 
 //! Tests basic snapshot support in the API
 
+use crate::integration_tests::instances::instance_simulate;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
@@ -20,6 +21,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
+use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
@@ -41,12 +43,8 @@ type ControlPlaneTestContext =
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
-fn get_project_url() -> String {
-    format!("/organizations/{}/projects/{}", ORG_NAME, PROJECT_NAME)
-}
-
 fn get_disks_url() -> String {
-    format!("{}/disks", get_project_url())
+    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -56,7 +54,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 }
 
 #[nexus_test]
-async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
+async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     populate_ip_pool(&client, "default", None).await;
@@ -133,12 +131,12 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     // Boot instance with disk
     let instances_url = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORG_NAME, PROJECT_NAME,
     );
     let instance_name = "base-instance";
 
-    let _instance: Instance = object_create(
+    let instance: Instance = object_create(
         client,
         &instances_url,
         &params::InstanceCreate {
@@ -163,9 +161,13 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
+    // cannot snapshot attached disk for instance in state starting
+    let nexus = &cptestctx.server.apictx().nexus;
+    instance_simulate(nexus, &instance.identity.id).await;
+
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -262,9 +264,24 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    // Assert disk is detached
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
+    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk")
+        .parsed_body()
+        .unwrap();
+
+    assert_eq!(disk.state, DiskState::Detached);
+
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -276,13 +293,28 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.clone(),
         },
     )
     .await;
 
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
+
+    // Assert disk is still detached
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
+    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk")
+        .parsed_body()
+        .unwrap();
+
+    assert_eq!(disk.state, DiskState::Detached);
 }
 
 #[nexus_test]
@@ -331,7 +363,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -396,8 +428,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     // Delete snapshot
     let snapshot_url = format!(
-        "/organizations/{}/projects/{}/snapshots/not-attached",
-        ORG_NAME, PROJECT_NAME,
+        "/v1/snapshots/not-attached?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
     );
 
     NexusRequest::new(
@@ -419,7 +451,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Delete the disk using the snapshot
-    let disk_url = format!("{}/{}", disks_url, snap_disk_name);
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        snap_disk_name, ORG_NAME, PROJECT_NAME
+    );
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -432,7 +467,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
 
     // Delete the original base disk
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -734,7 +772,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
 
     // Issue snapshot request, expect it to fail
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 

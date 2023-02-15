@@ -3,13 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod archive;
+mod artifact;
 mod key;
 mod repository;
 mod root;
 mod target;
-mod zone;
 
 pub use archive::*;
+pub use artifact::*;
 pub use key::*;
 pub use repository::*;
-pub use zone::*;

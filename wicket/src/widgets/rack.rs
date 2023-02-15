@@ -219,6 +219,15 @@ pub struct RackState {
     pub tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
     pub component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
     pub knight_rider_mode: Option<KnightRiderMode>,
+
+    // Useful for arrow based navigation. When we cross the switches going up
+    // or down the rack we want to stay in the same column. This allows a user
+    // to repeatedly hit up or down arrow and stay in the same column, as they
+    // would expect.
+    //
+    // This is the only part of the state that is "historical", and doesn't
+    // rely on the current TabIndex/ComponentId at all times.
+    left_column: bool,
 }
 
 #[allow(clippy::new_without_default)]
@@ -238,6 +247,9 @@ impl RackState {
             tab_index_by_component_id: BTreeMap::new(),
             component_id_by_tab_index: BTreeMap::new(),
             knight_rider_mode: None,
+
+            // Default to the left column, where sled 0 lives
+            left_column: true,
         };
 
         state.init_tab_index();
@@ -296,6 +308,85 @@ impl RackState {
         }
     }
 
+    pub fn up_arrow(&mut self) {
+        self.set_column();
+        if !self.tab_index.is_set() {
+            self.set_tab(ComponentId::Sled(0));
+            return;
+        }
+
+        match self.get_current_component_id() {
+            // Up the left side
+            ComponentId::Switch(1) if self.left_column => self.inc_tab_index(),
+
+            // Up the middle (right side if sled 15)
+            ComponentId::Sled(15)
+            | ComponentId::Psc(_)
+            | ComponentId::Switch(0) => {
+                self.inc_tab_index();
+            }
+
+            // Up the current side (always right side if switch 1)
+            ComponentId::Sled(_) | ComponentId::Switch(_) => {
+                self.inc_tab_index();
+                self.inc_tab_index();
+            }
+        }
+    }
+
+    pub fn down_arrow(&mut self) {
+        self.set_column();
+        if !self.tab_index.is_set() {
+            self.set_tab(ComponentId::Sled(0));
+            return;
+        }
+
+        match self.get_current_component_id() {
+            // Down the left side
+            ComponentId::Switch(0) if !self.left_column => self.dec_tab_index(),
+
+            // Down the middle (right side if sled 16)
+            ComponentId::Sled(16)
+            | ComponentId::Psc(_)
+            | ComponentId::Switch(1) => {
+                self.dec_tab_index();
+            }
+
+            // Up the current side (always right side if switch 0)
+            ComponentId::Sled(_) | ComponentId::Switch(_) => {
+                self.dec_tab_index();
+                self.dec_tab_index();
+            }
+        }
+    }
+
+    pub fn left_or_right_arrow(&mut self) {
+        self.set_column();
+        if !self.tab_index.is_set() {
+            self.set_tab(ComponentId::Sled(0));
+            return;
+        }
+
+        match self.get_current_component_id() {
+            ComponentId::Sled(_) => {
+                if self.left_column {
+                    self.inc_tab_index();
+                } else {
+                    self.dec_tab_index();
+                }
+            }
+            _ => (),
+        }
+    }
+
+    fn set_column(&mut self) {
+        match self.tabbed {
+            None => self.left_column = true,
+            Some(ComponentId::Sled(i)) => self.left_column = i % 2 == 0,
+            _ => (),
+        }
+    }
+
     pub fn inc_tab_index(&mut self) {
         self.tab_index.inc();
         let id = self.get_current_component_id();
@@ -311,6 +402,7 @@ impl RackState {
     pub fn clear_tab_index(&mut self) {
         self.tab_index.clear();
         self.tabbed = None;
+        self.left_column = true;
     }
 
     pub fn set_tab_from_hovered(&mut self) {

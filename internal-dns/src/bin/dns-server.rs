@@ -15,7 +15,6 @@ use anyhow::Context;
 use clap::Parser;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -36,8 +35,6 @@ struct Args {
 async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let config_file = &args.config_file;
-    let dns_address = &args.dns_address;
-    let zone = &args.dns_zone;
     let config_file_contents = std::fs::read_to_string(config_file)
         .with_context(|| format!("read config file {:?}", config_file))?;
     let mut config: internal_dns::Config =
@@ -52,20 +49,14 @@ async fn main() -> Result<(), anyhow::Error> {
         .to_logger("internal-dns")
         .context("failed to create logger")?;
 
-    let db = Arc::new(sled::open(&config.data.storage_path)?);
+    let (_dns_server, dropshot_server) = internal_dns::start(
+        log,
+        config,
+        args.dns_zone,
+        args.dns_address.into(),
+    )
+    .await?;
 
-    let _dns_server = {
-        let db = db.clone();
-        let log = log.clone();
-        let dns_config = internal_dns::dns_server::Config {
-            bind_address: dns_address.to_string(),
-            zone: zone.to_string(),
-        };
-        internal_dns::dns_server::run(log, db, dns_config).await?
-    };
-
-    let dropshot_server =
-        internal_dns::start_dropshot_server(config, log, db).await?;
     dropshot_server
         .await
         .map_err(|error_message| anyhow!("server exiting: {}", error_message))

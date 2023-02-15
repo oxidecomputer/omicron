@@ -5,7 +5,8 @@ use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use tufaceous_lib::{AddZone, ArchiveExtractor, Key, OmicronRepo};
+use omicron_common::api::internal::nexus::KnownArtifactKind;
+use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -37,12 +38,18 @@ enum Command {
         #[clap(long)]
         no_generate_key: bool,
     },
-    AddZone {
-        /// Override the name for this zone (default: zone filename with extension stripped)
+    Add {
+        /// The kind of artifact this is.
+        kind: KnownArtifactKind,
+
+        /// Path to the artifact.
+        path: Utf8PathBuf,
+
+        /// Override the name for this artifact (default: filename with extension stripped)
         #[clap(long)]
         name: Option<String>,
 
-        zone: Utf8PathBuf,
+        /// Artifact version.
         version: String,
     },
     /// Archives this repository to a zip file.
@@ -81,18 +88,21 @@ fn main() -> Result<()> {
             println!("Initialized TUF repository in {}", repo.repo_path());
             Ok(())
         }
-        Command::AddZone { name, zone, version } => {
+        Command::Add { kind, path, name, version } => {
             let repo = OmicronRepo::load_ignore_expiration(&repo_path)?;
             let mut editor = repo.into_editor()?;
 
-            let add_zone = AddZone::new(zone, name, version)?;
+            let new_artifact = AddArtifact::new(kind, path, name, version)?;
 
-            editor.add_zone(&add_zone).context("error adding zone")?;
+            editor
+                .add_artifact(&new_artifact)
+                .context("error adding artifact")?;
             editor.sign_and_finish(args.keys, args.expiry)?;
             println!(
-                "added zone {}, version {}",
-                add_zone.name(),
-                add_zone.version()
+                "added {} {}, version {}",
+                new_artifact.kind(),
+                new_artifact.name(),
+                new_artifact.version()
             );
             Ok(())
         }

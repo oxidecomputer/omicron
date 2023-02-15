@@ -12,6 +12,8 @@ pub mod http_entrypoints; // TODO pub only for testing - is this right?
 
 pub use config::Config;
 pub use context::ServerContext;
+pub use error::*;
+
 use dropshot::ShutdownWaitFuture;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
