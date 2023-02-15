@@ -948,7 +948,7 @@ mod test {
             primary_key_columns = [
                 { column_name = "name", rust_type = String },
                 { column_name = "version", rust_type = i64 },
-                { column_name = "kind", rust_type = UpdateArtifactKind }
+                { column_name = "kind", rust_type = KnownArtifactKind }
             ]
         })
         .unwrap();

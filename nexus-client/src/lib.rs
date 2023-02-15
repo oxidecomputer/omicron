@@ -173,32 +173,28 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
-    for types::UpdateArtifactKind
+impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
+    for types::KnownArtifactKind
 {
     fn from(
-        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+        s: omicron_common::api::internal::nexus::KnownArtifactKind,
     ) -> Self {
-        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+        use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
-            UpdateArtifactKind::GimletSp => types::UpdateArtifactKind::GimletSp,
-            UpdateArtifactKind::GimletRot => {
-                types::UpdateArtifactKind::GimletRot
+            KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
+            KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
+            KnownArtifactKind::Host => types::KnownArtifactKind::Host,
+            KnownArtifactKind::Trampoline => {
+                types::KnownArtifactKind::Trampoline
             }
-            UpdateArtifactKind::Host => types::UpdateArtifactKind::Host,
-            UpdateArtifactKind::Trampoline => {
-                types::UpdateArtifactKind::Trampoline
+            KnownArtifactKind::ControlPlane => {
+                types::KnownArtifactKind::ControlPlane
             }
-            UpdateArtifactKind::ControlPlane => {
-                types::UpdateArtifactKind::ControlPlane
-            }
-            UpdateArtifactKind::PscSp => types::UpdateArtifactKind::PscSp,
-            UpdateArtifactKind::PscRot => types::UpdateArtifactKind::PscRot,
-            UpdateArtifactKind::SwitchSp => types::UpdateArtifactKind::SwitchSp,
-            UpdateArtifactKind::SwitchRot => {
-                types::UpdateArtifactKind::SwitchRot
-            }
+            KnownArtifactKind::PscSp => types::KnownArtifactKind::PscSp,
+            KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
+            KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
+            KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
         }
     }
 }

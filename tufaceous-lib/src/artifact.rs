@@ -4,11 +4,11 @@
 
 use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 
 /// Describes a new artifact to be added.
 pub struct AddArtifact {
-    kind: UpdateArtifactKind,
+    kind: KnownArtifactKind,
     path: Utf8PathBuf,
     name: String,
     version: String,
@@ -20,7 +20,7 @@ impl AddArtifact {
     /// If the name is `None`, it is derived from the filename of the path
     /// without matching extensions.
     pub fn new(
-        kind: UpdateArtifactKind,
+        kind: KnownArtifactKind,
         path: Utf8PathBuf,
         name: Option<String>,
         version: String,
@@ -40,7 +40,7 @@ impl AddArtifact {
     }
 
     /// Returns the kind of artifact this is.
-    pub fn kind(&self) -> UpdateArtifactKind {
+    pub fn kind(&self) -> KnownArtifactKind {
         self.kind
     }
 

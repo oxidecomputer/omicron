@@ -7,7 +7,7 @@
 use crate::nexus::NexusClient;
 use futures::{TryFutureExt, TryStreamExt};
 use omicron_common::api::internal::nexus::{
-    UpdateArtifactId, UpdateArtifactKind,
+    KnownArtifactKind, UpdateArtifactId,
 };
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -38,7 +38,7 @@ pub async fn download_artifact(
 ) -> Result<(), Error> {
     match artifact.kind {
         // TODO This is a demo for tests, for now.
-        UpdateArtifactKind::ControlPlane => {
+        KnownArtifactKind::ControlPlane => {
             let directory = PathBuf::from("/var/tmp/control-plane");
             tokio::fs::create_dir_all(&directory).await.map_err(|err| {
                 Error::Io {
@@ -63,7 +63,7 @@ pub async fn download_artifact(
 
             let response = nexus
                 .cpapi_artifact_download(
-                    nexus_client::types::UpdateArtifactKind::ControlPlane,
+                    nexus_client::types::KnownArtifactKind::ControlPlane,
                     &artifact.name,
                     &artifact.version,
                 )
@@ -120,7 +120,7 @@ mod test {
         let artifact = UpdateArtifactId {
             name: expected_name.to_string(),
             version: "0.0.0".to_string(),
-            kind: UpdateArtifactKind::ControlPlane,
+            kind: KnownArtifactKind::ControlPlane,
         };
         let expected_path =
             PathBuf::from("/var/tmp/control-plane").join(expected_name);

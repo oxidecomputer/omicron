@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
@@ -40,7 +40,7 @@ enum Command {
     },
     Add {
         /// The kind of artifact this is.
-        kind: UpdateArtifactKind,
+        kind: KnownArtifactKind,
 
         /// Path to the artifact.
         path: Utf8PathBuf,

@@ -38,7 +38,7 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::UpdateArtifactKind;
+use crate::db::model::KnownArtifactKind;
 use crate::db::DataStore;
 use anyhow::anyhow;
 use authz_macros::authz_resource;
@@ -966,7 +966,7 @@ authz_resource! {
 authz_resource! {
     name = "UpdateAvailableArtifact",
     parent = "Fleet",
-    primary_key = (String, String, UpdateArtifactKind),
+    primary_key = (String, String, KnownArtifactKind),
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
