@@ -17,7 +17,6 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use serde::Deserialize;
 use serde::Serialize;
@@ -221,7 +220,7 @@ async fn svc_create_route(
         default_route_id,
         system_router_id,
         RouterRouteKind::Default,
-        RouterRouteCreateParams {
+        params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: "default".parse().unwrap(),
                 description: "The default route of a vpc".to_string(),

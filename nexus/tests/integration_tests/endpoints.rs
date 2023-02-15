@@ -23,8 +23,6 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteCreateParams;
-use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
@@ -114,14 +112,14 @@ lazy_static! {
     pub static ref DEMO_PROJECT_POLICY_URL: String =
         format!("/v1/projects/{}/policy?organization={}", *DEMO_PROJECT_NAME, *DEMO_ORG_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
-        format!("/organizations/{}/projects/{}/disks", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/disks?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
         format!("/organizations/{}/projects/{}/images", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
         format!("/v1/snapshots?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_VPCS: String =
-        format!("/organizations/{}/projects/{}/vpcs", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/vpcs?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -133,13 +131,13 @@ lazy_static! {
     // VPC used for testing
     pub static ref DEMO_VPC_NAME: Name = "demo-vpc".parse().unwrap();
     pub static ref DEMO_VPC_URL: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpcs/{}?organization={}&project={}", *DEMO_VPC_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_VPC_URL_FIREWALL_RULES: String =
         format!("/organizations/{}/projects/{}/vpcs/{}/firewall/rules", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_ROUTERS: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}/routers", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-routers?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_SUBNETS: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}/subnets", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-subnets?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_CREATE: params::VpcCreate =
         params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -154,9 +152,9 @@ lazy_static! {
     pub static ref DEMO_VPC_SUBNET_NAME: Name =
         "demo-vpc-subnet".parse().unwrap();
     pub static ref DEMO_VPC_SUBNET_URL: String =
-        format!("{}/{}", *DEMO_VPC_URL_SUBNETS, *DEMO_VPC_SUBNET_NAME);
+        format!("/v1/vpc-subnets/{}?organization={}&project={}&vpc={}", *DEMO_VPC_SUBNET_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_SUBNET_INTERFACES_URL: String =
-        format!("{}/network-interfaces", *DEMO_VPC_SUBNET_URL);
+        format!("/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_SUBNET_NAME);
     pub static ref DEMO_VPC_SUBNET_CREATE: params::VpcSubnetCreate =
         params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
@@ -171,9 +169,9 @@ lazy_static! {
     pub static ref DEMO_VPC_ROUTER_NAME: Name =
         "demo-vpc-router".parse().unwrap();
     pub static ref DEMO_VPC_ROUTER_URL: String =
-        format!("{}/{}", *DEMO_VPC_URL_ROUTERS, *DEMO_VPC_ROUTER_NAME);
+        format!("/v1/vpc-routers/{}?organization={}&project={}&vpc={}", *DEMO_VPC_ROUTER_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_ROUTER_URL_ROUTES: String =
-        format!("{}/routes", *DEMO_VPC_ROUTER_URL);
+        format!("/v1/vpc-router-routes?organization={}&project={}&vpc={}&router={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_ROUTER_NAME);
     pub static ref DEMO_VPC_ROUTER_CREATE: params::VpcRouterCreate =
         params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
@@ -186,9 +184,9 @@ lazy_static! {
     pub static ref DEMO_ROUTER_ROUTE_NAME: Name =
         "demo-router-route".parse().unwrap();
     pub static ref DEMO_ROUTER_ROUTE_URL: String =
-        format!("{}/{}", *DEMO_VPC_ROUTER_URL_ROUTES, *DEMO_ROUTER_ROUTE_NAME);
-    pub static ref DEMO_ROUTER_ROUTE_CREATE: RouterRouteCreateParams =
-        RouterRouteCreateParams {
+        format!("/v1/vpc-router-routes/{}?organization={}&project={}&vpc={}&router={}", *DEMO_ROUTER_ROUTE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_ROUTER_NAME);
+    pub static ref DEMO_ROUTER_ROUTE_CREATE: params::RouterRouteCreate =
+        params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_ROUTER_ROUTE_NAME.clone(),
                 description: String::from(""),
@@ -259,7 +257,7 @@ lazy_static! {
 
     // To be migrated...
     pub static ref DEMO_INSTANCE_NICS_URL: String =
-        format!("/organizations/{}/projects/{}/instances/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
+        format!("/v1/network-interfaces?organization={}&project={}&instance={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
         format!("/organizations/{}/projects/{}/instances/{}/external-ips", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
@@ -285,7 +283,7 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_NIC_NAME: Name =
         nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
-        format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
+        format!("/v1/network-interfaces/{}?organization={}&project={}&instance={}", *DEMO_INSTANCE_NIC_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
         params::NetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -1140,7 +1138,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
-                    serde_json::to_value(&RouterRouteUpdateParams {
+                    serde_json::to_value(&params::RouterRouteUpdate {
                         identity: IdentityMetadataUpdateParams {
                             name: None,
                             description: Some("different".to_string())
@@ -1366,15 +1364,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE).unwrap()
                 ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/network-interfaces/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 
