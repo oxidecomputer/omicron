@@ -97,7 +97,9 @@ organization_view_v1                     /v1/organizations/{organization}
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
 system_policy_update                     /system/policy
+system_policy_update_v1                  /v1/system/policy
 system_policy_view                       /system/policy
+system_policy_view_v1                    /v1/system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             URL PATH
@@ -133,23 +135,33 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
 policy_update                            /policy
+policy_update_v1                         /v1/policy
 policy_view                              /policy
+policy_view_v1                           /v1/policy
 user_list                                /users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
 snapshot_create                          /organizations/{organization_name}/projects/{project_name}/snapshots
+snapshot_create_v1                       /v1/snapshots
 snapshot_delete                          /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+snapshot_delete_v1                       /v1/snapshots/{snapshot}
 snapshot_list                            /organizations/{organization_name}/projects/{project_name}/snapshots
+snapshot_list_v1                         /v1/snapshots
 snapshot_view                            /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
 snapshot_view_by_id                      /by-id/snapshots/{id}
+snapshot_view_v1                         /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
 certificate_create                       /system/certificates
+certificate_create_v1                    /v1/system/certificates
 certificate_delete                       /system/certificates/{certificate}
+certificate_delete_v1                    /v1/system/certificates/{certificate}
 certificate_list                         /system/certificates
+certificate_list_v1                      /v1/system/certificates
 certificate_view                         /system/certificates/{certificate}
+certificate_view_v1                      /v1/system/certificates/{certificate}
 ip_pool_create                           /system/ip-pools
 ip_pool_delete                           /system/ip-pools/{pool_name}
 ip_pool_list                             /system/ip-pools
@@ -167,10 +179,15 @@ local_idp_user_create                    /system/silos/{silo_name}/identity-prov
 local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
 local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
 physical_disk_list                       /system/hardware/disks
+physical_disk_list_v1                    /v1/system/hardware/disks
 rack_list                                /system/hardware/racks
+rack_list_v1                             /v1/system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
+rack_view_v1                             /v1/system/hardware/racks/{rack_id}
 saga_list                                /system/sagas
+saga_list_v1                             /v1/system/sagas
 saga_view                                /system/sagas/{saga_id}
+saga_view_v1                             /v1/system/sagas/{saga_id}
 saml_identity_provider_create            /system/silos/{silo_name}/identity-providers/saml
 saml_identity_provider_view              /system/silos/{silo_name}/identity-providers/saml/{provider_name}
 silo_create                              /system/silos
@@ -184,8 +201,11 @@ silo_users_list                          /system/silos/{silo_name}/users/all
 silo_view                                /system/silos/{silo_name}
 silo_view_by_id                          /system/by-id/silos/{id}
 sled_list                                /system/hardware/sleds
+sled_list_v1                             /v1/system/hardware/sleds
 sled_physical_disk_list                  /system/hardware/sleds/{sled_id}/disks
+sled_physical_disk_list_v1               /v1/system/hardware/sleds/{sled_id}/disks
 sled_view                                /system/hardware/sleds/{sled_id}
+sled_view_v1                             /v1/system/hardware/sleds/{sled_id}
 system_component_version_list            /v1/system/update/components
 system_image_create                      /system/images
 system_image_delete                      /system/images/{image_name}

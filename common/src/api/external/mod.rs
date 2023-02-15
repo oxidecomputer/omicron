@@ -958,6 +958,8 @@ pub enum DiskState {
     Creating,
     /// Disk is ready but detached from any Instance
     Detached,
+    /// Disk is undergoing maintenance
+    Maintenance,
     /// Disk is being attached to the given Instance
     Attaching(Uuid), // attached Instance id
     /// Disk is attached to the given Instance
@@ -985,6 +987,7 @@ impl TryFrom<(&str, Option<Uuid>)> for DiskState {
         match (s, maybe_id) {
             ("creating", None) => Ok(DiskState::Creating),
             ("detached", None) => Ok(DiskState::Detached),
+            ("maintenance", None) => Ok(DiskState::Maintenance),
             ("destroyed", None) => Ok(DiskState::Destroyed),
             ("faulted", None) => Ok(DiskState::Faulted),
             ("attaching", Some(id)) => Ok(DiskState::Attaching(id)),
@@ -1004,6 +1007,7 @@ impl DiskState {
         match self {
             DiskState::Creating => "creating",
             DiskState::Detached => "detached",
+            DiskState::Maintenance => "maintenance",
             DiskState::Attaching(_) => "attaching",
             DiskState::Attached(_) => "attached",
             DiskState::Detaching(_) => "detaching",
@@ -1028,6 +1032,7 @@ impl DiskState {
 
             DiskState::Creating => None,
             DiskState::Detached => None,
+            DiskState::Maintenance => None,
             DiskState::Destroyed => None,
             DiskState::Faulted => None,
         }

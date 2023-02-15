@@ -157,6 +157,7 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
             Detaching(u) => Self::Detaching(u),
@@ -184,6 +185,7 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
             Detaching(u) => Self::Detaching(u),
@@ -312,11 +314,9 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
             UpdateArtifactKind::GimletRot => {
                 types::UpdateArtifactKind::GimletRot
             }
-            UpdateArtifactKind::HostPhase1 => {
-                types::UpdateArtifactKind::HostPhase1
-            }
-            UpdateArtifactKind::HostPhase2 => {
-                types::UpdateArtifactKind::HostPhase2
+            UpdateArtifactKind::Host => types::UpdateArtifactKind::Host,
+            UpdateArtifactKind::Trampoline => {
+                types::UpdateArtifactKind::Trampoline
             }
             UpdateArtifactKind::ControlPlane => {
                 types::UpdateArtifactKind::ControlPlane

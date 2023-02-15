@@ -26,6 +26,7 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             types::DiskState::Creating => Self::Creating,
             types::DiskState::Detached => Self::Detached,
+            types::DiskState::Maintenance => Self::Maintenance,
             types::DiskState::Attaching(u) => Self::Attaching(u),
             types::DiskState::Attached(u) => Self::Attached(u),
             types::DiskState::Detaching(u) => Self::Detaching(u),
@@ -128,6 +129,7 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             DiskState::Creating => Self::Creating,
             DiskState::Detached => Self::Detached,
+            DiskState::Maintenance => Self::Maintenance,
             DiskState::Attaching(u) => Self::Attaching(u),
             DiskState::Attached(u) => Self::Attached(u),
             DiskState::Detaching(u) => Self::Detaching(u),
@@ -184,11 +186,9 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
             UpdateArtifactKind::GimletRot => {
                 types::UpdateArtifactKind::GimletRot
             }
-            UpdateArtifactKind::HostPhase1 => {
-                types::UpdateArtifactKind::HostPhase1
-            }
-            UpdateArtifactKind::HostPhase2 => {
-                types::UpdateArtifactKind::HostPhase2
+            UpdateArtifactKind::Host => types::UpdateArtifactKind::Host,
+            UpdateArtifactKind::Trampoline => {
+                types::UpdateArtifactKind::Trampoline
             }
             UpdateArtifactKind::ControlPlane => {
                 types::UpdateArtifactKind::ControlPlane

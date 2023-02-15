@@ -5,7 +5,7 @@
 //! Implementation of a simulated SP / RoT.
 
 use super::SpError;
-use crate::illumos::dladm::Dladm;
+use crate::illumos::dladm::{Dladm, UNDERLAY_ETHERSTUB_NAME};
 use crate::zone::Zones;
 use slog::Logger;
 use sp_sim::config::GimletConfig;
@@ -60,8 +60,8 @@ impl SimulatedSp {
             }
 
             // Ensure we have the global zone IP address we need for the SP.
-            let etherstub =
-                Dladm::ensure_etherstub().map_err(SpError::CreateEtherstub)?;
+            let etherstub = Dladm::ensure_etherstub(UNDERLAY_ETHERSTUB_NAME)
+                .map_err(SpError::CreateEtherstub)?;
             let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
                 .map_err(SpError::CreateEtherstubVnic)?;
             Zones::ensure_has_global_zone_v6_address(
