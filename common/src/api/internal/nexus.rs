@@ -174,7 +174,7 @@ mod tests {
         for kind in KnownArtifactKind::iter() {
             let as_string = kind.to_string();
             let kind2 = as_string.parse::<KnownArtifactKind>().unwrap_or_else(
-                |error| panic!("kind {as_string} parsed successfully: {error}"),
+                |error| panic!("error parsing kind {as_string}: {error}"),
             );
             assert_eq!(kind, kind2);
         }

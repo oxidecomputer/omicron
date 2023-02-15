@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::api::internal::nexus::KnownArtifactKind;
 use serde::{Deserialize, Serialize};
 
@@ -29,25 +27,21 @@ pub struct Artifact {
 /// The kind of artifact we are dealing with.
 ///
 /// To ensure older versions of Nexus can work with update repositories that
-/// describe artifact kinds it is not yet aware of, this has a fallback
-/// `Unknown` variant.
+/// describe artifact kinds it is not yet aware of, this is a newtype wrapper
+/// around a string. The set of known artifact kinds is described in
+/// [`KnownArtifactKind`], and this type has conversions to and from it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ArtifactKind(Cow<'static, str>);
+pub struct ArtifactKind(String);
 
 impl ArtifactKind {
     /// Creates a new `ArtifactKind` from a string.
-    pub fn new(kind: impl Into<Cow<'static, str>>) -> Self {
-        Self(kind.into())
-    }
-
-    /// Creates a new `ArtifactKind` from a static string.
-    pub const fn new_static(kind: &'static str) -> Self {
-        Self(Cow::Borrowed(kind))
+    pub fn new(kind: String) -> Self {
+        Self(kind)
     }
 
     /// Creates a new `ArtifactKind` from a known kind.
     pub fn from_known(kind: KnownArtifactKind) -> Self {
-        Self(kind.to_string().into())
+        Self(kind.to_string())
     }
 
     /// Returns the kind as a string.
@@ -57,7 +51,7 @@ impl ArtifactKind {
 
     /// Converts self to a `KnownArtifactKind`, if it is known.
     pub fn to_known(&self) -> Option<KnownArtifactKind> {
-        self.0.parse::<KnownArtifactKind>().ok()
+        self.0.parse().ok()
     }
 }
 
