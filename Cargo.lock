@@ -2905,9 +2905,11 @@ name = "ipcc-key-value"
 version = "0.1.0"
 dependencies = [
  "ciborium",
+ "libc",
  "proptest",
  "serde",
  "test-strategy",
+ "thiserror",
  "uuid",
 ]
 
