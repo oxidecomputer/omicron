@@ -18,14 +18,16 @@
           {
             "in": "path",
             "name": "kind",
+            "description": "The kind of update artifact this is.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/UpdateArtifactKind"
+              "$ref": "#/components/schemas/KnownArtifactKind"
             }
           },
           {
             "in": "path",
             "name": "name",
+            "description": "The artifact's name.",
             "required": true,
             "schema": {
               "type": "string"
@@ -34,10 +36,10 @@
           {
             "in": "path",
             "name": "version",
+            "description": "The artifact's version.",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int64"
+              "type": "string"
             }
           }
         ],
@@ -49,6 +51,35 @@
                 "schema": {}
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/disk/{disk_id}/remove-read-only-parent": {
+      "post": {
+        "summary": "Request removal of a read_only_parent from a disk",
+        "description": "This is a thin wrapper around the volume_remove_read_only_parent saga. All we are doing here is, given a disk UUID, figure out what the volume_id is for that disk, then use that to call the volume_remove_read_only_parent saga on it.",
+        "operationId": "cpapi_disk_remove_read_only_parent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -218,6 +249,65 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/physical-disk": {
+      "put": {
+        "summary": "Report that a physical disk for the specified sled has come online.",
+        "operationId": "physical_disk_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskPutResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Report that a physical disk for the specified sled has gone offline.",
+        "operationId": "physical_disk_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -403,6 +493,27 @@
       }
     },
     "schemas": {
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "identifier",
+          "model",
+          "revision"
+        ]
+      },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
@@ -596,6 +707,31 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "Certificate": {
+        "type": "object",
+        "properties": {
+          "cert": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ]
       },
       "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
@@ -917,6 +1053,21 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
                 ]
               }
             },
@@ -1658,6 +1809,94 @@
           "collector_id"
         ]
       },
+      "PhysicalDiskDeleteRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "sled_id",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskKind": {
+        "description": "Describes the type of physical disk.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "m2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PhysicalDiskPutRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/PhysicalDiskKind"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "sled_id",
+          "variant",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskPutResponse": {
+        "type": "object"
+      },
       "ProducerEndpoint": {
         "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
         "type": "object",
@@ -1729,6 +1968,12 @@
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
+          "certs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Certificate"
+            }
+          },
           "datasets": {
             "type": "array",
             "items": {
@@ -1743,6 +1988,7 @@
           }
         },
         "required": [
+          "certs",
           "datasets",
           "services"
         ]
@@ -1862,6 +2108,20 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -1902,6 +2162,14 @@
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
         "properties": {
+          "baseboard": {
+            "description": "Describes the sled's identity",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
           "role": {
             "description": "Describes the responsibilities of the sled",
             "allOf": [
@@ -1916,6 +2184,7 @@
           }
         },
         "required": [
+          "baseboard",
           "role",
           "sa_address"
         ]
@@ -1959,11 +2228,19 @@
       "ZpoolPutResponse": {
         "type": "object"
       },
-      "UpdateArtifactKind": {
+      "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
         "type": "string",
         "enum": [
-          "zone"
+          "gimlet_sp",
+          "gimlet_rot",
+          "host",
+          "trampoline",
+          "control_plane",
+          "psc_sp",
+          "psc_rot",
+          "switch_sp",
+          "switch_rot"
         ]
       }
     }

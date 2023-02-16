@@ -14,16 +14,22 @@ mod animated_logo;
 mod banner;
 mod help_button;
 mod help_menu;
+mod list;
+mod liveness;
 mod rack;
 mod screen_button;
+mod status_bar;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
 pub use help_button::{HelpButton, HelpButtonState};
 pub use help_menu::HelpMenu;
 pub use help_menu::HelpMenuState;
+pub use list::{Indicator, List, ListEntry, ListState};
+pub use liveness::{LivenessState, LivenessStyles};
 pub use rack::{KnightRiderMode, Rack, RackState};
 pub use screen_button::{ScreenButton, ScreenButtonState};
+pub use status_bar::{StatusBar, StatusBarStyles};
 
 /// A unique id for a [`Control`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -33,6 +39,12 @@ pub struct ControlId(pub usize);
 pub fn get_control_id() -> ControlId {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+// The result of checking for a hover intersection on a `Control`
+pub struct HoverResult {
+    pub redraw: bool,
+    pub hovered: bool,
 }
 
 /// A control is an interactive object on a [`Screen`](crate::screens::Screen).

@@ -12,10 +12,8 @@ use crate::widgets::Control;
 use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
 use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
-use crate::Action;
-use crate::Frame;
-use crate::ScreenEvent;
-use crate::State;
+use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
+use crate::{BOTTOM_MARGIN, TOP_MARGIN};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -31,7 +29,6 @@ pub struct RackScreen {
     log: Logger,
     watermark: &'static str,
     hovered: Option<ControlId>,
-    help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
     help_menu_state: HelpMenuState,
 }
@@ -41,9 +38,10 @@ impl RackScreen {
         let help_data = vec![
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
+            ("<ARROWS>", "Cycle through components directionally"),
             ("<Enter> | left mouse click", "Select hovered object"),
-            ("<ESC>", "Reset the TabIndex of the Rack"),
-            ("<CTRL-h", "Toggle this help menu"),
+            ("<ESC>", "Exit help menu | Reset the TabIndex of the Rack"),
+            ("<CTRL-h>", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
 
@@ -51,9 +49,8 @@ impl RackScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
             hovered: None,
-            help_data,
             help_button_state: HelpButtonState::new(1, 0),
-            help_menu_state: HelpMenuState::default(),
+            help_menu_state: HelpMenuState::new(help_data),
         }
     }
 
@@ -87,7 +84,7 @@ impl RackScreen {
         // help menu
         if !self.help_menu_state.is_closed() {
             let menu = HelpMenu {
-                help: &self.help_data,
+                help: self.help_menu_state.help_text(),
                 style: help_menu_style,
                 command_style: help_menu_command_style,
                 state: self.help_menu_state.get_animation_state().unwrap(),
@@ -119,7 +116,7 @@ impl RackScreen {
 
         // Only draw the banner if there is enough horizontal whitespace to
         // make it look good.
-        if state.rack_state.rect.width * 3 + width > rect.width {
+        if state.rack_state.rect().width * 3 + width > rect.width {
             return (Height(0), Width(0));
         }
 
@@ -155,7 +152,7 @@ impl RackScreen {
             power_shelf_selected_style: Style::default().bg(OX_GRAY),
         };
 
-        let area = state.rack_state.rect;
+        let area = state.rack_state.rect();
         f.render_widget(rack, area);
     }
 
@@ -171,8 +168,21 @@ impl RackScreen {
             KeyCode::BackTab => {
                 state.rack_state.dec_tab_index();
             }
+            KeyCode::Up => {
+                state.rack_state.up_arrow();
+            }
+            KeyCode::Down => {
+                state.rack_state.down_arrow();
+            }
+            KeyCode::Left | KeyCode::Right => {
+                state.rack_state.left_or_right_arrow();
+            }
             KeyCode::Esc => {
-                state.rack_state.clear_tab_index();
+                if self.help_menu_state.is_closed() {
+                    state.rack_state.clear_tab_index();
+                } else {
+                    self.help_menu_state.close();
+                }
             }
             KeyCode::Enter => {
                 if state.rack_state.tab_index.is_set() {
@@ -276,16 +286,13 @@ impl RackScreen {
 }
 
 impl Screen for RackScreen {
-    fn draw(
-        &self,
-        state: &State,
-        terminal: &mut crate::Term,
-    ) -> anyhow::Result<()> {
+    fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
             self.draw_rack(state, f);
             self.draw_watermark(state, f);
             self.draw_menubar(f);
+            state.status_bar.draw(f);
         })?;
         Ok(())
     }
@@ -299,18 +306,33 @@ impl Screen for RackScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
+                let mut redraw = false;
+
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
                     k.step();
+                    redraw = true;
                 }
-
                 if !self.help_menu_state.is_closed() {
                     self.help_menu_state.step();
-                    vec![Action::Redraw]
-                } else if state.rack_state.knight_rider_mode.is_some() {
+                    redraw = true;
+                }
+
+                redraw |= state.status_bar.should_redraw();
+
+                if redraw {
                     vec![Action::Redraw]
                 } else {
                     vec![]
                 }
+            }
+            ScreenEvent::Term(TermEvent::Resize(width, height)) => {
+                state.rack_state.resize(
+                    width,
+                    height,
+                    TOP_MARGIN,
+                    BOTTOM_MARGIN,
+                );
+                vec![Action::Redraw]
             }
             _ => vec![],
         }

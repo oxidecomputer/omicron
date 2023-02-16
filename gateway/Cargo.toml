@@ -6,7 +6,9 @@ license = "MPL-2.0"
 
 [dependencies]
 async-trait.workspace = true
+ciborium.workspace = true
 clap.workspace = true
+crucible-smf.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
@@ -14,11 +16,13 @@ gateway-sp-comms.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+ipcc-key-value.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 schemars.workspace = true
 serde.workspace = true
-serde_with.workspace = true
+signal-hook.workspace = true
+signal-hook-tokio.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true

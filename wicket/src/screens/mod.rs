@@ -2,15 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod common;
 mod component;
 mod rack;
 mod splash;
 
-use crate::Action;
-use crate::ScreenEvent;
-use crate::State;
-use crate::Term;
-use crate::TermEvent;
+use crate::wizard::{Action, ScreenEvent, State, Term};
+use crossterm::event::Event as TermEvent;
 use slog::Logger;
 
 use component::ComponentScreen;

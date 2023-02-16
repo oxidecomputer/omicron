@@ -28,6 +28,14 @@ pub enum SledRole {
     Scrimlet,
 }
 
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Baseboard {
+    pub identifier: String,
+    pub model: String,
+    pub revision: i64,
+}
+
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentStartupInfo {
@@ -36,6 +44,41 @@ pub struct SledAgentStartupInfo {
 
     /// Describes the responsibilities of the sled
     pub role: SledRole,
+
+    /// Describes the sled's identity
+    pub baseboard: Baseboard,
+}
+
+/// Describes the type of physical disk.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "content")]
+pub enum PhysicalDiskKind {
+    M2,
+    U2,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskPutRequest {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub variant: PhysicalDiskKind,
+    pub sled_id: Uuid,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskPutResponse {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskDeleteRequest {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub sled_id: Uuid,
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
@@ -117,6 +160,7 @@ pub enum ServiceKind {
     Oximeter,
     Dendrite,
     Tfport,
+    CruciblePantry,
 }
 
 impl fmt::Display for ServiceKind {
@@ -128,6 +172,7 @@ impl fmt::Display for ServiceKind {
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
+            CruciblePantry => "crucible_pantry",
         };
         write!(f, "{}", s)
     }
@@ -153,6 +198,21 @@ pub struct DatasetCreateRequest {
     pub request: DatasetPutRequest,
 }
 
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Certificate {
+    pub cert: Vec<u8>,
+    pub key: Vec<u8>,
+}
+
+impl std::fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Certificate")
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
     pub services: Vec<ServicePutRequest>,
@@ -164,6 +224,7 @@ pub struct RackInitializationRequest {
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/1528):
     // Support passing x509 cert info.
+    pub certs: Vec<Certificate>,
 }
 
 /// Message used to notify Nexus that this oximeter instance is up and running.

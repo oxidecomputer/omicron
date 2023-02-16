@@ -10,7 +10,9 @@ use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{
+    EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL,
+};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
@@ -82,6 +84,26 @@ pub enum GetControlInterfaceError {
 
     #[error("VNIC starting with 'oxControl' not found in {zone}")]
     NotFound { zone: String },
+}
+
+/// Errors from [`Zones::get_bootstrap_interface`].
+/// Error which may be returned accessing the bootstrap interface of a zone.
+#[derive(thiserror::Error, Debug)]
+pub enum GetBootstrapInterfaceError {
+    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    Execution {
+        zone: String,
+        #[source]
+        err: crate::illumos::ExecutionError,
+    },
+
+    #[error("VNIC starting with 'oxBootstrap' not found in {zone}")]
+    NotFound { zone: String },
+
+    #[error(
+        "VNIC starting with 'oxBootstrap' found in non-switch zone: {zone}"
+    )]
+    Unexpected { zone: String },
 }
 
 /// Errors which may be encountered ensuring addresses.
@@ -204,6 +226,12 @@ impl Zones {
         Ok(())
     }
 
+    /// Installs a zone with the provided arguments.
+    ///
+    /// - If a zone with the name `zone_name` exists and is currently running,
+    /// we return immediately.
+    /// - Otherwise, the zone is deleted.
+    #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
         zone_name: &str,
@@ -220,11 +248,9 @@ impl Zones {
                 zone.name(),
                 zone.state()
             );
-            if zone.state() == zone::State::Installed
-                || zone.state() == zone::State::Running
-            {
+            if zone.state() == zone::State::Running {
                 // TODO: Admittedly, the zone still might be messed up. However,
-                // for now, we assume that "installed" means "good to go".
+                // for now, we assume that "running" means "good to go".
                 return Ok(());
             } else {
                 info!(
@@ -348,6 +374,46 @@ impl Zones {
             .ok_or(GetControlInterfaceError::NotFound {
                 zone: zone.to_string(),
             })
+    }
+
+    /// Returns the name of the VNIC used to communicate with the bootstrap network.
+    pub fn get_bootstrap_interface(
+        zone: &str,
+    ) -> Result<Option<String>, GetBootstrapInterfaceError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            ZLOGIN,
+            zone,
+            DLADM,
+            "show-vnic",
+            "-p",
+            "-o",
+            "LINK",
+        ]);
+        let output = execute(cmd).map_err(|err| {
+            GetBootstrapInterfaceError::Execution {
+                zone: zone.to_string(),
+                err,
+            }
+        })?;
+        let vnic =
+            String::from_utf8_lossy(&output.stdout).lines().find_map(|name| {
+                if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
+                    Some(name.to_string())
+                } else {
+                    None
+                }
+            });
+
+        if zone == "oxz_switch" && vnic.is_none() {
+            Err(GetBootstrapInterfaceError::NotFound { zone: zone.to_string() })
+        } else if zone != "oxz_switch" && vnic.is_some() {
+            Err(GetBootstrapInterfaceError::Unexpected {
+                zone: zone.to_string(),
+            })
+        } else {
+            Ok(vnic)
+        }
     }
 
     /// Ensures that an IP address on an interface matches the requested value.
@@ -571,12 +637,12 @@ impl Zones {
             )
             .map_err(|err| anyhow!(err))?;
 
-            // Ensure that a static IPv6 address has been allocated
-            // to the Global Zone. Without this, we don't have a way
-            // to route to IP addresses that we want to create in
-            // the non-GZ. Note that we use a `/64` prefix, as all addresses
-            // allocated for services on this sled itself are within the underlay
-            // prefix. Anything else must be routed through Sidecar.
+            // Ensure that a static IPv6 address has been allocated to the
+            // Global Zone. Without this, we don't have a way to route to IP
+            // addresses that we want to create in the non-GZ. Note that we
+            // use a `/64` prefix, as all addresses allocated for services on
+            // this sled itself are within the underlay or bootstrap prefix.
+            // Anything else must be routed through Sidecar.
             Self::ensure_address(
                 None,
                 &gz_link_local_addrobj

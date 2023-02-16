@@ -4,15 +4,18 @@
 
 //! Code for talking to wicketd
 
-use crate::Event;
-use slog::{debug, o, warn, Logger};
+use slog::{o, warn, Logger};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 use wicketd_client::types::RackV1Inventory;
+use wicketd_client::GetInventoryResponse;
 
-const WICKETD_POLL_INTERVAL: Duration = Duration::from_secs(5);
+use crate::wizard::Event;
+use crate::InventoryEvent;
+
+const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const WICKETD_TIMEOUT_MS: u32 = 1000;
 
 // Assume that these requests are periodic on the order of seconds or the
@@ -38,7 +41,6 @@ pub struct WicketdManager {
     rx: mpsc::Receiver<Request>,
     wizard_tx: Sender<Event>,
     inventory_client: wicketd_client::Client,
-    inventory: RackV1Inventory,
 }
 
 impl WicketdManager {
@@ -49,26 +51,9 @@ impl WicketdManager {
     ) -> (WicketdHandle, WicketdManager) {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
-        let endpoint =
-            format!("http://[{}]:{}", wicketd_addr.ip(), wicketd_addr.port());
-
-        let timeout =
-            std::time::Duration::from_millis(WICKETD_TIMEOUT_MS.into());
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(timeout)
-            .timeout(timeout)
-            .build()
-            .unwrap();
-
-        let inventory_client = wicketd_client::Client::new_with_client(
-            &endpoint,
-            client,
-            log.clone(),
-        );
-        let inventory = RackV1Inventory { sps: vec![] };
+        let inventory_client = create_wicketd_client(&log, wicketd_addr);
         let handle = WicketdHandle { tx };
-        let manager =
-            WicketdManager { log, rx, wizard_tx, inventory_client, inventory };
+        let manager = WicketdManager { log, rx, wizard_tx, inventory_client };
 
         (handle, manager)
     }
@@ -81,28 +66,43 @@ impl WicketdManager {
     ///   that can be utilized by the UI.
     pub async fn run(self) {
         let mut inventory_rx =
-            poll_inventory(&self.log, self.inventory_client, self.inventory)
-                .await;
+            poll_inventory(&self.log, self.inventory_client).await;
 
         // TODO: Eventually there will be a tokio::select! here that also
         // allows issuing updates.
-        while let Some(inventory) = inventory_rx.recv().await {
+        while let Some(event) = inventory_rx.recv().await {
             // XXX: Should we log an error and exit here? This means the wizard
             // died and the process is exiting.
-            let _ = self.wizard_tx.send(Event::Inventory(inventory));
+            let _ = self.wizard_tx.send(Event::Inventory(event));
         }
     }
+}
+
+pub(crate) fn create_wicketd_client(
+    log: &Logger,
+    wicketd_addr: SocketAddrV6,
+) -> wicketd_client::Client {
+    let endpoint =
+        format!("http://[{}]:{}", wicketd_addr.ip(), wicketd_addr.port());
+    let timeout = std::time::Duration::from_millis(WICKETD_TIMEOUT_MS.into());
+    let client = reqwest::ClientBuilder::new()
+        .connect_timeout(timeout)
+        .timeout(timeout)
+        .build()
+        .unwrap();
+
+    wicketd_client::Client::new_with_client(&endpoint, client, log.clone())
 }
 
 async fn poll_inventory(
     log: &Logger,
     client: wicketd_client::Client,
-    mut inventory: RackV1Inventory,
-) -> mpsc::Receiver<RackV1Inventory> {
+) -> mpsc::Receiver<InventoryEvent> {
     let log = log.clone();
 
     // We only want one oustanding request at a time
     let (tx, rx) = mpsc::channel(1);
+    let mut state = InventoryState::new(&log, tx);
 
     tokio::spawn(async move {
         let mut ticker = interval(WICKETD_POLL_INTERVAL);
@@ -113,12 +113,7 @@ async fn poll_inventory(
             match client.get_inventory().await {
                 Ok(val) => {
                     let new_inventory = val.into_inner();
-                    if new_inventory != inventory {
-                        inventory = new_inventory;
-                        let _ = tx.send(inventory.clone()).await;
-                    } else {
-                        debug!(log, "No change to inventory");
-                    }
+                    state.send_if_changed(new_inventory.into()).await;
                 }
                 Err(e) => {
                     warn!(log, "{e}");
@@ -128,4 +123,65 @@ async fn poll_inventory(
     });
 
     rx
+}
+
+#[derive(Debug)]
+struct InventoryState {
+    log: Logger,
+    current_inventory: Option<RackV1Inventory>,
+    tx: mpsc::Sender<InventoryEvent>,
+}
+
+impl InventoryState {
+    fn new(log: &Logger, tx: mpsc::Sender<InventoryEvent>) -> Self {
+        let log = log.new(o!("component" => "InventoryState"));
+        Self { log, current_inventory: None, tx }
+    }
+
+    async fn send_if_changed(&mut self, new_inventory: GetInventoryResponse) {
+        match (self.current_inventory.take(), new_inventory) {
+            (
+                current_inventory,
+                GetInventoryResponse::Response {
+                    inventory: new_inventory,
+                    received_ago: mgs_received_ago,
+                },
+            ) => {
+                let changed_inventory = (current_inventory.as_ref()
+                    != Some(&new_inventory))
+                .then(|| {
+                    self.current_inventory = Some(new_inventory.clone());
+                    new_inventory
+                });
+
+                let _ = self
+                    .tx
+                    .send(InventoryEvent::Inventory {
+                        changed_inventory,
+                        wicketd_received: Instant::now(),
+                        mgs_received: libsw::Stopwatch::with_elapsed_started(
+                            mgs_received_ago,
+                        ),
+                    })
+                    .await;
+            }
+            (Some(_), GetInventoryResponse::Unavailable) => {
+                // This is an illegal state transition -- wicketd can never return Unavailable after
+                // returning a response.
+                slog::error!(
+                    self.log,
+                    "Illegal state transition from response to unavailable"
+                );
+            }
+            (None, GetInventoryResponse::Unavailable) => {
+                // No response received by wicketd from MGS yet.
+                let _ = self
+                    .tx
+                    .send(InventoryEvent::Unavailable {
+                        wicketd_received: Instant::now(),
+                    })
+                    .await;
+            }
+        };
+    }
 }

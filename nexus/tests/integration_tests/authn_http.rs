@@ -16,6 +16,7 @@ use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use dropshot::ApiDescription;
 use dropshot::HttpErrorResponseBody;
+use dropshot::RequestContext;
 use headers::authorization::Credentials;
 use http::header::HeaderValue;
 use omicron_nexus::authn::external::session_cookie;
@@ -26,7 +27,7 @@ use omicron_nexus::authn::external::HttpAuthnScheme;
 use omicron_nexus::authn::external::SiloUserSilo;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use uuid::Uuid;
 
 /// Tests authn::external::Authenticator with the "spoof" scheme allowed
@@ -299,7 +300,7 @@ async fn start_whoami_server(
     TestContext::new(
         whoami_api,
         server_state,
-        &config.deployment.dropshot_external[0],
+        &config.deployment.dropshot_external,
         Some(logctx),
         log,
     )
@@ -399,7 +400,7 @@ struct WhoamiResponse {
     path = "/whoami",
 }]
 async fn whoami_get(
-    rqctx: Arc<dropshot::RequestContext<WhoamiServerState>>,
+    rqctx: RequestContext<WhoamiServerState>,
 ) -> Result<dropshot::HttpResponseOk<WhoamiResponse>, dropshot::HttpError> {
     let whoami_state = rqctx.context();
     let authn = whoami_state.authn.authn_request(&rqctx).await?;

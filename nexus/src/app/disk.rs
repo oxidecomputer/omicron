@@ -9,37 +9,70 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use ref_cast::RefCast;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
     // Disks
+    pub fn disk_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        disk_selector: &'a params::DiskSelector,
+    ) -> LookupResult<lookup::Disk<'a>> {
+        match disk_selector {
+            params::DiskSelector {
+                disk: NameOrId::Id(id),
+                project_selector: None,
+            } => {
+                let disk =
+                    LookupPath::new(opctx, &self.db_datastore).disk_id(*id);
+                Ok(disk)
+            }
+            params::DiskSelector {
+                disk: NameOrId::Name(name),
+                project_selector: Some(project_selector),
+            } => {
+                let disk = self
+                    .project_lookup(opctx, project_selector)?
+                    .disk_name(Name::ref_cast(name));
+                Ok(disk)
+            }
+            params::DiskSelector {
+                disk: NameOrId::Id(_),
+                project_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing disk as an ID, project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "disk should either be UUID or project should be specified",
+            )),
+        }
+    }
 
     pub async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         params: &params::DiskCreate,
     ) -> CreateResult<db::model::Disk> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         match &params.disk_source {
             params::DiskSource::Blank { block_size } => {
@@ -225,49 +258,15 @@ impl super::Nexus {
         Ok(disk_created)
     }
 
-    pub async fn project_list_disks(
+    pub async fn disk_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore
-            .project_list_disks(opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn disk_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
-    ) -> LookupResult<db::model::Disk> {
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .fetch()
-            .await?;
-        Ok(db_disk)
-    }
-
-    pub async fn disk_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        disk_id: &Uuid,
-    ) -> LookupResult<db::model::Disk> {
-        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(*disk_id)
-            .fetch()
-            .await?;
-        Ok(db_disk)
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore.disk_list(opctx, &authz_project, pagparams).await
     }
 
     /// Modifies the runtime state of the Disk as requested.  This generally
@@ -373,148 +372,40 @@ impl super::Nexus {
     pub async fn project_delete_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        disk_name: &Name,
+        disk_lookup: &lookup::Disk<'_>,
     ) -> DeleteResult {
-        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .lookup_for(authz::Action::Delete)
-            .await?;
+        let (.., project, authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Delete).await?;
 
-        let saga_params =
-            sagas::disk_delete::Params { disk_id: authz_disk.id() };
+        let saga_params = sagas::disk_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: project.id(),
+            disk_id: authz_disk.id(),
+        };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
         Ok(())
     }
 
-    // Snapshots
-
-    pub async fn project_create_snapshot(
+    /// Remove a read only parent from a disk.
+    /// This is just a wrapper around the volume operation of the same
+    /// name, but we provide this interface when all the caller has is
+    /// the disk UUID as the internal volume_id is not exposed.
+    pub async fn disk_remove_read_only_parent(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        params: &params::SnapshotCreate,
-    ) -> CreateResult<db::model::Snapshot> {
-        let authz_silo: authz::Silo;
-        let _authz_org: authz::Organization;
-        let authz_project: authz::Project;
-        let authz_disk: authz::Disk;
-
-        (authz_silo, _authz_org, authz_project, authz_disk) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(&db::model::Name(params.disk.clone()))
-                .lookup_for(authz::Action::Read)
-                .await?;
-
-        let saga_params = sagas::snapshot_create::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            silo_id: authz_silo.id(),
-            project_id: authz_project.id(),
-            disk_id: authz_disk.id(),
-            create_params: params.clone(),
-        };
-
-        let saga_outputs = self
-            .execute_saga::<sagas::snapshot_create::SagaSnapshotCreate>(
-                saga_params,
-            )
-            .await?;
-
-        let snapshot_created = saga_outputs
-            .lookup_node_output::<db::model::Snapshot>("finalized_snapshot")
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
-
-        Ok(snapshot_created)
-    }
-
-    pub async fn project_list_snapshots(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Snapshot> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-
-        self.db_datastore
-            .project_list_snapshots(opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn snapshot_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        snapshot_name: &Name,
-    ) -> LookupResult<db::model::Snapshot> {
-        let (.., db_snapshot) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .snapshot_name(snapshot_name)
-            .fetch()
-            .await?;
-
-        Ok(db_snapshot)
-    }
-
-    pub async fn snapshot_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        snapshot_id: &Uuid,
-    ) -> LookupResult<db::model::Snapshot> {
-        let (.., db_snapshot) = LookupPath::new(opctx, &self.db_datastore)
-            .snapshot_id(*snapshot_id)
-            .fetch()
-            .await?;
-
-        Ok(db_snapshot)
-    }
-
-    pub async fn project_delete_snapshot(
-        self: &Arc<Self>,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        snapshot_name: &Name,
+        disk_id: Uuid,
     ) -> DeleteResult {
-        // TODO-correctness
-        // This also requires solving how to clean up the associated resources
-        // (on-disk snapshots, running read-only downstairs) because disks
-        // *could* still be using them (if the snapshot has not yet been turned
-        // into a regular crucible volume). It will involve some sort of
-        // reference counting for volumes.
+        // First get the internal volume ID that is stored in the disk
+        // database entry, once we have that just call the volume method
+        // to remove the read only parent.
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .disk_id(disk_id)
+            .fetch()
+            .await?;
 
-        let (.., authz_snapshot, db_snapshot) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .snapshot_name(snapshot_name)
-                .fetch()
-                .await?;
+        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
 
-        let saga_params = sagas::snapshot_delete::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            authz_snapshot,
-            snapshot: db_snapshot,
-        };
-        self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
-            saga_params,
-        )
-        .await?;
         Ok(())
     }
 }

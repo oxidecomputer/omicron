@@ -490,6 +490,9 @@ impl ServiceInner {
                         ServiceType::Oximeter => {
                             NexusTypes::ServiceKind::Oximeter
                         }
+                        ServiceType::CruciblePantry => {
+                            NexusTypes::ServiceKind::CruciblePantry
+                        }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",
@@ -520,8 +523,17 @@ impl ServiceInner {
             }
         }
 
-        let request =
-            NexusTypes::RackInitializationRequest { services, datasets };
+        let request = NexusTypes::RackInitializationRequest {
+            services,
+            datasets,
+            // TODO(https://github.com/oxidecomputer/omicron/issues/1959): Plumb
+            // these paths through RSS's API.
+            //
+            // These certificates CAN be updated through Nexus' HTTP API, but
+            // should be bootstrapped during the rack setup process to avoid
+            // the need for unencrypted communication.
+            certs: vec![],
+        };
 
         let notify_nexus = || async {
             nexus_client

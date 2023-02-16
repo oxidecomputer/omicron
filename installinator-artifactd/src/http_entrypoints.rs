@@ -4,8 +4,6 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use std::sync::Arc;
-
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
     RequestContext,
@@ -37,7 +35,7 @@ pub fn api() -> ArtifactServerApiDesc {
     path = "/artifacts/{name}/{version}"
 }]
 async fn get_artifact(
-    rqctx: Arc<RequestContext<ServerContext>>,
+    rqctx: RequestContext<ServerContext>,
     path: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     match rqctx.context().artifact_store.get_artifact(&path.into_inner()).await

@@ -678,7 +678,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
-        client.insert_samples(&vec![sample]).await.unwrap();
+        client.insert_samples(&[sample]).await.unwrap();
 
         let bad_name = name_mismatch::TestTarget {
             name: "first_name".into(),

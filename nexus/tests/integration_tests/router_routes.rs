@@ -11,9 +11,9 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    RouteDestination, RouteTarget, RouterRoute, RouterRouteCreateParams,
-    RouterRouteKind, RouterRouteUpdateParams,
+    RouteDestination, RouteTarget, RouterRoute, RouterRouteKind,
 };
+use omicron_nexus::external_api::params;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
@@ -110,7 +110,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     let route_created: RouterRoute = NexusRequest::objects_post(
         client,
         get_routes_url(router_name).as_str(),
-        &RouterRouteCreateParams {
+        &params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: route_name.parse().unwrap(),
                 description: "It's a route, what else can I say?".to_string(),
@@ -151,7 +151,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::object_put(
         client,
         route_url.as_str(),
-        Some(&RouterRouteUpdateParams {
+        Some(&params::RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: Some(route_name.parse().unwrap()),
                 description: None,

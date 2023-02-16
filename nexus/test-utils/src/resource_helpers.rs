@@ -24,12 +24,14 @@ use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::views;
+use omicron_nexus::external_api::views::Certificate;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
 use omicron_nexus::external_api::views::User;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
+use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -63,7 +65,27 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect(&format!("failed to make \"create\" request to {path}"))
+        .unwrap_or_else(|_| {
+            panic!("failed to make \"create\" request to {path}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn object_put<InputType, OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_put(client, path, Some(input))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|_| panic!("failed to make \"PUT\" request to {path}"))
         .parsed_body()
         .unwrap()
 }
@@ -73,7 +95,9 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect(&format!("failed to make \"delete\" request to {path}"));
+        .unwrap_or_else(|_| {
+            panic!("failed to make \"delete\" request to {path}")
+        });
 }
 
 pub async fn populate_ip_pool(
@@ -123,6 +147,83 @@ pub async fn create_ip_pool(
     (pool, range)
 }
 
+pub async fn create_certificate(
+    client: &ClientTestContext,
+    cert_name: &str,
+    cert: Vec<u8>,
+    key: Vec<u8>,
+) -> Certificate {
+    let url = "/system/certificates".to_string();
+    object_create(
+        client,
+        &url,
+        &params::CertificateCreate {
+            identity: IdentityMetadataCreateParams {
+                name: cert_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            cert,
+            key,
+            service: shared::ServiceUsingCertificate::ExternalApi,
+        },
+    )
+    .await
+}
+
+pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
+    let url = format!("/system/certificates/{}", cert_name);
+    object_delete(client, &url).await
+}
+
+pub async fn create_physical_disk(
+    client: &ClientTestContext,
+    vendor: &str,
+    serial: &str,
+    model: &str,
+    variant: internal_params::PhysicalDiskKind,
+    sled_id: Uuid,
+) -> internal_params::PhysicalDiskPutResponse {
+    object_put(
+        client,
+        "/physical-disk",
+        &internal_params::PhysicalDiskPutRequest {
+            vendor: vendor.to_string(),
+            serial: serial.to_string(),
+            model: model.to_string(),
+            variant,
+            sled_id,
+        },
+    )
+    .await
+}
+
+pub async fn delete_physical_disk(
+    client: &ClientTestContext,
+    vendor: &str,
+    serial: &str,
+    model: &str,
+    sled_id: Uuid,
+) {
+    let body = internal_params::PhysicalDiskDeleteRequest {
+        vendor: vendor.to_string(),
+        serial: serial.to_string(),
+        model: model.to_string(),
+        sled_id,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, "/physical-disk")
+            .body(Some(&body))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|_| {
+        panic!("failed to make \"delete\" request of physical disk")
+    });
+}
+
 pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
@@ -168,7 +269,7 @@ pub async fn create_organization(
 ) -> Organization {
     object_create(
         client,
-        "/organizations",
+        "/v1/organizations",
         &params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: organization_name.parse().unwrap(),
@@ -184,7 +285,7 @@ pub async fn create_project(
     organization_name: &str,
     project_name: &str,
 ) -> Project {
-    let url = format!("/organizations/{}/projects", &organization_name);
+    let url = format!("/v1/projects?organization={}", &organization_name);
     object_create(
         client,
         &url,
@@ -269,7 +370,7 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
 ) -> Instance {
     let url = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         organization_name, project_name
     );
     object_create(

@@ -4,7 +4,7 @@
 
 //! HTTP entrypoint functions for wicketd
 
-use crate::RackV1Inventory;
+use crate::mgs::GetInventoryResponse;
 use buf_list::BufList;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -15,7 +15,6 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::UntypedBody;
 use installinator_artifactd::ArtifactId;
-use std::sync::Arc;
 
 use crate::ServerContext;
 
@@ -50,10 +49,10 @@ pub fn api() -> WicketdApiDescription {
     path = "/inventory"
 }]
 async fn get_inventory(
-    rqctx: Arc<RequestContext<ServerContext>>,
-) -> Result<HttpResponseOk<RackV1Inventory>, HttpError> {
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
     match rqctx.context().mgs_handle.get_inventory().await {
-        Ok(inventory) => Ok(HttpResponseOk(inventory)),
+        Ok(response) => Ok(HttpResponseOk(response)),
         Err(_) => {
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))
         }
@@ -66,7 +65,7 @@ async fn get_inventory(
     path = "/artifacts/{name}/{version}",
 }]
 async fn put_artifact(
-    rqctx: Arc<RequestContext<ServerContext>>,
+    rqctx: RequestContext<ServerContext>,
     path: Path<ArtifactId>,
     body: UntypedBody,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

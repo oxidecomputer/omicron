@@ -5,11 +5,12 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::external_api::shared;
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    http_pagination::{PaginatedByName, PaginatedByNameOrId},
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, RouteDestination,
+    RouteTarget, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -19,6 +20,7 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
+// TODO-v1: Post migration rename `*Path` to `*Identifier`
 #[derive(Deserialize, JsonSchema)]
 pub struct OrganizationPath {
     pub organization: NameOrId,
@@ -35,6 +37,41 @@ pub struct InstancePath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct NetworkInterfacePath {
+    pub interface: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct VpcPath {
+    pub vpc: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetPath {
+    pub subnet: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouterPath {
+    pub router: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RoutePath {
+    pub route: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DiskPath {
+    pub disk: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SnapshotPath {
+    pub snapshot: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
 }
@@ -51,7 +88,7 @@ pub struct OptionalOrganizationSelector {
     pub organization_selector: Option<OrganizationSelector>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
     #[serde(flatten)]
     pub organization_selector: Option<OrganizationSelector>,
@@ -69,21 +106,55 @@ impl ProjectSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectList {
-    #[serde(flatten)]
-    pub pagination: PaginatedByNameOrId,
-    #[serde(flatten)]
-    pub organization: OrganizationSelector,
-}
-
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct DiskSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub disk: NameOrId,
+}
+
+impl DiskSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        disk: NameOrId,
+    ) -> Self {
+        DiskSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            disk,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SnapshotSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub snapshot: NameOrId,
+}
+
+impl SnapshotSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        snapshot: NameOrId,
+    ) -> Self {
+        SnapshotSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            snapshot,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
@@ -105,21 +176,139 @@ impl InstanceSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct InstanceList {
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalInstanceSelector {
     #[serde(flatten)]
-    pub pagination: PaginatedByName,
+    pub instance_selector: Option<InstanceSelector>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct NetworkInterfaceSelector {
     #[serde(flatten)]
-    pub project_selector: ProjectSelector,
+    pub instance_selector: Option<InstanceSelector>,
+    pub network_interface: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl NetworkInterfaceSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        instance: Option<NameOrId>,
+        network_interface: NameOrId,
+    ) -> Self {
+        NetworkInterfaceSelector {
+            instance_selector: instance.map(|instance| {
+                InstanceSelector::new(organization, project, instance)
+            }),
+            network_interface,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct VpcSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub vpc: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct InstanceSerialConsole {
+pub struct OptionalVpcSelector {
     #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub vpc_selector: Option<VpcSelector>,
+}
 
+// TODO-v1: delete this post migration
+impl VpcSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: NameOrId,
+    ) -> Self {
+        VpcSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            vpc,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetSelector {
     #[serde(flatten)]
-    pub console_params: InstanceSerialConsoleRequest,
+    pub vpc_selector: Option<VpcSelector>,
+    pub subnet: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SubnetSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        subnet: NameOrId,
+    ) -> Self {
+        SubnetSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            subnet,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct RouterSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+    pub router: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouterSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: NameOrId,
+    ) -> Self {
+        RouterSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            router,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalRouterSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouteSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+    pub route: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouteSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: Option<NameOrId>,
+        route: NameOrId,
+    ) -> Self {
+        RouteSelector {
+            router_selector: router.map(|router| {
+                RouterSelector::new(organization, project, vpc, router)
+            }),
+            route,
+        }
+    }
 }
 
 // Silos
@@ -323,12 +512,14 @@ impl<'de> Visitor<'de> for X509CertVisitor {
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value.as_bytes()).map_err(|e| {
-            de::Error::custom(format!(
-                "could not base64 decode public_cert: {}",
-                e
-            ))
-        })?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&value.as_bytes())
+            .map_err(|e| {
+                de::Error::custom(format!(
+                    "could not base64 decode public_cert: {}",
+                    e
+                ))
+            })?;
         let _parsed =
             openssl::x509::X509::from_der(&raw_bytes).map_err(|e| {
                 de::Error::custom(format!(
@@ -368,12 +559,14 @@ impl<'de> Visitor<'de> for KeyVisitor {
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value).map_err(|e| {
-            de::Error::custom(format!(
-                "could not base64 decode private_key: {}",
-                e
-            ))
-        })?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&value)
+            .map_err(|e| {
+                de::Error::custom(format!(
+                    "could not base64 decode private_key: {}",
+                    e
+                ))
+            })?;
 
         // TODO: samael does not support ECDSA, update to generic PKey type when it does
         //let _parsed = openssl::pkey::PKey::private_key_from_der(&raw_bytes)
@@ -449,7 +642,8 @@ pub struct SamlIdentityProviderCreate {
 /// sign some junk data and validate it with the key pair
 fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     let private_key = {
-        let raw_bytes = base64::decode(&key_pair.private_key)?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&key_pair.private_key)?;
         // TODO: samael does not support ECDSA, update to generic PKey type when it does
         //let parsed = openssl::pkey::PKey::private_key_from_der(&raw_bytes)?;
         let parsed = openssl::rsa::Rsa::private_key_from_der(&raw_bytes)?;
@@ -458,7 +652,8 @@ fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     };
 
     let public_key = {
-        let raw_bytes = base64::decode(&key_pair.public_cert)?;
+        let raw_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&key_pair.public_cert)?;
         let parsed = openssl::x509::X509::from_der(&raw_bytes)?;
         parsed.public_key()?
     };
@@ -580,6 +775,33 @@ pub struct NetworkInterfaceUpdate {
     // for the instance, though not the name.
     #[serde(default)]
     pub primary: bool,
+}
+
+// CERTIFICATES
+
+/// Create-time parameters for a
+/// [`Certificate`](crate::external_api::views::Certificate)
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+pub struct CertificateCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// PEM file containing public certificate chain
+    pub cert: Vec<u8>,
+    /// PEM file containing private key
+    pub key: Vec<u8>,
+    /// The service using this certificate
+    pub service: shared::ServiceUsingCertificate,
+}
+
+impl std::fmt::Debug for CertificateCreate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CertificateCreate")
+            .field("identity", &self.identity)
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
 }
 
 // IP POOLS
@@ -734,14 +956,18 @@ impl UserData {
     where
         S: Serializer,
     {
-        base64::encode(data).serialize(serializer)
+        base64::engine::general_purpose::STANDARD
+            .encode(data)
+            .serialize(serializer)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        match base64::decode(<String>::deserialize(deserializer)?) {
+        match base64::engine::general_purpose::STANDARD
+            .decode(<String>::deserialize(deserializer)?)
+        {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
                 if buf.len() > MAX_USER_DATA_BYTES {
@@ -886,6 +1112,26 @@ pub struct VpcRouterUpdate {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+// VPC ROUTER ROUTES
+
+/// Create-time parameters for a [`omicron_common::api::external::RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Updateable properties of a [`omicron_common::api::external::RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
 // DISKS
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
@@ -971,6 +1217,7 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
+/// TODO-v1: Delete this
 /// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -978,6 +1225,7 @@ pub struct DiskIdentifier {
     pub name: Name,
 }
 
+/// TODO-v1: Delete this
 /// Parameters for the
 /// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
 /// attached or detached to an instance.
@@ -1097,4 +1345,36 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
+}
+
+// SYSTEM UPDATE
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdatePath {
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdateStart {
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdateCreate {
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ComponentUpdateCreate {
+    pub version: SemverVersion,
+    pub component_type: shared::UpdateableComponentType,
+    pub system_update_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateableComponentCreate {
+    pub version: SemverVersion,
+    pub system_version: SemverVersion,
+    pub component_type: shared::UpdateableComponentType,
+    pub device_id: String,
 }

@@ -6,8 +6,9 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DiskRuntimeState, InstanceRuntimeState, RackInitializationRequest,
-    SledAgentStartupInfo, UpdateArtifactKind, ZpoolPutRequest,
+    DiskRuntimeState, InstanceRuntimeState, KnownArtifactKind,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
+    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
     ZpoolPutResponse,
 };
 use slog::Logger;
@@ -28,6 +29,14 @@ mock! {
             id: &Uuid,
             info: &SledAgentStartupInfo,
         ) -> Result<()>;
+        pub async fn physical_disk_put(
+            &self,
+            request: &PhysicalDiskPutRequest,
+        ) -> Result<()>;
+        pub async fn physical_disk_delete(
+            &self,
+            request: &PhysicalDiskDeleteRequest,
+        ) -> Result<()>;
         pub async fn cpapi_instances_put(
             &self,
             id: &Uuid,
@@ -40,9 +49,9 @@ mock! {
             ) -> Result<()>;
         pub async fn cpapi_artifact_download(
             &self,
-            kind: UpdateArtifactKind,
+            kind: KnownArtifactKind,
             name: &str,
-            version: i64,
+            version: &str,
         ) -> Result<progenitor::progenitor_client::ByteStream>;
         pub async fn zpool_put(
             &self,

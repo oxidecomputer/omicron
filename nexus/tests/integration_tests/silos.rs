@@ -2,39 +2,39 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::{
+    create_local_user, create_organization, create_silo, grant_iam,
+    object_create, objects_list_page_authz,
+};
+use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, LookupType, Name,
 };
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
+use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use omicron_nexus::authz::{self, SiloRole};
 use omicron_nexus::context::OpContext;
 use omicron_nexus::db;
+use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
+use omicron_nexus::db::identity::Asset;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::views::{
     self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
 };
 use omicron_nexus::external_api::{params, shared};
+
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 use std::str::FromStr;
 
+use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
-use nexus_test_utils::resource_helpers::{
-    create_local_user, create_organization, create_silo, grant_iam,
-    object_create, objects_list_page_authz,
-};
-
-use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::authz::{self, SiloRole};
-use uuid::Uuid;
-
 use httptest::{matchers::*, responders::*, Expectation, Server};
-use omicron_common::api::external::ObjectIdentity;
-use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
-use omicron_nexus::db::identity::Asset;
+use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -42,7 +42,7 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     // Create two silos: one discoverable, one not
     create_silo(
@@ -222,7 +222,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let silo: Silo = object_create(
         client,
@@ -465,7 +465,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
     .expect("failed to make request");
 
     // Expect that the silo is gone
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let response = IdentityProviderType::lookup(
         &nexus.datastore(),
@@ -538,7 +538,8 @@ async fn test_saml_idp_metadata_data_valid(
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+                data: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_IDP_DESCRIPTOR),
             },
 
             idp_entity_id: "entity_id".to_string(),
@@ -602,7 +603,7 @@ async fn test_saml_idp_metadata_data_truncated(
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode({
+                data: base64::engine::general_purpose::STANDARD.encode({
                     let mut saml_idp_descriptor =
                         SAML_IDP_DESCRIPTOR.to_string();
                     saml_idp_descriptor.truncate(100);
@@ -685,7 +686,7 @@ struct TestSiloUserProvisionTypes {
 #[nexus_test]
 async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let test_cases: Vec<TestSiloUserProvisionTypes> = vec![
@@ -782,7 +783,7 @@ async fn test_silo_user_fetch_by_external_id(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let silo = create_silo(
         &client,
@@ -819,7 +820,7 @@ async fn test_silo_user_fetch_by_external_id(
         .silo_user_fetch_by_external_id(
             &opctx_external_authn,
             &authz_silo,
-            "123".into(),
+            "123",
         )
         .await;
     assert!(result.is_ok());
@@ -831,7 +832,7 @@ async fn test_silo_user_fetch_by_external_id(
         .silo_user_fetch_by_external_id(
             &opctx_external_authn,
             &authz_silo,
-            "f5513e049dac9468de5bdff36ab17d04f".into(),
+            "f5513e049dac9468de5bdff36ab17d04f",
         )
         .await;
     assert!(result.is_ok());
@@ -964,7 +965,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1033,7 +1034,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let silo = create_silo(
         &client,
@@ -1094,7 +1095,7 @@ async fn test_silo_groups_remove_from_one_group(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1207,7 +1208,7 @@ async fn test_silo_groups_remove_from_both_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1319,7 +1320,7 @@ async fn test_silo_groups_remove_from_both_groups(
 #[nexus_test]
 async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     // Create a silo
     let silo = create_silo(
@@ -1401,7 +1402,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     // Create a silo
     let silo = create_silo(
@@ -1463,7 +1464,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let datastore = cptestctx.server.apictx.nexus.datastore();
+    let datastore = cptestctx.server.apictx().nexus.datastore();
 
     // Create the two Silos.
     let silo1 =
@@ -1515,8 +1516,8 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     };
 
     let users_by_name = users_by_id
-        .iter()
-        .map(|(_, user)| (user.display_name.to_owned(), *user))
+        .values()
+        .map(|user| (user.display_name.to_owned(), *user))
         .collect::<BTreeMap<_, _>>();
 
     // We'll run through a battery of tests:
@@ -1681,7 +1682,7 @@ async fn create_jit_user(
 #[nexus_test]
 async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let silo =
         create_silo(&client, "jit", true, shared::SiloIdentityMode::SamlJit)
@@ -1795,7 +1796,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .await;
 }
 
-async fn verify_local_idp_404<'a>(request: NexusRequest<'a>) {
+async fn verify_local_idp_404(request: NexusRequest<'_>) {
     let error = request
         .execute()
         .await
@@ -1856,7 +1857,8 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 
                 idp_metadata_source:
                     params::IdpMetadataSource::Base64EncodedXml {
-                        data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_IDP_DESCRIPTOR),
                     },
 
                 idp_entity_id: "entity_id".to_string(),
@@ -1966,7 +1968,7 @@ async fn run_user_tests(
         "/system/silos/{}/identity-providers/local/users",
         silo.identity.name
     );
-    let url_user_create = format!("{}", url_local_idp_users);
+    let url_user_create = url_local_idp_users.to_string();
 
     // Fetch users and verify it matches what the caller expects.
     println!("run_user_tests: as {:?}: fetch all users", authn_mode);

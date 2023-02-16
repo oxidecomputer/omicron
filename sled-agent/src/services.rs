@@ -38,12 +38,15 @@ use crate::params::{
 use crate::smf_helper::SmfHelper;
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
+use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::WICKETD_PORT;
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -116,6 +119,9 @@ pub enum Error {
 
     #[error("Failed to create Vnic for Nexus: {0}")]
     NexusVnicCreation(crate::illumos::dladm::CreateVnicError),
+
+    #[error("Failed to create Vnic in switch zone: {0}")]
+    SwitchVnicCreation(crate::illumos::dladm::CreateVnicError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
@@ -228,11 +234,13 @@ pub struct ServiceManagerInner {
     stub_scrimlet: Option<bool>,
     sidecar_revision: String,
     zones: Mutex<Vec<RunningZone>>,
-    vnic_allocator: VnicAllocator<Etherstub>,
+    underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
+    bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
     ddmd_client: DdmAdminClient,
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
+    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -242,6 +250,36 @@ struct SledAgentInfo {
     physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
+}
+
+fn is_char_device(name: impl Into<PathBuf>) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+
+    match std::fs::metadata(name.into()) {
+        Ok(metadata) => metadata.file_type().is_char_device(),
+        Err(_) => false,
+    }
+}
+
+// Depending on the kernel version, a tofino device can be found at either
+// /dev/tofino or /dev/tofino/<instance#>.  This method examines each in
+// turn, returning the first character device it finds in either of those
+// locations.
+fn find_tofino(root: &str) -> Result<String, Error> {
+    if is_char_device(root) {
+        return Ok(root.to_string());
+    }
+
+    for entry in std::fs::read_dir(root)
+        .map_err(|e| Error::Io { path: root.into(), err: e })?
+    {
+        let entry =
+            entry.map_err(|e| Error::Io { path: root.into(), err: e })?;
+        if is_char_device(&entry.path()) {
+            return Ok(entry.path().into_os_string().into_string().unwrap());
+        }
+    }
+    Err(Error::MissingDevice { device: "tofino".to_string() })
 }
 
 #[derive(Clone)]
@@ -259,10 +297,12 @@ impl ServiceManager {
     /// - `stub_scrimlet`: Identifies how to launch the switch zone.
     pub async fn new(
         log: Logger,
-        etherstub: Etherstub,
+        underlay_etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
+        bootstrap_etherstub: Etherstub,
         stub_scrimlet: Option<bool>,
         sidecar_revision: String,
+        switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -275,11 +315,19 @@ impl ServiceManager {
                 stub_scrimlet,
                 sidecar_revision,
                 zones: Mutex::new(vec![]),
-                vnic_allocator: VnicAllocator::new("Service", etherstub),
+                underlay_vnic_allocator: VnicAllocator::new(
+                    "Service",
+                    underlay_etherstub,
+                ),
                 underlay_vnic,
+                bootstrap_vnic_allocator: VnicAllocator::new(
+                    "Bootstrap",
+                    bootstrap_etherstub,
+                ),
                 ddmd_client: DdmAdminClient::new(log)?,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
+                switch_zone_bootstrap_address,
             }),
         };
         Ok(mgr)
@@ -372,7 +420,7 @@ impl ServiceManager {
                 ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
                     // When running on a real sidecar, we need the /dev/tofino
                     // device to talk to the tofino ASIC.
-                    devices.push("/dev/tofino".to_string());
+                    devices.push(find_tofino("/dev/tofino")?);
                 }
                 _ => (),
             }
@@ -384,6 +432,25 @@ impl ServiceManager {
             }
         }
         Ok(devices)
+    }
+
+    // If we are running in the switch zone, we need a bootstrap vnic so we can
+    // listen on a bootstrap address for the wicketd artifact server.
+    //
+    // No other zone besides the switch and global zones should have a
+    // bootstrap address.
+    fn bootstrap_vnic_needed(
+        &self,
+        req: &ServiceZoneRequest,
+    ) -> Result<Option<Link>, Error> {
+        if req.zone_type == ZoneType::Switch {
+            match self.inner.bootstrap_vnic_allocator.new_bootstrap() {
+                Ok(link) => Ok(Some(link)),
+                Err(e) => Err(Error::SwitchVnicCreation(e)),
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -454,8 +521,10 @@ impl ServiceManager {
         request: &ServiceZoneRequest,
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(request)?;
+        let bootstrap_vnic = self.bootstrap_vnic_needed(request)?;
         let link = self.link_needed(request)?;
         let limit_priv = Self::privs_needed(request);
+        let needs_bootstrap_address = bootstrap_vnic.is_some();
 
         let devices: Vec<zone::Device> = device_names
             .iter()
@@ -464,7 +533,7 @@ impl ServiceManager {
 
         let installed_zone = InstalledZone::install(
             &self.inner.log,
-            &self.inner.vnic_allocator,
+            &self.inner.underlay_vnic_allocator,
             &request.zone_type.to_string(),
             // unique_name=
             None,
@@ -473,12 +542,26 @@ impl ServiceManager {
             &devices,
             // opte_ports=
             vec![],
+            bootstrap_vnic,
             link,
             limit_priv,
         )
         .await?;
 
         let running_zone = RunningZone::boot(installed_zone).await?;
+
+        if needs_bootstrap_address {
+            info!(
+                self.inner.log,
+                "Ensuring bootstrap address {} exists in switch zone",
+                self.inner.switch_zone_bootstrap_address.to_string()
+            );
+            running_zone
+                .ensure_bootstrap_address(
+                    self.inner.switch_zone_bootstrap_address,
+                )
+                .await?;
+        }
 
         for addr in &request.addresses {
             info!(
@@ -596,35 +679,17 @@ impl ServiceManager {
                         }
                     }
 
-                    let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
-                    let key_file = PathBuf::from("/var/nexus/certs/key.pem");
-
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
                         id: request.id,
                         rack_id: sled_info.rack_id,
 
-                        // Request two dropshot servers: One for HTTP (port 80),
-                        // one for HTTPS (port 443).
-                        dropshot_external: vec![
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(
-                                    *external_ip,
-                                    443,
-                                ),
-                                request_body_max_bytes: 1048576,
-                                tls: Some(dropshot::ConfigTls::AsFile {
-                                    cert_file,
-                                    key_file,
-                                }),
-                            },
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(*external_ip, 80),
-                                request_body_max_bytes: 1048576,
-                                ..Default::default()
-                            },
-                        ],
+                        dropshot_external: dropshot::ConfigDropshot {
+                            bind_address: SocketAddr::new(*external_ip, 80),
+                            request_body_max_bytes: 1048576,
+                            ..Default::default()
+                        },
                         dropshot_internal: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(
                                 IpAddr::V6(*internal_ip),
@@ -712,12 +777,41 @@ impl ServiceManager {
                 ServiceType::ManagementGatewayService => {
                     info!(self.inner.log, "Setting up MGS service");
                     smfh.setprop("config/id", request.id)?;
+
+                    // Always tell MGS to listen on localhost so wicketd can
+                    // contact it even before we have an underlay network.
+                    smfh.addpropvalue(
+                        "config/address",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )?;
+
                     if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
+                        smfh.addpropvalue(
                             "config/address",
-                            &format!("[{}]:{}", address, MGS_PORT),
+                            &format!("[{address}]:{MGS_PORT}"),
                         )?;
                     }
+
+                    smfh.refresh()?;
+                }
+                ServiceType::Wicketd => {
+                    info!(self.inner.log, "Setting up wicketd service");
+
+                    smfh.setprop(
+                        "config/address",
+                        &format!("[::1]:{WICKETD_PORT}"),
+                    )?;
+
+                    // TODO: Use bootstrap address
+                    smfh.setprop(
+                        "config/artifact-address",
+                        &format!("[::1]:{BOOTSTRAP_ARTIFACT_PORT}"),
+                    )?;
+
+                    smfh.setprop(
+                        "config/mgs-address",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )?;
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {
@@ -756,6 +850,17 @@ impl ServiceManager {
                         smfh.setprop("config/host", &format!("[{}]", address))?;
                     }
                     smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
+                    smfh.refresh()?;
+                }
+                ServiceType::CruciblePantry => {
+                    info!(self.inner.log, "Setting up Crucible pantry service");
+
+                    if let Some(address) = request.addresses.get(0) {
+                        smfh.setprop(
+                            "config/listen",
+                            &format!("[{}]:{}", address, CRUCIBLE_PANTRY_PORT),
+                        )?;
+                    }
                     smfh.refresh()?;
                 }
             }
@@ -885,7 +990,11 @@ impl ServiceManager {
 
         let services = match self.inner.stub_scrimlet {
             Some(_) => {
-                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
+                vec![
+                    ServiceType::Dendrite { asic: DendriteAsic::TofinoStub },
+                    ServiceType::ManagementGatewayService,
+                    ServiceType::Wicketd,
+                ]
             }
             None => {
                 vec![
@@ -971,14 +1080,24 @@ impl ServiceManager {
 
                     match service {
                         ServiceType::ManagementGatewayService => {
+                            // Remove any existing `config/address` values
+                            // without deleting the property itself.
+                            smfh.delpropvalue("config/address", "*")?;
+
+                            // Restore the localhost address that we always add
+                            // when setting up MGS.
+                            smfh.addpropvalue(
+                                "config/address",
+                                &format!("[::1]:{MGS_PORT}"),
+                            )?;
+
+                            // Add the underlay address.
                             smfh.setprop(
                                 "config/address",
-                                &format!("[{}]:{}", address, MGS_PORT),
+                                &format!("[{address}]:{MGS_PORT}"),
                             )?;
+
                             smfh.refresh()?;
-                            // TODO: For this restart to be optional, MGS must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
                         }
                         ServiceType::Dendrite { .. } => {
                             smfh.setprop(
@@ -1068,7 +1187,10 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::illumos::{
-        dladm::{Etherstub, MockDladm, ETHERSTUB_NAME, ETHERSTUB_VNIC_NAME},
+        dladm::{
+            Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
+            UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
+        },
         svc,
         zone::MockZones,
     };
@@ -1076,6 +1198,9 @@ mod test {
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
+
+    // Just a placeholder. Not used.
+    const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
     const EXPECTED_ZONE_NAME: &str = "oxz_oximeter";
 
@@ -1085,7 +1210,7 @@ mod test {
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
             |physical_link: &Etherstub, _, _, _| {
-                assert_eq!(&physical_link.0, &ETHERSTUB_NAME);
+                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
                 Ok(())
             },
         );
@@ -1224,10 +1349,12 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1259,10 +1386,12 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1296,10 +1425,12 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1322,10 +1453,12 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1356,10 +1489,12 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();
@@ -1384,10 +1519,12 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
+            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             None,
             "rev-test".to_string(),
+            SWITCH_ZONE_BOOTSTRAP_IP,
         )
         .await
         .unwrap();

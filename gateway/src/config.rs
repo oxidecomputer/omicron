@@ -15,6 +15,11 @@ use thiserror::Error;
 /// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
+    /// Maximum number of host phase2 recover images we're willing to keep
+    /// cached.
+    pub host_phase2_recovery_image_cache_max_images: usize,
+    /// Partial configuration for our dropshot server.
+    pub dropshot: PartialDropshotConfig,
     /// Configuration of the management switch.
     pub switch: SwitchConfig,
     /// Server-wide logging configuration.
@@ -34,6 +39,11 @@ impl Config {
             .map_err(|e| (path.to_path_buf(), e))?;
         Ok(config_parsed)
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PartialDropshotConfig {
+    pub request_body_max_bytes: usize,
 }
 
 #[derive(Debug, Error)]

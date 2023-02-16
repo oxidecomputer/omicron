@@ -31,35 +31,45 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
-    /// List disks associated with a given instance.
+    /// List disks associated with a given instance by name.
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Disk> {
         use db::schema::disk::dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        paginated(dsl::disk, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::attach_instance_id.eq(authz_instance.id()))
-            .select(Disk::as_select())
-            .load_async::<Disk>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::disk, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::disk,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::attach_instance_id.eq(authz_instance.id()))
+        .select(Disk::as_select())
+        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_disk(
@@ -110,22 +120,31 @@ impl DataStore {
         Ok(disk)
     }
 
-    pub async fn project_list_disks(
+    pub async fn disk_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Disk> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::disk::dsl;
-        paginated(dsl::disk, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Disk::as_select())
-            .load_async::<Disk>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::disk, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::disk,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .select(Disk::as_select())
+        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Attaches a disk to an instance, if both objects:
@@ -487,7 +506,7 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<db::model::Disk, Error> {
         use db::schema::disk::dsl;
         let pool = self.pool();
         let now = Utc::now();
@@ -522,7 +541,7 @@ impl DataStore {
             })?;
 
         match result.status {
-            UpdateStatus::Updated => Ok(result.found.volume_id),
+            UpdateStatus::Updated => Ok(result.found),
             UpdateStatus::NotUpdatedButExists => {
                 let disk = result.found;
                 let disk_state = disk.state();
@@ -532,7 +551,7 @@ impl DataStore {
                 {
                     // To maintain idempotency, if the disk has already been
                     // destroyed, don't throw an error.
-                    return Ok(disk.volume_id);
+                    return Ok(disk);
                 } else if !ok_to_delete_states.contains(disk_state.state()) {
                     return Err(Error::InvalidRequest {
                         message: format!(

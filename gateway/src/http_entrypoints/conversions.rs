@@ -6,9 +6,14 @@
 
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
-use crate::error::SpCommsError;
-
+use super::HostStartupOptions;
+use super::IgnitionCommand;
+use super::ImageVersion;
+use super::InstallinatorImageId;
 use super::PowerState;
+use super::RotImageDetails;
+use super::RotSlot;
+use super::RotState;
 use super::SpComponentInfo;
 use super::SpComponentList;
 use super::SpComponentPresence;
@@ -19,10 +24,13 @@ use super::SpState;
 use super::SpType;
 use super::SpUpdateStatus;
 use super::UpdatePreparationProgress;
+use crate::error::SpCommsError;
 use dropshot::HttpError;
 use gateway_messages::SpComponent;
+use gateway_messages::StartupOptions;
 use gateway_messages::UpdateStatus;
 use gateway_sp_comms::error::CommunicationError;
+use std::str;
 
 // wrap `SpComponent::try_from(&str)` into a usable form for dropshot endpoints
 pub(super) fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
@@ -91,13 +99,74 @@ impl From<PowerState> for gateway_messages::PowerState {
     }
 }
 
+impl From<gateway_messages::ImageVersion> for ImageVersion {
+    fn from(v: gateway_messages::ImageVersion) -> Self {
+        Self { epoch: v.epoch, version: v.version }
+    }
+}
+
+// We expect serial and model numbers to be ASCII and 0-padded: find the first 0
+// byte and convert to a string. If that fails, hexlify the entire slice.
+fn stringify_byte_string(bytes: &[u8]) -> String {
+    let first_zero = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+
+    str::from_utf8(&bytes[..first_zero])
+        .map(|s| s.to_string())
+        .unwrap_or_else(|_err| hex::encode(bytes))
+}
+
 impl From<Result<gateway_messages::SpState, SpCommsError>> for SpState {
     fn from(result: Result<gateway_messages::SpState, SpCommsError>) -> Self {
         match result {
             Ok(state) => Self::Enabled {
-                serial_number: hex::encode(&state.serial_number[..]),
+                serial_number: stringify_byte_string(&state.serial_number),
+                model: stringify_byte_string(&state.model),
+                revision: state.revision,
+                hubris_archive_id: hex::encode(&state.hubris_archive_id),
+                base_mac_address: state.base_mac_address,
+                version: ImageVersion::from(state.version),
+                power_state: PowerState::from(state.power_state),
+                rot: RotState::from(state.rot),
             },
             Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
+impl From<Result<gateway_messages::RotState, gateway_messages::RotError>>
+    for RotState
+{
+    fn from(
+        result: Result<gateway_messages::RotState, gateway_messages::RotError>,
+    ) -> Self {
+        match result {
+            Ok(state) => {
+                let boot_state = state.rot_updates.boot_state;
+                Self::Enabled {
+                    active: boot_state.active.into(),
+                    slot_a: boot_state.slot_a.map(Into::into),
+                    slot_b: boot_state.slot_b.map(Into::into),
+                }
+            }
+            Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
+impl From<gateway_messages::RotSlot> for RotSlot {
+    fn from(slot: gateway_messages::RotSlot) -> Self {
+        match slot {
+            gateway_messages::RotSlot::A => Self::A,
+            gateway_messages::RotSlot::B => Self::B,
+        }
+    }
+}
+
+impl From<gateway_messages::RotImageDetails> for RotImageDetails {
+    fn from(details: gateway_messages::RotImageDetails) -> Self {
+        Self {
+            digest: hex::encode(&details.digest),
+            version: details.version.into(),
         }
     }
 }
@@ -165,6 +234,22 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
+        }
+    }
+}
+
+impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
+    fn from(cmd: IgnitionCommand) -> Self {
+        match cmd {
+            IgnitionCommand::PowerOn => {
+                gateway_messages::IgnitionCommand::PowerOn
+            }
+            IgnitionCommand::PowerOff => {
+                gateway_messages::IgnitionCommand::PowerOff
+            }
+            IgnitionCommand::PowerReset => {
+                gateway_messages::IgnitionCommand::PowerReset
+            }
         }
     }
 }
@@ -240,5 +325,47 @@ impl From<gateway_sp_comms::SpDevice> for SpComponentInfo {
 impl From<gateway_sp_comms::SpInventory> for SpComponentList {
     fn from(inv: gateway_sp_comms::SpInventory) -> Self {
         Self { components: inv.devices.into_iter().map(Into::into).collect() }
+    }
+}
+
+impl From<HostStartupOptions> for StartupOptions {
+    fn from(mgs_opt: HostStartupOptions) -> Self {
+        let mut opt = StartupOptions::empty();
+        opt.set(
+            StartupOptions::PHASE2_RECOVERY_MODE,
+            mgs_opt.phase2_recovery_mode,
+        );
+        opt.set(StartupOptions::STARTUP_KBM, mgs_opt.kbm);
+        opt.set(StartupOptions::STARTUP_BOOTRD, mgs_opt.bootrd);
+        opt.set(StartupOptions::STARTUP_PROM, mgs_opt.prom);
+        opt.set(StartupOptions::STARTUP_KMDB, mgs_opt.kmdb);
+        opt.set(StartupOptions::STARTUP_KMDB_BOOT, mgs_opt.kmdb_boot);
+        opt.set(StartupOptions::STARTUP_BOOT_RAMDISK, mgs_opt.boot_ramdisk);
+        opt.set(StartupOptions::STARTUP_BOOT_NET, mgs_opt.boot_net);
+        opt.set(StartupOptions::STARTUP_VERBOSE, mgs_opt.verbose);
+        opt
+    }
+}
+
+impl From<StartupOptions> for HostStartupOptions {
+    fn from(opt: StartupOptions) -> Self {
+        Self {
+            phase2_recovery_mode: opt
+                .contains(StartupOptions::PHASE2_RECOVERY_MODE),
+            kbm: opt.contains(StartupOptions::STARTUP_KBM),
+            bootrd: opt.contains(StartupOptions::STARTUP_BOOTRD),
+            prom: opt.contains(StartupOptions::STARTUP_PROM),
+            kmdb: opt.contains(StartupOptions::STARTUP_KMDB),
+            kmdb_boot: opt.contains(StartupOptions::STARTUP_KMDB_BOOT),
+            boot_ramdisk: opt.contains(StartupOptions::STARTUP_BOOT_RAMDISK),
+            boot_net: opt.contains(StartupOptions::STARTUP_BOOT_NET),
+            verbose: opt.contains(StartupOptions::STARTUP_VERBOSE),
+        }
+    }
+}
+
+impl From<InstallinatorImageId> for ipcc_key_value::InstallinatorImageId {
+    fn from(id: InstallinatorImageId) -> Self {
+        Self { host_phase_2: id.host_phase_2, control_plane: id.control_plane }
     }
 }

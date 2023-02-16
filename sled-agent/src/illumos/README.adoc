@@ -1,0 +1,12 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= illumos commands
+
+This directory contains wrappers around a variety of "illumos-only" commands.
+
+At the moment, these are wrappers around CLI-based invocations, and therefore
+can be compiled on any OS. We enable this behavior (even though these commands
+would likely result in an error on other OSes) to be more permissive with
+rust analyzer support.

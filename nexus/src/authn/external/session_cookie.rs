@@ -91,7 +91,7 @@ where
         &self,
         ctx: &T,
         log: &slog::Logger,
-        request: &http::Request<hyper::Body>,
+        request: &dropshot::RequestInfo,
     ) -> SchemeResult {
         let token = match get_token_from_cookie(request.headers()) {
             Some(token) => token,
@@ -267,7 +267,7 @@ mod test {
             let headers = request.headers_mut();
             headers.insert(http::header::COOKIE, cookie.parse().unwrap());
         }
-        scheme.authn(context, &log, &request).await
+        scheme.authn(context, &log, &request.into()).await
     }
 
     #[tokio::test]

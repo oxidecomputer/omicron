@@ -26,20 +26,34 @@ fn main() -> Result<()> {
         .packages
         .get("maghemite")
         .context("missing maghemite package in ../package-manifest.toml")?;
-    let commit = match &maghemite.source {
-        PackageSource::Prebuilt { commit, .. } => commit,
+
+    let local_path = match &maghemite.source {
+        PackageSource::Prebuilt { commit, .. } => {
+            // Report a relatively verbose error if we haven't downloaded the requisite
+            // openapi spec.
+            let local_path =
+                format!("../out/downloads/ddm-admin-{commit}.json");
+            if !Path::new(&local_path).exists() {
+                bail!("{local_path} doesn't exist; rerun `tools/ci_download_maghemite_openapi` (after updating `tools/maghemite_openapi_version` if the maghemite commit in package-manifest.toml has changed)");
+            }
+            println!("cargo:rerun-if-changed={local_path}");
+            local_path
+        }
+
+        PackageSource::Manual => {
+            let local_path =
+                "../out/downloads/ddm-admin-manual.json".to_string();
+            if !Path::new(&local_path).exists() {
+                bail!("{local_path} doesn't exist, please copy manually built ddm-admin.json there!");
+            }
+            println!("cargo:rerun-if-changed={local_path}");
+            local_path
+        }
+
         _ => {
-            bail!("maghemite external package must have type `prebuilt`")
+            bail!("maghemite external package must have type `prebuilt` or `manual`")
         }
     };
-
-    // Report a relatively verbose error if we haven't downloaded the requisite
-    // openapi spec.
-    let local_path = format!("../out/downloads/ddm-admin-{commit}.json");
-    if !Path::new(&local_path).exists() {
-        bail!("{local_path} doesn't exist; rerun `tools/ci_download_maghemite_openapi` (after updating `tools/maghemite_openapi_version` if the maghemite commit in package-manifest.toml has changed)");
-    }
-    println!("cargo:rerun-if-changed={local_path}");
 
     let spec = {
         let bytes = fs::read(&local_path)

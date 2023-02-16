@@ -31,20 +31,18 @@ struct Args {
 // Generate a config file for a simulated SP in each deployment server folder.
 fn overlay_sp_configs(server_dirs: &[PathBuf]) -> Result<()> {
     let local_sp_configs = (1..=(server_dirs.len() as u32))
-        .map(|id| {
-            let id = id.to_be_bytes();
+        .map(|i| {
+            let id = i.to_be_bytes();
             let mut config = GimletConfig {
                 common: SpCommonConfig {
                     multicast_addr: None,
                     bind_addrs: None,
-                    serial_number: [0; 16],
+                    serial_number: format!("FakeSp{i:05}"),
                     manufacturing_root_cert_seed: [0; 32],
                     device_id_cert_seed: [0; 32],
                     components: Vec::new(),
                 },
             };
-            let len = config.common.serial_number.len();
-            config.common.serial_number[len - 4..].copy_from_slice(&id);
             let len = config.common.device_id_cert_seed.len();
             config.common.device_id_cert_seed[len - 4..].copy_from_slice(&id);
             config
@@ -59,7 +57,12 @@ fn overlay_sp_configs(server_dirs: &[PathBuf]) -> Result<()> {
                 salty::Keypair::from(&config.manufacturing_root_cert_seed);
             let device_id_keypair =
                 salty::Keypair::from(&config.device_id_cert_seed);
-            let serial_number = SerialNumber(config.serial_number);
+            let mut serial_number = [0; 16];
+            serial_number
+                .get_mut(0..config.serial_number.len())
+                .expect("simulated serial number too long")
+                .copy_from_slice(config.serial_number.as_bytes());
+            let serial_number = SerialNumber(serial_number);
             let config = RotConfig::bootstrap_for_testing(
                 &manufacturing_keypair,
                 device_id_keypair,

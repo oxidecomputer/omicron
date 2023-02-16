@@ -6,8 +6,10 @@
 
 //! HTTP entrypoint functions for the gateway service
 
+mod component_details;
 mod conversions;
 
+use self::component_details::SpComponentDetails;
 use self::conversions::component_from_str;
 use crate::error::SpCommsError;
 use crate::ServerContext;
@@ -19,10 +21,12 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use dropshot::UntypedBody;
+use dropshot::WebsocketEndpointResult;
+use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
-use gateway_messages::IgnitionCommand;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -63,11 +67,76 @@ pub struct SpInfo {
 pub enum SpState {
     Enabled {
         serial_number: String,
-        // TODO more stuff
+        model: String,
+        revision: u32,
+        hubris_archive_id: String,
+        base_mac_address: [u8; 6],
+        version: ImageVersion,
+        power_state: PowerState,
+        rot: RotState,
     },
     CommunicationFailed {
         message: String,
     },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RotState {
+    // TODO gateway_messages's RotState includes a couple nested structures that
+    // I've flattened here because they only contain one field each. When those
+    // structures grow we'll need to expand/change this.
+    Enabled {
+        active: RotSlot,
+        slot_a: Option<RotImageDetails>,
+        slot_b: Option<RotImageDetails>,
+    },
+    CommunicationFailed {
+        message: String,
+    },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "slot", rename_all = "snake_case")]
+pub enum RotSlot {
+    A,
+    B,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotImageDetails {
+    pub digest: String,
+    pub version: ImageVersion,
 }
 
 #[derive(
@@ -118,6 +187,17 @@ pub enum SpIgnition {
     },
     #[serde(rename = "error")]
     CommunicationFailed { message: String },
+}
+
+/// Ignition command.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum IgnitionCommand {
+    PowerOn,
+    PowerOff,
+    PowerReset,
 }
 
 /// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
@@ -264,6 +344,21 @@ impl Display for SpIdentifier {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+pub struct HostStartupOptions {
+    pub phase2_recovery_mode: bool,
+    pub kbm: bool,
+    pub bootrd: bool,
+    pub prom: bool,
+    pub kmdb: bool,
+    pub kmdb_boot: bool,
+    pub boot_ramdisk: bool,
+    pub boot_net: bool,
+    pub verbose: bool,
+}
+
 /// See RFD 81.
 ///
 /// This enum only lists power states the SP is able to control; higher power
@@ -280,10 +375,57 @@ impl Display for SpIdentifier {
     Deserialize,
     JsonSchema,
 )]
-enum PowerState {
+pub enum PowerState {
     A0,
     A1,
     A2,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct ImageVersion {
+    pub epoch: u32,
+    pub version: u32,
+}
+
+// This type is a duplicate of the type in `ipcc-key-value`, and we provide a
+// `From<_>` impl to convert to it. We keep these types distinct to allow us to
+// choose different representations for MGS's HTTP API (this type) and the wire
+// format passed through the SP to installinator
+// (`ipcc_key_value::InstallinatorImageId`), although _currently_ they happen to
+// be defined identically.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct InstallinatorImageId {
+    pub host_phase_2: [u8; 32],
+    pub control_plane: [u8; 32],
+}
+
+/// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
+/// the host boot flash.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+pub struct SpComponentFirmwareSlot {
+    pub slot: u16,
+}
+
+/// Identity of a host phase2 recovery image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HostPhase2RecoveryImageId {
+    pub sha256_hash: String,
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -337,6 +479,16 @@ struct PathSpComponent {
     component: String,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct PathSpIgnitionCommand {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    sp: SpIdentifier,
+    /// Ignition command to perform on the targeted SP.
+    command: IgnitionCommand,
+}
+
 /// List SPs
 ///
 /// Since communication with SPs may be unreliable, consumers may specify an
@@ -357,7 +509,7 @@ struct PathSpComponent {
     path = "/sp",
 }]
 async fn sp_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<Vec<SpInfo>>, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
@@ -451,7 +603,7 @@ async fn sp_list(
     path = "/sp/{type}/{slot}",
 }]
 async fn sp_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpInfo>, HttpError> {
     let apictx = rqctx.context();
@@ -475,6 +627,51 @@ async fn sp_get(
     Ok(HttpResponseOk(info))
 }
 
+/// Get host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<HostStartupOptions>, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let options = sp.get_startup_options().await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(options.into()))
+}
+
+/// Set host startup options for a sled
+///
+/// This endpoint will currently fail for any `SpType` other than
+/// `SpType::Sled`.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/startup-options",
+}]
+async fn sp_startup_options_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+    body: TypedBody<HostStartupOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let mgmt_switch = &apictx.mgmt_switch;
+    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    sp.set_startup_options(body.into_inner().into())
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// List components of an SP
 ///
 /// A component is a distinct entity under an SP's direct control. This lists
@@ -484,7 +681,7 @@ async fn sp_get(
     path = "/sp/{type}/{slot}/component",
 }]
 async fn sp_component_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
     let apictx = rqctx.context();
@@ -508,37 +705,132 @@ async fn sp_component_list(
     path = "/sp/{type}/{slot}/component/{component}",
 }]
 async fn sp_component_get(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<SpComponentInfo>, HttpError> {
-    todo!()
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<Vec<SpComponentDetails>>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let details =
+        sp.component_details(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
+}
+
+/// Clear status of a component
+///
+/// For components that maintain event counters (e.g., the sidecar `monorail`),
+/// this will reset the event counters to zero.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/clear-status",
+}]
+async fn sp_component_clear_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    sp.component_clear_status(component).await.map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Get the currently-active slot for an SP component
+///
+/// Note that the meaning of "current" in "currently-active" may vary depending
+/// on the component: for example, it may mean "the actively-running slot" or
+/// "the slot that will become active the next time the component is booted".
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/active-slot",
+}]
+async fn sp_component_active_slot_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SpComponentFirmwareSlot>, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+
+    let slot = sp
+        .component_active_slot(component)
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseOk(SpComponentFirmwareSlot { slot }))
+}
+
+/// Set the currently-active slot for an SP component
+///
+/// Note that the meaning of "current" in "currently-active" may vary depending
+/// on the component: for example, it may mean "the actively-running slot" or
+/// "the slot that will become active the next time the component is booted".
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/active-slot",
+}]
+async fn sp_component_active_slot_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+    body: TypedBody<SpComponentFirmwareSlot>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
+    let slot = body.into_inner().slot;
+
+    sp.set_component_active_slot(component, slot)
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// Upgrade into a websocket connection attached to the given SP component's
 /// serial console.
+// This is a websocket endpoint; normally we'd expect to use `dropshot::channel`
+// with `protocol = WEBSOCKETS` instead of `dropshot::endpoint`, but
+// `dropshot::channel` doesn't allow us to return an error _before_ upgrading
+// the connection, and we want to bail out ASAP if the SP doesn't allow us to
+// attach. Therefore, we use `dropshot::endpoint` with the special argument type
+// `WebsocketUpgrade`: this inserts the correct marker for progenitor to know
+// this is a websocket endpoint, and it allows us to call
+// `WebsocketUpgrade::handle()` (the method `dropshot::channel` would call for
+// us to upgrade the connection) by hand after our error checking.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component/{component}/serial-console/attach",
 }]
 async fn sp_component_serial_console_attach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
-) -> Result<http::Response<hyper::Body>, HttpError> {
+    websocket: WebsocketUpgrade,
+) -> WebsocketEndpointResult {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-
     let component = component_from_str(&component)?;
-    let mut request = rqctx.request.lock().await;
 
-    let sp = sp.into();
-    Ok(crate::serial_console::attach(
-        &apictx.mgmt_switch,
-        sp,
-        component,
-        &mut request,
-        apictx.log.new(slog::o!("sp" => format!("{sp:?}"))),
-    )
-    .await?)
+    // Ensure we can attach to this SP's serial console.
+    let console = apictx
+        .mgmt_switch
+        .sp(sp.into())?
+        .serial_console_attach(component)
+        .await
+        .map_err(SpCommsError::from)?;
+
+    let log = apictx.log.new(slog::o!("sp" => format!("{sp:?}")));
+
+    // We've successfully attached to the SP's serial console: upgrade the
+    // websocket and run our side of that connection.
+    websocket.handle(move |conn| crate::serial_console::run(console, conn, log))
 }
 
 /// Detach the websocket connection attached to the given SP component's serial
@@ -548,7 +840,7 @@ async fn sp_component_serial_console_attach(
     path = "/sp/{type}/{slot}/component/{component}/serial-console/detach",
 }]
 async fn sp_component_serial_console_detach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -600,7 +892,7 @@ pub struct UpdateAbortBody {
     path = "/sp/{type}/{slot}/reset",
 }]
 async fn sp_reset(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -632,7 +924,7 @@ async fn sp_reset(
     path = "/sp/{type}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -659,7 +951,7 @@ async fn sp_component_update(
     path = "/sp/{type}/{slot}/component/{component}/update-status",
 }]
 async fn sp_component_update_status(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
 ) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError> {
     let apictx = rqctx.context();
@@ -685,7 +977,7 @@ async fn sp_component_update_status(
     path = "/sp/{type}/{slot}/component/{component}/update-abort",
 }]
 async fn sp_component_update_abort(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateAbortBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -701,36 +993,6 @@ async fn sp_component_update_abort(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
-/// Power on an SP component
-///
-/// Components whose power state cannot be changed will always return an error.
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power-on",
-}]
-async fn sp_component_power_on(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSpComponent>,
-    // TODO do we need a timeout?
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    todo!()
-}
-
-/// Power off an SP component
-///
-/// Components whose power state cannot be changed will always return an error.
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power-off",
-}]
-async fn sp_component_power_off(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSpComponent>,
-    // TODO do we need a timeout?
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    todo!()
-}
-
 /// List SPs via Ignition
 ///
 /// Retreive information for all SPs via the Ignition controller. This is lower
@@ -741,7 +1003,7 @@ async fn sp_component_power_off(
     path = "/ignition",
 }]
 async fn ignition_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
@@ -768,7 +1030,7 @@ async fn ignition_list(
     path = "/ignition/{type}/{slot}",
 }]
 async fn ignition_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
     let apictx = rqctx.context();
@@ -787,50 +1049,30 @@ async fn ignition_get(
     Ok(HttpResponseOk(info))
 }
 
-/// Power on a sled via a request to its SP.
+/// Send an ignition command targeting a specific SP.
 ///
-/// This corresponds to moving the sled into A2.
+/// This endpoint can be used to transition a target between A2 and A3 (via
+/// power-on / power-off) or reset it.
+///
+/// The management network traffic caused by requests to this endpoint is
+/// between this MGS instance and its local ignition controller, _not_ the SP
+/// targeted by the command.
 #[endpoint {
     method = POST,
-    path = "/ignition/{type}/{slot}/power-on",
+    path = "/ignition/{type}/{slot}/{command}",
 }]
-async fn ignition_power_on(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path: Path<PathSp>,
+async fn ignition_command(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpIgnitionCommand>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
-    let ignition_target =
-        mgmt_switch.ignition_target(path.into_inner().sp.into())?;
+    let PathSpIgnitionCommand { sp, command } = path.into_inner();
+    let ignition_target = mgmt_switch.ignition_target(sp.into())?;
 
     mgmt_switch
         .ignition_controller()
-        .ignition_command(ignition_target, IgnitionCommand::PowerOn)
-        .await
-        .map_err(SpCommsError::from)?;
-
-    Ok(HttpResponseUpdatedNoContent {})
-}
-
-/// Power off a sled via Ignition
-///
-/// This corresponds to moving the sled into A3.
-#[endpoint {
-    method = POST,
-    path = "/ignition/{type}/{slot}/power-off",
-}]
-async fn ignition_power_off(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path: Path<PathSp>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let mgmt_switch = &apictx.mgmt_switch;
-    let ignition_target =
-        mgmt_switch.ignition_target(path.into_inner().sp.into())?;
-
-    mgmt_switch
-        .ignition_controller()
-        .ignition_command(ignition_target, IgnitionCommand::PowerOff)
+        .ignition_command(ignition_target, command.into())
         .await
         .map_err(SpCommsError::from)?;
 
@@ -846,7 +1088,7 @@ async fn ignition_power_off(
     path = "/sp/{type}/{slot}/power-state",
 }]
 async fn sp_power_state_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<PowerState>, HttpError> {
     let apictx = rqctx.context();
@@ -866,7 +1108,7 @@ async fn sp_power_state_get(
     path = "/sp/{type}/{slot}/power-state",
 }]
 async fn sp_power_state_set(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
     body: TypedBody<PowerState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -877,6 +1119,93 @@ async fn sp_power_state_set(
     sp.set_power_state(power_state.into()).await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Set the installinator image ID the sled should use for recovery.
+///
+/// This value can be read by the host via IPCC; see the `ipcc-key-value` crate.
+#[endpoint {
+    method = PUT,
+    path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+}]
+async fn sp_installinator_image_id_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+    body: TypedBody<InstallinatorImageId>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    use ipcc_key_value::Key;
+
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let image_id =
+        ipcc_key_value::InstallinatorImageId::from(body.into_inner());
+
+    sp.set_ipcc_key_lookup_value(
+        Key::InstallinatorImageId as u8,
+        image_id.serialize(),
+    )
+    .await
+    .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Clear any previously-set installinator image ID on the target sled.
+#[endpoint {
+    method = DELETE,
+    path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+}]
+async fn sp_installinator_image_id_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    use ipcc_key_value::Key;
+
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    // We clear the image ID by setting it to a 0-length vec.
+    sp.set_ipcc_key_lookup_value(Key::InstallinatorImageId as u8, Vec::new())
+        .await
+        .map_err(SpCommsError::from)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Upload a host phase2 image that can be served to recovering hosts via the
+/// host/SP control uart.
+///
+/// MGS caches this image in memory and is limited to a small, fixed number of
+/// images (potentially 1). Uploading a new image may evict the
+/// least-recently-requested image if our cache is already full.
+#[endpoint {
+    method = POST,
+    path = "/recovery/host-phase2",
+}]
+async fn recovery_host_phase2_upload(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: UntypedBody,
+) -> Result<HttpResponseOk<HostPhase2RecoveryImageId>, HttpError> {
+    let apictx = rqctx.context();
+
+    // TODO: this makes a full copy of the host image, potentially unnecessarily
+    // if it's malformed.
+    let image = body.as_bytes().to_vec();
+
+    let sha2 =
+        apictx.host_phase2_provider.insert(image).await.map_err(|err| {
+            // Any cache-insertion failure indicates a malformed image; map them
+            // to bad requests.
+            HttpError::for_bad_request(
+                Some("BadHostPhase2Image".to_string()),
+                err.to_string(),
+            )
+        })?;
+
+    Ok(HttpResponseOk(HostPhase2RecoveryImageId {
+        sha256_hash: hex::encode(&sha2),
+    }))
 }
 
 // TODO
@@ -899,22 +1228,27 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
+        api.register(sp_startup_options_get)?;
+        api.register(sp_startup_options_set)?;
         api.register(sp_reset)?;
         api.register(sp_power_state_get)?;
         api.register(sp_power_state_set)?;
+        api.register(sp_installinator_image_id_set)?;
+        api.register(sp_installinator_image_id_delete)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_clear_status)?;
+        api.register(sp_component_active_slot_get)?;
+        api.register(sp_component_active_slot_set)?;
         api.register(sp_component_serial_console_attach)?;
         api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
         api.register(sp_component_update_status)?;
         api.register(sp_component_update_abort)?;
-        api.register(sp_component_power_on)?;
-        api.register(sp_component_power_off)?;
         api.register(ignition_list)?;
         api.register(ignition_get)?;
-        api.register(ignition_power_on)?;
-        api.register(ignition_power_off)?;
+        api.register(ignition_command)?;
+        api.register(recovery_host_phase2_upload)?;
         Ok(())
     }
 

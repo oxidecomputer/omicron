@@ -2,18 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::{GimletConfig, SpComponentConfig};
+use crate::config::GimletConfig;
+use crate::config::SpComponentConfig;
 use crate::rot::RotSprocketExt;
+use crate::serial_number_padded;
 use crate::server;
 use crate::server::UdpServer;
-use crate::{Responsiveness, SimulatedSp};
+use crate::Responsiveness;
+use crate::SimulatedSp;
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
-use gateway_messages::SerialNumber;
+use gateway_messages::RotBootState;
+use gateway_messages::RotSlot;
+use gateway_messages::RotUpdateDetails;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
@@ -39,6 +44,7 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
 
 const SIM_GIMLET_VERSION: ImageVersion = ImageVersion { epoch: 0, version: 0 };
@@ -47,7 +53,7 @@ pub struct Gimlet {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
-    serial_number: SerialNumber,
+    handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
@@ -65,8 +71,13 @@ impl Drop for Gimlet {
 
 #[async_trait]
 impl SimulatedSp for Gimlet {
-    fn serial_number(&self) -> String {
-        hex::encode(self.serial_number)
+    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
+        omicron_gateway::http_entrypoints::SpState::from(Ok::<
+            _,
+            omicron_gateway::CommunicationError,
+        >(
+            self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
+        ))
     }
 
     fn manufacturing_public_key(&self) -> Ed25519PublicKey {
@@ -108,7 +119,9 @@ impl Gimlet {
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let local_addrs = if let Some(bind_addrs) = gimlet.common.bind_addrs {
+        let (local_addrs, handler) = if let Some(bind_addrs) =
+            gimlet.common.bind_addrs
+        {
             // bind to our two local "KSZ" ports
             assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
             let servers = future::try_join(
@@ -181,11 +194,11 @@ impl Gimlet {
             }
             let local_addrs =
                 [servers[0].local_addr(), servers[1].local_addr()];
-            let inner = UdpTask::new(
+            let (inner, handler) = UdpTask::new(
                 servers,
                 gimlet.common.components.clone(),
                 attached_mgs,
-                gimlet.common.serial_number,
+                gimlet.common.serial_number.clone(),
                 incoming_console_tx,
                 commands_rx,
                 log,
@@ -193,9 +206,9 @@ impl Gimlet {
             inner_tasks
                 .push(task::spawn(async move { inner.run().await.unwrap() }));
 
-            Some(local_addrs)
+            (Some(local_addrs), Some(handler))
         } else {
-            None
+            (None, None)
         };
 
         let (manufacturing_public_key, rot) =
@@ -204,7 +217,7 @@ impl Gimlet {
             rot: Mutex::new(rot),
             manufacturing_public_key,
             local_addrs,
-            serial_number: gimlet.common.serial_number,
+            handler,
             serial_console_addrs,
             commands,
             inner_tasks,
@@ -394,7 +407,7 @@ enum CommandResponse {
 struct UdpTask {
     udp0: UdpServer,
     udp1: UdpServer,
-    handler: Handler,
+    handler: Arc<TokioMutex<Handler>>,
     commands:
         mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
 }
@@ -404,27 +417,23 @@ impl UdpTask {
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
-        serial_number: SerialNumber,
+        serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         commands: mpsc::UnboundedReceiver<(
             Command,
             oneshot::Sender<CommandResponse>,
         )>,
         log: Logger,
-    ) -> Self {
+    ) -> (Self, Arc<TokioMutex<Handler>>) {
         let [udp0, udp1] = servers;
-        Self {
-            udp0,
-            udp1,
-            handler: Handler::new(
-                serial_number,
-                components,
-                attached_mgs,
-                incoming_serial_console,
-                log,
-            ),
-            commands,
-        }
+        let handler = Arc::new(TokioMutex::new(Handler::new(
+            serial_number,
+            components,
+            attached_mgs,
+            incoming_serial_console,
+            log,
+        )));
+        (Self { udp0, udp1, handler: Arc::clone(&handler), commands }, handler)
     }
 
     async fn run(mut self) -> Result<()> {
@@ -434,7 +443,7 @@ impl UdpTask {
             select! {
                 recv0 = self.udp0.recv_from() => {
                     if let Some((resp, addr)) = server::handle_request(
-                        &mut self.handler,
+                        &mut *self.handler.lock().await,
                         recv0,
                         &mut out_buf,
                         responsiveness,
@@ -446,7 +455,7 @@ impl UdpTask {
 
                 recv1 = self.udp1.recv_from() => {
                     if let Some((resp, addr)) = server::handle_request(
-                        &mut self.handler,
+                        &mut *self.handler.lock().await,
                         recv1,
                         &mut out_buf,
                         responsiveness,
@@ -478,7 +487,7 @@ impl UdpTask {
 
 struct Handler {
     log: Logger,
-    serial_number: SerialNumber,
+    serial_number: String,
 
     components: Vec<SpComponentConfig>,
     // `SpHandler` wants `&'static str` references when describing components;
@@ -497,7 +506,7 @@ struct Handler {
 
 impl Handler {
     fn new(
-        serial_number: SerialNumber,
+        serial_number: String,
         components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
@@ -525,6 +534,34 @@ impl Handler {
             incoming_serial_console,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
+        }
+    }
+
+    fn sp_state_impl(&self) -> SpState {
+        const FAKE_GIMLET_MODEL: &[u8] = b"FAKE_SIM_GIMLET";
+
+        let mut model = [0; 32];
+        model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL);
+
+        SpState {
+            hubris_archive_id: [0; 8],
+            serial_number: serial_number_padded(&self.serial_number),
+            model,
+            revision: 0,
+            base_mac_address: [0; 6],
+            version: SIM_GIMLET_VERSION,
+            power_state: self.power_state,
+            rot: Ok(RotState {
+                rot_updates: RotUpdateDetails {
+                    // TODO replace with configurable data once something cares
+                    // about this?
+                    boot_state: RotBootState {
+                        active: RotSlot::A,
+                        slot_a: None,
+                        slot_b: None,
+                    },
+                },
+            }),
         }
     }
 }
@@ -728,24 +765,56 @@ impl SpHandler for Handler {
         Ok(())
     }
 
+    fn serial_console_break(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received serial console break";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        let component = self
+            .attached_mgs
+            .lock()
+            .unwrap()
+            .map(|(component, _port, _addr)| component)
+            .ok_or(SpError::SerialConsoleNotAttached)?;
+
+        let incoming_serial_console = self
+            .incoming_serial_console
+            .get(&component)
+            .ok_or(SpError::RequestUnsupportedForComponent)?;
+
+        // if the receiving half is gone, we're in the process of shutting down;
+        // ignore errors here
+        _ = incoming_serial_console.send(b"*** serial break ***".to_vec());
+
+        Ok(())
+    }
+
+    fn send_host_nmi(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received host NMI request; not supported by simulated gimlet";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
     fn sp_state(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, SpError> {
-        let state = SpState {
-            serial_number: self.serial_number,
-            version: SIM_GIMLET_VERSION,
-            power_state: self.power_state,
-            rot: Ok(RotState {
-                version: SIM_GIMLET_VERSION,
-                messages_received: 0,
-                invalid_messages_received: 0,
-                incomplete_transmissions: 0,
-                rx_fifo_overrun: 0,
-                tx_fifo_underrun: 0,
-            }),
-        };
+        let state = self.sp_state_impl();
         debug!(
             &self.log, "received state request";
             "sender" => %sender,
@@ -1050,5 +1119,23 @@ impl SpHandler for Handler {
             "offset" => offset,
             "data_len" => data.len(),
         );
+    }
+
+    fn set_ipcc_key_lookup_value(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        key: u8,
+        value: &[u8],
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received IPCC key/value; not supported by simulated gimlet";
+            "sender" => %sender,
+            "port" => ?port,
+            "key" => key,
+            "value" => ?value,
+        );
+        Err(SpError::RequestUnsupportedForSp)
     }
 }

@@ -11,6 +11,7 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use std::io::Write;
@@ -115,7 +116,7 @@ impl RouterRoute {
         route_id: Uuid,
         vpc_router_id: Uuid,
         kind: external::RouterRouteKind,
-        params: external::RouterRouteCreateParams,
+        params: params::RouterRouteCreate,
     ) -> Self {
         let identity = RouterRouteIdentity::new(route_id, params.identity);
         Self {
@@ -150,8 +151,8 @@ pub struct RouterRouteUpdate {
     pub destination: RouteDestination,
 }
 
-impl From<external::RouterRouteUpdateParams> for RouterRouteUpdate {
-    fn from(params: external::RouterRouteUpdateParams) -> Self {
+impl From<params::RouterRouteUpdate> for RouterRouteUpdate {
+    fn from(params: params::RouterRouteUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

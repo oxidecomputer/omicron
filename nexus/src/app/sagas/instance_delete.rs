@@ -7,7 +7,9 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::context::OpContext;
+use crate::db;
 use crate::{authn, authz};
+use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,6 +21,7 @@ use steno::ActionError;
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
+    pub instance: db::model::Instance,
 }
 
 // instance delete saga: actions
@@ -33,6 +36,9 @@ declare_saga_actions! {
     }
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
+    }
+    RESOURCES_ACCOUNT -> "no_result4" {
+        + sid_account_resources
     }
 }
 
@@ -55,6 +61,7 @@ impl NexusSaga for SagaInstanceDelete {
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
+        builder.append(resources_account_action());
         Ok(builder.build()?)
     }
 }
@@ -116,6 +123,27 @@ async fn sid_deallocate_external_ip(
     Ok(())
 }
 
+async fn sid_account_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_instance(
+            &opctx,
+            params.instance.id(),
+            params.instance.project_id,
+            i64::from(params.instance.runtime_state.ncpus.0 .0),
+            params.instance.runtime_state.memory,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use crate::{
@@ -161,9 +189,9 @@ mod test {
         instance_id: Uuid,
     ) -> Params {
         let opctx = test_opctx(&cptestctx);
-        let datastore = cptestctx.server.apictx.nexus.datastore();
+        let datastore = cptestctx.server.apictx().nexus.datastore();
 
-        let (.., authz_instance, _instance) =
+        let (.., authz_instance, instance) =
             LookupPath::new(&opctx, &datastore)
                 .instance_id(instance_id)
                 .fetch()
@@ -172,6 +200,7 @@ mod test {
         Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             authz_instance,
+            instance,
         }
     }
 
@@ -201,7 +230,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.apictx().nexus.datastore().clone(),
         )
     }
 
@@ -211,7 +240,7 @@ mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -238,7 +267,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         params: params::InstanceCreate,
     ) -> db::model::Instance {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
@@ -262,7 +291,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters

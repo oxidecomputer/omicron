@@ -107,6 +107,7 @@ pub trait Target {
 /// Example
 /// -------
 /// ```rust
+/// use chrono::Utc;
 /// use oximeter::Metric;
 ///
 /// // A gauge with a floating-point value.
@@ -118,7 +119,7 @@ pub trait Target {
 ///
 /// let met = MyMetric { name: "name".into(), datum: 0.0 };
 /// assert_eq!(met.datum_type(), oximeter::DatumType::F64);
-/// let measurement = met.measure();
+/// let measurement = met.measure(Utc::now());
 /// assert!(measurement.start_time().is_none());
 /// assert_eq!(measurement.datum(), &oximeter::Datum::F64(0.0));
 /// ```
@@ -166,8 +167,8 @@ pub trait Metric {
     /// Return a mutable reference to the underlying metric itself.
     fn datum_mut(&mut self) -> &mut Self::Datum;
 
-    /// Sample the underlying metric, returning a measurement from it.
-    fn measure(&self) -> Measurement;
+    /// Sample the underlying metric, with a caller-supplied timestamp.
+    fn measure(&self, timestamp: DateTime<Utc>) -> Measurement;
 
     /// Return true if the metric is cumulative, else false.
     fn is_cumulative(&self) -> bool {

@@ -4,14 +4,12 @@
 
 //! Handler functions (entrypoints) for external HTTP APIs
 
-use super::views::IpPool;
-use super::views::IpPoolRange;
 use super::{
-    console_api, device_auth, params, views,
+    console_api, device_auth, params,
     views::{
-        GlobalImage, Group, IdentityProvider, Image, Organization, Project,
-        Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc,
-        VpcRouter, VpcSubnet,
+        self, Certificate, GlobalImage, Group, IdentityProvider, Image, IpPool,
+        IpPoolRange, Organization, PhysicalDisk, Project, Rack, Role, Silo,
+        Sled, Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -20,6 +18,7 @@ use crate::db;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
+use chrono::Utc;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
@@ -40,13 +39,12 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_types::identity::AssetIdentityMetadata;
 use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
-use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
-use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
-use omicron_common::api::external::http_pagination::PagField;
+use omicron_common::api::external::http_pagination::name_or_id_pagination;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
@@ -60,11 +58,10 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
-use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
-use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
@@ -85,8 +82,14 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_policy_view)?;
         api.register(system_policy_update)?;
 
+        api.register(system_policy_view_v1)?;
+        api.register(system_policy_update_v1)?;
+
         api.register(policy_view)?;
         api.register(policy_update)?;
+
+        api.register(policy_view_v1)?;
+        api.register(policy_update_v1)?;
 
         api.register(organization_list)?;
         api.register(organization_create)?;
@@ -148,6 +151,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
 
+        api.register(disk_list_v1)?;
+        api.register(disk_create_v1)?;
+        api.register(disk_view_v1)?;
+        api.register(disk_delete_v1)?;
+
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
@@ -157,6 +165,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
+        api.register(instance_disk_list)?;
+        api.register(instance_disk_attach)?;
+        api.register(instance_disk_detach)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
 
@@ -168,6 +179,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_reboot_v1)?;
         api.register(instance_start_v1)?;
         api.register(instance_stop_v1)?;
+        api.register(instance_disk_list_v1)?;
+        api.register(instance_disk_attach_v1)?;
+        api.register(instance_disk_detach_v1)?;
         api.register(instance_serial_console_v1)?;
         api.register(instance_serial_console_stream_v1)?;
 
@@ -178,15 +192,16 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_view_by_id)?;
         api.register(image_delete)?;
 
-        api.register(instance_disk_list)?;
-        api.register(instance_disk_attach)?;
-        api.register(instance_disk_detach)?;
-
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
         api.register(snapshot_view)?;
         api.register(snapshot_view_by_id)?;
         api.register(snapshot_delete)?;
+
+        api.register(snapshot_list_v1)?;
+        api.register(snapshot_create_v1)?;
+        api.register(snapshot_view_v1)?;
+        api.register(snapshot_delete_v1)?;
 
         api.register(vpc_list)?;
         api.register(vpc_create)?;
@@ -194,6 +209,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_view_by_id)?;
         api.register(vpc_update)?;
         api.register(vpc_delete)?;
+
+        api.register(vpc_list_v1)?;
+        api.register(vpc_create_v1)?;
+        api.register(vpc_view_v1)?;
+        api.register(vpc_update_v1)?;
+        api.register(vpc_delete_v1)?;
 
         api.register(vpc_subnet_list)?;
         api.register(vpc_subnet_view)?;
@@ -203,12 +224,25 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_update)?;
         api.register(vpc_subnet_list_network_interfaces)?;
 
+        api.register(vpc_subnet_list_v1)?;
+        api.register(vpc_subnet_view_v1)?;
+        api.register(vpc_subnet_create_v1)?;
+        api.register(vpc_subnet_delete_v1)?;
+        api.register(vpc_subnet_update_v1)?;
+        // api.register(vpc_subnet_list_network_interfaces_v1)?;
+
         api.register(instance_network_interface_create)?;
         api.register(instance_network_interface_list)?;
         api.register(instance_network_interface_view)?;
         api.register(instance_network_interface_view_by_id)?;
         api.register(instance_network_interface_update)?;
         api.register(instance_network_interface_delete)?;
+
+        api.register(instance_network_interface_create_v1)?;
+        api.register(instance_network_interface_list_v1)?;
+        api.register(instance_network_interface_view_v1)?;
+        api.register(instance_network_interface_update_v1)?;
+        api.register(instance_network_interface_delete_v1)?;
 
         api.register(instance_external_ip_list)?;
 
@@ -219,12 +253,24 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_router_delete)?;
         api.register(vpc_router_update)?;
 
+        api.register(vpc_router_list_v1)?;
+        api.register(vpc_router_view_v1)?;
+        api.register(vpc_router_create_v1)?;
+        api.register(vpc_router_delete_v1)?;
+        api.register(vpc_router_update_v1)?;
+
         api.register(vpc_router_route_list)?;
         api.register(vpc_router_route_view)?;
         api.register(vpc_router_route_view_by_id)?;
         api.register(vpc_router_route_create)?;
         api.register(vpc_router_route_delete)?;
         api.register(vpc_router_route_update)?;
+
+        api.register(vpc_router_route_list_v1)?;
+        api.register(vpc_router_route_view_v1)?;
+        api.register(vpc_router_route_create_v1)?;
+        api.register(vpc_router_route_delete_v1)?;
+        api.register(vpc_router_route_update_v1)?;
 
         api.register(vpc_firewall_rules_view)?;
         api.register(vpc_firewall_rules_update)?;
@@ -233,9 +279,21 @@ pub fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
+        api.register(sled_physical_disk_list)?;
+        api.register(physical_disk_list)?;
+
+        api.register(rack_list_v1)?;
+        api.register(rack_view_v1)?;
+        api.register(sled_list_v1)?;
+        api.register(sled_view_v1)?;
+        api.register(sled_physical_disk_list_v1)?;
+        api.register(physical_disk_list_v1)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
+
+        api.register(saga_list_v1)?;
+        api.register(saga_view_v1)?;
 
         api.register(system_user_list)?;
         api.register(system_user_view)?;
@@ -267,13 +325,34 @@ pub fn external_api() -> NexusApiDescription {
         api.register(local_idp_user_delete)?;
         api.register(local_idp_user_set_password)?;
 
+        api.register(certificate_list)?;
+        api.register(certificate_create)?;
+        api.register(certificate_view)?;
+        api.register(certificate_delete)?;
+
+        api.register(certificate_list_v1)?;
+        api.register(certificate_create_v1)?;
+        api.register(certificate_view_v1)?;
+        api.register(certificate_delete_v1)?;
+
         api.register(system_image_list)?;
         api.register(system_image_create)?;
         api.register(system_image_view)?;
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
-        api.register(updates_refresh)?;
+        api.register(system_metric)?;
+
+        api.register(system_update_refresh)?;
+        api.register(system_version)?;
+        api.register(system_component_version_list)?;
+        api.register(system_update_list)?;
+        api.register(system_update_view)?;
+        api.register(system_update_start)?;
+        api.register(system_update_stop)?;
+        api.register(system_update_components_list)?;
+        api.register(update_deployments_list)?;
+        api.register(update_deployment_view)?;
 
         api.register(user_list)?;
         api.register(silo_users_list)?;
@@ -320,26 +399,21 @@ pub fn external_api() -> NexusApiDescription {
 // Generally, HTTP resources are grouped within some collection.  For a
 // relatively simple example:
 //
-//   GET    /organizations            (list the organizations in the collection)
-//   POST   /organizations            (create a organization in the collection)
-//   GET    /organizations/{org_name} (look up a organization in the collection)
-//   DELETE /organizations/{org_name} (delete a organization in the collection)
-//   PUT    /organizations/{org_name} (update a organization in the collection)
-//
-// An exception to this are id lookup operations which have a different top-level route
-// but will still be grouped with the collection.  For example:
-//
-//  GET    /by-id/organizations/{id} (look up a organization in the collection by id)
+//   GET    v1/organizations                (list the organizations in the collection)
+//   POST   v1/organizations                (create a organization in the collection)
+//   GET    v1/organizations/{organization} (look up a organization in the collection)
+//   DELETE v1/organizations/{organization} (delete a organization in the collection)
+//   PUT    v1/organizations/{organization} (update a organization in the collection)
 //
 // We pick a name for the function that implements a given API entrypoint
 // based on how we expect it to appear in the CLI subcommand hierarchy. For
 // example:
 //
-//   GET    /organizations                    -> organization_list()
-//   POST   /organizations                    -> organization_create()
-//   GET    /organizations/{org_name}         -> organization_view()
-//   DELETE /organizations/{org_name}         -> organization_delete()
-//   PUT    /organizations/{org_name}         -> organization_update()
+//   GET    v1/organizations                    -> organization_list()
+//   POST   v1/organizations                    -> organization_create()
+//   GET    v1/organizations/{organization}     -> organization_view()
+//   DELETE v1/organizations/{organization}     -> organization_delete()
+//   PUT    v1/organizations/{organization}     -> organization_update()
 //
 // Note that the path typically uses the entity's plural form while the
 // function name uses its singular.
@@ -360,11 +434,32 @@ pub fn external_api() -> NexusApiDescription {
 /// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
-    path = "/system/policy",
+    path = "/v1/system/policy",
     tags = ["policy"],
 }]
+async fn system_policy_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus.fleet_fetch_policy(&opctx).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the top-level IAM policy
+/// Use `GET /v1/system/policy` instead
+#[endpoint {
+    method = GET,
+    path = "/system/policy",
+    tags = ["policy"],
+    deprecated = true
+}]
 async fn system_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -386,11 +481,36 @@ struct ByIdPathParams {
 /// Update the top-level IAM policy
 #[endpoint {
     method = PUT,
+    path = "/v1/system/policy",
+    tags = ["policy"],
+}]
+async fn system_policy_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let new_policy = new_policy.into_inner();
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the top-level IAM policy
+/// Use 'PUT /v1/system/policy' instead
+#[endpoint {
+    method = PUT,
     path = "/system/policy",
     tags = ["policy"],
 }]
 async fn system_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -411,11 +531,38 @@ async fn system_policy_update(
 /// Fetch the current silo's IAM policy
 #[endpoint {
     method = GET,
-    path = "/policy",
+    path = "/v1/policy",
     tags = ["silos"],
  }]
+pub async fn policy_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy = nexus.silo_fetch_policy(&opctx, lookup).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the current silo's IAM policy
+/// Use `GET /v1/policy` instead
+#[endpoint {
+    method = GET,
+    path = "/policy",
+    tags = ["silos"],
+    deprecated = true,
+ }]
 pub async fn policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -436,11 +583,43 @@ pub async fn policy_view(
 /// Update the current silo's IAM policy
 #[endpoint {
     method = PUT,
-    path = "/policy",
+    path = "/v1/policy",
     tags = ["silos"],
 }]
+async fn policy_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let new_policy = new_policy.into_inner();
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy =
+            nexus.silo_update_policy(&opctx, lookup, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the current silo's IAM policy
+/// Use `PUT /v1/policy` instead
+#[endpoint {
+    method = PUT,
+    path = "/policy",
+    tags = ["silos"],
+    deprecated = true,
+}]
 async fn policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -473,33 +652,23 @@ async fn policy_update(
     tags = ["system"],
 }]
 async fn silo_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Silo>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let silos = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.silos_list_by_id(&opctx, &page_selector).await?
-            }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.silos_list_by_name(&opctx, &page_selector).await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.try_into())
-        .collect::<Result<Vec<_>, Error>>()?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let silos = nexus
+            .silos_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             silos,
@@ -516,7 +685,7 @@ async fn silo_list(
     tags = ["system"],
 }]
 async fn silo_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_silo_params: TypedBody<params::SiloCreate>,
 ) -> Result<HttpResponseCreated<Silo>, HttpError> {
     let apictx = rqctx.context();
@@ -546,7 +715,7 @@ struct SiloPathParam {
     tags = ["system"],
 }]
 async fn silo_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseOk<Silo>, HttpError> {
     let apictx = rqctx.context();
@@ -568,7 +737,7 @@ async fn silo_view(
     tags = ["system"]
 }]
 async fn silo_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Silo>, HttpError> {
     let apictx = rqctx.context();
@@ -592,7 +761,7 @@ async fn silo_view_by_id(
     tags = ["system"],
 }]
 async fn silo_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -614,7 +783,7 @@ async fn silo_delete(
     tags = ["system"],
 }]
 async fn silo_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -638,7 +807,7 @@ async fn silo_policy_view(
     tags = ["system"],
 }]
 async fn silo_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
@@ -670,16 +839,16 @@ async fn silo_policy_update(
     tags = ["system"],
 }]
 async fn silo_users_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let silo_name = path_params.into_inner().silo_name;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let silo_name = path_params.into_inner().silo_name;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
             .silo_list_users(&opctx, &silo_name, &pagparams)
@@ -712,7 +881,7 @@ struct UserPathParam {
     tags = ["system"],
 }]
 async fn silo_user_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserPathParam>,
 ) -> Result<HttpResponseOk<User>, HttpError> {
     let apictx = rqctx.context();
@@ -741,7 +910,7 @@ async fn silo_user_view(
     tags = ["system"],
 }]
 async fn silo_identity_provider_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
@@ -778,7 +947,7 @@ async fn silo_identity_provider_list(
     tags = ["system"],
 }]
 async fn saml_identity_provider_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
 ) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
@@ -815,7 +984,7 @@ struct SiloSamlPathParam {
     tags = ["system"],
 }]
 async fn saml_identity_provider_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloSamlPathParam>,
 ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
@@ -853,7 +1022,7 @@ async fn saml_identity_provider_view(
     tags = ["system"],
 }]
 async fn local_idp_user_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SiloPathParam>,
     new_user_params: TypedBody<params::UserCreate>,
 ) -> Result<HttpResponseCreated<User>, HttpError> {
@@ -881,7 +1050,7 @@ async fn local_idp_user_create(
     tags = ["system"],
 }]
 async fn local_idp_user_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -911,7 +1080,7 @@ async fn local_idp_user_delete(
     tags = ["system"],
 }]
 async fn local_idp_user_set_password(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserPathParam>,
     update: TypedBody<params::UserPassword>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -940,33 +1109,23 @@ async fn local_idp_user_set_password(
     tags = ["organizations"]
 }]
 async fn organization_list_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let organizations = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.organizations_list_by_id(&opctx, &page_selector).await?
-            }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&opctx, &page_selector).await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organizations = nexus
+            .organizations_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             organizations,
@@ -985,33 +1144,23 @@ async fn organization_list_v1(
     deprecated = true
 }]
 async fn organization_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
         let query = query_params.into_inner();
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-
-        let organizations = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.organizations_list_by_id(&opctx, &page_selector).await?
-            }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.organizations_list_by_name(&opctx, &page_selector).await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organizations = nexus
+            .organizations_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             organizations,
@@ -1028,7 +1177,7 @@ async fn organization_list(
     tags = ["organizations"],
 }]
 async fn organization_create_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_organization: TypedBody<params::OrganizationCreate>,
 ) -> Result<HttpResponseCreated<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1052,7 +1201,7 @@ async fn organization_create_v1(
     deprecated = true
 }]
 async fn organization_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_organization: TypedBody<params::OrganizationCreate>,
 ) -> Result<HttpResponseCreated<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1074,7 +1223,7 @@ async fn organization_create(
     tags = ["organizations"],
 }]
 async fn organization_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1112,7 +1261,7 @@ struct OrganizationPathParam {
     deprecated = true
 }]
 async fn organization_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1143,7 +1292,7 @@ async fn organization_view(
     deprecated = true
 }]
 async fn organization_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
     let apictx = rqctx.context();
@@ -1170,7 +1319,7 @@ async fn organization_view_by_id(
     tags = ["organizations"],
 }]
 async fn organization_delete_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -1197,7 +1346,7 @@ async fn organization_delete_v1(
     deprecated = true
 }]
 async fn organization_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -1223,7 +1372,7 @@ async fn organization_delete(
     tags = ["organizations"],
 }]
 async fn organization_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
     updated_organization: TypedBody<params::OrganizationUpdate>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
@@ -1262,7 +1411,7 @@ async fn organization_update_v1(
     deprecated = true
 }]
 async fn organization_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
     updated_organization: TypedBody<params::OrganizationUpdate>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
@@ -1295,7 +1444,7 @@ async fn organization_update(
     tags = ["organizations"],
 }]
 async fn organization_policy_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
@@ -1325,7 +1474,7 @@ async fn organization_policy_view_v1(
     deprecated = true
 }]
 async fn organization_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
@@ -1355,7 +1504,7 @@ async fn organization_policy_view(
     tags = ["organizations"],
 }]
 async fn organization_policy_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
     new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
@@ -1394,7 +1543,7 @@ async fn organization_policy_update_v1(
     deprecated = true
 }]
 async fn organization_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
     new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
@@ -1432,49 +1581,27 @@ async fn organization_policy_update(
     tags = ["projects"],
 }]
 async fn project_list_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::ProjectList>,
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::OrganizationSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_lookup =
-            nexus.organization_lookup(&opctx, &query.organization)?;
-        let params = ScanByNameOrId::from_query(&query.pagination)?;
-        let field = pagination_field_for_scan_params(params);
-        let projects = match field {
-            PagField::Id => {
-                let page_selector =
-                    data_page_params_nameid_id(&rqctx, &query.pagination)?;
-                nexus
-                    .projects_list_by_id(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector,
-                    )
-                    .await?
-            }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query.pagination)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus
-                    .projects_list_by_name(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector,
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+            nexus.organization_lookup(&opctx, &scan_params.selector)?;
+        let projects = nexus
+            .project_list(&opctx, &organization_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query.pagination,
+            &query,
             projects,
             &marker_for_name_or_id,
         )?))
@@ -1491,52 +1618,30 @@ async fn project_list_v1(
     deprecated = true,
 }]
 async fn project_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let organization_selector = &params::OrganizationSelector {
             organization: path.organization_name.into(),
         };
+        let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-        let projects = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus
-                    .projects_list_by_id(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector,
-                    )
-                    .await?
-            }
-
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus
-                    .projects_list_by_name(
-                        &opctx,
-                        &organization_lookup,
-                        &page_selector,
-                    )
-                    .await?
-            }
-        }
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+        let projects = nexus
+            .project_list(&opctx, &organization_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             projects,
@@ -1553,7 +1658,7 @@ async fn project_list(
     tags = ["projects"],
 }]
 async fn project_create_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OrganizationSelector>,
     new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
@@ -1587,7 +1692,7 @@ async fn project_create_v1(
     deprecated = true
 }]
 async fn project_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<OrganizationPathParam>,
     new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
@@ -1620,7 +1725,7 @@ async fn project_create(
     tags = ["projects"],
 }]
 async fn project_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
@@ -1659,7 +1764,7 @@ struct ProjectPathParam {
     deprecated = true
 }]
 async fn project_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1687,7 +1792,7 @@ async fn project_view(
     deprecated = true
 }]
 async fn project_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1711,7 +1816,7 @@ async fn project_view_by_id(
     tags = ["projects"],
 }]
 async fn project_delete_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -1741,7 +1846,7 @@ async fn project_delete_v1(
     deprecated = true
 }]
 async fn project_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -1767,7 +1872,7 @@ async fn project_delete(
     tags = ["projects"],
 }]
 async fn project_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
     updated_project: TypedBody<params::ProjectUpdate>,
@@ -1806,7 +1911,7 @@ async fn project_update_v1(
     deprecated = true
 }]
 async fn project_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     updated_project: TypedBody<params::ProjectUpdate>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
@@ -1839,7 +1944,7 @@ async fn project_update(
     tags = ["projects"],
 }]
 async fn project_policy_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
@@ -1870,7 +1975,7 @@ async fn project_policy_view_v1(
     deprecated = true
 }]
 async fn project_policy_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -1897,7 +2002,7 @@ async fn project_policy_view(
     tags = ["projects"],
 }]
 async fn project_policy_update_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
@@ -1929,7 +2034,7 @@ async fn project_policy_update_v1(
     tags = ["projects"],
 }]
 async fn project_policy_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
@@ -1969,31 +2074,23 @@ pub struct IpPoolPathParam {
     tags = ["system"],
 }]
 async fn ip_pool_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let params = ScanByNameOrId::from_query(&query)?;
-        let field = pagination_field_for_scan_params(params);
-        let pools = match field {
-            PagField::Id => {
-                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
-                nexus.ip_pools_list_by_id(&opctx, &page_selector).await?
-            }
-            PagField::Name => {
-                let page_selector =
-                    data_page_params_nameid_name(&rqctx, &query)?
-                        .map_name(|n| Name::ref_cast(n));
-                nexus.ip_pools_list_by_name(&opctx, &page_selector).await?
-            }
-        }
-        .into_iter()
-        .map(IpPool::from)
-        .collect();
+        let pools = nexus
+            .ip_pools_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(IpPool::from)
+            .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             pools,
@@ -2010,7 +2107,7 @@ async fn ip_pool_list(
     tags = ["system"],
 }]
 async fn ip_pool_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     pool_params: TypedBody<params::IpPoolCreate>,
 ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
@@ -2031,7 +2128,7 @@ async fn ip_pool_create(
     tags = ["system"],
 }]
 async fn ip_pool_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
@@ -2053,7 +2150,7 @@ async fn ip_pool_view(
     tags = ["system"],
 }]
 async fn ip_pool_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
@@ -2075,7 +2172,7 @@ async fn ip_pool_view_by_id(
     tags = ["system"],
 }]
 async fn ip_pool_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -2097,7 +2194,7 @@ async fn ip_pool_delete(
     tags = ["system"],
 }]
 async fn ip_pool_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     updates: TypedBody<params::IpPoolUpdate>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
@@ -2121,7 +2218,7 @@ async fn ip_pool_update(
     tags = ["system"],
 }]
 async fn ip_pool_service_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -2144,7 +2241,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
     tags = ["system"],
 }]
 async fn ip_pool_range_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     query_params: Query<IpPoolRangePaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
@@ -2188,7 +2285,7 @@ async fn ip_pool_range_list(
     tags = ["system"],
 }]
 async fn ip_pool_range_add(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
@@ -2212,7 +2309,7 @@ async fn ip_pool_range_add(
     tags = ["system"],
 }]
 async fn ip_pool_range_remove(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -2238,7 +2335,7 @@ async fn ip_pool_range_remove(
     tags = ["system"],
 }]
 async fn ip_pool_service_range_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<IpPoolRangePaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
     let apictx = rqctx.context();
@@ -2279,7 +2376,7 @@ async fn ip_pool_service_range_list(
     tags = ["system"],
 }]
 async fn ip_pool_service_range_add(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
@@ -2300,7 +2397,7 @@ async fn ip_pool_service_range_add(
     tags = ["system"],
 }]
 async fn ip_pool_service_range_remove(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = &rqctx.context();
@@ -2319,29 +2416,67 @@ async fn ip_pool_service_range_remove(
 /// List disks
 #[endpoint {
     method = GET,
+    path = "/v1/disks",
+    tags = ["disks"],
+}]
+async fn disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, &scan_params.selector)?;
+        let disks = nexus
+            .disk_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|disk| disk.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            disks,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List disks
+/// Use `GET /v1/disks` instead
+#[endpoint {
+    method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"]
+    tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let disks = nexus
-            .project_list_disks(
+            .disk_list(
                 &opctx,
-                organization_name,
-                project_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &project_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -2357,34 +2492,86 @@ async fn disk_list(
 }
 
 /// Create a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks",
+    tags = ["disks"]
+}]
+async fn disk_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    new_disk: TypedBody<params::DiskCreate>,
+) -> Result<HttpResponseCreated<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let params = new_disk.into_inner();
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
+        let disk =
+            nexus.project_create_disk(&opctx, &project_lookup, &params).await?;
+        Ok(HttpResponseCreated(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // TODO-correctness See note about instance create.  This should be async.
+/// Use `POST /v1/disks` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"]
+    tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_disk: TypedBody<params::DiskCreate>,
 ) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let new_disk_params = &new_disk.into_inner();
+    let project_selector = params::ProjectSelector::new(
+        Some(path.organization_name.into()),
+        path.project_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let disk = nexus
-            .project_create_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &new_disk_params,
-            )
+            .project_create_disk(&opctx, &project_lookup, &new_disk_params)
             .await?;
         Ok(HttpResponseCreated(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a disk
+#[endpoint {
+    method = GET,
+    path = "/v1/disks/{disk}",
+    tags = ["disks"]
+}]
+async fn disk_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
+        Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2398,48 +2585,54 @@ struct DiskPathParam {
 }
 
 /// Fetch a disk
+/// Use `GET /v1/disks/{disk}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
     tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
+    let disk_selector = params::DiskSelector::new(
+        Some(path.organization_name.into()),
+        Some(path.project_name.into()),
+        path.disk_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus
-            .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
-            .await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch a disk by id
+/// Use `GET /v1/disks/{disk}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/disks/{id}",
     tags = ["disks"],
+    deprecated = true
 }]
 async fn disk_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
+    let disk_selector = params::DiskSelector::new(None, None, path.id.into());
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let disk = nexus.disk_fetch_by_id(&opctx, id).await?;
+        let (.., disk) =
+            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2448,29 +2641,54 @@ async fn disk_view_by_id(
 /// Delete a disk
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
+    path = "/v1/disks/{disk}",
     tags = ["disks"],
 }]
-async fn disk_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<DiskPathParam>,
+async fn disk_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let disk_name = &path.disk_name;
+    let query = query_params.into_inner();
+    let disk_selector = params::DiskSelector {
+        disk: path.disk,
+        project_selector: query.project_selector,
+    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &disk_name,
-            )
-            .await?;
+        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
+        nexus.project_delete_disk(&opctx, &disk_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Use `DELETE /v1/disks/{disk}` instead
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
+    tags = ["disks"],
+    deprecated = true
+}]
+async fn disk_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let disk_selector = params::DiskSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.disk_name.into(),
+        );
+        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
+        nexus.project_delete_disk(&opctx, &disk_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2495,36 +2713,33 @@ pub enum DiskMetricName {
     tags = ["disks"],
 }]
 async fn disk_metrics_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<MetricsPathParam<DiskPathParam, DiskMetricName>>,
     query_params: Query<
         PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
     >,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-
-    let path = path_params.into_inner();
-    let organization_name = &path.inner.organization_name;
-    let project_name = &path.inner.project_name;
-    let disk_name = &path.inner.disk_name;
-    let metric_name = path.metric_name;
-
-    let query = query_params.into_inner();
-    let limit = rqctx.page_limit(&query)?;
-
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let limit = rqctx.page_limit(&query)?;
+        let disk_selector = params::DiskSelector::new(
+            Some(path.inner.organization_name.into()),
+            Some(path.inner.project_name.into()),
+            path.inner.disk_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
-
-        // This ensures the user is authorized on Action::Read for this disk
-        let disk = nexus
-            .disk_fetch(&opctx, organization_name, project_name, disk_name)
+        let (.., authz_disk) = nexus
+            .disk_lookup(&opctx, &disk_selector)?
+            .lookup_for(authz::Action::Read)
             .await?;
-        let upstairs_uuid = disk.id();
+
         let result = nexus
             .select_timeseries(
-                &format!("crucible_upstairs:{}", metric_name),
-                &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                &format!("crucible_upstairs:{}", path.metric_name),
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
             )
@@ -2544,31 +2759,29 @@ async fn disk_metrics_list(
     tags = ["instances"],
 }]
 async fn instance_list_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::InstanceList>,
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_lookup =
-            nexus.project_lookup(&opctx, &query.project_selector)?;
+            nexus.project_lookup(&opctx, &scan_params.selector)?;
         let instances = nexus
-            .project_list_instances(
-                &opctx,
-                &project_lookup,
-                &data_page_params_for(&rqctx, &query.pagination)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
+            .instance_list(&opctx, &project_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|i| i.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query.pagination,
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
             instances,
-            &marker_for_name,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2581,28 +2794,25 @@ async fn instance_list_v1(
     tags = ["instances"],
 }]
 async fn instance_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let project_selector = params::ProjectSelector::new(
-        Some(path.organization_name.into()),
-        path.project_name.into(),
-    );
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let paginated_by = PaginatedBy::Name(pag_params);
+        let path = path_params.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let instances = nexus
-            .project_list_instances(
-                &opctx,
-                &project_lookup,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
+            .instance_list(&opctx, &project_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -2623,7 +2833,7 @@ async fn instance_list(
     tags = ["instances"],
 }]
 async fn instance_create_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
@@ -2662,7 +2872,7 @@ async fn instance_create_v1(
     deprecated = true,
 }]
 async fn instance_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_instance: TypedBody<params::InstanceCreate>,
 ) -> Result<HttpResponseCreated<Instance>, HttpError> {
@@ -2696,7 +2906,7 @@ async fn instance_create(
     tags = ["instances"],
 }]
 async fn instance_view_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
@@ -2735,7 +2945,7 @@ struct InstancePathParam {
     deprecated = true,
 }]
 async fn instance_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2763,7 +2973,7 @@ async fn instance_view(
     tags = ["instances"],
 }]
 async fn instance_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2790,7 +3000,7 @@ async fn instance_view_by_id(
     tags = ["instances"],
 }]
 async fn instance_delete_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2820,7 +3030,7 @@ async fn instance_delete_v1(
     deprecated = true,
 }]
 async fn instance_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -2849,7 +3059,7 @@ async fn instance_delete(
     tags = ["instances"],
 }]
 async fn instance_migrate_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
     migrate_params: TypedBody<params::InstanceMigrate>,
@@ -2889,7 +3099,7 @@ async fn instance_migrate_v1(
     deprecated = true,
 }]
 async fn instance_migrate(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     migrate_params: TypedBody<params::InstanceMigrate>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
@@ -2925,10 +3135,10 @@ async fn instance_migrate(
     tags = ["instances"],
 }]
 async fn instance_reboot_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -2942,7 +3152,7 @@ async fn instance_reboot_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_reboot(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2956,7 +3166,7 @@ async fn instance_reboot_v1(
     deprecated = true,
 }]
 async fn instance_reboot(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -2984,10 +3194,10 @@ async fn instance_reboot(
     tags = ["instances"],
 }]
 async fn instance_start_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -3001,7 +3211,7 @@ async fn instance_start_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_start(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3015,7 +3225,7 @@ async fn instance_start_v1(
     deprecated = true,
 }]
 async fn instance_start(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -3043,10 +3253,10 @@ async fn instance_start(
     tags = ["instances"],
 }]
 async fn instance_stop_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -3060,7 +3270,7 @@ async fn instance_stop_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let instance = nexus.instance_stop(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(instance.into()))
+        Ok(HttpResponseAccepted(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3074,7 +3284,7 @@ async fn instance_stop_v1(
     deprecated = true,
 }]
 async fn instance_stop(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
@@ -3102,16 +3312,18 @@ async fn instance_stop(
     tags = ["instances"],
 }]
 async fn instance_serial_console_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
-    query_params: Query<params::InstanceSerialConsole>,
+    query_params: Query<params::InstanceSerialConsoleRequest>,
+    selector_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let query = query_params.into_inner();
+    let selector = selector_params.into_inner();
     let instance_selector = params::InstanceSelector {
-        project_selector: query.project_selector,
+        project_selector: selector.project_selector,
         instance: path.instance,
     };
     let handler = async {
@@ -3119,10 +3331,7 @@ async fn instance_serial_console_v1(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let data = nexus
-            .instance_serial_console_data(
-                &instance_lookup,
-                &query.console_params,
-            )
+            .instance_serial_console_data(&instance_lookup, &query)
             .await?;
         Ok(HttpResponseOk(data))
     };
@@ -3138,7 +3347,7 @@ async fn instance_serial_console_v1(
     deprecated = true,
 }]
 async fn instance_serial_console(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     query_params: Query<params::InstanceSerialConsoleRequest>,
 ) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
@@ -3172,10 +3381,10 @@ async fn instance_serial_console(
     tags = ["instances"],
 }]
 async fn instance_serial_console_stream_v1(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    conn: WebsocketConnection,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::OptionalProjectSelector>,
+    conn: WebsocketConnection,
 ) -> WebsocketChannelResult {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -3200,9 +3409,9 @@ async fn instance_serial_console_stream_v1(
     deprecated = true,
 }]
 async fn instance_serial_console_stream(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    conn: WebsocketConnection,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
+    conn: WebsocketConnection,
 ) -> WebsocketChannelResult {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -3219,34 +3428,78 @@ async fn instance_serial_console_stream(
 }
 
 /// List an instance's disks
-// TODO-scalability needs to be paginated
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/disks",
+    tags = ["instances"],
+}]
+async fn instance_disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+    path_params: Path<params::InstancePath>,
+) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: scan_params.selector.project_selector.clone(),
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disks = nexus
+            .instance_list_disks(&opctx, &instance_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            disks,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List an instance's disks
+/// Use `GET /v1/instances/{instance}/disks` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks",
     tags = ["instances"],
+    deprecated = true
 }]
 async fn instance_disk_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let path = path_params.into_inner();
+        let instance_selector = params::InstanceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.instance_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disks = nexus
             .instance_list_disks(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &instance_lookup,
+                &PaginatedBy::Name(pag_params),
             )
             .await?
             .into_iter()
@@ -3264,30 +3517,63 @@ async fn instance_disk_list(
 /// Attach a disk to an instance
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
+    path = "/v1/instances/{instance}/disks/attach",
     tags = ["instances"],
 }]
+async fn instance_disk_attach_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    disk_to_attach: TypedBody<params::DiskPath>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk = disk_to_attach.into_inner().disk;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disk =
+            nexus.instance_attach_disk(&opctx, &instance_lookup, disk).await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Attach a disk to an instance
+/// Use `POST /v1/instances/{instance}/disks/attach` instead
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
+    tags = ["instances"],
+    deprecated = true
+}]
 async fn instance_disk_attach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     disk_to_attach: TypedBody<params::DiskIdentifier>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let disk = disk_to_attach.into_inner();
+    let instance_selector = params::InstanceSelector::new(
+        Some(path.organization_name.clone().into()),
+        Some(path.project_name.clone().into()),
+        path.instance_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disk = nexus
-            .instance_attach_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_attach.into_inner().name.into(),
-            )
+            .instance_attach_disk(&opctx, &instance_lookup, disk.name.into())
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };
@@ -3297,32 +3583,307 @@ async fn instance_disk_attach(
 /// Detach a disk from an instance
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
+    path = "/v1/instances/{instance}/disks/detach",
     tags = ["instances"],
 }]
+async fn instance_disk_detach_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    disk_to_detach: TypedBody<params::DiskPath>,
+) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let disk = disk_to_detach.into_inner().disk;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let disk =
+            nexus.instance_detach_disk(&opctx, &instance_lookup, disk).await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach a disk from an instance
+/// Use `POST /v1/disks/{disk}/detach` instead
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
+    tags = ["instances"],
+    deprecated = true
+}]
 async fn instance_disk_detach(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     disk_to_detach: TypedBody<params::DiskIdentifier>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let disk = disk_to_detach.into_inner();
+    let instance_selector = params::InstanceSelector::new(
+        Some(path.organization_name.clone().into()),
+        Some(path.project_name.clone().into()),
+        path.instance_name.into(),
+    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let disk = nexus
-            .instance_detach_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_to_detach.into_inner().name.into(),
-            )
+            .instance_detach_disk(&opctx, &instance_lookup, disk.name.into())
             .await?;
         Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Certificates
+
+/// List system-wide certificates
+///
+/// Returns a list of all the system-wide certificates. System-wide certificates
+/// are returned sorted by creation date, with the most recent certificates
+/// appearing first.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/certificates",
+    tags = ["system"],
+}]
+async fn certificate_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let certs = nexus
+            .certificates_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|d| d.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            certs,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List system-wide certificates
+///
+/// Returns a list of all the system-wide certificates. System-wide certificates
+/// are returned sorted by creation date, with the most recent certificates
+/// appearing first.
+/// Use `GET /v1/system/certificates` instead
+#[endpoint {
+    method = GET,
+    path = "/system/certificates",
+    tags = ["system"],
+    deprecated = true,
+}]
+async fn certificate_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pag_params = data_page_params_for(&rqctx, &query)?;
+    let scan_params = ScanByNameOrId::from_query(&query)?;
+    let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let certs = nexus
+            .certificates_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|d| d.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            certs,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new system-wide x.509 certificate.
+///
+/// This certificate is automatically used by the Oxide Control plane to serve
+/// external connections.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/certificates",
+    tags = ["system"]
+}]
+async fn certificate_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_cert: TypedBody<params::CertificateCreate>,
+) -> Result<HttpResponseCreated<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let new_cert_params = new_cert.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
+        Ok(HttpResponseCreated(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new system-wide x.509 certificate.
+///
+/// This certificate is automatically used by the Oxide Control plane to serve
+/// external connections.
+/// Use `POST /v1/system/certificates` instead
+#[endpoint {
+    method = POST,
+    path = "/system/certificates",
+    tags = ["system"],
+    deprecated = true,
+}]
+async fn certificate_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_cert: TypedBody<params::CertificateCreate>,
+) -> Result<HttpResponseCreated<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let new_cert_params = new_cert.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
+        Ok(HttpResponseCreated(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Certificate requests
+#[derive(Deserialize, JsonSchema)]
+struct CertificatePathParam {
+    certificate: NameOrId,
+}
+
+/// Fetch a certificate
+///
+/// Returns the details of a specific certificate
+#[endpoint {
+    method = GET,
+    path = "/v1/system/certificates/{certificate}",
+    tags = ["system"],
+}]
+async fn certificate_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseOk<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., cert) =
+            nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
+        Ok(HttpResponseOk(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a certificate
+///
+/// Returns the details of a specific certificate
+/// Use `GET /v1/system/certificates/{certificate}` instead
+#[endpoint {
+    method = GET,
+    path = "/system/certificates/{certificate}",
+    tags = ["system"],
+    deprecated = true,
+}]
+async fn certificate_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseOk<Certificate>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., cert) =
+            nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
+        Ok(HttpResponseOk(cert.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a certificate
+///
+/// Permanently delete a certificate. This operation cannot be undone.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/certificates/{certificate}",
+    tags = ["system"],
+}]
+async fn certificate_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .certificate_delete(
+                &opctx,
+                nexus.certificate_lookup(&opctx, &path.certificate),
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a certificate
+///
+/// Permanently delete a certificate. This operation cannot be undone.
+/// Use `DELETE /v1/system/certificates/{certificate}` instead
+#[endpoint {
+    method = DELETE,
+    path = "/system/certificates/{certificate}",
+    tags = ["system"],
+    deprecated = true,
+}]
+async fn certificate_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CertificatePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .certificate_delete(
+                &opctx,
+                nexus.certificate_lookup(&opctx, &path.certificate),
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3339,7 +3900,7 @@ async fn instance_disk_detach(
     tags = ["system"],
 }]
 async fn system_image_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<GlobalImage>>, HttpError> {
     let apictx = rqctx.context();
@@ -3376,7 +3937,7 @@ async fn system_image_list(
     tags = ["system"]
 }]
 async fn system_image_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
@@ -3405,7 +3966,7 @@ struct GlobalImagePathParam {
     tags = ["system"],
 }]
 async fn system_image_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
@@ -3427,7 +3988,7 @@ async fn system_image_view(
     tags = ["system"],
 }]
 async fn system_image_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
@@ -3453,7 +4014,7 @@ async fn system_image_view_by_id(
     tags = ["system"],
 }]
 async fn system_image_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -3478,7 +4039,7 @@ async fn system_image_delete(
     tags = ["images"],
 }]
 async fn image_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
@@ -3520,7 +4081,7 @@ async fn image_list(
     tags = ["images"]
 }]
 async fn image_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_image: TypedBody<params::ImageCreate>,
 ) -> Result<HttpResponseCreated<Image>, HttpError> {
@@ -3562,7 +4123,7 @@ struct ImagePathParam {
     tags = ["images"],
 }]
 async fn image_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
     let apictx = rqctx.context();
@@ -3593,7 +4154,7 @@ async fn image_view(
     tags = ["images"],
 }]
 async fn image_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
     let apictx = rqctx.context();
@@ -3619,7 +4180,7 @@ async fn image_view_by_id(
     tags = ["images"],
 }]
 async fn image_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -3643,10 +4204,40 @@ async fn image_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/*
- * VPCs
- */
-
+/// List network interfaces
+#[endpoint {
+    method = GET,
+    path = "/v1/network-interfaces",
+    tags = ["instances"],
+}]
+async fn instance_network_interface_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &scan_params.selector)?;
+        let interfaces = nexus
+            .network_interface_list(&opctx, &instance_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            interfaces,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 /// List network interfaces
 #[endpoint {
     method = GET,
@@ -3654,27 +4245,28 @@ async fn image_delete(
     tags = ["instances"],
 }]
 async fn instance_network_interface_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let instance_selector = params::InstanceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.instance_name.into(),
+        );
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let interfaces = nexus
-            .instance_list_network_interfaces(
+            .network_interface_list(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &instance_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -3692,28 +4284,61 @@ async fn instance_network_interface_list(
 /// Create a network interface
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
+    path = "/v1/network-interfaces",
     tags = ["instances"],
 }]
+async fn instance_network_interface_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::InstanceSelector>,
+    interface_params: TypedBody<params::NetworkInterfaceCreate>,
+) -> Result<HttpResponseCreated<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let instance_lookup = nexus.instance_lookup(&opctx, &query)?;
+        let iface = nexus
+            .network_interface_create(
+                &opctx,
+                &instance_lookup,
+                &interface_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(iface.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a network interface
+/// Use `POST /v1/network-interfaces` instead
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
+    tags = ["instances"],
+    deprecated = true
+}]
 async fn instance_network_interface_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     interface_params: TypedBody<params::NetworkInterfaceCreate>,
 ) -> Result<HttpResponseCreated<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let instance_selector = params::InstanceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.instance_name.into(),
+        );
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
         let iface = nexus
-            .instance_create_network_interface(
+            .network_interface_create(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
+                &instance_lookup,
                 &interface_params.into_inner(),
             )
             .await?;
@@ -3738,31 +4363,61 @@ pub struct NetworkInterfacePathParam {
 /// interfaces.
 #[endpoint {
     method = DELETE,
+    path = "/v1/network-interfaces/{interface}",
+    tags = ["instances"],
+}]
+async fn instance_network_interface_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::NetworkInterfacePath>,
+    query_params: Query<params::OptionalInstanceSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector {
+            instance_selector: query.instance_selector,
+            network_interface: path.interface,
+        };
+        let interface_lookup =
+            nexus.network_interface_lookup(&opctx, &interface_selector)?;
+        nexus.network_interface_delete(&opctx, &interface_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a network interface
+///
+/// Note that the primary interface for an instance cannot be deleted if there
+/// are any secondary interfaces. A new primary interface must be designated
+/// first. The primary interface can be deleted if there are no secondary
+/// interfaces.
+#[endpoint {
+    method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
 async fn instance_network_interface_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let interface_name = &path.interface_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .instance_delete_network_interface(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                interface_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.instance_name.into()),
+            path.interface_name.into(),
+        );
+        let interface_lookup =
+            nexus.network_interface_lookup(&opctx, &interface_selector)?;
+        nexus.network_interface_delete(&opctx, &interface_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3771,32 +4426,61 @@ async fn instance_network_interface_delete(
 /// Fetch a network interface
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    path = "/v1/network-interfaces/{interface}",
     tags = ["instances"],
 }]
+async fn instance_network_interface_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::NetworkInterfacePath>,
+    query_params: Query<params::OptionalInstanceSelector>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector {
+            instance_selector: query.instance_selector,
+            network_interface: path.interface,
+        };
+        let (.., interface) = nexus
+            .network_interface_lookup(&opctx, &interface_selector)?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(interface.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a network interface
+/// Use `GET /v1/network-interfaces/{interface}` instead
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    tags = ["instances"],
+    deprecated = true
+}]
 async fn instance_network_interface_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let interface_name = &path.interface_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let interface = nexus
-            .network_interface_fetch(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                interface_name,
-            )
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.instance_name.into()),
+            path.interface_name.into(),
+        );
+        let (.., interface) = nexus
+            .network_interface_lookup(&opctx, &interface_selector)?
+            .fetch()
             .await?;
-        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+        Ok(HttpResponseOk(interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3808,18 +4492,23 @@ async fn instance_network_interface_view(
     tags = ["instances"],
 }]
 async fn instance_network_interface_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let network_interface =
-            nexus.network_interface_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(network_interface.into()))
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector {
+            instance_selector: None,
+            network_interface: path.id.into(),
+        };
+        let (.., interface) = nexus
+            .network_interface_lookup(&opctx, &interface_selector)?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3827,35 +4516,71 @@ async fn instance_network_interface_view_by_id(
 /// Update a network interface
 #[endpoint {
     method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    path = "/v1/network-interfaces/{interface}",
     tags = ["instances"],
 }]
-async fn instance_network_interface_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<NetworkInterfacePathParam>,
+async fn instance_network_interface_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::NetworkInterfacePath>,
+    query_params: Query<params::OptionalInstanceSelector>,
     updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
-    let interface_name = &path.interface_name;
-    let updated_iface = updated_iface.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_iface = updated_iface.into_inner();
+        let network_interface_selector = params::NetworkInterfaceSelector {
+            instance_selector: query.instance_selector,
+            network_interface: path.interface,
+        };
+        let network_interface_lookup = nexus
+            .network_interface_lookup(&opctx, &network_interface_selector)?;
         let interface = nexus
             .network_interface_update(
                 &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                interface_name,
+                &network_interface_lookup,
                 updated_iface,
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update a network interface
+/// Use `PUT /v1/network-interfaces/{interface}` instead
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    tags = ["instances"],
+    deprecated = true
+}]
+async fn instance_network_interface_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<NetworkInterfacePathParam>,
+    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let updated_iface = updated_iface.into_inner();
+        let interface_selector = params::NetworkInterfaceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.instance_name.into()),
+            path.interface_name.into(),
+        );
+        let interface_lookup =
+            nexus.network_interface_lookup(&opctx, &interface_selector)?;
+        let interface = nexus
+            .network_interface_update(&opctx, &interface_lookup, updated_iface)
+            .await?;
+        Ok(HttpResponseOk(interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3869,7 +4594,7 @@ async fn instance_network_interface_update(
     tags = ["instances"],
 }]
 async fn instance_external_ip_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
@@ -3898,29 +4623,67 @@ async fn instance_external_ip_list(
 /// List snapshots
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
+    path = "/v1/snapshots",
     tags = ["snapshots"],
 }]
+async fn snapshot_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<Snapshot>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, &scan_params.selector)?;
+        let snapshots = nexus
+            .snapshot_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            snapshots,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List snapshots
+/// Use `GET /v1/snapshots` instead.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
+    tags = ["snapshots"],
+    deprecated = true
+}]
 async fn snapshot_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Snapshot>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let snapshots = nexus
-            .project_list_snapshots(
+            .snapshot_list(
                 &opctx,
-                organization_name,
-                project_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &project_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -3940,29 +4703,55 @@ async fn snapshot_list(
 /// Creates a point-in-time snapshot from a disk.
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
+    path = "/v1/snapshots",
     tags = ["snapshots"],
 }]
+async fn snapshot_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    new_snapshot: TypedBody<params::SnapshotCreate>,
+) -> Result<HttpResponseCreated<Snapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let new_snapshot_params = &new_snapshot.into_inner();
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
+        let snapshot = nexus
+            .snapshot_create(&opctx, project_lookup, &new_snapshot_params)
+            .await?;
+        Ok(HttpResponseCreated(snapshot.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a snapshot
+/// Use `POST /v1/snapshots` instead.
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
+    tags = ["snapshots"],
+    deprecated = true,
+}]
 async fn snapshot_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_snapshot: TypedBody<params::SnapshotCreate>,
 ) -> Result<HttpResponseCreated<Snapshot>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let new_snapshot_params = &new_snapshot.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let new_snapshot_params = &new_snapshot.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let snapshot = nexus
-            .project_create_snapshot(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &new_snapshot_params,
-            )
+            .snapshot_create(&opctx, project_lookup, &new_snapshot_params)
             .await?;
         Ok(HttpResponseCreated(snapshot.into()))
     };
@@ -3980,51 +4769,83 @@ struct SnapshotPathParam {
 /// Fetch a snapshot
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
+    path = "/v1/snapshots/{snapshot}",
     tags = ["snapshots"],
 }]
+async fn snapshot_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SnapshotPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<Snapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let snapshot_selector = params::SnapshotSelector {
+            project_selector: query.project_selector,
+            snapshot: path.snapshot,
+        };
+        let (.., snapshot) =
+            nexus.snapshot_lookup(&opctx, &snapshot_selector)?.fetch().await?;
+        Ok(HttpResponseOk(snapshot.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a snapshot
+/// Use `GET /v1/snapshots/{snapshot}` instead.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
+    tags = ["snapshots"],
+    deprecated = true
+}]
 async fn snapshot_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SnapshotPathParam>,
 ) -> Result<HttpResponseOk<Snapshot>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let snapshot_name = &path.snapshot_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let snapshot = nexus
-            .snapshot_fetch(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &snapshot_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let selector = params::SnapshotSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.snapshot_name.into(),
+        );
+        let (.., snapshot) =
+            nexus.snapshot_lookup(&opctx, &selector)?.fetch().await?;
         Ok(HttpResponseOk(snapshot.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch a snapshot by id
+/// Use `GET /v1/snapshots/{snapshot}` instead.
 #[endpoint {
     method = GET,
     path = "/by-id/snapshots/{id}",
     tags = ["snapshots"],
+    deprecated = true,
 }]
 async fn snapshot_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Snapshot>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let snapshot = nexus.snapshot_fetch_by_id(&opctx, id).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let selector = params::SnapshotSelector {
+            project_selector: None,
+            snapshot: path.id.into(),
+        };
+        let (.., snapshot) =
+            nexus.snapshot_lookup(&opctx, &selector)?.fetch().await?;
         Ok(HttpResponseOk(snapshot.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4033,29 +4854,57 @@ async fn snapshot_view_by_id(
 /// Delete a snapshot
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
+    path = "/v1/snapshots/{snapshot}",
     tags = ["snapshots"],
 }]
+async fn snapshot_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SnapshotPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let snapshot_selector = params::SnapshotSelector {
+            project_selector: query.project_selector,
+            snapshot: path.snapshot,
+        };
+        let snapshot_lookup =
+            nexus.snapshot_lookup(&opctx, &snapshot_selector)?;
+        nexus.snapshot_delete(&opctx, &snapshot_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a snapshot
+/// Use `DELETE /v1/snapshots/{snapshot}` instead.
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
+    tags = ["snapshots"],
+    deprecated = true
+}]
 async fn snapshot_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SnapshotPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let snapshot_name = &path.snapshot_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_snapshot(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &snapshot_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let snapshot_selector = params::SnapshotSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.snapshot_name.into(),
+        );
+        let snapshot_lookup =
+            nexus.snapshot_lookup(&opctx, &snapshot_selector)?;
+        nexus.snapshot_delete(&opctx, &snapshot_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4066,29 +4915,68 @@ async fn snapshot_delete(
 /// List VPCs
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
+    path = "/v1/vpcs",
     tags = ["vpcs"],
 }]
+async fn vpc_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, &scan_params.selector)?;
+        let vpcs = nexus
+            .vpc_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            vpcs,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List VPCs
+/// Use `GET /v1/vpcs` instead
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
+    tags = ["vpcs"],
+    deprecated = true,
+}]
 async fn vpc_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let vpcs = nexus
-            .project_list_vpcs(
+            .vpc_list(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &project_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -4104,78 +4992,50 @@ async fn vpc_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for VPC requests
-#[derive(Deserialize, JsonSchema)]
-struct VpcPathParam {
-    organization_name: Name,
-    project_name: Name,
-    vpc_name: Name,
-}
-
-/// Fetch a VPC
+/// Create a VPC
 #[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    method = POST,
+    path = "/v1/vpcs",
     tags = ["vpcs"],
 }]
-async fn vpc_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
+async fn vpc_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    body: TypedBody<params::VpcCreate>,
+) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let vpc_name = &path.vpc_name;
+    let query = query_params.into_inner();
+    let new_vpc_params = body.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
         let vpc = nexus
-            .vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
+            .project_create_vpc(&opctx, &project_lookup, &new_vpc_params)
             .await?;
-        Ok(HttpResponseOk(vpc.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a VPC
-#[endpoint {
-    method = GET,
-    path = "/by-id/vpcs/{id}",
-    tags = ["vpcs"],
-}]
-async fn vpc_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let vpc = nexus.vpc_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(vpc.into()))
+        Ok(HttpResponseCreated(vpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Create a VPC
+/// Use `POST /v1/vpcs` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProjectPathParam>,
     new_vpc: TypedBody<params::VpcCreate>,
 ) -> Result<HttpResponseCreated<Vpc>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let new_vpc_params = &new_vpc.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let new_vpc_params = &new_vpc.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let project_selector = params::ProjectSelector::new(
             Some(path.organization_name.into()),
@@ -4190,14 +5050,138 @@ async fn vpc_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a VPC
+#[endpoint {
+    method = GET,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
+async fn vpc_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::VpcPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector {
+            project_selector: query.project_selector,
+            vpc: path.vpc,
+        };
+        let (.., vpc) =
+            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for VPC requests
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    organization_name: Name,
+    project_name: Name,
+    vpc_name: Name,
+}
+
+/// Fetch a VPC
+/// Use `GET /v1/vpcs/{vpc}` instead
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    tags = ["vpcs"],
+    deprecated = true,
+}]
+async fn vpc_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let (.., vpc) =
+            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a VPC
+/// Use `GET /v1/vpcs/{id}` instead
+#[endpoint {
+    method = GET,
+    path = "/by-id/vpcs/{id}",
+    tags = ["vpcs"],
+    deprecated = true,
+}]
+async fn vpc_view_by_id(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(None, None, path.id.into());
+        let (.., vpc) =
+            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Update a VPC
+#[endpoint {
+    method = PUT,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
+async fn vpc_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::VpcPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    updated_vpc: TypedBody<params::VpcUpdate>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_vpc_params = &updated_vpc.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector {
+            project_selector: query.project_selector,
+            vpc: path.vpc,
+        };
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        let vpc = nexus
+            .project_update_vpc(&opctx, &vpc_lookup, &updated_vpc_params)
+            .await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update a VPC
+/// Use `PUT /v1/vpcs/{vpc}` instead
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<params::VpcUpdate>,
 ) -> Result<HttpResponseOk<Vpc>, HttpError> {
@@ -4206,14 +5190,14 @@ async fn vpc_update(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let newvpc = nexus
-            .project_update_vpc(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &updated_vpc.into_inner(),
-            )
+            .project_update_vpc(&opctx, &vpc_lookup, &updated_vpc.into_inner())
             .await?;
         Ok(HttpResponseOk(newvpc.into()))
     };
@@ -4223,59 +5207,124 @@ async fn vpc_update(
 /// Delete a VPC
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    path = "/v1/vpcs/{vpc}",
     tags = ["vpcs"],
 }]
-async fn vpc_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcPathParam>,
+async fn vpc_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::VpcPath>,
+    query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let vpc_name = &path.vpc_name;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_vpc(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &vpc_name,
-            )
-            .await?;
+        let vpc_selector = params::VpcSelector {
+            project_selector: query.project_selector,
+            vpc: path.vpc,
+        };
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        nexus.project_delete_vpc(&opctx, &vpc_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete a VPC
+/// Use `DELETE /v1/vpcs/{vpc}` instead
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
+    tags = ["vpcs"],
+    deprecated = true,
+}]
+async fn vpc_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<VpcPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        nexus.project_delete_vpc(&opctx, &vpc_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a subnet
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-subnets",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &scan_params.selector)?;
+        let subnets = nexus
+            .vpc_subnet_list(&opctx, &vpc_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|vpc| vpc.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            subnets,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List subnets
+/// Use `GET /v1/vpc-subnets` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_subnet_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let vpcs = nexus
-            .vpc_list_subnets(
+            .vpc_subnet_list(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &vpc_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -4290,6 +5339,91 @@ async fn vpc_subnet_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create a subnet
+#[endpoint {
+    method = POST,
+    path = "/v1/vpc-subnets",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::VpcSelector>,
+    create_params: TypedBody<params::VpcSubnetCreate>,
+) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let create = create_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &query)?;
+        let subnet =
+            nexus.vpc_create_subnet(&opctx, &vpc_lookup, &create).await?;
+        Ok(HttpResponseCreated(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a subnet
+/// Use `POST /v1/vpc-subnets` instead
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
+    tags = ["vpcs"],
+    deprecated = true
+}]
+async fn vpc_subnet_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<VpcPathParam>,
+    create_params: TypedBody<params::VpcSubnetCreate>,
+) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        let subnet = nexus
+            .vpc_create_subnet(&opctx, &vpc_lookup, &create_params.into_inner())
+            .await?;
+        Ok(HttpResponseCreated(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a subnet
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-subnets/{subnet}",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<params::VpcSelector>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: Some(query),
+            subnet: path.subnet,
+        };
+        let (.., subnet) =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
+        Ok(HttpResponseOk(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Path parameters for VPC Subnet requests
 #[derive(Deserialize, JsonSchema)]
 struct VpcSubnetPathParam {
@@ -4300,82 +5434,59 @@ struct VpcSubnetPathParam {
 }
 
 /// Fetch a subnet
+/// Use `GET /v1/vpc-subnets/{subnet}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_subnet_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let subnet = nexus
-            .vpc_subnet_fetch(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let (.., subnet) =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
         Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch a subnet by id
+/// Use `GET /v1/vpc-subnets/{id}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/vpc-subnets/{id}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_subnet_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let subnet = nexus.vpc_subnet_fetch_by_id(&opctx, id).await?;
+        let subnet_selector = params::SubnetSelector {
+            subnet: path.id.into(),
+            vpc_selector: None,
+        };
+        let (.., subnet) =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
         Ok(HttpResponseOk(subnet.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a subnet
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["vpcs"],
-}]
-async fn vpc_subnet_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcPathParam>,
-    create_params: TypedBody<params::VpcSubnetCreate>,
-) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let subnet = nexus
-            .vpc_create_subnet(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &create_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4383,27 +5494,58 @@ async fn vpc_subnet_create(
 /// Delete a subnet
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+    path = "/v1/vpc-subnets/{subnet}",
     tags = ["vpcs"],
 }]
+async fn vpc_subnet_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<params::OptionalVpcSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: query.vpc_selector,
+            subnet: path.subnet,
+        };
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        nexus.vpc_delete_subnet(&opctx, &subnet_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a subnet
+/// Use `DELETE /v1/vpc-subnets/{subnet}` instead
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+    tags = ["vpcs"],
+    deprecated = true
+}]
 async fn vpc_subnet_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .vpc_delete_subnet(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
-            )
-            .await?;
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        nexus.vpc_delete_subnet(&opctx, &subnet_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4412,26 +5554,66 @@ async fn vpc_subnet_delete(
 /// Update a subnet
 #[endpoint {
     method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+    path = "/v1/vpc-subnets/{subnet}",
     tags = ["vpcs"],
 }]
+async fn vpc_subnet_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<params::OptionalVpcSelector>,
+    subnet_params: TypedBody<params::VpcSubnetUpdate>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let subnet_params = subnet_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: query.vpc_selector,
+            subnet: path.subnet,
+        };
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        let subnet = nexus
+            .vpc_update_subnet(&opctx, &subnet_lookup, &subnet_params)
+            .await?;
+        Ok(HttpResponseOk(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update a subnet
+/// Use `PUT /v1/vpc-subnets/{subnet}` instead
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
+    tags = ["vpcs"],
+    deprecated = true
+}]
 async fn vpc_subnet_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcSubnetPathParam>,
     subnet_params: TypedBody<params::VpcSubnetUpdate>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
         let subnet = nexus
             .vpc_update_subnet(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
+                &subnet_lookup,
                 &subnet_params.into_inner(),
             )
             .await?;
@@ -4447,7 +5629,7 @@ async fn vpc_subnet_update(
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_list_network_interfaces(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
@@ -4490,7 +5672,7 @@ async fn vpc_subnet_list_network_interfaces(
     tags = ["vpcs"],
 }]
 async fn vpc_firewall_rules_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
     // TODO: Check If-Match and fail if the ETag doesn't match anymore.
@@ -4523,7 +5705,7 @@ async fn vpc_firewall_rules_view(
     tags = ["vpcs"],
 }]
 async fn vpc_firewall_rules_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
 ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
@@ -4555,28 +5737,67 @@ async fn vpc_firewall_rules_update(
 /// List routers
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
+    path = "/v1/vpc-routers",
     tags = ["vpcs"],
 }]
+async fn vpc_router_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &scan_params.selector)?;
+        let routers = nexus
+            .vpc_router_list(&opctx, &vpc_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            routers,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List routers
+/// Use `GET /v1/vpc-routers` instead
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
+    tags = ["vpcs"],
+    deprecated = true,
+}]
 async fn vpc_router_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let routers = nexus
-            .vpc_list_routers(
+            .vpc_router_list(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &vpc_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -4591,6 +5812,34 @@ async fn vpc_router_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get a router
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-routers/{router}",
+    tags = ["vpcs"],
+}]
+async fn vpc_router_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::RouterPath>,
+    query_params: Query<params::VpcSelector>,
+) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let router_selector = params::RouterSelector {
+            vpc_selector: Some(query),
+            router: path.router,
+        };
+        let (.., vpc_router) =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?.fetch().await?;
+        Ok(HttpResponseOk(vpc_router.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Path parameters for VPC Router requests
 #[derive(Deserialize, JsonSchema)]
 struct VpcRouterPathParam {
@@ -4601,29 +5850,32 @@ struct VpcRouterPathParam {
 }
 
 /// Get a router
+/// Use `GET /v1/vpc-routers/{router}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_router_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let vpc_router = nexus
-            .vpc_router_fetch(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let router_selector = params::RouterSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.router_name.into(),
+        );
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
+        let (.., vpc_router) = router_lookup.fetch().await?;
+
         Ok(HttpResponseOk(vpc_router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4636,43 +5888,85 @@ async fn vpc_router_view(
     tags = ["vpcs"],
 }]
 async fn vpc_router_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let router = nexus.vpc_router_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(router.into()))
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let router_selector = params::RouterSelector {
+            vpc_selector: None,
+            router: path.id.into(),
+        };
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
+        let (.., vpc_router) = router_lookup.fetch().await?;
+        Ok(HttpResponseOk(vpc_router.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a VPC router
+#[endpoint {
+    method = POST,
+    path = "/v1/vpc-routers",
+    tags = ["vpcs"],
+}]
+async fn vpc_router_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::VpcSelector>,
+    create_params: TypedBody<params::VpcRouterCreate>,
+) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let create = create_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &query)?;
+        let router = nexus
+            .vpc_create_router(
+                &opctx,
+                &vpc_lookup,
+                &db::model::VpcRouterKind::Custom,
+                &create,
+            )
+            .await?;
+        Ok(HttpResponseCreated(router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Create a router
+/// Use `POST /v1/vpc-routers` instead
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_router_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcPathParam>,
     create_params: TypedBody<params::VpcRouterCreate>,
 ) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let router = nexus
             .vpc_create_router(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
+                &vpc_lookup,
                 &db::model::VpcRouterKind::Custom,
                 &create_params.into_inner(),
             )
@@ -4685,28 +5979,92 @@ async fn vpc_router_create(
 /// Delete a router
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
 }]
+async fn vpc_router_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::RouterPath>,
+    query_params: Query<params::OptionalVpcSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let router_selector = params::RouterSelector {
+            vpc_selector: query.vpc_selector,
+            router: path.router,
+        };
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
+        nexus.vpc_delete_router(&opctx, &router_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a router
+/// Use `DELETE /v1/vpc-routers/{router}` instead
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
+    tags = ["vpcs"],
+    deprecated = true,
+}]
 async fn vpc_router_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .vpc_delete_router(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
-            )
-            .await?;
+        let router_selector = params::RouterSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.router_name.into(),
+        );
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
+        nexus.vpc_delete_router(&opctx, &router_lookup).await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update a router
+#[endpoint {
+    method = PUT,
+    path = "/v1/vpc-routers/{router}",
+    tags = ["vpcs"],
+}]
+async fn vpc_router_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::RouterPath>,
+    query_params: Query<params::OptionalVpcSelector>,
+    router_params: TypedBody<params::VpcRouterUpdate>,
+) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let router_params = router_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let router_selector = params::RouterSelector {
+            vpc_selector: query.vpc_selector,
+            router: path.router,
+        };
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
+        let router = nexus
+            .vpc_update_router(&opctx, &router_lookup, &router_params)
+            .await?;
+        Ok(HttpResponseOk(router.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4716,28 +6074,71 @@ async fn vpc_router_delete(
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_router_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VpcRouterPathParam>,
     router_params: TypedBody<params::VpcRouterUpdate>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let router_selector = params::RouterSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.router_name.into(),
+        );
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
         let router = nexus
             .vpc_update_router(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
+                &router_lookup,
                 &router_params.into_inner(),
             )
             .await?;
         Ok(HttpResponseOk(router.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// List routes
+///
+/// List the routes associated with a router in a particular VPC.
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-router-routes",
+    tags = ["vpcs"],
+}]
+async fn vpc_router_route_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::RouterSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &scan_params.selector)?;
+        let routes = nexus
+            .vpc_router_route_list(&opctx, &router_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|route| route.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            routes,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4747,31 +6148,37 @@ async fn vpc_router_update(
 /// List routes
 ///
 /// List the routes associated with a router in a particular VPC.
+/// Use `GET /v1/vpc-router-routes` instead.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let router_selector = params::RouterSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.router_name.into(),
+        );
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
         let routes = nexus
-            .router_list_routes(
+            .vpc_router_route_list(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &router_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -4782,6 +6189,36 @@ async fn vpc_router_route_list(
             routes,
             &marker_for_name,
         )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a route
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-router-routes/{route}",
+    tags = ["vpcs"],
+}]
+async fn vpc_router_route_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::RoutePath>,
+    query_params: Query<params::RouterSelector>,
+) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let route_selector = params::RouteSelector {
+            router_selector: Some(query),
+            route: path.route,
+        };
+        let (.., route) = nexus
+            .vpc_router_route_lookup(&opctx, &route_selector)?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4797,29 +6234,32 @@ struct RouterRoutePathParam {
 }
 
 /// Fetch a route
+/// Use `GET /v1/vpc-router-routes/{route}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let route = nexus
-            .route_fetch(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
-                &path.route_name,
-            )
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let route_selector = params::RouteSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            Some(path.router_name.into()),
+            path.route_name.into(),
+        );
+        let (.., route) = nexus
+            .vpc_router_route_lookup(&opctx, &route_selector)?
+            .fetch()
             .await?;
         Ok(HttpResponseOk(route.into()))
     };
@@ -4827,22 +6267,30 @@ async fn vpc_router_route_view(
 }
 
 /// Fetch a route by id
+/// Use `GET /v1/vpc-router-routes/{route}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/vpc-router-routes/{id}",
-    tags = ["vpcs"]
+    tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_view_by_id(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let route = nexus.route_fetch_by_id(&opctx, id).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let route_selector = params::RouteSelector {
+            router_selector: None,
+            route: path.id.into(),
+        };
+        let (.., route) = nexus
+            .vpc_router_route_lookup(&opctx, &route_selector)?
+            .fetch()
+            .await?;
         Ok(HttpResponseOk(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4851,26 +6299,64 @@ async fn vpc_router_route_view_by_id(
 /// Create a router
 #[endpoint {
     method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+    path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
 }]
-async fn vpc_router_route_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<VpcRouterPathParam>,
-    create_params: TypedBody<RouterRouteCreateParams>,
+async fn vpc_router_route_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::RouterSelector>,
+    create_params: TypedBody<params::RouterRouteCreate>,
 ) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let create = create_params.into_inner();
+        let router_lookup = nexus.vpc_router_lookup(&opctx, &query)?;
         let route = nexus
             .router_create_route(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
+                &router_lookup,
+                &RouterRouteKind::Custom,
+                &create,
+            )
+            .await?;
+        Ok(HttpResponseCreated(route.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a router
+/// Use `POST /v1/vpc-router-routes` instead
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
+    tags = ["vpcs"],
+    deprecated = true
+}]
+async fn vpc_router_route_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<VpcRouterPathParam>,
+    create_params: TypedBody<params::RouterRouteCreate>,
+) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let router_selector = params::RouterSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.router_name.into(),
+        );
+        let router_lookup =
+            nexus.vpc_router_lookup(&opctx, &router_selector)?;
+        let route = nexus
+            .router_create_route(
+                &opctx,
+                &router_lookup,
                 &RouterRouteKind::Custom,
                 &create_params.into_inner(),
             )
@@ -4883,61 +6369,131 @@ async fn vpc_router_route_create(
 /// Delete a route
 #[endpoint {
     method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+    path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_route_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<RouterRoutePathParam>,
+async fn vpc_router_route_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::RoutePath>,
+    query_params: Query<params::OptionalRouterSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .router_delete_route(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
-                &path.route_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let route_selector = params::RouteSelector {
+            router_selector: query.router_selector,
+            route: path.route,
+        };
+        let route_lookup =
+            nexus.vpc_router_route_lookup(&opctx, &route_selector)?;
+        nexus.router_delete_route(&opctx, &route_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Delete a route
+/// Use `DELETE /v1/vpc-router-routes/{route}` instead
+#[endpoint {
+    method = DELETE,
+    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
+    tags = ["vpcs"],
+    deprecated = true
+}]
+async fn vpc_router_route_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<RouterRoutePathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let route_selector = params::RouteSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            Some(path.router_name.into()),
+            path.route_name.into(),
+        );
+        let route_lookup =
+            nexus.vpc_router_route_lookup(&opctx, &route_selector)?;
+        nexus.router_delete_route(&opctx, &route_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 /// Update a route
+#[endpoint {
+    method = PUT,
+    path = "/v1/vpc-router-routes/{route}",
+    tags = ["vpcs"],
+}]
+async fn vpc_router_route_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::RoutePath>,
+    query_params: Query<params::OptionalRouterSelector>,
+    router_params: TypedBody<params::RouterRouteUpdate>,
+) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let router_params = router_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let route_selector = params::RouteSelector {
+            router_selector: query.router_selector,
+            route: path.route,
+        };
+        let route_lookup =
+            nexus.vpc_router_route_lookup(&opctx, &route_selector)?;
+        let route = nexus
+            .router_update_route(&opctx, &route_lookup, &router_params)
+            .await?;
+        Ok(HttpResponseOk(route.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update a route
+/// Use `PUT /v1/vpc-router-routes/{route}` instead
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_router_route_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RouterRoutePathParam>,
-    router_params: TypedBody<RouterRouteUpdateParams>,
+    router_params: TypedBody<params::RouterRouteUpdate>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let router_route = nexus
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let route_selector = params::RouteSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            Some(path.router_name.into()),
+            path.route_name.into(),
+        );
+        let route_lookup =
+            nexus.vpc_router_route_lookup(&opctx, &route_selector)?;
+        let route = nexus
             .router_update_route(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.router_name,
-                &path.route_name,
+                &route_lookup,
                 &router_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(router_route.into()))
+        Ok(HttpResponseOk(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4947,11 +6503,43 @@ async fn vpc_router_route_update(
 /// List racks
 #[endpoint {
     method = GET,
-    path = "/system/hardware/racks",
+    path = "/v1/system/hardware/racks",
     tags = ["system"],
 }]
+async fn rack_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let racks = nexus
+            .racks_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            racks,
+            &|_, rack: &Rack| rack.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List racks
+/// Use `GET /v1/system/hardware/racks` instead
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/racks",
+    tags = ["system"],
+    deprecated = true,
+}]
 async fn rack_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
     let apictx = rqctx.context();
@@ -4984,11 +6572,34 @@ struct RackPathParam {
 /// Fetch a rack
 #[endpoint {
     method = GET,
-    path = "/system/hardware/racks/{rack_id}",
+    path = "/v1/system/hardware/racks/{rack_id}",
     tags = ["system"],
 }]
+async fn rack_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<RackPathParam>,
+) -> Result<HttpResponseOk<Rack>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let rack_info = nexus.rack_lookup(&opctx, &path.rack_id).await?;
+        Ok(HttpResponseOk(rack_info.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a rack
+/// Use `GET /v1/system/hardware/racks/{rack_id}` instead
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/racks/{rack_id}",
+    tags = ["system"],
+    deprecated = true,
+}]
 async fn rack_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOk<Rack>, HttpError> {
     let apictx = rqctx.context();
@@ -5007,11 +6618,43 @@ async fn rack_view(
 /// List sleds
 #[endpoint {
     method = GET,
-    path = "/system/hardware/sleds",
+    path = "/v1/system/hardware/sleds",
     tags = ["system"],
 }]
+async fn sled_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let sleds = nexus
+            .sleds_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            sleds,
+            &|_, sled: &Sled| sled.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List sleds
+/// Use `GET /v1/system/hardware/sleds instead`
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/sleds",
+    tags = ["system"],
+    deprecated = true,
+}]
 async fn sled_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
     let apictx = rqctx.context();
@@ -5044,11 +6687,34 @@ struct SledPathParam {
 /// Fetch a sled
 #[endpoint {
     method = GET,
-    path = "/system/hardware/sleds/{sled_id}",
+    path = "/v1/system/hardware/sleds/{sled_id}",
     tags = ["system"],
 }]
+async fn sled_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledPathParam>,
+) -> Result<HttpResponseOk<Sled>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let sled_info = nexus.sled_lookup(&opctx, &path.sled_id).await?;
+        Ok(HttpResponseOk(sled_info.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a sled
+/// Use `GET /v1/system/hardware/sleds/{sled_id}` instead
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/sleds/{sled_id}",
+    tags = ["system"],
+    deprecated = true,
+}]
 async fn sled_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SledPathParam>,
 ) -> Result<HttpResponseOk<Sled>, HttpError> {
     let apictx = rqctx.context();
@@ -5062,16 +6728,212 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// Physical disks
+
+/// List physical disks
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/disks",
+    tags = ["system"],
+}]
+async fn physical_disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .physical_disk_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List physical disks
+/// Use `GET /v1/system/hardware/disks` instead
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/disks",
+    tags = ["system"],
+    deprecated = true,
+}]
+async fn physical_disk_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .physical_disk_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List physical disks attached to sleds
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/sleds/{sled_id}/disks",
+    tags = ["system"],
+}]
+async fn sled_physical_disk_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledPathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .sled_list_physical_disks(
+                &opctx,
+                path.sled_id,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List physical disks attached to sleds
+/// Use `GET /v1/system/hardware/sleds/{sled_id}/disks` instead
+#[endpoint {
+    method = GET,
+    path = "/system/hardware/sleds/{sled_id}/disks",
+    tags = ["system"],
+    deprecated = true,
+}]
+async fn sled_physical_disk_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledPathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disks = nexus
+            .sled_list_physical_disks(
+                &opctx,
+                path.sled_id,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            disks,
+            &|_, disk: &PhysicalDisk| disk.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Metrics
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SystemMetricParams {
+    #[serde(flatten)]
+    pub pagination: dropshot::PaginationParams<
+        params::ResourceMetrics,
+        params::ResourceMetrics,
+    >,
+
+    /// The UUID of the container being queried
+    // TODO: I might want to force the caller to specify type here?
+    pub id: Uuid,
+}
+
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMetricName {
+    VirtualDiskSpaceProvisioned,
+    CpusProvisioned,
+    RamProvisioned,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SystemMetricsPathParam {
+    metric_name: SystemMetricName,
+}
+
+/// Access metrics data
+#[endpoint {
+     method = GET,
+     path = "/system/metrics/{metric_name}",
+     tags = ["system"],
+}]
+async fn system_metric(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SystemMetricsPathParam>,
+    query_params: Query<SystemMetricParams>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let metric_name = path_params.into_inner().metric_name;
+
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query.pagination)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let result = nexus
+            .system_metric_lookup(&opctx, metric_name, query, limit)
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Updates
 
 /// Refresh update data
 #[endpoint {
      method = POST,
-     path = "/system/updates/refresh",
+     path = "/v1/system/update/refresh",
      tags = ["system"],
 }]
-async fn updates_refresh(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+async fn system_update_refresh(
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -5083,16 +6945,331 @@ async fn updates_refresh(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// View system version and update status
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/version",
+     tags = ["system"],
+}]
+async fn system_version(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<views::SystemVersion>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        // The only way we have no latest deployment is if the rack was just set
+        // up and no system updates have ever been run. In this case there is no
+        // update running, so we can fall back to steady.
+        let status = nexus
+            .latest_update_deployment(&opctx)
+            .await
+            .map_or(views::UpdateStatus::Steady, |d| d.status.into());
+
+        // Updateable components, however, are populated at rack setup before
+        // the external API is even started, so if we get here and there are no
+        // components, that's a real issue and the 500 we throw is appropriate.
+        let low = nexus.lowest_component_system_version(&opctx).await?.into();
+        let high = nexus.highest_component_system_version(&opctx).await?.into();
+
+        Ok(HttpResponseOk(views::SystemVersion {
+            version_range: views::VersionRange { low, high },
+            status,
+        }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View version and update status of component tree
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/components",
+     tags = ["system"],
+}]
+async fn system_component_version_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::UpdateableComponent>>, HttpError>
+{
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let components = nexus
+            .updateable_components_list_by_id(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|u| u.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            components,
+            &|_, u: &views::UpdateableComponent| u.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List all updates
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/updates",
+     tags = ["system"],
+}]
+async fn system_update_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::SystemUpdate>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let updates = nexus
+            .system_updates_list_by_id(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|u| u.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            updates,
+            &|_, u: &views::SystemUpdate| u.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View system update
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/updates/{version}",
+     tags = ["system"],
+}]
+async fn system_update_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SystemUpdatePath>,
+) -> Result<HttpResponseOk<views::SystemUpdate>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let system_update =
+            nexus.system_update_fetch_by_version(&opctx, &path.version).await?;
+        Ok(HttpResponseOk(system_update.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View system update component tree
+#[endpoint {
+    method = GET,
+    path = "/v1/system/update/updates/{version}/components",
+    tags = ["system"],
+}]
+async fn system_update_components_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SystemUpdatePath>,
+) -> Result<HttpResponseOk<ResultsPage<views::ComponentUpdate>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let components = nexus
+            .system_update_list_components(&opctx, &path.version)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ResultsPage { items: components, next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Start system update
+#[endpoint {
+    method = POST,
+    path = "/v1/system/update/start",
+    tags = ["system"],
+}]
+async fn system_update_start(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    // The use of the request body here instead of a path param is deliberate.
+    // Unlike instance start (which uses a path param), update start is about
+    // modifying the state of the system rather than the state of the resource
+    // (instance there, system update here) identified by the param. This
+    // approach also gives us symmetry with the /stop endpoint.
+    update: TypedBody<params::SystemUpdateStart>,
+) -> Result<HttpResponseAccepted<views::UpdateDeployment>, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // inverse situation to stop: we only want to actually start an update
+        // if there isn't one already in progress.
+
+        // 1. check that there is no update in progress
+        //   a. if there is one, this should probably 409
+        // 2. kick off the update start saga, which
+        //   a. tells the update system to get going
+        //   b. creates an update deployment
+
+        // similar question for stop: do we return the deployment directly, or a
+        // special StartUpdateResult that includes a deployment ID iff an update
+        // was actually started
+
+        Ok(HttpResponseAccepted(views::UpdateDeployment {
+            identity: AssetIdentityMetadata {
+                id: Uuid::new_v4(),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+            },
+            version: update.into_inner().version,
+            status: views::UpdateStatus::Updating,
+        }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Stop system update
+///
+/// If there is no update in progress, do nothing.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/update/stop",
+    tags = ["system"],
+}]
+async fn system_update_stop(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let _nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // TODO: Implement stopping an update. Should probably be a saga.
+
+        // Ask update subsystem if it's doing anything. If so, tell it to stop.
+        // This could be done in a single call to the updater if the latter can
+        // respond to a stop command differently depending on whether it did
+        // anything or not.
+
+        // If we did in fact stop a running update, update the status on the
+        // latest update deployment in the DB to `stopped` and respond with that
+        // deployment. If we do nothing, what should we return? Maybe instead of
+        // responding with the deployment, this endpoint gets its own
+        // `StopUpdateResult` response view that says whether it was a noop, and
+        // if it wasn't, includes the ID of the stopped deployment, which allows
+        // the client to fetch it if it actually wants it.
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List all update deployments
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/deployments",
+     tags = ["system"],
+}]
+async fn update_deployments_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::UpdateDeployment>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let updates = nexus
+            .update_deployments_list_by_id(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|u| u.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            updates,
+            &|_, u: &views::UpdateDeployment| u.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a system update deployment
+#[endpoint {
+     method = GET,
+     path = "/v1/system/update/deployments/{id}",
+     tags = ["system"],
+}]
+async fn update_deployment_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<views::UpdateDeployment>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let deployment =
+            nexus.update_deployment_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(deployment.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Sagas
 
 /// List sagas
 #[endpoint {
     method = GET,
-    path = "/system/sagas",
+    path = "/v1/system/sagas",
     tags = ["system"],
 }]
+async fn saga_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
+        let view_list = to_list(saga_stream).await;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &|_, saga: &Saga| saga.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List sagas
+/// Use `GET v1/system/sagas` instead
+#[endpoint {
+    method = GET,
+    path = "/system/sagas",
+    tags = ["system"],
+    deprecated = true,
+}]
 async fn saga_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
     let apictx = rqctx.context();
@@ -5121,11 +7298,34 @@ struct SagaPathParam {
 /// Fetch a saga
 #[endpoint {
     method = GET,
-    path = "/system/sagas/{saga_id}",
+    path = "/v1/system/sagas/{saga_id}",
     tags = ["system"],
 }]
+async fn saga_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SagaPathParam>,
+) -> Result<HttpResponseOk<Saga>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let saga = nexus.saga_get(&opctx, path.saga_id).await?;
+        Ok(HttpResponseOk(saga))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a saga
+/// Use `GET v1/system/sagas/{saga_id}` instead
+#[endpoint {
+    method = GET,
+    path = "/system/sagas/{saga_id}",
+    tags = ["system"],
+    deprecated = true,
+}]
 async fn saga_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SagaPathParam>,
 ) -> Result<HttpResponseOk<Saga>, HttpError> {
     let apictx = rqctx.context();
@@ -5148,7 +7348,7 @@ async fn saga_view(
     tags = ["silos"],
 }]
 async fn user_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
     let apictx = rqctx.context();
@@ -5181,7 +7381,7 @@ async fn user_list(
     tags = ["silos"],
 }]
 async fn group_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
     let apictx = rqctx.context();
@@ -5214,7 +7414,7 @@ async fn group_list(
     tags = ["system"],
 }]
 async fn system_user_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
     let apictx = rqctx.context();
@@ -5253,7 +7453,7 @@ struct BuiltinUserPathParam {
     tags = ["system"],
 }]
 async fn system_user_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<BuiltinUserPathParam>,
 ) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
     let apictx = rqctx.context();
@@ -5275,7 +7475,7 @@ async fn system_user_view(
     tags = ["metrics"],
 }]
 async fn timeseries_schema_get(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<oximeter_db::TimeseriesSchemaPaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>, HttpError>
 {
@@ -5307,7 +7507,7 @@ struct RolePage {
     tags = ["roles"],
 }]
 async fn role_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
 ) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
     let apictx = rqctx.context();
@@ -5361,7 +7561,7 @@ struct RolePathParam {
     tags = ["roles"],
 }]
 async fn role_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RolePathParam>,
 ) -> Result<HttpResponseOk<Role>, HttpError> {
     let apictx = rqctx.context();
@@ -5387,7 +7587,7 @@ async fn role_view(
     tags = ["session"],
 }]
 async fn session_sshkey_list(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
     let apictx = rqctx.context();
@@ -5425,7 +7625,7 @@ async fn session_sshkey_list(
     tags = ["session"],
 }]
 async fn session_sshkey_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     new_key: TypedBody<params::SshKeyCreate>,
 ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
     let apictx = rqctx.context();
@@ -5459,7 +7659,7 @@ struct SshKeyPathParams {
     tags = ["session"],
 }]
 async fn session_sshkey_view(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
     let apictx = rqctx.context();
@@ -5488,7 +7688,7 @@ async fn session_sshkey_view(
     tags = ["session"],
 }]
 async fn session_sshkey_delete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();

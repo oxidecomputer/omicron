@@ -2,6 +2,9 @@
 # Oxide API: configuration file for test suite
 #
 
+# Avoid conflicting with other ports during HTTPS tests
+nexus_https_port = 0
+
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "tests/static"
@@ -41,7 +44,7 @@ max_vpc_ipv4_subnet_prefix = 29
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 
-[[deployment.dropshot_external]]
+[deployment.dropshot_external]
 # NOTE: for the test suite, the port MUST be 0 (in order to bind to any
 # available port) because the test suite will be running many servers
 # concurrently.

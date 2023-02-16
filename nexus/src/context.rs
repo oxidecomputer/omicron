@@ -171,8 +171,9 @@ impl ServerContext {
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
-            resolver,
+            Arc::new(tokio::sync::Mutex::new(resolver)),
             pool,
+            &producer_registry,
             config,
             Arc::clone(&authz),
         )
@@ -335,7 +336,7 @@ impl OpContext {
         rqctx: &dropshot::RequestContext<T>,
         metadata: &mut BTreeMap<String, String>,
     ) {
-        let request = rqctx.request.lock().await;
+        let request = &rqctx.request;
         metadata.insert(String::from("request_id"), rqctx.request_id.clone());
         metadata
             .insert(String::from("http_method"), request.method().to_string());
