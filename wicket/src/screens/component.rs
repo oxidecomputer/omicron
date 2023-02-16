@@ -13,7 +13,6 @@ use crate::defaults::style;
 use crate::screens::ScreenId;
 use crate::widgets::HelpButtonState;
 use crate::widgets::HelpMenuState;
-use crate::widgets::ScreenButtonState;
 use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
@@ -35,8 +34,9 @@ impl ComponentScreen {
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
             ("<ESC>", "Exit help menu | Go back to the rack screen"),
-            ("<CTRL-r>", "Go back to the rack screen"),
             ("<CTRL-h>", "Toggle this help menu"),
+            ("<CTRL-n>", "Goto the next screen"),
+            ("<CTRL-p>", "Goto the previous screen"),
             ("<CTRL-c>", "Exit the program"),
         ];
         ComponentScreen {
@@ -44,9 +44,8 @@ impl ComponentScreen {
                 hovered: None,
                 help_button_state: HelpButtonState::new(1, 0),
                 help_menu_state: HelpMenuState::new(help_text),
-                rack_screen_button_state: ScreenButtonState::new(
-                    ScreenId::Rack,
-                ),
+                prev_screen: Some(ScreenId::Rack),
+                next_screen: ScreenId::Update,
             },
         }
     }
@@ -201,11 +200,11 @@ impl Screen for ComponentScreen {
     fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.common.draw_background(f);
-            self.common.draw_menubar(f, state);
+            self.common.draw_menubar(f);
             self.draw_component_list(f, state);
             self.draw_power_state(f, state);
             self.common.draw_help_menu(f);
-            self.common.draw_screen_selection_buttons(f);
+            self.common.draw_screen_navigation_instructions(f);
             self.draw_inventory(f, state);
             state.status_bar.draw(f);
         })?;
@@ -222,6 +221,11 @@ impl Screen for ComponentScreen {
             }
             ScreenEvent::Term(TermEvent::Resize(width, height)) => {
                 self.common.resize(width, height);
+                // This is kind of a hack to ensure the TabIndex is set if not
+                // selected in the rack screen. We always resize before drawing
+                // on screen switch, so we just ensure the TabIndex is set
+                // and there is a valid ComponentId.
+                state.rack_state.ensure_component_id_is_valid();
                 // A redraw always occurs in the wizard
                 vec![]
             }

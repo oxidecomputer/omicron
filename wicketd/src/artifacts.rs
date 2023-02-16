@@ -20,24 +20,9 @@ use futures::stream;
 use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
 use omicron_common::update::ArtifactId;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use thiserror::Error;
 use tough::TargetName;
 use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
-
-/// Path parameters for TUF repositories.
-#[derive(
-    Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Deserialize, JsonSchema,
-)]
-#[allow(dead_code)]
-pub struct TufRepositoryId {
-    /// The repository's name.
-    pub name: String,
-
-    /// The version of the repository.
-    pub version: String,
-}
 
 /// The artifact store for wicketd.
 ///
@@ -57,12 +42,8 @@ impl WicketdArtifactStore {
         Self { log, artifacts: Default::default() }
     }
 
-    pub(crate) fn put_repository(
-        &self,
-        id: TufRepositoryId,
-        bytes: &[u8],
-    ) -> Result<(), HttpError> {
-        slog::debug!(self.log, "adding repository"; "id" => ?id, "size" => bytes.len());
+    pub(crate) fn put_repository(&self, bytes: &[u8]) -> Result<(), HttpError> {
+        slog::debug!(self.log, "adding repository"; "size" => bytes.len());
 
         let new_artifacts = extract_and_validate(&bytes, &self.log)
             .map_err(|error| error.to_http_error())?;

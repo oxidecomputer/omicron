@@ -252,36 +252,6 @@ struct SledAgentInfo {
     rack_id: Uuid,
 }
 
-fn is_char_device(name: impl Into<PathBuf>) -> bool {
-    use std::os::unix::fs::FileTypeExt;
-
-    match std::fs::metadata(name.into()) {
-        Ok(metadata) => metadata.file_type().is_char_device(),
-        Err(_) => false,
-    }
-}
-
-// Depending on the kernel version, a tofino device can be found at either
-// /dev/tofino or /dev/tofino/<instance#>.  This method examines each in
-// turn, returning the first character device it finds in either of those
-// locations.
-fn find_tofino(root: &str) -> Result<String, Error> {
-    if is_char_device(root) {
-        return Ok(root.to_string());
-    }
-
-    for entry in std::fs::read_dir(root)
-        .map_err(|e| Error::Io { path: root.into(), err: e })?
-    {
-        let entry =
-            entry.map_err(|e| Error::Io { path: root.into(), err: e })?;
-        if is_char_device(&entry.path()) {
-            return Ok(entry.path().into_os_string().into_string().unwrap());
-        }
-    }
-    Err(Error::MissingDevice { device: "tofino".to_string() })
-}
-
 #[derive(Clone)]
 pub struct ServiceManager {
     inner: Arc<ServiceManagerInner>,
@@ -418,9 +388,15 @@ impl ServiceManager {
         for svc in &req.services {
             match svc {
                 ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
-                    // When running on a real sidecar, we need the /dev/tofino
-                    // device to talk to the tofino ASIC.
-                    devices.push(find_tofino("/dev/tofino")?);
+                    if let Ok(Some(n)) = tofino::get_tofino() {
+                        if let Ok(device_path) = n.device_path() {
+                            devices.push(device_path);
+                            continue;
+                        }
+                    }
+                    return Err(Error::MissingDevice {
+                        device: "tofino".to_string(),
+                    });
                 }
                 _ => (),
             }
@@ -825,6 +801,23 @@ impl ServiceManager {
                     }
                     match *asic {
                         DendriteAsic::TofinoAsic => {
+                            // There should be exactly one device_name
+                            // associated with this zone: the /dev path for
+                            // the tofino ASIC.
+                            let dev_cnt = device_names.len();
+                            if dev_cnt == 1 {
+                                smfh.setprop(
+                                    "config/dev_path",
+                                    device_names[0].clone(),
+                                )?;
+                            } else {
+                                return Err(Error::SwitchZone(
+                                    anyhow::anyhow!(
+                                    "{dev_cnt} devices needed for tofino asic"
+                                ),
+                                ));
+                            }
+
                             smfh.setprop(
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",

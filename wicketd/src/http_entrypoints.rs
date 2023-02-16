@@ -4,14 +4,12 @@
 
 //! HTTP entrypoint functions for wicketd
 
-use crate::artifacts::TufRepositoryId;
 use crate::mgs::GetInventoryResponse;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
-use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::UntypedBody;
 
@@ -58,26 +56,22 @@ async fn get_inventory(
     }
 }
 
-/// Upload TUF repositories to the server.
+/// Upload a TUF repository to the server.
 ///
-/// At any given time, wicketd will keep at most one repository in memory. Any
-/// previously-uploaded repositories will be discarded.
+/// At any given time, wicketd will keep at most one TUF repository in memory.
+/// Any previously-uploaded repositories will be discarded.
 #[endpoint {
     method = PUT,
-    path = "/repositories/{name}/{version}",
+    path = "/repository",
 }]
 async fn put_repository(
     rqctx: RequestContext<ServerContext>,
-    path: Path<TufRepositoryId>,
     body: UntypedBody,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     // TODO: do we need to return more information with the response?
 
     // TODO: `UntypedBody` is currently inefficient for large request bodies -- it does many copies
     // and allocations. Replace this with a better solution once it's available in dropshot.
-    rqctx
-        .context()
-        .artifact_store
-        .put_repository(path.into_inner(), body.as_bytes())?;
+    rqctx.context().artifact_store.put_repository(body.as_bytes())?;
     Ok(HttpResponseUpdatedNoContent())
 }

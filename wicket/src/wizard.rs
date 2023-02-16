@@ -26,8 +26,7 @@ use wicketd_client::types::RackV1Inventory;
 use crate::inventory::Inventory;
 use crate::screens::{Height, ScreenId, Screens};
 use crate::wicketd::{WicketdHandle, WicketdManager};
-use crate::widgets::RackState;
-use crate::widgets::StatusBar;
+use crate::widgets::{RackState, StatusBar, UpdateState};
 
 pub const TOP_MARGIN: Height = Height(5);
 pub const BOTTOM_MARGIN: Height = Height(2);
@@ -141,6 +140,9 @@ impl Wizard {
     fn mainloop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
         let rect = self.terminal.get_frame().size();
+
+        // Initialize and size the update widgets
+        self.state.updates.init(&self.state.inventory);
 
         // Draw the initial screen
         let screen = self.screens.get_mut(self.active_screen);
@@ -339,6 +341,7 @@ pub struct State {
     pub rack_state: RackState,
     pub status_bar: StatusBar,
     pub mouse: Point,
+    pub updates: UpdateState,
 }
 
 impl Default for State {
@@ -354,6 +357,7 @@ impl State {
             rack_state: RackState::new(),
             status_bar: StatusBar::new(),
             mouse: Point::default(),
+            updates: UpdateState::new(),
         }
     }
 }

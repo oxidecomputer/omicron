@@ -35,31 +35,11 @@
         }
       }
     },
-    "/repositories/{name}/{version}": {
+    "/repository": {
       "put": {
-        "summary": "Upload TUF repositories to the server.",
-        "description": "At any given time, wicketd will keep at most one repository in memory. Any previously-uploaded repositories will be discarded.",
+        "summary": "Upload a TUF repository to the server.",
+        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
         "operationId": "put_repository",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "description": "The repository's name.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version",
-            "description": "The version of the repository.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/octet-stream": {

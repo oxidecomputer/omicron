@@ -4,9 +4,8 @@
 
 //! List widget, specifically designed for use with wicket
 
-use crate::Point;
-
 use super::{get_control_id, Control, ControlId, HoverResult};
+use crate::Point;
 use std::fmt::Display;
 use tui::layout::Rect;
 use tui::style::Style;
@@ -68,8 +67,6 @@ pub struct ListState<T> {
     mouse: Point,
 }
 
-// Temporary until the using code is added
-#[allow(dead_code)]
 impl<T: Display> ListState<T> {
     pub fn new() -> ListState<T> {
         ListState {

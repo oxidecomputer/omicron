@@ -372,9 +372,6 @@ impl ArtifactClient {
     }
 
     async fn fetch(&self, artifact_id: ArtifactId, sender: FetchSender) {
-        // TODO: should the installinator try and handle artifact kinds that are
-        // currently unknown to it? (Maybe if a destination is also specified?)
-        // If so, we'll want to change this to a string.
         let artifact_bytes = match self
             .client
             .get_artifact(
