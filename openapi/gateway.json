@@ -1193,11 +1193,16 @@
             },
             "minItems": 32,
             "maxItems": 32
+          },
+          "update_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
           "control_plane",
-          "host_phase_2"
+          "host_phase_2",
+          "update_id"
         ]
       },
       "LinkStatus": {
