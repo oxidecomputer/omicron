@@ -139,6 +139,13 @@ enum Command {
         /// Clear any previously-set ID.
         #[clap(long)]
         clear: bool,
+        /// ID to assign to this update for progress/completion messages.
+        #[clap(
+            long,
+            conflicts_with = "clear",
+            required_unless_present = "clear"
+        )]
+        update_id: Option<Uuid>,
         /// Hash of the host OS image.
         #[clap(
             long,
@@ -460,6 +467,7 @@ async fn main() -> Result<()> {
         Command::SetInstallinatorImageId {
             sp,
             clear,
+            update_id,
             host_phase_2,
             control_plane,
         } => {
@@ -468,14 +476,19 @@ async fn main() -> Result<()> {
                     .sp_installinator_image_id_delete(sp.type_, sp.slot)
                     .await?;
             } else {
-                // clap guarantees these are not `None`.
+                // clap guarantees these are not `None` when `clear` is false.
+                let update_id = update_id.unwrap();
                 let host_phase_2 = host_phase_2.unwrap().to_vec();
                 let control_plane = control_plane.unwrap().to_vec();
                 client
                     .sp_installinator_image_id_set(
                         sp.type_,
                         sp.slot,
-                        &InstallinatorImageId { host_phase_2, control_plane },
+                        &InstallinatorImageId {
+                            update_id,
+                            host_phase_2,
+                            control_plane,
+                        },
                     )
                     .await?;
             }
