@@ -150,7 +150,7 @@ impl UpdateState {
         self.components.scroll_up()
     }
 
-    pub fn to_widget<'a>(&'a self) -> Update<'a> {
+    pub fn to_widget(&self) -> Update<'_> {
         Update { state: self }
     }
 }
