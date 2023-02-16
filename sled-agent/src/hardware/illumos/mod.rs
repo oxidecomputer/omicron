@@ -24,8 +24,8 @@ enum Error {
     #[error("Failed to access devinfo: {0}")]
     DevInfo(anyhow::Error),
 
-    #[error("Device does not appear to be an Oxide Gimlet")]
-    NotAGimlet,
+    #[error("Device does not appear to be an Oxide Gimlet: {0}")]
+    NotAGimlet(String),
 
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
@@ -72,13 +72,9 @@ impl HardwareSnapshot {
         let Some(root) = node_walker.next().transpose().map_err(Error::DevInfo)? else {
             return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
         };
-        if root.node_name() != "Oxide,Gimlet" {
-            warn!(
-                log,
-                "Root name indicates this is not a Gimlet: {}",
-                root.node_name()
-            );
-            return Err(Error::NotAGimlet);
+        let root_node = root.node_name();
+        if root_node != "Oxide,Gimlet" {
+            return Err(Error::NotAGimlet(root_node));
         }
 
         let properties = find_properties(
@@ -437,10 +433,7 @@ fn poll_device_tree(
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = HardwareSnapshot::new(log).map_err(|e| {
-        warn!(log, "Failed to poll device tree: {e}");
-        e
-    })?;
+    let polled_hw = HardwareSnapshot::new(log)?;
 
     // After inspecting the device tree, diff with the old view, and provide
     // necessary updates.
@@ -470,8 +463,13 @@ async fn hardware_tracking_task(
     tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
-        if let Err(err) = poll_device_tree(&log, &inner, &tx) {
-            warn!(log, "Failed to query device tree: {err}");
+        match poll_device_tree(&log, &inner, &tx) {
+            // We've already warned about `NotAGimlet` by this point,
+            // so let's not spam the logs.
+            Ok(_) | Err(Error::NotAGimlet(_)) => (),
+            Err(err) => {
+                warn!(log, "Failed to query device tree: {err}");
+            }
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     }
@@ -520,9 +518,12 @@ impl HardwareManager {
         // an "empty" view of hardware to other consumers before the first
         // query.
         match poll_device_tree(&log, &inner, &tx) {
+            Ok(_) => (),
             // Allow non-gimlet devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
-            Ok(_) | Err(Error::NotAGimlet) => (),
+            Err(Error::NotAGimlet(root)) => {
+                warn!(log, "Device is not a Gimlet ({root}), proceeding with null hardware view");
+            }
             Err(err) => {
                 return Err(format!("Failed to poll device tree: {err}"))
             }
