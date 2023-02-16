@@ -840,6 +840,47 @@
         "format": "uint64",
         "minimum": 0
       },
+      "HostIdentifier": {
+        "description": "A `HostIdentifier` represents either an IP host or network (v4 or v6), or an entire VPC (identified by its VNI). It is used in firewall rule host filters.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Vni"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -1769,7 +1810,7 @@
             "nullable": true,
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/HostIdentifier"
             }
           },
           "filter_ports": {

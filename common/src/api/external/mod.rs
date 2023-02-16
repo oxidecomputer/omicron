@@ -1341,6 +1341,15 @@ impl From<Ipv6Addr> for IpNet {
     }
 }
 
+impl From<IpAddr> for IpNet {
+    fn from(n: IpAddr) -> IpNet {
+        match n {
+            IpAddr::V4(v4) => IpNet::from(v4),
+            IpAddr::V6(v6) => IpNet::from(v6),
+        }
+    }
+}
+
 impl std::fmt::Display for IpNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

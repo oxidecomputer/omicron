@@ -5,7 +5,8 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState,
+    ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState, IpNet,
+    Vni,
 };
 use chrono::{DateTime, Utc};
 use parse_display::{Display, FromStr};
@@ -179,4 +180,14 @@ mod tests {
             assert_eq!(kind, kind2);
         }
     }
+}
+
+/// A `HostIdentifier` represents either an IP host or network (v4 or v6),
+/// or an entire VPC (identified by its VNI). It is used in firewall rule
+/// host filters.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum HostIdentifier {
+    Ip(IpNet),
+    Vpc(Vni),
 }

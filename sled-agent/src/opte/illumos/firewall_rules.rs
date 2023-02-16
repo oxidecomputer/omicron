@@ -12,6 +12,7 @@ use omicron_common::api::external::VpcFirewallRuleAction;
 use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
 use omicron_common::api::external::VpcFirewallRuleStatus;
+use omicron_common::api::internal::nexus::HostIdentifier;
 use oxide_vpc::api::Address;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::Filters;
@@ -62,15 +63,22 @@ impl FromVpcFirewallRule for VpcFirewallRule {
                 hosts
                     .iter()
                     .map(|host| match host {
-                        IpNet::V4(net) if net.prefix() == 32 => {
+                        HostIdentifier::Ip(IpNet::V4(net))
+                            if net.prefix() == 32 =>
+                        {
                             Address::Ip(net.ip().into())
                         }
-                        IpNet::V4(net) => Address::Subnet(Ipv4Cidr::new(
-                            net.ip().into(),
-                            Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                        )),
-                        IpNet::V6(_net) => {
+                        HostIdentifier::Ip(IpNet::V4(net)) => {
+                            Address::Subnet(Ipv4Cidr::new(
+                                net.ip().into(),
+                                Ipv4PrefixLen::new(net.prefix()).unwrap(),
+                            ))
+                        }
+                        HostIdentifier::Ip(IpNet::V6(_net)) => {
                             todo!("IPv6 host filters")
+                        }
+                        HostIdentifier::Vpc(vni) => {
+                            Address::Vni(Vni::new(u32::from(*vni)).unwrap())
                         }
                     })
                     .collect::<Vec<Address>>()

@@ -22,14 +22,16 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::Vni;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use omicron_common::api::internal::nexus::HostIdentifier;
 use ref_cast::RefCast;
-use sled_agent_client::types::IpNet;
 use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
@@ -532,10 +534,10 @@ impl super::Nexus {
                             .unwrap_or(&no_interfaces)
                             .iter()
                             .filter(|nic| match (net, nic.ip) {
-                                (external::IpNet::V4(net), IpAddr::V4(ip)) => {
+                                (IpNet::V4(net), IpAddr::V4(ip)) => {
                                     net.contains(ip)
                                 }
-                                (external::IpNet::V6(net), IpAddr::V6(ip)) => {
+                                (IpNet::V6(net), IpAddr::V6(ip)) => {
                                     net.contains(ip)
                                 }
                                 (_, _) => false,
@@ -562,7 +564,12 @@ impl super::Nexus {
                                     .get(&name)
                                     .unwrap_or(&no_interfaces)
                                 {
-                                    host_addrs.push(IpNet::from(interface.ip))
+                                    host_addrs.push(
+                                        HostIdentifier::Ip(IpNet::from(
+                                            interface.ip,
+                                        ))
+                                        .into(),
+                                    )
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Subnet(
@@ -572,21 +579,34 @@ impl super::Nexus {
                                     .get(&name)
                                     .unwrap_or(&no_networks)
                                 {
-                                    host_addrs.push(IpNet::from(*subnet));
+                                    host_addrs.push(
+                                        HostIdentifier::Ip(IpNet::from(
+                                            *subnet,
+                                        ))
+                                        .into(),
+                                    );
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Ip(addr) => {
-                                host_addrs.push(IpNet::from(*addr))
+                                host_addrs.push(
+                                    HostIdentifier::Ip(IpNet::from(*addr))
+                                        .into(),
+                                )
                             }
                             external::VpcFirewallRuleHostFilter::IpNet(net) => {
-                                host_addrs.push(IpNet::from(*net))
+                                host_addrs.push(HostIdentifier::Ip(*net).into())
                             }
                             external::VpcFirewallRuleHostFilter::Vpc(name) => {
                                 for interface in vpc_interfaces
                                     .get(&name)
                                     .unwrap_or(&no_interfaces)
                                 {
-                                    host_addrs.push(IpNet::from(interface.ip))
+                                    host_addrs.push(
+                                        HostIdentifier::Vpc(Vni::try_from(
+                                            *interface.vni,
+                                        )?)
+                                        .into(),
+                                    )
                                 }
                             }
                         }

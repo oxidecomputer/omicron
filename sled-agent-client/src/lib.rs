@@ -208,6 +208,12 @@ impl From<omicron_common::api::external::Vni> for types::Vni {
     }
 }
 
+impl From<types::Vni> for omicron_common::api::external::Vni {
+    fn from(s: types::Vni) -> Self {
+        Self::try_from(s.0 as u32).unwrap()
+    }
+}
+
 impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     fn from(s: omicron_common::api::external::MacAddr) -> Self {
         Self::try_from(s.0.to_string())
@@ -323,6 +329,18 @@ impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
             KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
             KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
             KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::HostIdentifier>
+    for types::HostIdentifier
+{
+    fn from(s: omicron_common::api::internal::nexus::HostIdentifier) -> Self {
+        use omicron_common::api::internal::nexus::HostIdentifier::*;
+        match s {
+            Ip(net) => Self::Ip(net.into()),
+            Vpc(vni) => Self::Vpc(vni.into()),
         }
     }
 }
