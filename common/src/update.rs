@@ -40,8 +40,8 @@ impl Artifact {
 
 /// An identifier for an artifact.
 ///
-/// The kind is an [`ArtifactKind`], indicating that it might represent an unknown
-/// artifact.
+/// The kind is [`ArtifactKind`], indicating that it might represent an artifact
+/// whose kind is unknown.
 #[derive(
     Debug,
     Clone,
