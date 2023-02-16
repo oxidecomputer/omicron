@@ -423,6 +423,12 @@ impl RackState {
         self.log = Some(log);
     }
 
+    pub fn ensure_component_id_is_valid(&mut self) {
+        if self.tabbed.is_none() {
+            self.inc_tab_index();
+        }
+    }
+
     pub fn get_current_component_id(&self) -> ComponentId {
         *self.component_id_by_tab_index.get(&self.tab_index).unwrap()
     }

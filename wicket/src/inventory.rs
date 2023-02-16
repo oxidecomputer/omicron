@@ -6,6 +6,8 @@
 
 use anyhow::anyhow;
 use std::collections::BTreeMap;
+use std::fmt::Display;
+use std::iter::Iterator;
 use wicketd_client::types::{
     RackV1Inventory, SpComponentInfo, SpIgnition, SpState, SpType,
 };
@@ -25,6 +27,10 @@ impl Inventory {
 
     pub fn get_inventory(&self, id: &ComponentId) -> Option<&Component> {
         self.inventory.get(id)
+    }
+
+    pub fn components(&self) -> impl Iterator<Item = &ComponentId> {
+        self.inventory.keys()
     }
 
     pub fn update_inventory(
@@ -103,10 +109,16 @@ pub enum ComponentId {
 
 impl ComponentId {
     pub fn name(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl Display for ComponentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComponentId::Sled(i) => format!("sled {}", i),
-            ComponentId::Switch(i) => format!("switch {}", i),
-            ComponentId::Psc(i) => format!("psc {}", i),
+            ComponentId::Sled(i) => write!(f, "sled {}", i),
+            ComponentId::Switch(i) => write!(f, "switch {}", i),
+            ComponentId::Psc(i) => write!(f, "psc {}", i),
         }
     }
 }

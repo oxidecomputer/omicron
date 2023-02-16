@@ -4,14 +4,16 @@
 
 //! The Rack presentation [`Screen`]
 
+use super::common::CommonScreenState;
 use super::Screen;
 use super::ScreenId;
 use super::{Height, Width};
 use crate::defaults::colors::*;
+use crate::defaults::style;
 use crate::widgets::Control;
 use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
-use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
+use crate::widgets::{Banner, HelpButtonState, Rack};
 use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
 use crate::{BOTTOM_MARGIN, TOP_MARGIN};
 use crossterm::event::Event as TermEvent;
@@ -29,8 +31,7 @@ pub struct RackScreen {
     log: Logger,
     watermark: &'static str,
     hovered: Option<ControlId>,
-    help_button_state: HelpButtonState,
-    help_menu_state: HelpMenuState,
+    common: CommonScreenState,
 }
 
 impl RackScreen {
@@ -42,6 +43,7 @@ impl RackScreen {
             ("<Enter> | left mouse click", "Select hovered object"),
             ("<ESC>", "Exit help menu | Reset the TabIndex of the Rack"),
             ("<CTRL-h>", "Toggle this help menu"),
+            ("<CTRL-n>", "Goto the next screen"),
             ("<CTRL-c>", "Exit the program"),
         ];
 
@@ -49,8 +51,13 @@ impl RackScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
             hovered: None,
-            help_button_state: HelpButtonState::new(1, 0),
-            help_menu_state: HelpMenuState::new(help_data),
+            common: CommonScreenState {
+                hovered: None,
+                help_button_state: HelpButtonState::new(1, 0),
+                help_menu_state: HelpMenuState::new(help_data),
+                prev_screen: None,
+                next_screen: ScreenId::Component,
+            },
         }
     }
 
@@ -61,13 +68,7 @@ impl RackScreen {
     }
 
     fn draw_menubar(&self, f: &mut Frame) {
-        let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
-        let button_style = Style::default().fg(OX_OFF_WHITE).bg(OX_GRAY_DARK);
-        let hovered_style = Style::default().fg(OX_PINK).bg(OX_GRAY_DARK);
-        let help_menu_style =
-            Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
-        let help_menu_command_style =
-            Style::default().fg(OX_GREEN_LIGHT).bg(OX_GREEN_DARK);
+        self.common.draw_menubar(f);
 
         // Draw the title
         let mut rect = f.size();
@@ -75,36 +76,10 @@ impl RackScreen {
         rect.height = 1;
         rect.y = 1;
         let title_block = Block::default()
-            .style(style)
+            .style(style::menu_bar())
             .title(title)
             .title_alignment(Alignment::Center);
         f.render_widget(title_block, rect);
-
-        // Draw the help button if the help menu is closed, otherwise draw the
-        // help menu
-        if !self.help_menu_state.is_closed() {
-            let menu = HelpMenu {
-                help: self.help_menu_state.help_text(),
-                style: help_menu_style,
-                command_style: help_menu_command_style,
-                state: self.help_menu_state.get_animation_state().unwrap(),
-            };
-            f.render_widget(menu, f.size());
-        } else {
-            let border_style =
-                if self.hovered == Some(self.help_button_state.id()) {
-                    hovered_style
-                } else {
-                    button_style
-                };
-            let button = HelpButton::new(
-                &self.help_button_state,
-                button_style,
-                border_style,
-            );
-
-            f.render_widget(button, f.size());
-        }
     }
 
     fn draw_watermark(&self, state: &State, f: &mut Frame) -> (Height, Width) {
@@ -178,10 +153,10 @@ impl RackScreen {
                 state.rack_state.left_or_right_arrow();
             }
             KeyCode::Esc => {
-                if self.help_menu_state.is_closed() {
+                if self.common.help_menu_state.is_closed() {
                     state.rack_state.clear_tab_index();
                 } else {
-                    self.help_menu_state.close();
+                    self.common.help_menu_state.close();
                 }
             }
             KeyCode::Enter => {
@@ -189,17 +164,14 @@ impl RackScreen {
                     return vec![Action::SwitchScreen(ScreenId::Component)];
                 }
             }
-            KeyCode::Char('h') => {
-                if event.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.help_menu_state.toggle();
-                }
-            }
             KeyCode::Char('k') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
                     state.rack_state.toggle_knight_rider_mode();
                 }
             }
-            _ => (),
+            _ => {
+                return self.common.handle_key_event(event);
+            }
         }
         vec![Action::Redraw]
     }
@@ -224,15 +196,11 @@ impl RackScreen {
         // Set the tab index to the hovered component Id if there is one.
         // Remove the old tab_index, and make it match the clicked one
         match self.hovered {
-            Some(control_id) if control_id == self.help_button_state.id() => {
-                self.help_menu_state.open();
-                vec![]
-            }
             Some(control_id) if control_id == state.rack_state.id() => {
                 state.rack_state.set_tab_from_hovered();
                 vec![Action::SwitchScreen(ScreenId::Component)]
             }
-            _ => vec![],
+            _ => self.common.handle_mouse_click(),
         }
     }
 
@@ -245,6 +213,7 @@ impl RackScreen {
         y: u16,
     ) -> Vec<Action> {
         let current_id = self.find_intersection(state, x, y);
+        self.common.hovered = current_id;
         if current_id == self.hovered
             && self.hovered != Some(state.rack_state.id())
         {
@@ -275,8 +244,8 @@ impl RackScreen {
         x: u16,
         y: u16,
     ) -> Option<ControlId> {
-        if self.help_button_state.intersects_point(x, y) {
-            Some(self.help_button_state.id())
+        if self.common.help_button_state.intersects_point(x, y) {
+            Some(self.common.help_button_state.id())
         } else if state.rack_state.intersects_point(x, y) {
             Some(state.rack_state.id())
         } else {
@@ -292,6 +261,8 @@ impl Screen for RackScreen {
             self.draw_rack(state, f);
             self.draw_watermark(state, f);
             self.draw_menubar(f);
+            self.common.draw_help_menu(f);
+            self.common.draw_screen_navigation_instructions(f);
             state.status_bar.draw(f);
         })?;
         Ok(())
@@ -306,14 +277,10 @@ impl Screen for RackScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
-                let mut redraw = false;
+                let mut redraw = self.common.tick();
 
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
                     k.step();
-                    redraw = true;
-                }
-                if !self.help_menu_state.is_closed() {
-                    self.help_menu_state.step();
                     redraw = true;
                 }
 
@@ -326,6 +293,7 @@ impl Screen for RackScreen {
                 }
             }
             ScreenEvent::Term(TermEvent::Resize(width, height)) => {
+                self.common.resize(width, height);
                 state.rack_state.resize(
                     width,
                     height,

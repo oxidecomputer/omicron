@@ -11,13 +11,14 @@ use crate::defaults::dimensions::MENUBAR_HEIGHT;
 use crate::defaults::style;
 use crate::widgets::{
     Control, ControlId, HelpButton, HelpButtonState, HelpMenu, HelpMenuState,
-    ScreenButton, ScreenButtonState,
 };
-use crate::wizard::{Action, Frame, State};
+use crate::wizard::{Action, Frame};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tui::layout::Rect;
 use tui::style::{Color, Style};
-use tui::widgets::Block;
+use tui::text::Text;
+use tui::widgets::{Block, Paragraph};
 
 // State shared between all screens except the splash and rack screens
 //
@@ -25,26 +26,19 @@ use tui::widgets::Block;
 pub struct CommonScreenState {
     pub help_menu_state: HelpMenuState,
     pub help_button_state: HelpButtonState,
-    pub rack_screen_button_state: ScreenButtonState,
     pub hovered: Option<ControlId>,
+    pub next_screen: ScreenId,
+    pub prev_screen: Option<ScreenId>,
 }
 
 impl CommonScreenState {
-    pub fn resize(&mut self, width: u16, _height: u16) {
-        self.rack_screen_button_state.rect.x =
-            width - ScreenButtonState::width();
-    }
+    pub fn resize(&mut self, _width: u16, _height: u16) {}
 
     pub fn handle_mouse_click(&mut self) -> Vec<Action> {
         match self.hovered {
             Some(control_id) if control_id == self.help_button_state.id() => {
                 self.help_menu_state.open();
                 vec![]
-            }
-            Some(control_id)
-                if control_id == self.rack_screen_button_state.id() =>
-            {
-                vec![Action::SwitchScreen(ScreenId::Rack)]
             }
             _ => vec![],
         }
@@ -60,11 +54,24 @@ impl CommonScreenState {
             KeyCode::Char('h') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
                     self.help_menu_state.toggle();
+                    return vec![Action::Redraw];
+                }
+            }
+            KeyCode::Char('n') => {
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    return vec![Action::SwitchScreen(self.next_screen)];
+                }
+            }
+            KeyCode::Char('p') => {
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    if let Some(prev) = self.prev_screen {
+                        return vec![Action::SwitchScreen(prev)];
+                    }
                 }
             }
             _ => (),
         }
-        vec![Action::Redraw]
+        vec![]
     }
 
     // Handle a tick event. Return true if a redraw is required, false
@@ -83,8 +90,6 @@ impl CommonScreenState {
     pub fn find_intersection(&self, x: u16, y: u16) -> Option<ControlId> {
         if self.help_button_state.intersects_point(x, y) {
             Some(self.help_button_state.id())
-        } else if self.rack_screen_button_state.intersects_point(x, y) {
-            Some(self.rack_screen_button_state.id())
         } else {
             None
         }
@@ -96,7 +101,7 @@ impl CommonScreenState {
         f.render_widget(block, f.size());
     }
 
-    pub fn draw_menubar(&self, f: &mut Frame, _state: &State) {
+    pub fn draw_menubar(&self, f: &mut Frame) {
         let mut rect = f.size();
         rect.height = MENUBAR_HEIGHT;
 
@@ -134,19 +139,61 @@ impl CommonScreenState {
         }
     }
 
-    pub fn draw_screen_selection_buttons(&self, f: &mut Frame) {
-        // Draw the RackSreenButton
-        let border_style =
-            if self.hovered == Some(self.rack_screen_button_state.id()) {
-                style::button_hovered()
-            } else {
-                style::button()
+    pub fn draw_screen_navigation_instructions(&self, f: &mut Frame) {
+        let prev = self.prev_screen_label();
+        let next = self.next_screen_label();
+        if let Some(p) = prev {
+            // One space from right border and 2 spaces between prev and next
+            let padding = 3;
+            let width = p.width() as u16;
+            let prev =
+                Paragraph::new(p).style(Style::default().fg(OX_OFF_WHITE));
+            let rect = Rect {
+                x: f.size().width - width - next.width() as u16 - padding,
+                y: 1,
+                width,
+                height: 3,
             };
-        let button = ScreenButton::new(
-            &self.rack_screen_button_state,
-            style::button(),
-            border_style,
-        );
-        f.render_widget(button, f.size());
+            f.render_widget(prev, rect);
+        }
+
+        // Leave a space on the right side of the screen
+        let padding = 1;
+        let width = next.width() as u16;
+        let next =
+            Paragraph::new(next).style(Style::default().fg(OX_OFF_WHITE));
+        let rect = Rect {
+            x: f.size().width - width - padding,
+            y: 1,
+            width,
+            height: 3,
+        };
+        f.render_widget(next, rect);
+    }
+
+    fn prev_screen_label(&self) -> Option<Text> {
+        self.prev_screen.map(|s| {
+            let name = s.name();
+            let width = usize::max(6, name.len());
+            Text::from(format!(
+                "{:<width$}\n{:━^width$}\n{:<width$}",
+                name,
+                "━",
+                "ctrl-p",
+                width = width,
+            ))
+        })
+    }
+
+    fn next_screen_label(&self) -> Text {
+        let name = self.next_screen.name();
+        let width = usize::max(6, name.len());
+        Text::from(format!(
+            "{:<width$}\n{:━^width$}\n{:<width$}",
+            name,
+            "━",
+            "ctrl-n",
+            width = width,
+        ))
     }
 }
