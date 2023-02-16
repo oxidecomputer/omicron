@@ -92,12 +92,7 @@ impl HardwareSnapshot {
         );
 
         // Monitor for the Tofino device and driver.
-        let mut tofino = TofinoSnapshot::new();
-        while let Some(node) =
-            node_walker.next().transpose().map_err(Error::DevInfo)?
-        {
-            poll_tofino_node(&log, &mut tofino, &node);
-        }
+        let tofino = get_tofino_snapshot(log, &mut device_info);
 
         // Monitor for block devices.
         let mut disks = HashSet::new();
@@ -210,13 +205,6 @@ impl HardwareView {
     }
 }
 
-const TOFINO_SUBSYSTEM_VID: i32 = 0x1d1c;
-const TOFINO_SUBSYSTEM_ID: i32 = 0x100;
-
-fn node_name(subsystem_vid: i32, subsystem_id: i32) -> String {
-    format!("pci{subsystem_vid:x},{subsystem_id:x}")
-}
-
 fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
     match slot {
         // For the source of these values, refer to:
@@ -228,21 +216,24 @@ fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
     }
 }
 
-fn poll_tofino_node(
-    log: &Logger,
-    tofino: &mut TofinoSnapshot,
-    node: &Node<'_>,
-) {
-    if node.node_name() == node_name(TOFINO_SUBSYSTEM_VID, TOFINO_SUBSYSTEM_ID)
+fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
+    let (exists, driver_loaded) = match tofino::get_tofino_from_devinfo(devinfo)
     {
-        tofino.exists = true;
-        tofino.driver_loaded = node.driver_name().as_deref() == Some("tofino");
+        Ok(None) => (false, false),
+        Ok(Some(node)) => (node.has_asic(), node.has_driver()),
+        Err(e) => {
+            error!(log, "failed to get tofino state: {e:?}");
+            (false, false)
+        }
+    };
+    if exists {
         debug!(
             log,
             "Found tofino node, with driver {}loaded",
-            if tofino.driver_loaded { "" } else { "not " }
+            if driver_loaded { "" } else { "not " }
         );
     }
+    TofinoSnapshot { exists, driver_loaded }
 }
 
 fn get_dev_path_of_whole_disk(
