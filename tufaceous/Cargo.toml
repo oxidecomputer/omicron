@@ -1,0 +1,21 @@
+[package]
+name = "tufaceous"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true, features = ["backtrace"] }
+camino.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+chrono.workspace = true
+console = { version = "0.15.5", default-features = false }
+humantime = "2.1.0"
+omicron-common.workspace = true
+tufaceous-lib.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+fs-err.workspace = true
+omicron-common.workspace = true
+tempfile.workspace = true

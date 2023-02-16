@@ -1,0 +1,14 @@
+[package]
+name = "ipcc-key-value"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+ciborium.workspace = true
+serde.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true

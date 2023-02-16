@@ -9,15 +9,17 @@
 //! through Nexus' external API.
 
 use crate::nexus::NexusClient;
+use crate::sim::http_entrypoints_pantry::ExpectedDigest;
+use crate::sim::SledAgent;
 use anyhow::{bail, Result};
 use chrono::prelude::*;
 use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
+use crucible_client_types::VolumeConstructionRequest;
+use dropshot::HttpError;
 use futures::lock::Mutex;
-use nexus_client::types::{
-    ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest,
-};
+use nexus_client::types::{ByteCount, ZpoolPutRequest};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -461,8 +463,12 @@ impl Storage {
             .expect("Failed to notify Nexus about new Zpool");
     }
 
-    /// Adds a Dataset to the sled's simulated storage and notifies Nexus.
-    pub async fn insert_dataset(&mut self, zpool_id: Uuid, dataset_id: Uuid) {
+    /// Adds a Dataset to the sled's simulated storage.
+    pub async fn insert_dataset(
+        &mut self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+    ) -> SocketAddr {
         // Update our local data
         let dataset = self
             .zpools
@@ -477,15 +483,7 @@ impl Storage {
 
         self.next_crucible_port += 100;
 
-        // Notify Nexus
-        let request = DatasetPutRequest {
-            address: dataset.address().to_string(),
-            kind: DatasetKind::Crucible,
-        };
-        self.nexus_client
-            .dataset_put(&zpool_id, &dataset_id, &request)
-            .await
-            .expect("Failed to notify Nexus about new Dataset");
+        dataset.address()
     }
 
     pub async fn get_dataset(
@@ -528,5 +526,136 @@ impl Storage {
         }
 
         None
+    }
+}
+
+/// Simulated crucible pantry
+pub struct Pantry {
+    pub id: Uuid,
+    vcrs: Mutex<HashMap<String, VolumeConstructionRequest>>, // Please rewind!
+    sled_agent: Arc<SledAgent>,
+}
+
+impl Pantry {
+    pub fn new(sled_agent: Arc<SledAgent>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            vcrs: Mutex::new(HashMap::default()),
+            sled_agent,
+        }
+    }
+
+    pub async fn attach(
+        &self,
+        volume_id: String,
+        volume_construction_request: VolumeConstructionRequest,
+    ) -> Result<()> {
+        let mut vcrs = self.vcrs.lock().await;
+        vcrs.insert(volume_id, volume_construction_request);
+        Ok(())
+    }
+
+    pub async fn is_job_finished(
+        &self,
+        _job_id: String,
+    ) -> Result<bool, HttpError> {
+        Ok(true)
+    }
+
+    pub async fn get_job_result(
+        &self,
+        _job_id: String,
+    ) -> Result<Result<()>, HttpError> {
+        Ok(Ok(()))
+    }
+
+    pub async fn import_from_url(
+        &self,
+        _volume_id: String,
+        _url: String,
+        _expected_digest: Option<ExpectedDigest>,
+    ) -> Result<String, HttpError> {
+        unimplemented!();
+    }
+
+    pub async fn snapshot(
+        &self,
+        volume_id: String,
+        snapshot_id: String,
+    ) -> Result<(), HttpError> {
+        // Perform the disk id -> region id mapping just as was done by during
+        // the simulated instance ensure, then call
+        // [`instance_issue_disk_snapshot_request`] as the snapshot logic is the
+        // same.
+        let vcrs = self.vcrs.lock().await;
+        let volume_construction_request = vcrs.get(&volume_id).unwrap();
+
+        self.sled_agent
+            .map_disk_ids_to_region_ids(&volume_construction_request)
+            .await?;
+
+        self.sled_agent
+            .instance_issue_disk_snapshot_request(
+                Uuid::new_v4(), // instance id, not used by function
+                volume_id.parse().unwrap(),
+                snapshot_id.parse().unwrap(),
+            )
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))
+    }
+
+    pub async fn bulk_write(
+        &self,
+        _volume_id: String,
+        _offset: u64,
+        _data: Vec<u8>,
+    ) -> Result<(), HttpError> {
+        unimplemented!();
+    }
+
+    pub async fn scrub(&self, _volume_id: String) -> Result<String, HttpError> {
+        unimplemented!();
+    }
+
+    pub async fn detach(&self, volume_id: String) -> Result<()> {
+        let mut vcrs = self.vcrs.lock().await;
+        vcrs.remove(&volume_id);
+        Ok(())
+    }
+}
+
+pub struct PantryServer {
+    pub server: dropshot::HttpServer<Arc<Pantry>>,
+    pub pantry: Arc<Pantry>,
+}
+
+impl PantryServer {
+    pub async fn new(
+        log: Logger,
+        ip: IpAddr,
+        sled_agent: Arc<SledAgent>,
+    ) -> Self {
+        let pantry = Arc::new(Pantry::new(sled_agent));
+
+        let server = dropshot::HttpServerStarter::new(
+            &dropshot::ConfigDropshot {
+                bind_address: SocketAddr::new(ip, 0),
+                request_body_max_bytes: 1024 * 1024,
+                ..Default::default()
+            },
+            super::http_entrypoints_pantry::api(),
+            pantry.clone(),
+            &log.new(o!("component" => "dropshot")),
+        )
+        .expect("Could not initialize pantry server")
+        .start();
+
+        info!(&log, "Started Simulated Crucible Pantry"; "address" => server.local_addr());
+
+        PantryServer { server, pantry }
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.server.local_addr()
     }
 }

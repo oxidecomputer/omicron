@@ -28,28 +28,26 @@ use super::common_storage::delete_crucible_snapshots;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use crate::app::sagas::NexusAction;
+use crate::app::sagas::declare_saga_actions;
+use crate::authn;
 use crate::db::datastore::CrucibleResources;
-use lazy_static::lazy_static;
 use nexus_types::identity::Asset;
 use serde::Deserialize;
 use serde::Serialize;
-use std::sync::Arc;
-use steno::new_action_noop_undo;
 use steno::ActionError;
-use steno::Node;
 use uuid::Uuid;
 
 // volume delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
+    pub serialized_authn: authn::saga::Serialized,
     pub volume_id: Uuid,
 }
-
 // volume delete saga: actions
 
-lazy_static! {
+declare_saga_actions! {
+    volume_delete;
     // TODO(https://github.com/oxidecomputer/omicron/issues/612):
     //
     // We need a way to deal with this operation failing, aside from
@@ -57,34 +55,41 @@ lazy_static! {
     //
     // What if the Sled goes offline? Nexus must ultimately be
     // responsible for reconciling this scenario.
-
-    static ref DECREASE_CRUCIBLE_RESOURCE_COUNT: NexusAction = new_action_noop_undo(
-        "volume-delete.decrease-resource-count",
-        svd_decrease_crucible_resource_count,
-    );
-
-    static ref DELETE_CRUCIBLE_REGIONS: NexusAction = new_action_noop_undo(
-        "volume-delete.delete-crucible-regions",
-        svd_delete_crucible_regions,
-    );
-
-    static ref DELETE_CRUCIBLE_SNAPSHOTS: NexusAction = new_action_noop_undo(
-        "volume-delete.delete-crucible-snapshots",
-        svd_delete_crucible_snapshots,
-    );
-
-    static ref DELETE_FREED_CRUCIBLE_REGIONS: NexusAction = new_action_noop_undo(
-        "volume-delete.delete-freed-crucible-regions",
-        svd_delete_freed_crucible_regions,
-    );
-
-    static ref HARD_DELETE_VOLUME_RECORD: NexusAction = new_action_noop_undo(
-        "volume-delete.hard-delete-volume-record",
-        svd_hard_delete_volume_record,
-    );
+    DECREASE_CRUCIBLE_RESOURCE_COUNT -> "crucible_resources_to_delete" {
+        + svd_decrease_crucible_resource_count
+    }
+    DELETE_CRUCIBLE_REGIONS -> "no_result_1" {
+        + svd_delete_crucible_regions
+    }
+    DELETE_CRUCIBLE_SNAPSHOTS -> "no_result_2" {
+        + svd_delete_crucible_snapshots
+    }
+    DELETE_FREED_CRUCIBLE_REGIONS -> "no_result_3" {
+        + svd_delete_freed_crucible_regions
+    }
+    HARD_DELETE_VOLUME_RECORD -> "final_no_result" {
+        + svd_hard_delete_volume_record
+    }
 }
 
 // volume delete saga: definition
+
+pub fn create_dag(
+    mut builder: steno::DagBuilder,
+) -> Result<steno::Dag, super::SagaInitError> {
+    builder.append(decrease_crucible_resource_count_action());
+    builder.append_parallel(vec![
+        // clean up top level regions for volume
+        delete_crucible_regions_action(),
+        // clean up snapshots no longer referenced by any volume
+        delete_crucible_snapshots_action(),
+    ]);
+    // clean up regions that were freed by deleting snapshots
+    builder.append(delete_freed_crucible_regions_action());
+    builder.append(hard_delete_volume_record_action());
+
+    Ok(builder.build()?)
+}
 
 #[derive(Debug)]
 pub struct SagaVolumeDelete;
@@ -93,52 +98,14 @@ impl NexusSaga for SagaVolumeDelete {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*DECREASE_CRUCIBLE_RESOURCE_COUNT));
-        registry.register(Arc::clone(&*DELETE_CRUCIBLE_REGIONS));
-        registry.register(Arc::clone(&*DELETE_CRUCIBLE_SNAPSHOTS));
-        registry.register(Arc::clone(&*DELETE_FREED_CRUCIBLE_REGIONS));
-        registry.register(Arc::clone(&*HARD_DELETE_VOLUME_RECORD));
+        volume_delete_register_actions(registry);
     }
 
     fn make_saga_dag(
         _params: &Self::Params,
-        mut builder: steno::DagBuilder,
+        builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(Node::action(
-            "crucible_resources_to_delete",
-            "DecreaseCrucibleResources",
-            DECREASE_CRUCIBLE_RESOURCE_COUNT.as_ref(),
-        ));
-
-        builder.append_parallel(vec![
-            // clean up top level regions for volume
-            Node::action(
-                "no_result_1",
-                "DeleteCrucibleRegions",
-                DELETE_CRUCIBLE_REGIONS.as_ref(),
-            ),
-            // clean up snapshots no longer referenced by any volume
-            Node::action(
-                "no_result_2",
-                "DeleteCrucibleSnapshots",
-                DELETE_CRUCIBLE_SNAPSHOTS.as_ref(),
-            ),
-        ]);
-
-        // clean up regions that were freed by deleting snapshots
-        builder.append(Node::action(
-            "no_result_3",
-            "DeleteFreedCrucibleRegions",
-            DELETE_FREED_CRUCIBLE_REGIONS.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "final_no_result",
-            "HardDeleteVolumeRecord",
-            HARD_DELETE_VOLUME_RECORD.as_ref(),
-        ));
-
-        Ok(builder.build()?)
+        create_dag(builder)
     }
 }
 

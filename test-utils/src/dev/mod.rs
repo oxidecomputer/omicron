@@ -64,7 +64,7 @@ fn copy_dir(
 pub fn test_setup_log(test_name: &str) -> LogContext {
     let log_config = ConfigLogging::File {
         level: ConfigLoggingLevel::Trace,
-        path: String::from("UNUSED"),
+        path: "UNUSED".into(),
         if_exists: ConfigLoggingIfExists::Fail,
     };
 
@@ -139,6 +139,15 @@ async fn setup_database(
     }
 
     info!(&log, "cockroach command line: {}", starter.cmdline());
+    info!(
+        &log,
+        "cockroach environment: {}",
+        starter
+            .environment()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     let database = starter.start().await.unwrap_or_else(|error| {
         panic!("failed to start CockroachDB: {:#}", error);
     });

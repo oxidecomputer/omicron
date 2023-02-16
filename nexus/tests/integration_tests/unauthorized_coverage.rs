@@ -68,7 +68,7 @@ fn test_unauthorized_coverage() {
             let label = op
                 .operation_id
                 .clone()
-                .unwrap_or(String::from("unknown operation-id"));
+                .unwrap_or_else(|| String::from("unknown operation-id"));
             (Operation { method, path, label }, regex)
         })
         .collect();
@@ -85,8 +85,9 @@ fn test_unauthorized_coverage() {
             // a VerifyEndpoint for it.
             let method_string = m.http_method().to_string().to_uppercase();
             let found = spec_operations.iter().find(|(op, regex)| {
-                op.method.to_uppercase() == method_string
-                    && regex.is_match(v.url)
+                // Strip query parameters, if they exist.
+                let url = v.url.split('?').next().unwrap();
+                op.method.to_uppercase() == method_string && regex.is_match(url)
             });
             if let Some((op, _)) = found {
                 println!(
@@ -135,10 +136,16 @@ fn test_unauthorized_coverage() {
     // not `expectorage::assert_contents`?  Because we only expect this file to
     // ever shrink, which is easy enough to fix by hand, and we don't want to
     // make it easy to accidentally add things to the allowlist.)
-    let expected_uncovered_endpoints =
-        std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
-            .expect("failed to load file of allowed uncovered endpoints");
-    assert_eq!(expected_uncovered_endpoints, uncovered_endpoints);
+    // let expected_uncovered_endpoints =
+    //     std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
+    //         .expect("failed to load file of allowed uncovered endpoints");
+
+    // TODO: Update this to remove overwrite capabilities
+    // See https://github.com/oxidecomputer/expectorate/pull/12
+    assert_contents(
+        "tests/output/uncovered-authz-endpoints.txt",
+        uncovered_endpoints.as_str(),
+    );
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]

@@ -9,11 +9,12 @@ use crate::api::external::{
     Vni,
 };
 use chrono::{DateTime, Utc};
-use parse_display::Display;
+use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
+use strum::EnumIter;
 use uuid::Uuid;
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
@@ -78,13 +79,54 @@ impl ProducerEndpoint {
     }
 }
 
-/// Description of a single update artifact.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateArtifact {
+/// An identifier for a single update artifact.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct UpdateArtifactId {
+    /// The artifact's name.
     pub name: String,
-    pub version: i64,
-    pub kind: UpdateArtifactKind,
+
+    /// The artifact's version.
+    pub version: String,
+
+    /// The kind of update artifact this is.
+    pub kind: KnownArtifactKind,
 }
+
+// Adding a new KnownArtifactKind
+// ===============================
+//
+// Adding a new update artifact kind is a tricky process. To do so:
+//
+// 1. Add it here.
+//
+// 2. Add it by hand to <repo root>/openapi/{nexus-internal.json,sled_agent.json}
+//    (search for `"KnownArtifactKind"` with double-quotes).
+//
+//    TODO: is there a better way to do this? Rain couldn't figure out how to run
+//    the command to regenerate the API: the nexus build kept failing. There
+//    might be a circular dependency here, which is worrisome.
+//
+// 3. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
+//
+// 4. Add it to <repo root>/common/src/sql/dbinit.sql under (CREATE TYPE
+//    omicron.public.update_artifact_kind).
+//
+//    TODO: After omicron ships this would likely involve a DB migration.
+//
+// See https://github.com/oxidecomputer/omicron/pull/2300 as an example.
+//
+// NOTE: KnownArtifactKind has to be in snake_case due to openapi-lint requirements.
 
 /// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
 /// sled-agent to determine how to apply an update when asked.
@@ -94,15 +136,50 @@ pub struct UpdateArtifact {
     Debug,
     PartialEq,
     Eq,
+    Hash,
+    Ord,
+    PartialOrd,
     Display,
+    FromStr,
     Deserialize,
     Serialize,
     JsonSchema,
+    EnumIter,
 )]
-#[display(style = "kebab-case")]
-#[serde(rename_all = "kebab-case")]
-pub enum UpdateArtifactKind {
-    Zone,
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum KnownArtifactKind {
+    // Sled Artifacts
+    GimletSp,
+    GimletRot,
+    Host,
+    Trampoline,
+    ControlPlane,
+
+    // PSC Artifacts
+    PscSp,
+    PscRot,
+
+    // Switch Artifacts
+    SwitchSp,
+    SwitchRot,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn known_artifact_kind_roundtrip() {
+        for kind in KnownArtifactKind::iter() {
+            let as_string = kind.to_string();
+            let kind2 = as_string.parse::<KnownArtifactKind>().unwrap_or_else(
+                |error| panic!("error parsing kind {as_string}: {error}"),
+            );
+            assert_eq!(kind, kind2);
+        }
+    }
 }
 
 /// A `HostIdentifier` represents either an IP host or network (v4 or v6),

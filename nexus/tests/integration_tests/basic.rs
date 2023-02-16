@@ -11,15 +11,11 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
-use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::project_get;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
-use omicron_nexus::external_api::{
-    params,
-    views::{Project, Sled},
-};
+use omicron_nexus::external_api::{params, views::Project};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -28,9 +24,10 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::start_sled_agent;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
@@ -240,8 +237,25 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.description, expected.identity.description);
     assert!(project.identity.description.len() > 0);
 
-    // Delete "simproject2".  We'll make sure that's reflected in the other
-    // requests.
+    // Delete "simproject2", but first delete:
+    // - The default subnet within the default VPC
+    // - The default VPC
+    NexusRequest::object_delete(
+        client,
+        "/organizations/test-org/projects/simproject2/vpcs/default/subnets/default",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::object_delete(
+        client,
+        "/organizations/test-org/projects/simproject2/vpcs/default",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
     NexusRequest::object_delete(
         client,
         "/organizations/test-org/projects/simproject2",
@@ -249,7 +263,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("expected request to fail");
+    .unwrap();
 
     // Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
     // "/organizations/test-org/projects/simproject2".
@@ -582,41 +596,6 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     );
 }
 
-#[nexus_test]
-async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-
-    // Verify that there is one sled to begin with.
-    let sleds_url = "/system/hardware/sleds";
-    assert_eq!(sleds_list(&client, &sleds_url).await.len(), 1);
-
-    // Now start a few more sled agents.
-    let nsleds = 3;
-    let mut sas = Vec::with_capacity(nsleds);
-    for _ in 0..nsleds {
-        let sa_id = Uuid::new_v4();
-        let log =
-            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.http_server_internal.local_addr();
-        sas.push(start_sled_agent(log, addr, sa_id).await.unwrap());
-    }
-
-    // List sleds again.
-    let sleds_found = sleds_list(&client, &sleds_url).await;
-    assert_eq!(sleds_found.len(), nsleds + 1);
-
-    let sledids_found =
-        sleds_found.iter().map(|sv| sv.identity.id).collect::<Vec<Uuid>>();
-    let mut sledids_found_sorted = sledids_found.clone();
-    sledids_found_sorted.sort();
-    assert_eq!(sledids_found, sledids_found_sorted);
-
-    // Tear down the agents.
-    for sa in sas {
-        sa.http_server.close().await.unwrap();
-    }
-}
-
 async fn projects_list(
     client: &ClientTestContext,
     projects_url: &str,
@@ -625,8 +604,4 @@ async fn projects_list(
         .await
         .expect("failed to list projects")
         .all_items
-}
-
-async fn sleds_list(client: &ClientTestContext, sleds_url: &str) -> Vec<Sled> {
-    objects_list_page_authz::<Sled>(client, sleds_url).await.items
 }

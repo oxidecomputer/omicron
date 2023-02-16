@@ -8,7 +8,6 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_vpc,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
@@ -20,6 +19,9 @@ use omicron_common::api::external::{
 use omicron_nexus::external_api::views::Vpc;
 use std::convert::TryFrom;
 use uuid::Uuid;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {

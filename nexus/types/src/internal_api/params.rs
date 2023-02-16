@@ -7,6 +7,7 @@ use omicron_common::api::external::ByteCount;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -27,6 +28,14 @@ pub enum SledRole {
     Scrimlet,
 }
 
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Baseboard {
+    pub identifier: String,
+    pub model: String,
+    pub revision: i64,
+}
+
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentStartupInfo {
@@ -35,6 +44,41 @@ pub struct SledAgentStartupInfo {
 
     /// Describes the responsibilities of the sled
     pub role: SledRole,
+
+    /// Describes the sled's identity
+    pub baseboard: Baseboard,
+}
+
+/// Describes the type of physical disk.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "content")]
+pub enum PhysicalDiskKind {
+    M2,
+    U2,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskPutRequest {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub variant: PhysicalDiskKind,
+    pub sled_id: Uuid,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskPutResponse {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskDeleteRequest {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub sled_id: Uuid,
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
@@ -93,42 +137,30 @@ impl FromStr for DatasetKind {
 pub struct DatasetPutRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.
-    pub address: SocketAddr,
+    pub address: SocketAddrV6,
 
     /// Type of dataset being inserted.
     pub kind: DatasetKind,
-}
-
-/// Describes which ZFS properties should be set for a particular allocated
-/// dataset.
-// TODO: This could be useful for indicating quotas, or
-// for Nexus instructing the Sled Agent "what to format, and where".
-//
-// For now, the Sled Agent is a bit more proactive about allocation
-// decisions - see the "storage manager" section of the Sled Agent for
-// more details. Nexus, in response, merely advises minimums/maximums
-// for dataset sizes.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DatasetPutResponse {
-    /// A minimum reservation size for a filesystem.
-    /// Refer to ZFS native properties for more detail.
-    pub reservation: Option<ByteCount>,
-    /// A maximum quota on filesystem usage.
-    /// Refer to ZFS native properties for more detail.
-    pub quota: Option<ByteCount>,
 }
 
 /// Describes the purpose of the service.
 #[derive(
     Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     InternalDNS,
-    Nexus,
+    Nexus {
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
+        // While it's true that Nexus will only run with a single address,
+        // we want to convey information about the available pool of addresses
+        // when handing off from RSS -> Nexus.
+        external_address: IpAddr,
+    },
     Oximeter,
     Dendrite,
     Tfport,
+    CruciblePantry,
 }
 
 impl fmt::Display for ServiceKind {
@@ -136,30 +168,13 @@ impl fmt::Display for ServiceKind {
         use ServiceKind::*;
         let s = match self {
             InternalDNS => "internal_dns",
-            Nexus => "nexus",
+            Nexus { .. } => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
+            CruciblePantry => "crucible_pantry",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl FromStr for ServiceKind {
-    type Err = omicron_common::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use ServiceKind::*;
-        match s {
-            "nexus" => Ok(Nexus),
-            "oximeter" => Ok(Oximeter),
-            "internal_dns" => Ok(InternalDNS),
-            "dendrite" => Ok(Dendrite),
-            "tfport" => Ok(Tfport),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown service kind: {}", s),
-            }),
-        }
     }
 }
 
@@ -174,6 +189,42 @@ pub struct ServicePutRequest {
 
     /// Type of service being inserted.
     pub kind: ServiceKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DatasetCreateRequest {
+    pub zpool_id: Uuid,
+    pub dataset_id: Uuid,
+    pub request: DatasetPutRequest,
+}
+
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Certificate {
+    pub cert: Vec<u8>,
+    pub key: Vec<u8>,
+}
+
+impl std::fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Certificate")
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RackInitializationRequest {
+    pub services: Vec<ServicePutRequest>,
+    pub datasets: Vec<DatasetCreateRequest>,
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
+    // While it's true that Nexus will only run with a single address,
+    // we want to convey information about the available pool of addresses
+    // when handing off from RSS -> Nexus.
+
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1528):
+    // Support passing x509 cert info.
+    pub certs: Vec<Certificate>,
 }
 
 /// Message used to notify Nexus that this oximeter instance is up and running.

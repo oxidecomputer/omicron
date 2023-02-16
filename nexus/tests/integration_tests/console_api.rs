@@ -12,9 +12,7 @@ use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
 use nexus_test_utils::resource_helpers::grant_iam;
-use nexus_test_utils::{
-    load_test_config, test_setup_with_config, ControlPlaneTestContext,
-};
+use nexus_test_utils::{load_test_config, test_setup_with_config};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
@@ -24,6 +22,9 @@ use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::{shared, views};
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
@@ -304,8 +305,11 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 async fn test_absolute_static_dir() {
     let mut config = load_test_config();
     config.pkg.console.static_dir = current_dir().unwrap().join("tests/static");
-    let cptestctx =
-        test_setup_with_config("test_absolute_static_dir", &mut config).await;
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_absolute_static_dir",
+        &mut config,
+    )
+    .await;
     let testctx = &cptestctx.external_client;
 
     // existing file is returned

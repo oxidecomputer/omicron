@@ -57,17 +57,17 @@ use uuid::Uuid;
 //   `make_organization()`, etc.)  You'll likely need the `first_branch`
 //   argument that says whether to create users and how many child hierarchies
 //   to create.
-pub async fn make_resources<'a>(
-    mut builder: ResourceBuilder<'a>,
+pub async fn make_resources(
+    mut builder: ResourceBuilder<'_>,
     main_silo_id: Uuid,
 ) -> ResourceSet {
     // Global resources
-    builder.new_resource(authz::DATABASE.clone());
-    builder.new_resource_with_users(authz::FLEET.clone()).await;
-    builder.new_resource(authz::CONSOLE_SESSION_LIST.clone());
-    builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST.clone());
-    builder.new_resource(authz::GLOBAL_IMAGE_LIST.clone());
-    builder.new_resource(authz::IP_POOL_LIST.clone());
+    builder.new_resource(authz::DATABASE);
+    builder.new_resource_with_users(authz::FLEET).await;
+    builder.new_resource(authz::CONSOLE_SESSION_LIST);
+    builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
+    builder.new_resource(authz::GLOBAL_IMAGE_LIST);
+    builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -76,16 +76,62 @@ pub async fn make_resources<'a>(
     // Various other resources
     let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
     builder.new_resource(authz::Rack::new(
-        authz::FLEET.clone(),
-        Uuid::new_v4(),
+        authz::FLEET,
+        rack_id,
         LookupType::ById(rack_id),
     ));
 
     let sled_id = "8a785566-adaf-c8d8-e886-bee7f9b73ca7".parse().unwrap();
     builder.new_resource(authz::Sled::new(
-        authz::FLEET.clone(),
-        Uuid::new_v4(),
+        authz::FLEET,
+        sled_id,
         LookupType::ById(sled_id),
+    ));
+
+    let global_image_id =
+        "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
+    builder.new_resource(authz::GlobalImage::new(
+        authz::FLEET,
+        global_image_id,
+        LookupType::ById(global_image_id),
+    ));
+
+    let certificate_id =
+        "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
+    builder.new_resource(authz::Certificate::new(
+        authz::FLEET,
+        certificate_id,
+        LookupType::ById(certificate_id),
+    ));
+
+    let device_user_code = String::from("a-device-user-code");
+    builder.new_resource(authz::DeviceAuthRequest::new(
+        authz::FLEET,
+        device_user_code.clone(),
+        LookupType::ByName(device_user_code),
+    ));
+
+    let device_access_token = String::from("a-device-access-token");
+    builder.new_resource(authz::DeviceAccessToken::new(
+        authz::FLEET,
+        device_access_token.clone(),
+        LookupType::ByName(device_access_token),
+    ));
+
+    let system_update_id =
+        "9c86d713-1bc2-4927-9892-ada3eb6f5f62".parse().unwrap();
+    builder.new_resource(authz::SystemUpdate::new(
+        authz::FLEET,
+        system_update_id,
+        LookupType::ById(system_update_id),
+    ));
+
+    let update_deployment_id =
+        "c617a035-7c42-49ff-a36a-5dfeee382832".parse().unwrap();
+    builder.new_resource(authz::UpdateDeployment::new(
+        authz::FLEET,
+        update_deployment_id,
+        LookupType::ById(update_deployment_id),
     ));
 
     builder.build()
@@ -110,7 +156,38 @@ async fn make_silo(
     }
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
+    let idp_id = Uuid::new_v4();
+    builder.new_resource(authz::IdentityProvider::new(
+        silo.clone(),
+        idp_id,
+        LookupType::ByName(format!("{}-identity-provider", silo_name)),
+    ));
+    builder.new_resource(authz::SamlIdentityProvider::new(
+        silo.clone(),
+        idp_id,
+        LookupType::ByName(format!("{}-saml-identity-provider", silo_name)),
+    ));
+
     builder.new_resource(authz::SiloUserList::new(silo.clone()));
+    let silo_user_id = Uuid::new_v4();
+    let silo_user = authz::SiloUser::new(
+        silo.clone(),
+        silo_user_id,
+        LookupType::ByName(format!("{}-user", silo_name)),
+    );
+    builder.new_resource(silo_user.clone());
+    let ssh_key_id = Uuid::new_v4();
+    builder.new_resource(authz::SshKey::new(
+        silo_user,
+        ssh_key_id,
+        LookupType::ByName(format!("{}-user-ssh-key", silo_name)),
+    ));
+    let silo_group_id = Uuid::new_v4();
+    builder.new_resource(authz::SiloGroup::new(
+        silo.clone(),
+        silo_group_id,
+        LookupType::ByName(format!("{}-group", silo_name)),
+    ));
 
     let norganizations = if first_branch { 2 } else { 1 };
     for i in 0..norganizations {
@@ -250,19 +327,11 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::VpcRouter::get_polar_class(),
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),
-        authz::DeviceAuthRequest::get_polar_class(),
-        authz::DeviceAccessToken::get_polar_class(),
         authz::RoleBuiltin::get_polar_class(),
-        authz::SshKey::get_polar_class(),
-        authz::SiloUser::get_polar_class(),
-        authz::SiloGroup::get_polar_class(),
-        authz::IdentityProvider::get_polar_class(),
-        authz::SamlIdentityProvider::get_polar_class(),
         authz::UpdateAvailableArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
-        authz::GlobalImage::get_polar_class(),
     ]
     .into_iter()
-    .map(|c| c.name.clone())
+    .map(|c| c.name)
     .collect()
 }

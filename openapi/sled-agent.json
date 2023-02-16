@@ -21,8 +21,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -42,53 +41,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DiskRuntimeState"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/disks/{disk_id}/snapshot": {
-      "post": {
-        "summary": "Take a snapshot of a disk that is not attached to an instance.",
-        "description": "For disks attached to an instance, see [`instance_issue_disk_snapshot_request`]",
-        "operationId": "issue_disk_snapshot_request",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiskSnapshotRequestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiskSnapshotRequestResponse"
                 }
               }
             }
@@ -139,8 +91,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -176,7 +127,6 @@
     "/instances/{instance_id}/disks/{disk_id}/snapshot": {
       "post": {
         "summary": "Take a snapshot of a disk that is attached to an instance",
-        "description": "For disks not attached to an instance, see [`issue_disk_snapshot_request`]",
         "operationId": "instance_issue_disk_snapshot_request",
         "parameters": [
           {
@@ -186,8 +136,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -196,8 +145,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -241,8 +189,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "query",
@@ -253,8 +200,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -265,8 +211,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           },
           {
             "in": "query",
@@ -277,8 +222,7 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
-            },
-            "style": "form"
+            }
           }
         ],
         "responses": {
@@ -334,7 +278,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateArtifact"
+                "$ref": "#/components/schemas/UpdateArtifactId"
               }
             }
           },
@@ -364,8 +308,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -381,6 +324,33 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zpools": {
+      "get": {
+        "operationId": "zpools_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Zpool",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Zpool"
+                  }
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -586,11 +556,6 @@
           "device": {
             "type": "string"
           },
-          "gen": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
           "name": {
             "type": "string"
           },
@@ -606,7 +571,6 @@
         },
         "required": [
           "device",
-          "gen",
           "name",
           "read_only",
           "slot",
@@ -645,34 +609,6 @@
           "time_updated"
         ]
       },
-      "DiskSnapshotRequestBody": {
-        "type": "object",
-        "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "volume_construction_request": {
-            "$ref": "#/components/schemas/VolumeConstructionRequest"
-          }
-        },
-        "required": [
-          "snapshot_id",
-          "volume_construction_request"
-        ]
-      },
-      "DiskSnapshotRequestResponse": {
-        "type": "object",
-        "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "snapshot_id"
-        ]
-      },
       "DiskState": {
         "description": "State of a Disk (primarily: attached or not)",
         "oneOf": [
@@ -699,6 +635,21 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
                 ]
               }
             },
@@ -1357,6 +1308,21 @@
         "type": "string",
         "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
+      "KnownArtifactKind": {
+        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
+        "type": "string",
+        "enum": [
+          "gimlet_sp",
+          "gimlet_rot",
+          "host",
+          "trampoline",
+          "control_plane",
+          "psc_sp",
+          "psc_rot",
+          "switch_sp",
+          "switch_rot"
+        ]
+      },
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
@@ -1502,6 +1468,34 @@
           {
             "type": "object",
             "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "management_gateway_service"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "wicketd"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "asic": {
                 "$ref": "#/components/schemas/DendriteAsic"
               },
@@ -1532,6 +1526,20 @@
             },
             "required": [
               "pkt_source",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
               "type"
             ]
           }
@@ -1566,15 +1574,15 @@
               "$ref": "#/components/schemas/ServiceType"
             }
           },
-          "zone_name": {
-            "type": "string"
+          "zone_type": {
+            "$ref": "#/components/schemas/ZoneType"
           }
         },
         "required": [
           "addresses",
           "id",
           "services",
-          "zone_name"
+          "zone_type"
         ]
       },
       "Slot": {
@@ -1611,32 +1619,31 @@
           "last_port"
         ]
       },
-      "UpdateArtifact": {
-        "description": "Description of a single update artifact.",
+      "UpdateArtifactId": {
+        "description": "An identifier for a single update artifact.",
         "type": "object",
         "properties": {
           "kind": {
-            "$ref": "#/components/schemas/UpdateArtifactKind"
+            "description": "The kind of update artifact this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KnownArtifactKind"
+              }
+            ]
           },
           "name": {
+            "description": "The artifact's name.",
             "type": "string"
           },
           "version": {
-            "type": "integer",
-            "format": "int64"
+            "description": "The artifact's version.",
+            "type": "string"
           }
         },
         "required": [
           "kind",
           "name",
           "version"
-        ]
-      },
-      "UpdateArtifactKind": {
-        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
-        "type": "string",
-        "enum": [
-          "zone"
         ]
       },
       "Vni": {
@@ -1724,6 +1731,16 @@
                 "format": "uint64",
                 "minimum": 0
               },
+              "blocks_per_extent": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "extent_count": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
               "gen": {
                 "type": "integer",
                 "format": "uint64",
@@ -1741,6 +1758,8 @@
             },
             "required": [
               "block_size",
+              "blocks_per_extent",
+              "extent_count",
               "gen",
               "opts",
               "type"
@@ -1874,6 +1893,29 @@
         },
         "required": [
           "rules"
+        ]
+      },
+      "ZoneType": {
+        "description": "The type of zone which may be requested from Sled Agent",
+        "type": "string",
+        "enum": [
+          "internal_dns",
+          "nexus",
+          "oximeter",
+          "switch",
+          "crucible_pantry"
+        ]
+      },
+      "Zpool": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       }
     }

@@ -7,13 +7,15 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    DatasetPutRequest, DatasetPutResponse, OximeterInfo, ServicePutRequest,
-    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
+    OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
+    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentStartupInfo,
+    ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
@@ -23,7 +25,7 @@ use hyper::Body;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::UpdateArtifact;
+use omicron_common::api::internal::nexus::UpdateArtifactId;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -38,11 +40,13 @@ pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(sled_agent_put)?;
         api.register(rack_initialization_complete)?;
+        api.register(physical_disk_put)?;
+        api.register(physical_disk_delete)?;
         api.register(zpool_put)?;
-        api.register(dataset_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_volume_remove_read_only_parent)?;
+        api.register(cpapi_disk_remove_read_only_parent)?;
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
@@ -69,7 +73,7 @@ struct SledAgentPathParam {
      path = "/sled-agents/{sled_id}",
  }]
 async fn sled_agent_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<SledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -99,22 +103,63 @@ struct RackPathParam {
      path = "/racks/{rack_id}/initialization-complete",
  }]
 async fn rack_initialization_complete(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RackPathParam>,
-    info: TypedBody<Vec<ServicePutRequest>>,
+    info: TypedBody<RackInitializationRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let svcs = info.into_inner();
+    let request = info.into_inner();
     let opctx = OpContext::for_internal_api(&rqctx).await;
 
-    nexus.rack_initialize(&opctx, path.rack_id, svcs).await?;
+    nexus.rack_initialize(&opctx, path.rack_id, request).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// Path parameters for Sled Agent requests (internal API)
+/// Report that a physical disk for the specified sled has come online.
+#[endpoint {
+     method = PUT,
+     path = "/physical-disk",
+ }]
+async fn physical_disk_put(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<PhysicalDiskPutRequest>,
+) -> Result<HttpResponseOk<PhysicalDiskPutResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let disk = body.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.upsert_physical_disk(&opctx, disk).await?;
+        Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Report that a physical disk for the specified sled has gone offline.
+#[endpoint {
+     method = DELETE,
+     path = "/physical-disk",
+ }]
+async fn physical_disk_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<PhysicalDiskDeleteRequest>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let disk = body.into_inner();
+
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.delete_physical_disk(&opctx, disk).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Zpool requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct ZpoolPathParam {
     sled_id: Uuid,
@@ -127,7 +172,7 @@ struct ZpoolPathParam {
      path = "/sled-agents/{sled_id}/zpools/{zpool_id}",
  }]
 async fn zpool_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ZpoolPathParam>,
     pool_info: TypedBody<ZpoolPutRequest>,
 ) -> Result<HttpResponseOk<ZpoolPutResponse>, HttpError> {
@@ -137,37 +182,6 @@ async fn zpool_put(
     let pi = pool_info.into_inner();
     nexus.upsert_zpool(path.zpool_id, path.sled_id, pi).await?;
     Ok(HttpResponseOk(ZpoolPutResponse {}))
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct DatasetPathParam {
-    zpool_id: Uuid,
-    dataset_id: Uuid,
-}
-
-/// Report that a dataset within a pool has come online.
-#[endpoint {
-     method = PUT,
-     path = "/zpools/{zpool_id}/dataset/{dataset_id}",
- }]
-async fn dataset_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<DatasetPathParam>,
-    info: TypedBody<DatasetPutRequest>,
-) -> Result<HttpResponseOk<DatasetPutResponse>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let info = info.into_inner();
-    nexus
-        .upsert_dataset(
-            path.dataset_id,
-            path.zpool_id,
-            info.address,
-            info.kind.into(),
-        )
-        .await?;
-    Ok(HttpResponseOk(DatasetPutResponse { reservation: None, quota: None }))
 }
 
 /// Path parameters for Instance requests (internal API)
@@ -182,7 +196,7 @@ struct InstancePathParam {
      path = "/instances/{instance_id}",
  }]
 async fn cpapi_instances_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
     new_runtime_state: TypedBody<InstanceRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -209,7 +223,7 @@ struct DiskPathParam {
      path = "/disks/{disk_id}",
  }]
 async fn cpapi_disks_put(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<DiskPathParam>,
     new_runtime_state: TypedBody<DiskRuntimeState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -244,7 +258,7 @@ struct VolumePathParam {
      path = "/volume/{volume_id}/remove-read-only-parent",
  }]
 async fn cpapi_volume_remove_read_only_parent(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<VolumePathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -252,7 +266,33 @@ async fn cpapi_volume_remove_read_only_parent(
     let path = path_params.into_inner();
 
     let handler = async {
-        nexus.volume_remove_read_only_parent(path.volume_id).await?;
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.volume_remove_read_only_parent(&opctx, path.volume_id).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Request removal of a read_only_parent from a disk
+/// This is a thin wrapper around the volume_remove_read_only_parent saga.
+/// All we are doing here is, given a disk UUID, figure out what the
+/// volume_id is for that disk, then use that to call the
+/// volume_remove_read_only_parent saga on it.
+#[endpoint {
+     method = POST,
+     path = "/disk/{disk_id}/remove-read-only-parent",
+ }]
+async fn cpapi_disk_remove_read_only_parent(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<DiskPathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = OpContext::for_internal_api(&rqctx).await;
+        nexus.disk_remove_read_only_parent(&opctx, path.disk_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -264,7 +304,7 @@ async fn cpapi_volume_remove_read_only_parent(
      path = "/metrics/producers",
  }]
 async fn cpapi_producers_post(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    request_context: RequestContext<Arc<ServerContext>>,
     producer_info: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
@@ -286,7 +326,7 @@ async fn cpapi_producers_post(
      path = "/metrics/collectors",
  }]
 async fn cpapi_collectors_post(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    request_context: RequestContext<Arc<ServerContext>>,
     oximeter_info: TypedBody<OximeterInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
@@ -308,7 +348,7 @@ async fn cpapi_collectors_post(
     path = "/metrics/collect/{producer_id}",
 }]
 async fn cpapi_metrics_collect(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
+    request_context: RequestContext<Arc<ServerContext>>,
     path_params: Path<ProducerIdPathParams>,
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     let context = request_context.context();
@@ -327,8 +367,8 @@ async fn cpapi_metrics_collect(
     path = "/artifacts/{kind}/{name}/{version}",
 }]
 async fn cpapi_artifact_download(
-    request_context: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<UpdateArtifact>,
+    request_context: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpdateArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;

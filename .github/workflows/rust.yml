@@ -25,6 +25,9 @@ jobs:
       matrix:
         os: [ ubuntu-20.04, macos-11 ]
     steps:
+    # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
+    - name: Disable packages.microsoft.com repo
+      run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1
@@ -41,6 +44,9 @@ jobs:
   clippy-lint:
     runs-on: ubuntu-20.04
     steps:
+    # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
+    - name: Disable packages.microsoft.com repo
+      run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1
@@ -59,13 +65,16 @@ jobs:
       # override belongs in src/lib.rs, and it is there, but that doesn't
       # reliably work due to rust-lang/rust-clippy#6610.
       #
-      run: cargo clippy -- -D warnings -A clippy::style
+      run: cargo clippy --all-targets -- --deny warnings --allow clippy::style
 
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
     runs-on: ubuntu-20.04
     steps:
+    # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
+    - name: Disable packages.microsoft.com repo
+      run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
     - uses: Swatinem/rust-cache@v1

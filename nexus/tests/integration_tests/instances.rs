@@ -4,6 +4,9 @@
 
 //! Tests basic instance support in the API
 
+use super::metrics::query_for_latest_metric;
+
+use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -11,8 +14,12 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_ip_pool;
+use nexus_test_utils::resource_helpers::create_local_user;
+use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -25,9 +32,12 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
+use omicron_nexus::authz::SiloRole;
+use omicron_nexus::context::OpContext;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
+use omicron_nexus::external_api::shared::SiloIdentityMode;
 use omicron_nexus::external_api::views;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
@@ -43,23 +53,30 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
     create_instance, create_organization, create_project,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
-static POOL_NAME: &str = "p0";
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
-fn get_project_url() -> String {
-    format!("/organizations/{}/projects/{}", ORGANIZATION_NAME, PROJECT_NAME)
+fn get_instances_url() -> String {
+    format!(
+        "/v1/instances?organization={}&project={}",
+        ORGANIZATION_NAME, PROJECT_NAME
+    )
 }
 
-fn get_instances_url() -> String {
-    format!("{}/instances", get_project_url())
+fn get_instance_url(instance_name: &str) -> String {
+    format!(
+        "/v1/instances/{}?organization={}&project={}",
+        instance_name, ORGANIZATION_NAME, PROJECT_NAME
+    )
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -73,10 +90,7 @@ async fn test_instances_access_before_create_returns_not_found(
 
     // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // List instances.  There aren't any yet.
@@ -84,7 +98,7 @@ async fn test_instances_access_before_create_returns_not_found(
     assert_eq!(instances.len(), 0);
 
     // Make sure we get a 404 if we fetch one.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance_url = get_instance_url("just-rainsticks");
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -122,33 +136,86 @@ async fn test_instances_access_before_create_returns_not_found(
 }
 
 #[nexus_test]
+async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    populate_ip_pool(&client, "default", None).await;
+    let org = create_organization(&client, ORGANIZATION_NAME).await;
+    let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create an instance.
+    let instance_name = "test-instance";
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
+
+    // Fetch instance by id
+    let fetched_instance = instance_get(
+        &client,
+        format!("/v1/instances/{}", instance.identity.id).as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // Fetch instance by name and project_id
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}",
+            instance.identity.name, project.identity.id
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // Fetch instance by name, project_name, and organization_id
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}&organization={}",
+            instance.identity.name, project.identity.name, org.identity.id
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // Fetch instance by name, project_name, and organization_name
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}&organization={}",
+            instance.identity.name, project.identity.name, org.identity.name
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+}
+
+#[nexus_test]
 async fn test_instances_create_reboot_halt(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let instance_name = "just-rainsticks";
 
-    // Create an IP pool and  project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
+    let url_instances = get_instances_url();
 
     // Create an instance.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
-    let instance = create_instance(
-        client,
-        ORGANIZATION_NAME,
-        PROJECT_NAME,
-        "just-rainsticks",
-    )
-    .await;
-    assert_eq!(instance.identity.name, "just-rainsticks");
-    assert_eq!(instance.identity.description, "instance \"just-rainsticks\"");
+    let instance_url = get_instance_url(instance_name);
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
+    assert_eq!(instance.identity.name, instance_name);
+    assert_eq!(
+        instance.identity.description,
+        format!("instance \"{}\"", instance_name).as_str()
+    );
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
     // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
@@ -185,7 +252,10 @@ async fn test_instances_create_reboot_halt(
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
+    assert_eq!(
+        error.message,
+        format!("already exists: instance \"{}\"", instance_name).as_str()
+    );
 
     // List instances again and expect to find the one we just created.
     let instances = instances_list(&client, &url_instances).await;
@@ -227,7 +297,7 @@ async fn test_instances_create_reboot_halt(
     // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, instance_name, InstanceOp::Start).await;
     instances_eq(&instance, &instance_next);
     let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
@@ -235,7 +305,7 @@ async fn test_instances_create_reboot_halt(
     // Reboot the instance.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Reboot).await;
+        instance_post(&client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -263,7 +333,7 @@ async fn test_instances_create_reboot_halt(
     // Request a halt and verify both the immediate state and the finished state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -283,7 +353,7 @@ async fn test_instances_create_reboot_halt(
     // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     instances_eq(&instance, &instance_next);
     let instance_next = instance_get(&client, &instance_url).await;
     instances_eq(&instance, &instance_next);
@@ -294,7 +364,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::BAD_REQUEST,
         Method::POST,
-        &format!("{}/reboot", &instance_url),
+        get_instance_url(format!("{}/reboot", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -315,7 +385,7 @@ async fn test_instances_create_reboot_halt(
     // succeed, having stopped in between.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, instance_name, InstanceOp::Start).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -324,7 +394,7 @@ async fn test_instances_create_reboot_halt(
 
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Reboot).await;
+        instance_post(&client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -354,7 +424,7 @@ async fn test_instances_create_reboot_halt(
     // state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -365,7 +435,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::BAD_REQUEST,
         Method::POST,
-        &format!("{}/reboot", instance_url),
+        get_instance_url(format!("{}/reboot", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -417,7 +487,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        &format!("{}/reboot", instance_url),
+        get_instance_url(format!("{}/reboot", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -429,7 +499,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        &format!("{}/start", instance_url),
+        get_instance_url(format!("{}/start", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -439,7 +509,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        &format!("{}/stop", instance_url),
+        get_instance_url(format!("{}/stop", instance_name).as_str()).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -448,21 +518,200 @@ async fn test_instances_create_reboot_halt(
 }
 
 #[nexus_test]
-async fn test_instances_create_stopped_start(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
-    let nexus = &apictx.nexus;
+async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
+    // Normally, Nexus is not registered as a producer for tests.
+    // Turn this bit on so we can also test some metrics from Nexus itself.
+    cptestctx.server.register_as_producer().await;
 
-    // Create an IP pool and  project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    let client = &cptestctx.external_client;
+    let oximeter = &cptestctx.oximeter;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+
+    // Create an IP pool and project that we'll use for testing.
+    populate_ip_pool(&client, "default", None).await;
+    let organization_id =
+        create_organization(&client, ORGANIZATION_NAME).await.identity.id;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
+        .await
+        .identity
+        .id;
+
+    // Query the view of these metrics stored within CRDB
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
+    assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
+
+    // Query the view of these metrics stored within Clickhouse
+    let metric_url = |metric_type: &str, id: Uuid| {
+        format!(
+            "/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
+            Utc::now() - chrono::Duration::seconds(30),
+            Utc::now() + chrono::Duration::seconds(30),
+        )
+    };
+    oximeter.force_collect().await;
+    for id in &[organization_id, project_id] {
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", *id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", *id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            0
+        );
+    }
+
+    // Create an instance.
+    let instance_name = "just-rainsticks";
+    let instance_url = format!("{url_instances}/{instance_name}");
+    create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+        .await;
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, 4);
+    assert_eq!(
+        virtual_provisioning_collection.ram_provisioned.0,
+        ByteCount::from_gibibytes_u32(1),
+    );
+
+    // Stop the instance
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    // NOTE: I think it's arguably "more correct" to identify that the
+    // number of CPUs being used by guests at this point is actually "0",
+    // not "4", because the instance is stopped (same re: RAM usage).
+    //
+    // However, for implementation reasons, this is complicated (we have a
+    // tendency to update the runtime without checking the prior state, which
+    // makes edge-triggered behavior trickier to notice).
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    let expected_cpus = 4;
+    let expected_ram =
+        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, expected_cpus);
+    assert_eq!(
+        i64::from(virtual_provisioning_collection.ram_provisioned.0),
+        expected_ram
+    );
+    oximeter.force_collect().await;
+    for id in &[organization_id, project_id] {
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", *id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", *id),
+            )
+            .await,
+            expected_cpus
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            expected_ram
+        );
+    }
+
+    // Stop the instance
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
+    assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
+    oximeter.force_collect().await;
+    for id in &[organization_id, project_id] {
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("virtual_disk_space_provisioned", *id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("cpus_provisioned", *id),
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            query_for_latest_metric(
+                client,
+                &metric_url("ram_provisioned", *id),
+            )
+            .await,
+            0
+        );
+    }
+}
+
+#[nexus_test]
+async fn test_instances_create_stopped_start(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let instance_name = "just-rainsticks";
+
+    create_org_and_project(&client).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
 
     // Create an instance in a stopped state.
     let instance: Instance = object_create(
@@ -470,8 +719,8 @@ async fn test_instances_create_stopped_start(
         &url_instances,
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
-                name: "just-rainsticks".parse().unwrap(),
-                description: "instance just-rainsticks".to_string(),
+                name: instance_name.parse().unwrap(),
+                description: format!("instance {}", instance_name),
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
@@ -488,9 +737,9 @@ async fn test_instances_create_stopped_start(
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
 
     // Start the instance.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance_url = get_instance_url(instance_name);
     let instance =
-        instance_post(&client, &instance_url, InstanceOp::Start).await;
+        instance_post(&client, instance_name, InstanceOp::Start).await;
 
     // Now, simulate completion of instance boot and check the state reported.
     instance_simulate(nexus, &instance.identity.id).await;
@@ -508,27 +757,17 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let instance_name = "just-rainsticks";
 
-    // Create an IP pool and project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Create an instance.
-    let instance_url = format!("{}/just-rainsticks", url_instances);
-    let instance = create_instance(
-        client,
-        ORGANIZATION_NAME,
-        PROJECT_NAME,
-        "just-rainsticks",
-    )
-    .await;
+    let instance_url = get_instance_url(instance_name);
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
 
     // Simulate the instance booting.
     instance_simulate(nexus, &instance.identity.id).await;
@@ -556,7 +795,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 
     // Stop the instance
     let instance =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
@@ -637,13 +876,11 @@ async fn test_instance_create_saga_removes_instance_database_record(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
@@ -749,14 +986,11 @@ async fn test_instance_with_single_explicit_ip_address(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
@@ -825,14 +1059,11 @@ async fn test_instance_with_new_custom_network_interfaces(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create a VPC Subnet other than the default.
     //
@@ -981,16 +1212,14 @@ async fn test_instance_create_delete_network_interface(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let instance_name = "nic-attach-test-inst";
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_org_and_project(&client).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1015,7 +1244,7 @@ async fn test_instance_create_delete_network_interface(
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nic-attach-test-inst")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("instance to test attaching new nic"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -1034,8 +1263,6 @@ async fn test_instance_create_delete_network_interface(
             .await
             .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
-    let url_instance =
-        format!("{}/{}", url_instances, instance.identity.name.as_str());
 
     // Verify there are no interfaces
     let url_interfaces = format!(
@@ -1102,8 +1329,7 @@ async fn test_instance_create_delete_network_interface(
     );
 
     // Stop the instance
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Verify we can now make the requests again
@@ -1131,7 +1357,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Restart the instance, verify the interfaces are still correct.
     let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Get all interfaces in one request.
@@ -1173,8 +1399,7 @@ async fn test_instance_create_delete_network_interface(
     }
 
     // Stop the instance and verify we can delete the interface
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // We should not be able to delete the primary interface, while the
@@ -1232,16 +1457,11 @@ async fn test_instance_update_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let instance_name = "nic-update-test-inst";
 
-    // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
+    let url_instances = get_instances_url();
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1266,7 +1486,7 @@ async fn test_instance_update_network_interfaces(
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nic-update-test-inst")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("instance to test updatin nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -1285,8 +1505,6 @@ async fn test_instance_update_network_interfaces(
             .await
             .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
-    let url_instance =
-        format!("{}/{}", url_instances, instance.identity.name.as_str());
     let url_interfaces = format!(
         "/organizations/{}/projects/{}/instances/{}/network-interfaces",
         ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
@@ -1315,8 +1533,7 @@ async fn test_instance_update_network_interfaces(
     ];
 
     // Stop the instance
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Create the first interface on the instance.
@@ -1338,7 +1555,7 @@ async fn test_instance_update_network_interfaces(
     // Restart the instance, to ensure we can only modify things when it's
     // stopped.
     let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // We'll change the interface's name and description
@@ -1376,8 +1593,7 @@ async fn test_instance_update_network_interfaces(
     );
 
     // Stop the instance again, and now verify that the update works.
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let updated_primary_iface = NexusRequest::object_put(
         client,
@@ -1483,7 +1699,7 @@ async fn test_instance_update_network_interfaces(
 
     // Restart the instance, and verify that we can't update either interface.
     let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     for if_name in
@@ -1512,8 +1728,7 @@ async fn test_instance_update_network_interfaces(
     }
 
     // Stop the instance again.
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Verify that we can set the secondary as the new primary, and that nothing
@@ -1716,16 +1931,11 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 #[nexus_test]
 async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
+    let instance_name = "nifs";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Create the "probablydata" disk
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
@@ -1750,7 +1960,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     // Create the instance
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nfs")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -1767,10 +1977,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
             .body(Some(&instance_params))
@@ -1811,15 +2018,9 @@ async fn test_instance_fails_to_boot_with_disk(
     // see: https://github.com/oxidecomputer/omicron/issues/1713
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Create the "probablydata" disk
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
@@ -1901,6 +2102,212 @@ async fn test_instance_fails_to_boot_with_disk(
     assert_eq!(disks[0].state, DiskState::Detached);
 }
 
+#[nexus_test]
+async fn test_instance_create_attach_disks(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(&client).await;
+    let attachable_disk = create_disk(
+        &client,
+        ORGANIZATION_NAME,
+        PROJECT_NAME,
+        "attachable-disk",
+    )
+    .await;
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nfs")).unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(3),
+        hostname: String::from("nfs"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![
+            params::InstanceDiskAttachment::Create(params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from(String::from("created-disk")).unwrap(),
+                    description: String::from(
+                        "A disk that was created by instance create",
+                    ),
+                },
+                size: ByteCount::from_gibibytes_u32(4),
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            }),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: attachable_disk.identity.name,
+                },
+            ),
+        ],
+        start: true,
+    };
+
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Assert disks are created and attached
+    let url_project_disks = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 2);
+
+    for disk in disks {
+        assert_eq!(disk.state, DiskState::Attached(instance.identity.id));
+    }
+}
+
+/// Tests to ensure that when an error occurs in the instance create saga after
+/// some disks are succesfully created and attached, those disks are detached
+/// and deleted.
+#[nexus_test]
+async fn test_instance_create_attach_disks_undo(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(&client).await;
+    let regular_disk =
+        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "a-reg-disk")
+            .await;
+    let faulted_disk =
+        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "faulted-disk")
+            .await;
+
+    let url_project_disks = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+
+    // set `faulted_disk` to the faulted state
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    assert!(nexus
+        .set_disk_as_faulted(&faulted_disk.identity.id)
+        .await
+        .unwrap());
+
+    // Assert regular and faulted disks were created
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 2);
+
+    assert_eq!(disks[0].identity.id, regular_disk.identity.id);
+    assert_eq!(disks[0].state, DiskState::Detached);
+
+    assert_eq!(disks[1].identity.id, faulted_disk.identity.id);
+    assert_eq!(disks[1].state, DiskState::Faulted);
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nfs")).unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("nfs"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![
+            params::InstanceDiskAttachment::Create(params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from(String::from("probablydata")).unwrap(),
+                    description: String::from("probably data"),
+                },
+                size: ByteCount::from_gibibytes_u32(4),
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            }),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: regular_disk.identity.name },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: faulted_disk.identity.name },
+            ),
+        ],
+        start: true,
+    };
+
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::BAD_REQUEST));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to fail!");
+
+    // Assert disks are in the same state as before the instance creation began
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 2);
+
+    assert_eq!(disks[0].identity.id, regular_disk.identity.id);
+    assert_eq!(disks[0].state, DiskState::Detached);
+
+    assert_eq!(disks[1].identity.id, faulted_disk.identity.id);
+    assert_eq!(disks[1].state, DiskState::Faulted);
+}
+
 // Test that 8 disks is supported
 #[nexus_test]
 async fn test_attach_eight_disks_to_instance(
@@ -1908,15 +2315,9 @@ async fn test_attach_eight_disks_to_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -1961,10 +2362,8 @@ async fn test_attach_eight_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2069,10 +2468,8 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2121,17 +2518,9 @@ async fn test_cannot_attach_nine_disks_to_instance(
 #[nexus_test]
 async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-
-    // Test pre-reqs
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
-
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2161,7 +2550,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 8);
 
     // Set the 7th to FAULTED
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     assert!(nexus.set_disk_as_faulted(&disks[6].identity.id).await.unwrap());
 
@@ -2201,10 +2590,8 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2259,16 +2646,11 @@ async fn test_disks_detached_when_instance_destroyed(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-
-    const POOL_NAME: &str = "p0";
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
+    let instance_name = "nfs";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2304,7 +2686,7 @@ async fn test_disks_detached_when_instance_destroyed(
     // Boot the instance
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nfs")).unwrap(),
+            name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -2317,10 +2699,8 @@ async fn test_disks_detached_when_instance_destroyed(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2328,10 +2708,7 @@ async fn test_disks_detached_when_instance_destroyed(
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = get_instances_url();
 
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
@@ -2371,8 +2748,8 @@ async fn test_disks_detached_when_instance_destroyed(
     );
 
     let instance =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
-    let apictx = &cptestctx.server.apictx;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
@@ -2508,21 +2885,19 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
 #[nexus_test]
 async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let instance_name = "kris-picks";
 
-    // Create a project that we'll use for testing.
-    create_ip_pool(client, POOL_NAME, None, None).await;
-    create_organization(client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-    let _ = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_org_and_project(&client).await;
+    let instance_url = get_instance_url(instance_name);
 
     // Make sure we get a 404 if we try to access the serial console before creation.
-    let instance_serial_url =
-        format!("{}/kris-picks/serial-console?from_start=0", url_instances);
+    let instance_serial_url = format!(
+        "{}&{}",
+        get_instance_url(format!("{}/serial-console", instance_name).as_str()),
+        "from_start=0"
+    );
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -2535,12 +2910,14 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "not found: instance with name \"kris-picks\"");
+    assert_eq!(
+        error.message,
+        format!("not found: instance with name \"{}\"", instance_name).as_str()
+    );
 
     // Create an instance.
-    let instance_url = format!("{}/kris-picks", url_instances);
     let instance =
-        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, "kris-picks")
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
             .await;
 
     // Now, simulate completion of instance boot and check the state reported.
@@ -2571,7 +2948,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     // Request a halt and verify both the immediate state and the finished state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -2596,27 +2973,23 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_instance_ephemeral_ip_from_correct_project(
+async fn test_instance_ephemeral_ip_from_correct_pool(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test organization and two projects.
+    // Create test organization and projects.
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
-    let _ = create_project(&client, ORGANIZATION_NAME, "restricted").await;
 
     // Create two IP pools.
     //
-    // The first is restricted to the "restricted" project, the second unrestricted.
-    let project_path = params::ProjectPath {
-        organization: Name::try_from(ORGANIZATION_NAME.to_string()).unwrap(),
-        project: Name::try_from("restricted".to_string()).unwrap(),
-    };
+    // The first is given to the "default" pool, the provided to a distinct
+    // explicit pool.
     let first_range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 1),
@@ -2631,17 +3004,10 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         )
         .unwrap(),
     );
-    create_ip_pool(
-        &client,
-        "restricted-pool",
-        Some(first_range),
-        Some(project_path),
-    )
-    .await;
-    create_ip_pool(&client, "unrestricted-pool", Some(second_range), None)
-        .await;
+    populate_ip_pool(&client, "default", Some(first_range)).await;
+    create_ip_pool(&client, "other-pool", Some(second_range)).await;
 
-    // Create an instance in the default project, not the "dummy" project
+    // Create an instance explicitly using the "other-pool".
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("ip-pool-test")).unwrap(),
@@ -2653,7 +3019,9 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: None,
+            pool_name: Some(
+                Name::try_from(String::from("other-pool")).unwrap(),
+            ),
         }],
         disks: vec![],
         start: true,
@@ -2684,9 +3052,101 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         ips.items[0].ip >= second_range.first_address()
             && ips.items[0].ip <= second_range.last_address(),
         "Expected the Ephemeral IP to come from the second address \
-        range, since the first is reserved for a project different from \
-        the instance's project."
+        range, since the first is reserved for the default pool, not \
+        the requested pool."
     );
+}
+
+#[nexus_test]
+async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create a silo with a Collaborator User
+    let silo =
+        create_silo(&client, "authz", true, SiloIdentityMode::LocalOnly).await;
+    let user_id = create_local_user(
+        client,
+        &silo,
+        &"unpriv".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
+    grant_iam(
+        client,
+        "/system/silos/authz",
+        SiloRole::Collaborator,
+        user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Populate IP Pool
+    populate_ip_pool(&client, "default", None).await;
+
+    // Create test organization and projects.
+    NexusRequest::objects_post(
+        client,
+        "/organizations",
+        &params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: ORGANIZATION_NAME.parse().unwrap(),
+                description: String::new(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("failed to create Organization")
+    .parsed_body::<views::Organization>()
+    .expect("failed to parse new Organization");
+    NexusRequest::objects_post(
+        client,
+        &format!("/organizations/{ORGANIZATION_NAME}/projects"),
+        &params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: PROJECT_NAME.parse().unwrap(),
+                description: String::new(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("failed to create Project")
+    .parsed_body::<views::Project>()
+    .expect("failed to parse new Project");
+
+    // Create an instance using the authorization granted to the collaborator
+    // Silo User.
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("ip-pool-test")).unwrap(),
+            description: String::from("instance to test IP Pool authz"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("inst"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: Some(Name::try_from(String::from("default")).unwrap()),
+        }],
+        disks: vec![],
+        start: true,
+    };
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    NexusRequest::objects_post(client, &url_instances, &instance_params)
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute()
+        .await
+        .expect("Failed to create instance")
+        .parsed_body::<Instance>()
+        .expect("Failed to parse instance");
 }
 
 async fn instance_get(
@@ -2721,17 +3181,20 @@ pub enum InstanceOp {
 
 pub async fn instance_post(
     client: &ClientTestContext,
-    instance_url: &str,
+    instance_name: &str,
     which: InstanceOp,
 ) -> Instance {
-    let url = format!(
-        "{}/{}",
-        instance_url,
-        match which {
-            InstanceOp::Start => "start",
-            InstanceOp::Stop => "stop",
-            InstanceOp::Reboot => "reboot",
-        }
+    let url = get_instance_url(
+        format!(
+            "{}/{}",
+            instance_name,
+            match which {
+                InstanceOp::Start => "start",
+                InstanceOp::Stop => "stop",
+                InstanceOp::Reboot => "reboot",
+            }
+        )
+        .as_str(),
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
@@ -2769,5 +3232,5 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 /// going on.
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
-    sa.instance_finish_transition(id.clone()).await;
+    sa.instance_finish_transition(*id).await;
 }

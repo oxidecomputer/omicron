@@ -6,6 +6,11 @@
 
 use anyhow::anyhow;
 use std::collections::BTreeMap;
+use std::fmt::Display;
+use std::iter::Iterator;
+use wicketd_client::types::{
+    RackV1Inventory, SpComponentInfo, SpIgnition, SpState, SpType,
+};
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.
@@ -20,94 +25,78 @@ impl Inventory {
         self.power.get(id)
     }
 
-    pub fn update_power_state(
-        &mut self,
-        id: ComponentId,
-        state: PowerState,
-    ) -> anyhow::Result<()> {
-        Self::validate_component_id(id)?;
-        self.power.insert(id, state);
-        Ok(())
-    }
-
     pub fn get_inventory(&self, id: &ComponentId) -> Option<&Component> {
         self.inventory.get(id)
     }
 
+    pub fn components(&self) -> impl Iterator<Item = &ComponentId> {
+        self.inventory.keys()
+    }
+
     pub fn update_inventory(
         &mut self,
-        id: ComponentId,
-        component: Component,
+        inventory: RackV1Inventory,
     ) -> anyhow::Result<()> {
-        Self::validate_component_id(id)?;
-        self.inventory.insert(id, component);
+        let mut new_inventory = Inventory::default();
+
+        for sp in inventory.sps {
+            let i = sp.id.slot;
+            let type_ = sp.id.type_;
+            let sp = Sp {
+                ignition: sp.ignition,
+                state: sp.state,
+                components: sp.components,
+            };
+
+            // Validate and get a ComponentId
+            let (id, component) = match type_ {
+                SpType::Sled => {
+                    if i > 31 {
+                        return Err(anyhow!("Invalid sled slot: {}", i));
+                    }
+                    (ComponentId::Sled(i as u8), Component::Sled(sp))
+                }
+                SpType::Switch => {
+                    if i > 1 {
+                        return Err(anyhow!("Invalid switch slot: {}", i));
+                    }
+                    (ComponentId::Switch(i as u8), Component::Switch(sp))
+                }
+                SpType::Power => {
+                    if i > 1 {
+                        return Err(anyhow!("Invalid power shelf slot: {}", i));
+                    }
+                    (ComponentId::Psc(i as u8), Component::Psc(sp))
+                }
+            };
+            new_inventory.inventory.insert(id, component);
+
+            // TODO: Plumb through real power state
+            new_inventory.power.insert(id, PowerState::A2);
+        }
+
+        self.inventory = new_inventory.inventory;
+        self.power = new_inventory.power;
+
         Ok(())
     }
-
-    fn validate_component_id(id: ComponentId) -> anyhow::Result<()> {
-        match id {
-            ComponentId::Sled(i) if i > 31 => {
-                Err(anyhow!("Invalid sled slot: {}", i))
-            }
-            ComponentId::Switch(i) if i > 1 => {
-                Err(anyhow!("Invalid switch slot: {}", i))
-            }
-            ComponentId::Psc(i) if i > 1 => {
-                Err(anyhow!("Invalid power shelf slot: {}", i))
-            }
-            _ => Ok(()),
-        }
-    }
 }
 
+// We just print the debug info on the screen for now
+#[allow(unused)]
 #[derive(Debug)]
-pub struct FakeSled {
-    // 0-31
-    pub slot: u8,
-    pub serial_number: String,
-    pub part_number: String,
-    pub sp_version: String,
-    pub rot_version: String,
-    pub host_os_version: String,
-    pub control_plane_version: Option<String>,
+pub struct Sp {
+    ignition: SpIgnition,
+    state: SpState,
+    components: Option<Vec<SpComponentInfo>>,
 }
 
-#[derive(Debug)]
-pub struct FakeSwitch {
-    // Top is 0, bottom is 1
-    pub slot: u8,
-    pub serial_number: String,
-    pub part_number: String,
-    pub sp_version: String,
-    pub rot_version: String,
-}
-
-#[derive(Debug)]
-pub struct FakePsc {
-    // Top is 0 power shelf, 1 is bottom
-    pub slot: u8,
-    pub serial_number: String,
-    pub part_number: String,
-    pub sp_version: String,
-    pub rot_version: String,
-}
-
-/// TODO: Use real inventory received from MGS
+// XXX: Eventually a Sled will have a host component.
 #[derive(Debug)]
 pub enum Component {
-    Sled(FakeSled),
-    Switch(FakeSwitch),
-    Psc(FakePsc),
-}
-
-impl Component {
-    pub fn name(&self) -> String {
-        match self {
-            Component::Sled(s) => format!("sled {}", s.slot),
-            Component::Switch(s) => format!("switch {}", s.slot),
-            Component::Psc(p) => format!("psc {}", p.slot),
-        }
-    }
+    Sled(Sp),
+    Switch(Sp),
+    Psc(Sp),
 }
 
 // The component type and its slot.
@@ -120,10 +109,16 @@ pub enum ComponentId {
 
 impl ComponentId {
     pub fn name(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl Display for ComponentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComponentId::Sled(i) => format!("sled {}", i),
-            ComponentId::Switch(i) => format!("switch {}", i),
-            ComponentId::Psc(i) => format!("psc {}", i),
+            ComponentId::Sled(i) => write!(f, "sled {}", i),
+            ComponentId::Switch(i) => write!(f, "switch {}", i),
+            ComponentId::Psc(i) => write!(f, "psc {}", i),
         }
     }
 }

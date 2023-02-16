@@ -17,9 +17,9 @@ use http::{Method, Response, StatusCode};
 use hyper::Body;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::update::{Artifact, ArtifactKind, ArtifactsDocument};
 use omicron_nexus::config::UpdatesConfig;
-use omicron_nexus::updates::{ArtifactsDocument, UpdateArtifact};
 use ring::pkcs8::Document;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::Ed25519KeyPair;
@@ -32,7 +32,6 @@ use std::fs::File;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tempfile::{NamedTempFile, TempDir};
 use tough::editor::signed::{PathExists, SignedRole};
 use tough::editor::RepositoryEditor;
@@ -40,7 +39,8 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/omicron-test-component";
+const UPDATE_IMAGE_PATH: &'static str =
+    "/var/tmp/control-plane/omicron-test-component";
 
 #[tokio::test]
 async fn test_update_end_to_end() {
@@ -74,16 +74,19 @@ async fn test_update_end_to_end() {
         trusted_root: tuf_repo.path().join("metadata").join("1.root.json"),
         default_base_url: format!("http://{}/", local_addr),
     });
-    let cptestctx =
-        test_setup_with_config("test_update_end_to_end", &mut config).await;
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_update_end_to_end",
+        &mut config,
+    )
+    .await;
     let client = &cptestctx.external_client;
 
-    // call /system/updates/refresh on nexus
+    // call /v1/system/update/refresh on nexus
     // - download and verify the repo
     // - return 204 Non Content
     // - tells sled agent to do the thing
     NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/system/updates/refresh")
+        RequestBuilder::new(client, Method::POST, "/v1/system/update/refresh")
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -115,7 +118,7 @@ struct AllPath {
 
 #[endpoint(method = GET, path = "/{path:.*}", unpublished = true)]
 async fn static_content(
-    rqctx: Arc<RequestContext<FileServerContext>>,
+    rqctx: RequestContext<FileServerContext>,
     path: Path<AllPath>,
 ) -> Result<Response<Body>, HttpError> {
     // NOTE: this is a particularly brief and bad implementation of this to keep the test shorter.
@@ -156,7 +159,7 @@ fn new_tuf_repo(rng: &dyn SecureRandom) -> TempDir {
         roles: HashMap::new(),
         _extra: HashMap::new(),
     };
-    root.keys.insert(key_id.clone(), tuf_key.clone());
+    root.keys.insert(key_id.clone(), tuf_key);
     for role in [
         RoleType::Root,
         RoleType::Snapshot,
@@ -234,10 +237,10 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
 
     // artifacts.json, which describes all available artifacts.
     let artifacts = ArtifactsDocument {
-        artifacts: vec![UpdateArtifact {
+        artifacts: vec![Artifact {
             name: "omicron-test-component".into(),
-            version: 1,
-            kind: Some(UpdateArtifactKind::Zone),
+            version: "0.0.0".into(),
+            kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
             target: "omicron-test-component-1".into(),
         }],
     };
@@ -283,7 +286,9 @@ impl KeySource for KeyKeySource {
 // Tests that ".." paths are disallowed by dropshot.
 #[tokio::test]
 async fn test_download_with_dots_fails() {
-    let cptestctx = test_setup("test_download_with_dots_fails").await;
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_download_with_dots_fails")
+            .await;
     let client = &cptestctx.internal_client;
 
     let filename = "hey/can/you/look/../../../../up/the/directory/tree";

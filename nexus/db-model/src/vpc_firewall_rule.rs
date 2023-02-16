@@ -12,6 +12,8 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use serde::Deserialize;
+use serde::Serialize;
 use std::io::Write;
 use uuid::Uuid;
 
@@ -20,7 +22,7 @@ impl_enum_wrapper!(
     #[diesel(postgres_type(name = "vpc_firewall_rule_status"))]
     pub struct VpcFirewallRuleStatusEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
     #[diesel(sql_type = VpcFirewallRuleStatusEnum)]
     pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
 
@@ -35,7 +37,7 @@ impl_enum_wrapper!(
     #[diesel(postgres_type(name = "vpc_firewall_rule_direction"))]
     pub struct VpcFirewallRuleDirectionEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
     #[diesel(sql_type = VpcFirewallRuleDirectionEnum)]
     pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
 
@@ -50,7 +52,7 @@ impl_enum_wrapper!(
     #[diesel(postgres_type(name = "vpc_firewall_rule_action"))]
     pub struct VpcFirewallRuleActionEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
     #[diesel(sql_type = VpcFirewallRuleActionEnum)]
     pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
 
@@ -65,7 +67,7 @@ impl_enum_wrapper!(
     #[diesel(postgres_type(name = "vpc_firewall_rule_protocol"))]
     pub struct VpcFirewallRuleProtocolEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow)]
+    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
     #[diesel(sql_type = VpcFirewallRuleProtocolEnum)]
     pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 
@@ -78,7 +80,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleP
 
 /// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
 /// diesel traits for it
-#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
 #[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
@@ -113,7 +115,7 @@ where
 
 /// Newtype wrapper around [`external::VpcFirewallRuleHostFilter`] so we can derive
 /// diesel traits for it
-#[derive(Clone, Debug, AsExpression, FromSqlRow)]
+#[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
 #[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
@@ -148,7 +150,9 @@ where
 
 /// Newtype wrapper around [`external::VpcFirewallRulePriority`] so we can derive
 /// diesel traits for it
-#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
+#[derive(
+    Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+)]
 #[repr(transparent)]
 #[diesel(sql_type = sql_types::Int4)]
 pub struct VpcFirewallRulePriority(pub external::VpcFirewallRulePriority);
@@ -180,7 +184,16 @@ where
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
+#[derive(
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
 #[diesel(table_name = vpc_firewall_rule)]
 pub struct VpcFirewallRule {
     #[diesel(embed)]

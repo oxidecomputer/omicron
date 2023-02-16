@@ -34,6 +34,7 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::{
     data_page_params_for, PaginatedById, ScanById, ScanParams,
 };
@@ -60,7 +61,7 @@ pub struct SpoofLoginBody {
    tags = ["hidden"],
 }]
 pub async fn login_spoof(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<SpoofLoginBody>,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
@@ -226,7 +227,8 @@ pub struct RelayState {
 
 impl RelayState {
     pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
-        Ok(base64::encode(
+        Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
             serde_json::to_string(&self).context("encoding relay state")?,
         ))
     }
@@ -234,8 +236,11 @@ impl RelayState {
     pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
         serde_json::from_str(
             &String::from_utf8(
-                base64::decode(encoded)
-                    .context("base64 decoding relay state")?,
+                base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    encoded,
+                )
+                .context("base64 decoding relay state")?,
             )
             .context("creating relay state string")?,
         )
@@ -253,14 +258,14 @@ impl RelayState {
    tags = ["login"],
 }]
 pub async fn login_saml_begin(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
-        let request = &rqctx.request.lock().await;
+        let request = &rqctx.request;
 
         // Use opctx_external_authn because this request will be
         // unauthenticated.
@@ -323,17 +328,14 @@ pub async fn login_saml_begin(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Authenticate a user
-///
-/// Either receive a username and password, or some sort of identity provider
-/// data (like a SAMLResponse). Use these to set the user's session cookie.
+/// Authenticate a user (i.e., log in) via SAML
 #[endpoint {
    method = POST,
    path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
 pub async fn login_saml(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
 ) -> Result<HttpResponseSeeOther, HttpError> {
@@ -342,8 +344,9 @@ pub async fn login_saml(
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
 
-        // Use opctx_external_authn because this request will be
-        // unauthenticated.
+        // By definition, this request is not authenticated.  These operations
+        // happen using the Nexus "external authentication" context, which we
+        // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
 
         let (authz_silo, db_silo, identity_provider) =
@@ -384,60 +387,85 @@ pub async fn login_saml(
             )
             .await?;
 
-        if user.is_none() {
-            Err(Error::Unauthenticated {
-                internal_message: String::from(
-                    "no matching user found or credentials were not valid",
-                ),
-            })?;
-        }
-
-        let user = user.unwrap();
-
-        // always create a new console session if the user is POSTing here.
-        let session = nexus.session_create(&opctx, user.id()).await?;
-
-        let next_url = if let Some(relay_state) = &relay_state {
-            if let Some(referer) = &relay_state.referer {
-                referer.clone()
-            } else {
-                "/".to_string()
-            }
-        } else {
-            "/".to_string()
-        };
-
-        debug!(
-            &apictx.log,
-            "successful login to silo {} using provider {}: authenticated \
-            subject {} = user id {}",
-            path_params.silo_name,
-            path_params.provider_name,
-            authenticated_subject.external_id,
-            user.id(),
-        );
-
-        let mut response_with_headers = http_response_see_other(next_url)?;
-
-        {
-            let headers = response_with_headers.headers_mut();
-            headers.append(
-                header::SET_COOKIE,
-                http::HeaderValue::from_str(&session_cookie_header_value(
-                    &session.token,
-                    apictx.session_idle_timeout(),
-                ))
-                .map_err(|error| {
-                    HttpError::for_internal_error(format!(
-                        "unsupported cookie value: {:#}",
-                        error
-                    ))
-                })?,
-            );
-        }
-        Ok(response_with_headers)
+        login_finish(&opctx, apictx, user, relay_state.and_then(|r| r.referer))
+            .await
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginPathParam {
+    pub silo_name: crate::db::model::Name,
+}
+
+/// Authenticate a user (i.e., log in) via username and password
+#[endpoint {
+   method = POST,
+   path = "/login/{silo_name}/local",
+   tags = ["login"],
+}]
+pub async fn login_local(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<LoginPathParam>,
+    credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
+) -> Result<HttpResponseSeeOther, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+        let credentials = credentials.into_inner();
+
+        // By definition, this request is not authenticated.  These operations
+        // happen using the Nexus "external authentication" context, which we
+        // keep specifically for this purpose.
+        let opctx = nexus.opctx_external_authn();
+        let user = nexus
+            .login_local(&opctx, &path_params.silo_name, credentials)
+            .await?;
+        login_finish(&opctx, apictx, user, None).await
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+async fn login_finish(
+    opctx: &OpContext,
+    apictx: &ServerContext,
+    user: Option<crate::db::model::SiloUser>,
+    next_url: Option<String>,
+) -> Result<HttpResponseSeeOther, HttpError> {
+    let nexus = &apictx.nexus;
+
+    if user.is_none() {
+        Err(Error::Unauthenticated {
+            internal_message: String::from(
+                "no matching user found or credentials were not valid",
+            ),
+        })?;
+    }
+
+    let user = user.unwrap();
+    let session = nexus.session_create(&opctx, user.id()).await?;
+    let next_url = next_url.unwrap_or_else(|| "/".to_string());
+
+    let mut response_with_headers = http_response_see_other(next_url)?;
+
+    {
+        let headers = response_with_headers.headers_mut();
+        headers.append(
+            header::SET_COOKIE,
+            http::HeaderValue::from_str(&session_cookie_header_value(
+                &session.token,
+                apictx.session_idle_timeout(),
+            ))
+            .map_err(|error| {
+                HttpError::for_internal_error(format!(
+                    "unsupported cookie value: {:#}",
+                    error
+                ))
+            })?,
+        );
+    }
+    Ok(response_with_headers)
 }
 
 // Log user out of web console by deleting session in both server and browser
@@ -450,7 +478,7 @@ pub async fn login_saml(
    tags = ["hidden"],
 }]
 pub async fn logout(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     cookies: Cookies,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
@@ -514,7 +542,7 @@ pub struct RestPathParam {
    unpublished = true,
 }]
 pub async fn login_spoof_begin(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx.context()).await
 }
@@ -574,7 +602,7 @@ fn get_login_url(redirect_url: Option<String>) -> String {
    unpublished = true,
 }]
 pub async fn login_begin(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<StateParam>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
@@ -594,7 +622,7 @@ pub async fn login_begin(
    tags = ["hidden"],
 }]
 pub async fn session_me(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::User>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -616,7 +644,7 @@ pub async fn session_me(
     tags = ["hidden"],
  }]
 pub async fn session_me_groups(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
     let apictx = rqctx.context();
@@ -646,7 +674,7 @@ pub async fn session_me_groups(
 }
 
 pub async fn console_index_or_login_redirect(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     let opctx = OpContext::for_external_api(&rqctx).await;
 
@@ -664,13 +692,8 @@ pub async fn console_index_or_login_redirect(
     // using the spoof login page, which is hosted by Nexus. Once we start
     // sending users to a real external IdP login page, this will need to be a
     // full URL.
-    let redirect_url = rqctx
-        .request
-        .lock()
-        .await
-        .uri()
-        .path_and_query()
-        .map(|p| p.to_string());
+    let redirect_url =
+        rqctx.request.uri().path_and_query().map(|p| p.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
@@ -692,7 +715,7 @@ pub async fn console_index_or_login_redirect(
    unpublished = true,
 }]
 pub async fn console_page(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -704,7 +727,7 @@ pub async fn console_page(
    unpublished = true,
 }]
 pub async fn console_settings_page(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -716,7 +739,7 @@ pub async fn console_settings_page(
    unpublished = true,
 }]
 pub async fn console_system_page(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -728,7 +751,7 @@ pub async fn console_system_page(
    unpublished = true,
 }]
 pub async fn console_root(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -754,7 +777,7 @@ fn with_gz_ext(path: &PathBuf) -> PathBuf {
    unpublished = true,
 }]
 pub async fn asset(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
@@ -776,7 +799,7 @@ pub async fn asset(
         .ok_or_else(|| not_found("static_dir undefined"))?
         .join("assets");
 
-    let request = &rqctx.request.lock().await;
+    let request = &rqctx.request;
     let accept_encoding = request.headers().get(http::header::ACCEPT_ENCODING);
     let accept_gz = accept_encoding.map_or(false, |val| {
         val.to_str().map_or(false, |s| s.contains("gzip"))

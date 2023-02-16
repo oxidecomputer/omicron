@@ -25,8 +25,8 @@ use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
-use nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::api::external;
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -81,6 +81,11 @@ const NO_INSTANCE_ERROR_MESSAGE: &'static str =
 /// Errors related to inserting or attaching a NetworkInterface
 #[derive(Debug)]
 pub enum InsertError {
+    /// This interface already exists
+    ///
+    /// Note: An interface with the same name existing is a different error;
+    /// this error matches the case where the UUID already exists.
+    InterfaceAlreadyExists(String),
     /// The instance specified for this interface is already associated with a
     /// different VPC from this interface.
     InstanceSpansMultipleVpcs(Uuid),
@@ -134,6 +139,12 @@ impl InsertError {
     /// Convert this error into an external one.
     pub fn into_external(self) -> external::Error {
         match self {
+            InsertError::InterfaceAlreadyExists(name) => {
+                external::Error::ObjectAlreadyExists {
+                    type_name: external::ResourceType::NetworkInterface,
+                    object_name: name,
+                }
+            }
             InsertError::NoAvailableIpAddresses => {
                 external::Error::invalid_request(
                     "No available IP addresses for interface",
@@ -221,6 +232,10 @@ fn decode_database_error(
     // same instance.
     const NAME_CONFLICT_CONSTRAINT: &str =
         "network_interface_instance_id_name_key";
+
+    // The name of the constraint violated if we try to re-insert an already
+    // existing interface with the same UUID.
+    const ID_CONFLICT_CONSTRAINT: &str = "network_interface_pkey";
 
     // The check  violated in the case where we try to insert more that the
     // maximum number of NICs (`MAX_NICS_PER_INSTANCE`).
@@ -320,7 +335,6 @@ fn decode_database_error(
                     .unwrap_or_else(|| std::net::Ipv4Addr::UNSPECIFIED.into());
                 InsertError::IpAddressNotAvailable(ip)
             }
-
             // Constraint violated if the user-requested name is already
             // assigned to an interface on this instance.
             Some(constraint) if constraint == NAME_CONFLICT_CONSTRAINT => {
@@ -332,7 +346,13 @@ fn decode_database_error(
                     ),
                 ))
             }
-
+            // Constraint violated if the user-requested UUID has already
+            // been inserted.
+            Some(constraint) if constraint == ID_CONFLICT_CONSTRAINT => {
+                InsertError::InterfaceAlreadyExists(
+                    interface.identity.name.to_string(),
+                )
+            }
             // Any other constraint violation is a bug
             _ => InsertError::External(error::public_error_from_diesel_pool(
                 err,
@@ -638,6 +658,7 @@ fn push_ensure_unique_vpc_expression<'a>(
 ///        SELECT subnet_id
 ///        FROM network_interface
 ///        WHERE
+///            id != <interface_id> AND
 ///            instance_id = <instance_id> AND
 ///            time_deleted IS NULL AND
 ///            subnet_id = <subnet_id>
@@ -653,6 +674,7 @@ fn push_ensure_unique_vpc_expression<'a>(
 /// `'non-unique-subnets'`, which will fail casting to a UUID.
 fn push_ensure_unique_vpc_subnet_expression<'a>(
     mut out: AstPass<'_, 'a, Pg>,
+    interface_id: &'a Uuid,
     subnet_id: &'a Uuid,
     subnet_id_str: &'a String,
     instance_id: &'a Uuid,
@@ -662,6 +684,10 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
     out.push_sql(" FROM ");
     NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
+    out.push_identifier(dsl::id::NAME)?;
+    out.push_sql(" != ");
+    out.push_bind_param::<sql_types::Uuid, Uuid>(interface_id)?;
+    out.push_sql(" AND ");
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
@@ -694,6 +720,7 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
 #[allow(clippy::too_many_arguments)]
 fn push_instance_validation_cte<'a>(
     mut out: AstPass<'_, 'a, Pg>,
+    interface_id: &'a Uuid,
     vpc_id: &'a Uuid,
     vpc_id_str: &'a String,
     subnet_id: &'a Uuid,
@@ -727,6 +754,7 @@ fn push_instance_validation_cte<'a>(
     out.push_sql(", ");
     push_ensure_unique_vpc_subnet_expression(
         out.reborrow(),
+        interface_id,
         subnet_id,
         subnet_id_str,
         instance_id,
@@ -924,6 +952,7 @@ impl QueryFragment<Pg> for InsertQuery {
         //  - `is_primary`
         push_instance_validation_cte(
             out.reborrow(),
+            &self.interface.identity.id,
             &self.interface.vpc_id,
             &self.vpc_id_str,
             &self.interface.subnet.identity.id,
@@ -1496,15 +1525,19 @@ mod tests {
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::identity::Resource;
+    use crate::db::lookup::LookupPath;
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
     use crate::db::model::MacAddr;
     use crate::db::model::NetworkInterface;
+    use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
+    use crate::external_api::params;
     use crate::external_api::params::InstanceCreate;
     use crate::external_api::params::InstanceNetworkInterfaceAttachment;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -1534,10 +1567,12 @@ mod tests {
 
     // Add an instance. We'll use this to verify that the instance must be
     // stopped to add or delete interfaces.
-    async fn create_instance(db_datastore: &DataStore) -> Instance {
+    async fn create_instance(
+        opctx: &OpContext,
+        project_id: Uuid,
+        db_datastore: &DataStore,
+    ) -> Instance {
         let instance_id = Uuid::new_v4();
-        let project_id =
-            "f89892a0-58e0-60c8-a164-a82d0bd29ff4".parse().unwrap();
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
         let name = format!("a{}", instance_id)[..9].parse().unwrap();
@@ -1573,14 +1608,25 @@ mod tests {
         };
         let instance =
             Instance::new(instance_id, project_id, &params, runtime.into());
+
+        let (.., authz_project) = LookupPath::new(&opctx, &db_datastore)
+            .project_id(project_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .expect("Failed to lookup project for instance creation");
+
         db_datastore
-            .project_create_instance(instance)
+            .project_create_instance(&opctx, &authz_project, instance)
             .await
             .expect("Failed to create new instance record")
     }
 
-    async fn create_stopped_instance(db_datastore: &DataStore) -> Instance {
-        let instance = create_instance(db_datastore).await;
+    async fn create_stopped_instance(
+        opctx: &OpContext,
+        project_id: Uuid,
+        db_datastore: &DataStore,
+    ) -> Instance {
+        let instance = create_instance(opctx, project_id, db_datastore).await;
         instance_set_state(
             db_datastore,
             instance,
@@ -1671,6 +1717,7 @@ mod tests {
         opctx: OpContext,
         db: CockroachInstance,
         db_datastore: Arc<DataStore>,
+        project_id: Uuid,
         net1: Network,
         net2: Network,
     }
@@ -1680,12 +1727,40 @@ mod tests {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
-            let cfg = crate::db::Config { url: db.pg_config().clone() };
-            let pool = Arc::new(crate::db::Pool::new(&cfg));
-            let db_datastore =
-                Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
-            let opctx =
-                OpContext::for_tests(log.new(o!()), db_datastore.clone());
+            let (opctx, db_datastore) =
+                crate::db::datastore::datastore_test(&logctx, &db).await;
+
+            // Create an organization
+            let organization = params::OrganizationCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "org".parse().unwrap(),
+                    description: "desc".to_string(),
+                },
+            };
+            let organization = db_datastore
+                .organization_create(&opctx, &organization)
+                .await
+                .unwrap();
+
+            // Create a project
+            let project = Project::new(
+                organization.id(),
+                params::ProjectCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "project".parse().unwrap(),
+                        description: "desc".to_string(),
+                    },
+                },
+            );
+            let (.., authz_org) = LookupPath::new(&opctx, &db_datastore)
+                .organization_id(organization.id())
+                .lookup_for(authz::Action::CreateChild)
+                .await
+                .unwrap();
+            let (.., project) = db_datastore
+                .project_create(&opctx, &authz_org, project)
+                .await
+                .unwrap();
 
             use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
             let p = db_datastore.pool_authorized(&opctx).await.unwrap();
@@ -1698,7 +1773,15 @@ mod tests {
                     .await
                     .unwrap();
             }
-            Self { logctx, opctx, db, db_datastore, net1, net2 }
+            Self {
+                logctx,
+                opctx,
+                db,
+                db_datastore,
+                project_id: project.id(),
+                net1,
+                net2,
+            }
         }
 
         async fn success(mut self) {
@@ -1712,7 +1795,12 @@ mod tests {
         ) -> Instance {
             instance_set_state(
                 &self.db_datastore,
-                create_instance(&self.db_datastore).await,
+                create_instance(
+                    &self.opctx,
+                    self.project_id,
+                    &self.db_datastore,
+                )
+                .await,
                 state,
             )
             .await
@@ -2013,6 +2101,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_insert_same_interface_fails() {
+        let context =
+            TestContext::new("test_insert_same_interface_fails", 2).await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
+        let interface = IncompleteNetworkInterface::new(
+            Uuid::new_v4(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+        let _ = context
+            .db_datastore
+            .instance_create_network_interface_raw(
+                &context.opctx,
+                interface.clone(),
+            )
+            .await
+            .expect("Failed to insert interface");
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
+            .await;
+        assert!(
+            matches!(result, Err(InsertError::InterfaceAlreadyExists(_))),
+            "Expected that interface would already exist",
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
     async fn test_insert_multiple_vpcs_fails() {
         let context =
             TestContext::new("test_insert_multiple_vpcs_fails", 2).await;
@@ -2097,7 +2222,12 @@ mod tests {
         }
 
         // Next one should fail
-        let instance = create_stopped_instance(&context.db_datastore).await;
+        let instance = create_stopped_instance(
+            &context.opctx,
+            context.project_id,
+            &context.db_datastore,
+        )
+        .await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance.id(),

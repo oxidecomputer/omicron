@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+use dropshot::HttpError;
 pub use error::*;
 
 use anyhow::anyhow;
@@ -23,6 +24,7 @@ use futures::stream::StreamExt;
 use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
+use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -107,6 +109,56 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
             marker: self.marker.map(f),
             direction: self.direction,
             limit: self.limit,
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Name> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Name(name)) => Ok(DataPageParams {
+                marker: Some(name),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Id(id)) => Ok(DataPageParams {
+                marker: Some(id),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
         }
     }
 }
@@ -265,6 +317,92 @@ impl Name {
     /// Return the `&str` representing the actual name.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Display, Clone, PartialEq)]
+#[display("{0}")]
+#[serde(untagged)]
+pub enum NameOrId {
+    Id(Uuid),
+    Name(Name),
+}
+
+impl TryFrom<String> for NameOrId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(NameOrId::Id(id))
+        } else {
+            Ok(NameOrId::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl From<Name> for NameOrId {
+    fn from(name: Name) -> Self {
+        NameOrId::Name(name)
+    }
+}
+
+impl From<Uuid> for NameOrId {
+    fn from(id: Uuid) -> Self {
+        NameOrId::Id(id)
+    }
+}
+
+impl JsonSchema for NameOrId {
+    fn schema_name() -> String {
+        "NameOrId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    label_schema("id", gen.subschema_for::<Uuid>()),
+                    label_schema("name", gen.subschema_for::<Name>()),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+// TODO: remove wrapper for semver::Version once this PR goes through
+// https://github.com/GREsau/schemars/pull/195
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[display("{0}")]
+pub struct SemverVersion(pub semver::Version);
+
+impl SemverVersion {
+    pub fn new(major: u64, minor: u64, patch: u64) -> Self {
+        Self(semver::Version::new(major, minor, patch))
+    }
+}
+
+impl JsonSchema for SemverVersion {
+    fn schema_name() -> String {
+        "SemverVersion".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(r"^\d+\.\d+\.\d+([\-\+].+)?$".to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
@@ -534,6 +672,7 @@ pub enum ResourceType {
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
+    Certificate,
     ConsoleSession,
     DeviceAuthRequest,
     DeviceAccessToken,
@@ -546,6 +685,7 @@ pub enum ResourceType {
     Instance,
     IpPool,
     NetworkInterface,
+    PhysicalDisk,
     Rack,
     Service,
     Sled,
@@ -561,6 +701,11 @@ pub enum ResourceType {
     MetricProducer,
     RoleBuiltin,
     UpdateAvailableArtifact,
+    SystemUpdate,
+    ComponentUpdate,
+    SystemUpdateComponentUpdate,
+    UpdateDeployment,
+    UpdateableComponent,
     UserBuiltin,
     Zpool,
 }
@@ -813,6 +958,8 @@ pub enum DiskState {
     Creating,
     /// Disk is ready but detached from any Instance
     Detached,
+    /// Disk is undergoing maintenance
+    Maintenance,
     /// Disk is being attached to the given Instance
     Attaching(Uuid), // attached Instance id
     /// Disk is attached to the given Instance
@@ -840,6 +987,7 @@ impl TryFrom<(&str, Option<Uuid>)> for DiskState {
         match (s, maybe_id) {
             ("creating", None) => Ok(DiskState::Creating),
             ("detached", None) => Ok(DiskState::Detached),
+            ("maintenance", None) => Ok(DiskState::Maintenance),
             ("destroyed", None) => Ok(DiskState::Destroyed),
             ("faulted", None) => Ok(DiskState::Faulted),
             ("attaching", Some(id)) => Ok(DiskState::Attaching(id)),
@@ -859,6 +1007,7 @@ impl DiskState {
         match self {
             DiskState::Creating => "creating",
             DiskState::Detached => "detached",
+            DiskState::Maintenance => "maintenance",
             DiskState::Attaching(_) => "attaching",
             DiskState::Attached(_) => "attached",
             DiskState::Detaching(_) => "detaching",
@@ -883,6 +1032,7 @@ impl DiskState {
 
             DiskState::Creating => None,
             DiskState::Detached => None,
+            DiskState::Maintenance => None,
             DiskState::Destroyed => None,
             DiskState::Faulted => None,
         }
@@ -1412,24 +1562,6 @@ pub struct RouterRoute {
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
 
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
-/// Create-time parameters for a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
-/// Updateable properties of a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
     pub target: RouteTarget,
     pub destination: RouteDestination,
 }
@@ -2399,7 +2531,7 @@ mod test {
             "vpc:foo".parse().unwrap()
         );
         assert_eq!(
-            RouteDestination::Subnet(name.clone()),
+            RouteDestination::Subnet(name),
             "subnet:foo".parse().unwrap()
         );
         assert_eq!(

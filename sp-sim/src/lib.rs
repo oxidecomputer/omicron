@@ -22,11 +22,6 @@ use sprockets_rot::common::Ed25519PublicKey;
 pub use sprockets_rot::RotSprocketError;
 use std::net::SocketAddrV6;
 
-pub mod ignition_id {
-    pub const GIMLET: u16 = 0b0000_0000_0001_0001;
-    pub const SIDECAR: u16 = 0b0000_0000_0001_0010;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Responsiveness {
     Responsive,
@@ -35,8 +30,8 @@ pub enum Responsiveness {
 
 #[async_trait]
 pub trait SimulatedSp {
-    /// Hexlified serial number.
-    fn serial_number(&self) -> String;
+    /// Serial number.
+    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState;
 
     /// Public key for the manufacturing cert used to sign this SP's RoT certs.
     fn manufacturing_public_key(&self) -> Ed25519PublicKey;
@@ -54,6 +49,17 @@ pub trait SimulatedSp {
         &self,
         request: RotRequestV1,
     ) -> Result<RotResponseV1, RotSprocketError>;
+}
+
+// Helper function to pad a simulated serial number (stored as a `String`) to
+// the appropriate size for returning in the SpState message.
+fn serial_number_padded(serial_number: &str) -> [u8; 32] {
+    let mut padded = [0; 32];
+    padded
+        .get_mut(0..serial_number.len())
+        .expect("simulated serial number too long")
+        .copy_from_slice(serial_number.as_bytes());
+    padded
 }
 
 pub struct SimRack {

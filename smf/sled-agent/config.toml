@@ -1,6 +1,18 @@
 # Sled Agent Configuration
 
-id = "fb0f7546-4d46-40ca-9d56-cbb810684ca7"
+# Identifies if the sled should be unconditionally treated as a scrimlet.
+#
+# If this is set to "true", the sled agent treats itself as a scrimlet.
+# If this is set to "false", the sled agent treats itself as a gimlet.
+# If this is unset:
+# - On illumos, the sled automatically detects whether or not it is a scrimlet.
+# - On all other platforms, the sled assumes it is a gimlet.
+# stub_scrimlet = true
+
+# Identifies the revision of the sidecar that is attached, if one is attached.
+# TODO: This field should be removed once Gimlets have the ability to auto-detect
+# this information.
+sidecar_revision = "rev_a"
 
 # A file-backed zpool can be manually created with the following:
 # # truncate -s 10GB testpool.vdev

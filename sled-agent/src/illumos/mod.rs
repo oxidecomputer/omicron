@@ -8,9 +8,10 @@ use cfg_if::cfg_if;
 
 pub mod addrobj;
 pub mod dladm;
+pub mod fstyp;
+pub mod link;
 pub mod running_zone;
 pub mod svc;
-pub mod vnic;
 pub mod zfs;
 pub mod zone;
 pub mod zpool;

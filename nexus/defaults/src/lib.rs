@@ -13,14 +13,6 @@ use omicron_common::api::external::Ipv6Net;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
-/// Minimum prefix size supported in IPv4 VPC Subnets.
-///
-/// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
-pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
-
-/// The number of reserved addresses at the beginning of a subnet range.
-pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
-
 /// The name provided for a default primary network interface for a guest
 /// instance.
 pub const DEFAULT_PRIMARY_NIC_NAME: &str = "net0";

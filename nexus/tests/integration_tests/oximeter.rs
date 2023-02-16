@@ -4,13 +4,16 @@
 
 //! Integration tests for oximeter collectors and producers.
 
-use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
 use std::net;
 use std::time::Duration;
 use uuid::Uuid;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
@@ -62,8 +65,10 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
 
 #[tokio::test]
 async fn test_oximeter_reregistration() {
-    let mut context =
-        nexus_test_utils::test_setup("test_oximeter_reregistration").await;
+    let mut context = nexus_test_utils::test_setup::<omicron_nexus::Server>(
+        "test_oximeter_reregistration",
+    )
+    .await;
     let db = &context.database;
     let producer_id = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
     let oximeter_id = nexus_test_utils::OXIMETER_UUID.parse().unwrap();
@@ -199,7 +204,7 @@ async fn test_oximeter_reregistration() {
     // Restart the producer, and verify that we have _more_ data than before
     // Set up a test metric producer server
     context.producer = nexus_test_utils::start_producer_server(
-        context.server.http_server_internal.local_addr(),
+        context.server.get_http_server_internal_address().await,
         nexus_test_utils::PRODUCER_UUID.parse().unwrap(),
     )
     .await
@@ -277,7 +282,7 @@ async fn test_oximeter_reregistration() {
     // Restart oximeter again, and verify that we have even more new data.
     context.oximeter = nexus_test_utils::start_oximeter(
         context.logctx.log.new(o!("component" => "oximeter")),
-        context.server.http_server_internal.local_addr(),
+        context.server.get_http_server_internal_address().await,
         context.clickhouse.port(),
         oximeter_id,
     )

@@ -14,16 +14,22 @@ mod animated_logo;
 mod banner;
 mod help_button;
 mod help_menu;
+mod list;
+mod liveness;
 mod rack;
-mod screen_button;
+mod status_bar;
+mod update;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
 pub use help_button::{HelpButton, HelpButtonState};
 pub use help_menu::HelpMenu;
 pub use help_menu::HelpMenuState;
+pub use list::{Indicator, List, ListEntry, ListState};
+pub use liveness::{LivenessState, LivenessStyles};
 pub use rack::{KnightRiderMode, Rack, RackState};
-pub use screen_button::{ScreenButton, ScreenButtonState};
+pub use status_bar::{StatusBar, StatusBarStyles};
+pub use update::{Update, UpdateState};
 
 /// A unique id for a [`Control`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,10 +41,16 @@ pub fn get_control_id() -> ControlId {
     ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-/// A control is an interactive object on a [`Screen`].
+// The result of checking for a hover intersection on a `Control`
+pub struct HoverResult {
+    pub redraw: bool,
+    pub hovered: bool,
+}
+
+/// A control is an interactive object on a [`Screen`](crate::screens::Screen).
 ///
-/// Control's are often the internal state of [`tui::Widget`]s and are used to
-/// manage how the Widgets are drawn.
+/// `Control` instances are often the internal state of [`tui::widgets::Widget`]s
+/// and are used to manage how the Widgets are drawn.
 pub trait Control {
     fn id(&self) -> ControlId;
 

@@ -5,6 +5,8 @@
 use std::fmt::Debug;
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::{create_silo, object_create};
+use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::silos::{
     IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
@@ -14,16 +16,15 @@ use omicron_nexus::external_api::views::{self, Silo};
 use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces;
 
+use base64::Engine;
+use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
-use nexus_test_utils::resource_helpers::{create_silo, object_create};
-
-use nexus_test_utils::ControlPlaneTestContext;
-use nexus_test_utils_macros::nexus_test;
-
-use dropshot::ResultsPage;
 use httptest::{matchers::*, responders::*, Expectation, Server};
 use uuid::Uuid;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
 // note: no signing keys
@@ -87,7 +88,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Assert external authenticator opctx can read it
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let _retrieved_silo_nexus = nexus
         .silo_fetch(
@@ -486,12 +487,14 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
         // Reject signing keypair if the certificate or key is base64 encoded
         // but not valid
         params::DerEncodedKeyPair {
-            public_cert: base64::encode("not a cert"),
+            public_cert: base64::engine::general_purpose::STANDARD
+                .encode("not a cert"),
             private_key: RSA_KEY_1_PRIVATE.to_string(),
         },
         params::DerEncodedKeyPair {
             public_cert: RSA_KEY_1_PUBLIC.to_string(),
-            private_key: base64::encode("not a cert"),
+            private_key: base64::engine::general_purpose::STANDARD
+                .encode("not a cert"),
         },
         // Reject signing keypair if cert and key are swapped
         params::DerEncodedKeyPair {
@@ -642,7 +645,8 @@ fn test_correct_saml_response() {
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
-        saml_response: base64::encode(&SAML_RESPONSE),
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE),
         relay_state: None,
     })
     .unwrap();
@@ -688,7 +692,8 @@ fn test_correct_saml_response_ecdsa_sha256() {
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
-        saml_response: base64::encode(&SAML_RESPONSE_SIGNED_WITH_ECDSA_SHA256),
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_SIGNED_WITH_ECDSA_SHA256),
         relay_state: None,
     })
     .unwrap();
@@ -733,7 +738,8 @@ fn test_accept_saml_response_only_assertion_signed() {
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
-        saml_response: base64::encode(&SAML_RESPONSE_ONLY_ASSERTION_SIGNED),
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_ONLY_ASSERTION_SIGNED),
         relay_state: None,
     })
     .unwrap();
@@ -772,7 +778,8 @@ fn test_reject_unsigned_saml_response() {
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
-        saml_response: base64::encode(&SAML_RESPONSE_UNSIGNED),
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_UNSIGNED),
         relay_state: None,
     })
     .unwrap();
@@ -814,7 +821,8 @@ fn test_reject_saml_response_with_xml_comment() {
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
-        saml_response: base64::encode(&SAML_RESPONSE_WITH_COMMENT),
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_WITH_COMMENT),
         relay_state: None,
     })
     .unwrap();
@@ -853,7 +861,8 @@ fn test_correct_saml_response_with_group_attributes() {
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
-        saml_response: base64::encode(&SAML_RESPONSE_WITH_GROUPS),
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_WITH_GROUPS),
         relay_state: None,
     })
     .unwrap();
@@ -903,7 +912,8 @@ fn test_correct_saml_response_with_group_attributes_wrong_attribute_name() {
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
-        saml_response: base64::encode(&SAML_RESPONSE_WITH_GROUPS),
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_WITH_GROUPS),
         relay_state: None,
     })
     .unwrap();
@@ -952,7 +962,8 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                data: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
             },
 
             idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
@@ -968,7 +979,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
             - "2022-05-04T15:36:12.631Z"
@@ -988,7 +999,8 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
-                saml_response: base64::encode(SAML_RESPONSE_WITH_GROUPS),
+                saml_response: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_RESPONSE_WITH_GROUPS),
                 relay_state: None,
             })
             .unwrap(),
@@ -1092,7 +1104,8 @@ async fn test_post_saml_response_with_relay_state(
             },
 
             idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                data: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
             },
 
             idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
@@ -1108,7 +1121,7 @@ async fn test_post_saml_response_with_relay_state(
     )
     .await;
 
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
             - "2022-05-04T15:36:12.631Z"
@@ -1128,7 +1141,8 @@ async fn test_post_saml_response_with_relay_state(
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
-                saml_response: base64::encode(SAML_RESPONSE),
+                saml_response: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_RESPONSE),
                 relay_state: Some(
                     console_api::RelayState {
                         referer: Some("/some/actual/nexus/url".to_string()),

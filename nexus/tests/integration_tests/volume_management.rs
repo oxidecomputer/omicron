@@ -11,12 +11,11 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -27,11 +26,14 @@ use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
@@ -51,7 +53,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 }
 
 async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
 
     // Define a global image
@@ -459,7 +461,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     // Test multiple disks with multiple snapshots
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -606,7 +608,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     // Test multiple disks with multiple snapshots, varying the delete order
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -892,7 +894,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
     // delete all disks, then delete all snapshots
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
@@ -933,7 +935,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
     // delete all snapshots, then delete all disks
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
@@ -974,7 +976,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
     // delete snapshots and disks in a random order
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
@@ -1077,7 +1079,7 @@ async fn test_volume_remove_read_only_parent_base(
 ) {
     // Test the removal of a volume with a read only parent.
     // The ROP should end up on the t_vid volume.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1102,7 +1104,7 @@ async fn test_volume_remove_read_only_parent_base(
 
     // Go and get the volume from the database, verify it no longer
     // has a read only parent.
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1121,7 +1123,7 @@ async fn test_volume_remove_read_only_parent_base(
     }
 
     // Verify the t_vid now has a ROP.
-    let new_vol = datastore.volume_get(t_vid).await.unwrap();
+    let new_vol = datastore.volume_checkout(t_vid).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1148,7 +1150,7 @@ async fn test_volume_remove_read_only_parent_base(
     // We want to verify we can call volume_remove_rop twice and the second
     // time through it won't change what it did the first time. This is
     // critical to supporting replay of the saga, should it be needed.
-    let new_vol = datastore.volume_get(t_vid).await.unwrap();
+    let new_vol = datastore.volume_checkout(t_vid).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1173,7 +1175,7 @@ async fn test_volume_remove_read_only_parent_no_parent(
 ) {
     // Test the removal of a read only parent from a volume
     // without a read only parent.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1191,7 +1193,7 @@ async fn test_volume_remove_read_only_parent_volume_not_volume(
 ) {
     // test removal of a read only volume for a volume that is not
     // of a type to have a read only parent.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1220,7 +1222,7 @@ async fn test_volume_remove_read_only_parent_bad_volume(
 ) {
     // Test the removal of a read only parent from a volume
     // that does not exist
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1236,7 +1238,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
     cptestctx: &ControlPlaneTestContext,
 ) {
     // Test the removal of a read_only_parent from a deleted volume.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1266,7 +1268,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
 async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
     // Test the saga for removal of a volume with a read only parent.
     // We create a volume with a read only parent, then call the saga on it.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1297,7 +1299,7 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1323,7 +1325,7 @@ async fn test_volume_remove_rop_saga_twice(
     // Test calling the saga for removal of a volume with a read only parent
     // two times, the first will remove the read_only_parent, the second will
     // do nothing.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
@@ -1355,7 +1357,7 @@ async fn test_volume_remove_rop_saga_twice(
         .unwrap();
 
     println!("first returns {:?}", res);
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1416,7 +1418,7 @@ async fn test_volume_remove_rop_saga_volume_not_volume(
 ) {
     // Test saga removal of a read only volume for a volume that is not
     // of a type to have a read only parent.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let volume_id = Uuid::new_v4();
     let datastore = nexus.datastore();
 
@@ -1455,7 +1457,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
 ) {
     // Test that a saga removal of a read_only_parent from a deleted volume
     // takes no action on that deleted volume.
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
     let block_size = 512;
@@ -1489,7 +1491,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
         .await
         .unwrap();
 
-    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     let vcr: VolumeConstructionRequest =
         serde_json::from_str(new_vol.data()).unwrap();
 
@@ -1509,13 +1511,305 @@ async fn test_volume_remove_rop_saga_deleted_volume(
     }
 }
 
+#[nexus_test]
+async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
+    // Verify that a volume_checkout will update the generation number in the
+    // database when the volume type is Volume with sub_volume Region.
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create a sub_vol with generation 1.
+    let subvol = create_region(block_size, 1, Uuid::new_v4());
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol],
+        read_only_parent: None,
+    };
+
+    // Take our VCR from above and insert into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get 1 but internally the generation number goes
+    // to 2.
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(1)]);
+
+    // Request again, we should get 2 now.
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(2)]);
+}
+
+#[nexus_test]
+async fn test_volume_checkout_updates_nothing(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_checkout will do nothing for a volume that does
+    // not contain a sub_volume with a generation field.
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Build our sub_vol and VCR from parts.
+    let subvol = VolumeConstructionRequest::File {
+        id: volume_id,
+        block_size,
+        path: "/lol".to_string(),
+    };
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol],
+        read_only_parent: None,
+    };
+
+    // Take our VCR from above and insert into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Verify nothing happens to our non generation number volume.
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None]);
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None]);
+}
+
+#[nexus_test]
+async fn test_volume_checkout_updates_multiple_gen(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_checkout will update the generation number in the
+    // database when the volume type is Volume with multiple sub_volumes of
+    // type Region.
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create two regions.
+    let subvol_one = create_region(block_size, 3, Uuid::new_v4());
+    let subvol_two = create_region(block_size, 8, Uuid::new_v4());
+
+    // Make the volume with our two regions as sub_volumes
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol_one, subvol_two],
+        read_only_parent: None,
+    };
+
+    // Insert the volume into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get our original values, but internally the
+    // generation number goes up.
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(3), Some(8)]);
+
+    // Request again, we should see the incremented values now..
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(4), Some(9)]);
+
+    // Request one more, because why not.
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(5), Some(10)]);
+}
+
+#[nexus_test]
+async fn test_volume_checkout_updates_sparse_multiple_gen(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_checkout will update the generation number in the
+    // database when the volume type is Volume with multiple sub_volumes of
+    // type Region and also verify that a non generation sub_volume won't be a
+    // problem
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create three sub_vols.
+    let subvol_one = VolumeConstructionRequest::File {
+        id: Uuid::new_v4(),
+        block_size,
+        path: "/lol".to_string(),
+    };
+    let subvol_two = create_region(block_size, 7, Uuid::new_v4());
+    let subvol_three = create_region(block_size, 9, Uuid::new_v4());
+
+    // Make the volume with our three regions as sub_volumes
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol_one, subvol_two, subvol_three],
+        read_only_parent: None,
+    };
+
+    // Insert the volume into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get our original values, but internally the
+    // generation number goes up.
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None, Some(7), Some(9)]);
+
+    // Request again, we should see the incremented values now..
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![None, Some(8), Some(10)]);
+}
+#[nexus_test]
+async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_checkout will update the generation number in the
+    // database when the volume type is Volume with multiple sub_volumes of
+    // type Region and also verify that a non generation sub_volume in the
+    // middle of the sub_volumes won't be a problem
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create three sub_vols.
+    let subvol_one = create_region(block_size, 7, Uuid::new_v4());
+    let subvol_two = VolumeConstructionRequest::File {
+        id: Uuid::new_v4(),
+        block_size,
+        path: "/lol".to_string(),
+    };
+    let subvol_three = create_region(block_size, 9, Uuid::new_v4());
+
+    // Make the volume with our three sub_volumes
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol_one, subvol_two, subvol_three],
+        read_only_parent: None,
+    };
+
+    // Insert the volume into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // The first time back, we get our original values, but internally the
+    // generation number goes up.
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(7), None, Some(9)]);
+
+    // Request again, we should see the incremented values now..
+    let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
+    volume_match_gen(new_vol, vec![Some(8), None, Some(10)]);
+}
+
+// Test function that creates a VolumeConstructionRequest::Region With gen,
+// and UUID you passed in.
+fn create_region(
+    block_size: u64,
+    gen: u64,
+    id: Uuid,
+) -> VolumeConstructionRequest {
+    VolumeConstructionRequest::Region {
+        block_size,
+        blocks_per_extent: 1,
+        extent_count: 1,
+        gen,
+        opts: CrucibleOpts {
+            id,
+            target: Vec::new(),
+            lossy: false,
+            flush_timeout: None,
+            key: None,
+            cert_pem: None,
+            key_pem: None,
+            root_cert_pem: None,
+            control: None,
+            read_only: false,
+        },
+    }
+}
+
+// Test function that expects a very specific type of volume and expects
+// the generation number provided to match the generation number in the
+// sub-volume.  The value 0 in the expected_gen vec tells this test function
+// that index in the list of sub_volumes should not be a Region, and therefore
+// will not have a generation number field.
+fn volume_match_gen(
+    volume: nexus_db_model::Volume,
+    expected_gen: Vec<Option<u64>>,
+) {
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(volume.data()).unwrap();
+
+    println!("VCR is: {:?}", vcr);
+    // Volume should have what we started with.
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes,
+            read_only_parent: _,
+        } => {
+            for (index, sv) in sub_volumes.iter().enumerate() {
+                match sv {
+                    VolumeConstructionRequest::Region {
+                        block_size: _,
+                        blocks_per_extent: _,
+                        extent_count: _,
+                        gen,
+                        opts: _,
+                    } => {
+                        assert_eq!(*gen, expected_gen[index].unwrap());
+                    }
+                    _ => {
+                        assert!(expected_gen[index].is_none());
+                    }
+                }
+            }
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
+}
+
 // volume_delete saga node idempotency tests
 
 #[nexus_test]
 async fn test_volume_hard_delete_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();

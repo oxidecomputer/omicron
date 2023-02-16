@@ -2,27 +2,28 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod common;
 mod component;
 mod rack;
 mod splash;
+mod update;
 
-use crate::Action;
-use crate::ScreenEvent;
-use crate::State;
-use crate::Term;
-use crate::TermEvent;
+use crate::wizard::{Action, ScreenEvent, State, Term};
+use crossterm::event::Event as TermEvent;
 use slog::Logger;
 
 use component::ComponentScreen;
 use rack::RackScreen;
 use splash::SplashScreen;
+use update::UpdateScreen;
 
-/// An identifier for a specific [`Screen`] in the [`Wizard`]
+/// An identifier for a specific [`Screen`] in the [`Wizard`](crate::Wizard).
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScreenId {
     Splash,
     Rack,
     Component,
+    Update,
 }
 
 impl ScreenId {
@@ -31,6 +32,7 @@ impl ScreenId {
             ScreenId::Splash => "splash",
             ScreenId::Rack => "rack",
             ScreenId::Component => "component",
+            ScreenId::Update => "update",
         }
     }
 
@@ -79,6 +81,7 @@ pub struct Screens {
     splash: SplashScreen,
     rack: RackScreen,
     component: ComponentScreen,
+    update: UpdateScreen,
 }
 
 impl Screens {
@@ -87,6 +90,7 @@ impl Screens {
             splash: SplashScreen::new(),
             rack: RackScreen::new(log),
             component: ComponentScreen::new(),
+            update: UpdateScreen::new(),
         }
     }
 
@@ -95,6 +99,7 @@ impl Screens {
             ScreenId::Splash => &mut self.splash,
             ScreenId::Rack => &mut self.rack,
             ScreenId::Component => &mut self.component,
+            ScreenId::Update => &mut self.update,
         }
     }
 }

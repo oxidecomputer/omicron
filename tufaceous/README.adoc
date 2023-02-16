@@ -1,0 +1,36 @@
+# tufaceous
+
+Rack update repository generation tool.
+
+## TUF, keys and lifetime
+
+Rack update repositories use TUF. Consider reading https://theupdateframework.io/overview/[the TUF overview] and https://theupdateframework.io/metadata/[a high level summary of the metadata mandated by the specification].
+
+The only keys currently supported by tufaceous are Ed25519 keys. Support for hardware-backed keys is planned.
+
+Each role has an expiration date. The default is one week, suitable for development testing. This can be modified with the `--expiry` option.
+
+## init
+
+Create a new repository in the current directory with `tufaceous init`.
+
+To change the target directory, use `-r/--repo`. This is accepted on all subcommands, and needs to come before the subcommand because Clap is picky.
+
+This will generate a new Ed25519 private key and display it on stderr if no keys are provided.
+
+Currently if keys are provided, they are allowed to sign all roles. For the time being if you need more advanced editing of the root role, use https://crates.io/crates/tuftool[tuftool]'s `root` subcommands.
+
+## add zones
+
+Usage:
+
+----
+tuftool [-r PATH/TO/REPO] add-zone [--name NAME] ZONE_TAR_GZ VERSION
+----
+
+Example:
+
+----
+$ tuftool add-zone out/omicron-nexus.tar.gz 0.0.0
+added zone omicron-nexus, version 0.0.0
+----

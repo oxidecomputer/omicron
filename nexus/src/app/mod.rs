@@ -14,14 +14,18 @@ use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
+use crate::DropshotServer;
+use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+mod certificate;
 mod device_auth;
 mod disk;
 mod external_ip;
@@ -29,14 +33,18 @@ mod iam;
 mod image;
 mod instance;
 mod ip_pool;
+mod metrics;
+mod network_interface;
 mod organization;
 mod oximeter;
 mod project;
+pub mod provisioning;
 mod rack;
-mod saga;
+pub mod saga;
 mod session;
 mod silo;
 mod sled;
+mod snapshot;
 pub mod test_interfaces;
 mod update;
 mod volume;
@@ -46,7 +54,7 @@ mod vpc_subnet;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
-mod sagas;
+pub mod sagas;
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
@@ -57,6 +65,48 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
 // TODO-completness: Support multiple external IPs
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
+
+pub(crate) struct ExternalServers {
+    config: dropshot::ConfigDropshot,
+    https_port: u16,
+    http: Option<DropshotServer>,
+    https: Option<DropshotServer>,
+}
+
+impl ExternalServers {
+    pub fn new(config: dropshot::ConfigDropshot, https_port: u16) -> Self {
+        Self { config, https_port, http: None, https: None }
+    }
+
+    pub fn set_http(&mut self, http: DropshotServer) {
+        self.http = Some(http);
+    }
+
+    pub fn set_https(&mut self, https: DropshotServer) {
+        self.https = Some(https);
+    }
+
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+
+    /// Returns a context object, if one exists.
+    pub fn get_context(&self) -> Option<Arc<crate::ServerContext>> {
+        if let Some(context) =
+            self.https.as_ref().map(|server| server.app_private())
+        {
+            // If an HTTPS server is already running, use that server context.
+            Some(context.clone())
+        } else if let Some(context) =
+            self.http.as_ref().map(|server| server.app_private())
+        {
+            // If an HTTP server is already running, use that server context.
+            Some(context.clone())
+        } else {
+            None
+        }
+    }
+}
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -80,6 +130,12 @@ pub struct Nexus {
 
     /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
+
+    /// External dropshot servers
+    external_servers: Mutex<ExternalServers>,
+
+    /// Internal dropshot server
+    internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
@@ -106,6 +162,8 @@ pub struct Nexus {
     // in order for our integration tests that POST static SAML responses to
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
+
+    resolver: Arc<Mutex<internal_dns_client::multiclient::Resolver>>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -121,14 +179,17 @@ impl Nexus {
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: internal_dns_client::multiclient::Resolver,
+        resolver: Arc<Mutex<internal_dns_client::multiclient::Resolver>>,
         pool: db::Pool,
+        producer_registry: &ProducerRegistry,
         config: &config::Config,
         authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(config.deployment.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
+        db_datastore.register_producers(&producer_registry);
+
+        let my_sec_id = db::SecId::from(config.deployment.id);
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
             Arc::clone(&db_datastore),
@@ -144,13 +205,14 @@ impl Nexus {
 
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
-        let timeseries_client =
-            if let Some(address) = &config.pkg.timeseries_db.address {
-                // If an address was provided, use it instead of DNS.
-                LazyTimeseriesClient::new_from_address(log.clone(), *address)
-            } else {
-                LazyTimeseriesClient::new_from_dns(log.clone(), resolver)
-            };
+        let timeseries_client = if let Some(address) =
+            &config.pkg.timeseries_db.address
+        {
+            // If an address was provided, use it instead of DNS.
+            LazyTimeseriesClient::new_from_address(log.clone(), *address)
+        } else {
+            LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
+        };
 
         // TODO-cleanup We may want a first-class subsystem for managing startup
         // background tasks.  It could use a Future for each one, a status enum
@@ -178,6 +240,11 @@ impl Nexus {
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
+            external_servers: Mutex::new(ExternalServers::new(
+                config.deployment.dropshot_external.clone(),
+                config.pkg.nexus_https_port,
+            )),
+            internal_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
@@ -195,6 +262,7 @@ impl Nexus {
                 Arc::clone(&db_datastore),
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
+            resolver,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -243,6 +311,76 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    // Called to hand off management of external servers to Nexus.
+    pub(crate) async fn set_servers(
+        &self,
+        external_servers: ExternalServers,
+        internal_server: DropshotServer,
+    ) {
+        // If any servers already exist, close them.
+        let _ = self.close_servers().await;
+
+        // Insert the new servers.
+        *self.external_servers.lock().await = external_servers;
+        self.internal_server.lock().unwrap().replace(internal_server);
+    }
+
+    pub async fn close_servers(&self) -> Result<(), String> {
+        let mut external_servers = self.external_servers.lock().await;
+        if let Some(server) = external_servers.http.take() {
+            server.close().await?;
+        }
+        if let Some(server) = external_servers.https.take() {
+            server.close().await?;
+        }
+        let internal_server = self.internal_server.lock().unwrap().take();
+        if let Some(server) = internal_server {
+            server.close().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn wait_for_shutdown(&self) -> Result<(), String> {
+        // The internal server is the last server to be closed.
+        //
+        // We don't wait for the external servers to be closed; we just expect
+        // that they'll be closed before the internal server.
+        let server_fut = self
+            .internal_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.wait_for_shutdown());
+        if let Some(server_fut) = server_fut {
+            server_fut.await?;
+        }
+        Ok(())
+    }
+
+    pub async fn get_http_external_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        let external_servers = self.external_servers.lock().await;
+        external_servers.http.as_ref().map(|server| server.local_addr())
+    }
+
+    pub async fn get_https_external_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        let external_servers = self.external_servers.lock().await;
+        external_servers.https.as_ref().map(|server| server.local_addr())
+    }
+
+    pub async fn get_internal_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.internal_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
     }
 
     /// Returns an [`OpContext`] used for authenticating external requests
@@ -464,6 +602,18 @@ impl Nexus {
         opctx: &'a OpContext,
     ) -> db::lookup::LookupPath {
         db::lookup::LookupPath::new(opctx, &self.db_datastore)
+    }
+
+    pub async fn set_resolver(
+        &self,
+        resolver: internal_dns_client::multiclient::Resolver,
+    ) {
+        *self.resolver.lock().await = resolver;
+    }
+
+    pub async fn resolver(&self) -> internal_dns_client::multiclient::Resolver {
+        let resolver = self.resolver.lock().await;
+        resolver.clone()
     }
 }
 

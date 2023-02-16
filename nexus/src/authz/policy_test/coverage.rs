@@ -33,7 +33,7 @@ impl Coverage {
 
     /// Record that type `class` is covered by the test
     pub fn covered_class(&mut self, class: oso::Class) {
-        let class_name = class.name.clone();
+        let class_name = class.name;
         debug!(&self.log, "covering"; "class_name" => &class_name);
         self.covered.insert(class_name);
     }

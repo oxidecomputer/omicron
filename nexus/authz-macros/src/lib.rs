@@ -278,7 +278,7 @@ fn do_authz_resource(
 
     Ok(quote! {
         #[doc = #doc_struct]
-        #[derive(Clone, Debug)]
+        #[derive(Clone, Debug, Serialize, Deserialize)]
         pub struct #resource_name {
             parent: #parent_resource_name,
             key: #primary_key_type,
@@ -369,16 +369,13 @@ fn do_authz_resource(
 #[cfg(test)]
 #[test]
 fn test_authz_dump() {
-    let output = do_authz_resource(
-        quote! {
-            name = "Organization",
-            parent = "Fleet",
-            primary_key = Uuid,
-            roles_allowed = false,
-            polar_snippet = Custom,
-        }
-        .into(),
-    )
+    let output = do_authz_resource(quote! {
+        name = "Organization",
+        parent = "Fleet",
+        primary_key = Uuid,
+        roles_allowed = false,
+        polar_snippet = Custom,
+    })
     .unwrap();
     println!("{}", output);
 }

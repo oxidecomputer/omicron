@@ -100,7 +100,7 @@ async fn populate(
 ) -> Result<(), String> {
     for p in *ALL_POPULATORS {
         let db_result = backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_internal_service(),
             || async {
                 p.populate(opctx, datastore, args).await.map_err(|error| {
                     match &error {
@@ -267,6 +267,36 @@ impl Populator for PopulateSiloUserRoleAssignments {
 }
 
 #[derive(Debug)]
+struct PopulateFleet;
+impl Populator for PopulateFleet {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async {
+            let id = *db::fixed_data::FLEET_ID;
+            datastore
+                .virtual_provisioning_collection_create(
+                    opctx,
+                    db::model::VirtualProvisioningCollection::new(
+                        id,
+                        db::model::CollectionTypeProvisioned::Fleet,
+                    ),
+                )
+                .await?;
+
+            Ok(())
+        }
+        .boxed()
+    }
+}
+
+#[derive(Debug)]
 struct PopulateRack;
 impl Populator for PopulateRack {
     fn populate<'a, 'b>(
@@ -288,16 +318,31 @@ impl Populator for PopulateRack {
                     name: "oxide-service-pool".parse::<Name>().unwrap(),
                     description: String::from("IP Pool for Oxide Services"),
                 },
-                project: None,
             };
             datastore
-                .ip_pool_create(opctx, &params, Some(args.rack_id))
+                .ip_pool_create(opctx, &params, /*internal=*/ true)
                 .await
                 .map(|_| ())
                 .or_else(|e| match e {
                     Error::ObjectAlreadyExists { .. } => Ok(()),
                     _ => Err(e),
                 })?;
+
+            let params = params::IpPoolCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse::<Name>().unwrap(),
+                    description: String::from("default IP pool"),
+                },
+            };
+            datastore
+                .ip_pool_create(opctx, &params, /*internal=*/ false)
+                .await
+                .map(|_| ())
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
+
             Ok(())
         }
         .boxed()
@@ -305,13 +350,14 @@ impl Populator for PopulateRack {
 }
 
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 7] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 8] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
         &PopulateSiloUsers,
         &PopulateSiloUserRoleAssignments,
+        &PopulateFleet,
         &PopulateRack,
     ];
 }

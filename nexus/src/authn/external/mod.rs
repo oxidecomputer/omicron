@@ -44,9 +44,8 @@ where
         Q: Borrow<T> + Send + Sync + 'static,
     {
         let log = &rqctx.log;
-        let request = &rqctx.request.lock().await;
         let ctx = rqctx.context().borrow();
-        let result = self.authn_request_generic(ctx, log, request).await;
+        let result = self.authn_request_generic(ctx, log, &rqctx.request).await;
         trace!(log, "authn result: {:?}", result);
         result
     }
@@ -56,7 +55,7 @@ where
         &self,
         ctx: &T,
         log: &slog::Logger,
-        request: &http::Request<hyper::Body>,
+        request: &dropshot::RequestInfo,
     ) -> Result<authn::Context, authn::Error> {
         // For debuggability, keep track of the schemes that we've tried.
         let mut schemes_tried = Vec::with_capacity(self.allowed_schemes.len());
@@ -64,7 +63,7 @@ where
             let scheme_name = scheme_impl.name();
             trace!(log, "authn: trying {:?}", scheme_name);
             schemes_tried.push(scheme_name);
-            let result = scheme_impl.authn(ctx, log, &request).await;
+            let result = scheme_impl.authn(ctx, log, request).await;
             match result {
                 // TODO-security If the user explicitly failed one
                 // authentication scheme (i.e., a signature that didn't match,
@@ -101,7 +100,7 @@ where
         &self,
         ctx: &T,
         log: &slog::Logger,
-        request: &http::Request<hyper::Body>,
+        request: &dropshot::RequestInfo,
     ) -> SchemeResult;
 }
 
@@ -164,7 +163,7 @@ mod test {
             &self,
             _ctx: &(),
             _log: &slog::Logger,
-            _request: &http::Request<hyper::Body>,
+            _request: &dropshot::RequestInfo,
         ) -> SchemeResult {
             self.nattempts.fetch_add(1, Ordering::SeqCst);
             match self.next.load(Ordering::SeqCst) {
@@ -239,7 +238,7 @@ mod test {
         // requested.  We should wind up with an unauthenticated context with
         // both grunts having been consulted.
         let ctx = authn
-            .authn_request_generic(&(), &log, &request)
+            .authn_request_generic(&(), &log, &(&request).into())
             .await
             .expect("expected authn to succeed");
         expected_count1 += 1;
@@ -254,7 +253,7 @@ mod test {
         // not be consulted.
         flag1.store(OK, Ordering::SeqCst);
         let ctx = authn
-            .authn_request_generic(&(), &log, &request)
+            .authn_request_generic(&(), &log, &(&request).into())
             .await
             .expect("expected authn to succeed");
         expected_count1 += 1;
@@ -267,7 +266,7 @@ mod test {
         // back an error.  grunt2 should not be consulted.
         flag1.store(FAIL, Ordering::SeqCst);
         let error = authn
-            .authn_request_generic(&(), &log, &request)
+            .authn_request_generic(&(), &log, &(&request).into())
             .await
             .expect_err("expected authn to fail");
         expected_count1 += 1;
@@ -284,7 +283,7 @@ mod test {
         flag1.store(SKIP, Ordering::SeqCst);
         flag2.store(OK, Ordering::SeqCst);
         let ctx = authn
-            .authn_request_generic(&(), &log, &request)
+            .authn_request_generic(&(), &log, &(&request).into())
             .await
             .expect("expected authn to succeed");
         expected_count1 += 1;
@@ -299,7 +298,7 @@ mod test {
         expected_count1 += 1;
         expected_count2 += 1;
         let error = authn
-            .authn_request_generic(&(), &log, &request)
+            .authn_request_generic(&(), &log, &(&request).into())
             .await
             .expect_err("expected authn to fail");
         assert_eq!(

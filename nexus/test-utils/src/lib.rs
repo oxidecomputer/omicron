@@ -9,6 +9,7 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use nexus_test_interface::NexusServer;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
@@ -32,10 +33,10 @@ pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
-pub struct ControlPlaneTestContext {
+pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
-    pub server: omicron_nexus::Server,
+    pub server: N,
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
@@ -44,12 +45,9 @@ pub struct ControlPlaneTestContext {
     pub producer: ProducerServer,
 }
 
-impl ControlPlaneTestContext {
+impl<N: NexusServer> ControlPlaneTestContext<N> {
     pub async fn teardown(mut self) {
-        for server in self.server.http_servers_external {
-            server.close().await.unwrap();
-        }
-        self.server.http_server_internal.close().await.unwrap();
+        self.server.close().await;
         self.database.cleanup().await.unwrap();
         self.clickhouse.cleanup().await.unwrap();
         self.sled_agent.http_server.close().await.unwrap();
@@ -57,9 +55,39 @@ impl ControlPlaneTestContext {
         self.producer.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
+
+    pub async fn external_http_client(&self) -> ClientTestContext {
+        self.server
+            .get_http_server_external_address()
+            .await
+            .map(|addr| {
+                ClientTestContext::new(
+                    addr,
+                    self.logctx.log.new(
+                        o!("component" => "external http client test context"),
+                    ),
+                )
+            })
+            .unwrap()
+    }
+
+    pub async fn external_https_client(&self) -> ClientTestContext {
+        self.server
+            .get_https_server_external_address()
+            .await
+            .map(|addr| {
+                ClientTestContext::new(
+                    addr,
+                    self.logctx.log.new(
+                        o!("component" => "external https client test context"),
+                    ),
+                )
+            })
+            .unwrap()
+    }
 }
 
-pub fn load_test_config() -> omicron_nexus::Config {
+pub fn load_test_config() -> omicron_common::nexus_config::Config {
     // We load as much configuration as we can from the test suite configuration
     // file.  In practice, TestContext requires that:
     //
@@ -76,21 +104,24 @@ pub fn load_test_config() -> omicron_nexus::Config {
     // configuration options, we expect many of those can be usefully configured
     // (and reconfigured) for the test suite.
     let config_file_path = Path::new("tests/config.test.toml");
-    let mut config = omicron_nexus::Config::from_file(config_file_path)
-        .expect("failed to load config.test.toml");
+    let mut config =
+        omicron_common::nexus_config::Config::from_file(config_file_path)
+            .expect("failed to load config.test.toml");
     config.deployment.id = Uuid::new_v4();
     config
 }
 
-pub async fn test_setup(test_name: &str) -> ControlPlaneTestContext {
+pub async fn test_setup<N: NexusServer>(
+    test_name: &str,
+) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
-    test_setup_with_config(test_name, &mut config).await
+    test_setup_with_config::<N>(test_name, &mut config).await
 }
 
-pub async fn test_setup_with_config(
+pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
-    config: &mut omicron_nexus::Config,
-) -> ControlPlaneTestContext {
+    config: &mut omicron_common::nexus_config::Config,
+) -> ControlPlaneTestContext<N> {
     let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
 
@@ -111,21 +142,18 @@ pub async fn test_setup_with_config(
         .expect("Tests expect to set a port of Clickhouse")
         .set_port(clickhouse.port());
 
-    let server =
-        omicron_nexus::Server::start(&config, &logctx.log).await.unwrap();
-    server
-        .apictx
-        .nexus
-        .wait_for_populate()
-        .await
-        .expect("Nexus never loaded users");
+    let server = N::start_and_populate(&config, &logctx.log).await;
+
+    let external_server_addr =
+        server.get_http_server_external_address().await.unwrap();
+    let internal_server_addr = server.get_http_server_internal_address().await;
 
     let testctx_external = ClientTestContext::new(
-        server.http_servers_external[0].local_addr(),
+        external_server_addr,
         logctx.log.new(o!("component" => "external client test context")),
     );
     let testctx_internal = ClientTestContext::new(
-        server.http_server_internal.local_addr(),
+        internal_server_addr,
         logctx.log.new(o!("component" => "internal client test context")),
     );
 
@@ -136,17 +164,31 @@ pub async fn test_setup_with_config(
             "component" => "omicron_sled_agent::sim::Server",
             "sled_id" => sa_id.to_string(),
         )),
-        server.http_server_internal.local_addr(),
+        internal_server_addr,
         sa_id,
     )
     .await
     .unwrap();
 
+    // Set Nexus' shared resolver to point to the simulated sled agent's
+    // internal DNS server
+    server
+        .set_resolver(
+            internal_dns_client::multiclient::Resolver::new(
+                &internal_dns_client::multiclient::ServerAddresses {
+                    dropshot_server_addrs: vec![],
+                    dns_server_addrs: vec![sled_agent.dns_server.address],
+                },
+            )
+            .unwrap(),
+        )
+        .await;
+
     // Set up an Oximeter collector server
     let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
     let oximeter = start_oximeter(
         log.new(o!("component" => "oximeter")),
-        server.http_server_internal.local_addr(),
+        internal_server_addr,
         clickhouse.port(),
         collector_id,
     )
@@ -155,12 +197,8 @@ pub async fn test_setup_with_config(
 
     // Set up a test metric producer server
     let producer_id = Uuid::parse_str(PRODUCER_UUID).unwrap();
-    let producer = start_producer_server(
-        server.http_server_internal.local_addr(),
-        producer_id,
-    )
-    .await
-    .unwrap();
+    let producer =
+        start_producer_server(internal_server_addr, producer_id).await.unwrap();
     register_test_producer(&producer).unwrap();
 
     ControlPlaneTestContext {
@@ -198,7 +236,9 @@ pub async fn start_sled_agent(
         },
     };
 
-    sim::Server::start(&config, &log).await
+    let (server, _rack_init_request) =
+        sim::Server::start(&config, &log).await?;
+    Ok(server)
 }
 
 pub async fn start_oximeter(

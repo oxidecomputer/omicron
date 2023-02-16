@@ -9,8 +9,8 @@ use crate::db;
 use futures::{future::BoxFuture, TryFutureExt};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::retry_policy_internal_service;
 use omicron_common::backoff::BackoffError;
 use std::future::Future;
 use std::pin::Pin;
@@ -92,7 +92,7 @@ where
         // (pages) goes up.  We'd be much more likely to finish the overall
         // operation if we didn't throw away the results we did get each time.
         let found_sagas = retry_notify(
-            internal_service_policy(),
+            retry_policy_internal_service(),
             || async {
                 list_unfinished_sagas(&opctx, &datastore, &sec_id)
                     .await

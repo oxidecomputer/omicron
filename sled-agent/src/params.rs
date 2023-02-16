@@ -4,7 +4,8 @@
 
 use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
-    DENDRITE_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
+    OXIMETER_PORT,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
@@ -230,6 +231,11 @@ pub struct InstanceSerialConsoleData {
     pub last_byte_offset: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct Zpool {
+    pub id: Uuid,
+}
+
 // The type of networking 'ASIC' the Dendrite service is expected to manage
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
@@ -372,18 +378,24 @@ pub enum ServiceType {
     Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
+    ManagementGatewayService,
+    Wicketd,
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
+    CruciblePantry,
 }
 
 impl std::fmt::Display for ServiceType {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         match self {
             ServiceType::Nexus { .. } => write!(f, "nexus"),
-            ServiceType::InternalDns { .. } => write!(f, "internal-dns"),
+            ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
+            ServiceType::ManagementGatewayService => write!(f, "mgs"),
+            ServiceType::Wicketd => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
+            ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
         }
     }
 }
@@ -404,9 +416,55 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
                 }
             }
             St::Oximeter => AutoSt::Oximeter,
+            St::ManagementGatewayService => AutoSt::ManagementGatewayService,
+            St::Wicketd => AutoSt::Wicketd,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
+            St::CruciblePantry => AutoSt::CruciblePantry,
         }
+    }
+}
+
+/// The type of zone which may be requested from Sled Agent
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub enum ZoneType {
+    #[serde(rename = "internal_dns")]
+    InternalDNS,
+    #[serde(rename = "nexus")]
+    Nexus,
+    #[serde(rename = "oximeter")]
+    Oximeter,
+    #[serde(rename = "switch")]
+    Switch,
+    #[serde(rename = "crucible_pantry")]
+    CruciblePantry,
+}
+
+impl From<ZoneType> for sled_agent_client::types::ZoneType {
+    fn from(zt: ZoneType) -> Self {
+        match zt {
+            ZoneType::InternalDNS => Self::InternalDns,
+            ZoneType::Nexus => Self::Nexus,
+            ZoneType::Oximeter => Self::Oximeter,
+            ZoneType::Switch => Self::Switch,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
+        }
+    }
+}
+
+impl std::fmt::Display for ZoneType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ZoneType::*;
+        let name = match self {
+            InternalDNS => "internal_dns",
+            Nexus => "nexus",
+            Oximeter => "oximeter",
+            Switch => "switch",
+            CruciblePantry => "crucible_pantry",
+        };
+        write!(f, "{name}")
     }
 }
 
@@ -417,8 +475,8 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 pub struct ServiceZoneRequest {
     // The UUID of the zone to be initialized.
     pub id: Uuid,
-    // The name of the zone to be created.
-    pub zone_name: String,
+    // The type of the zone to be created.
+    pub zone_type: ZoneType,
     // The addresses on which the service should listen for requests.
     pub addresses: Vec<Ipv6Addr>,
     // The addresses in the global zone which should be created, if necessary
@@ -447,8 +505,15 @@ impl ServiceZoneRequest {
             }
             ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
             ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceType::ManagementGatewayService => {
+                SRV::Service(ServiceName::ManagementGatewayService)
+            }
+            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
             ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
             ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
+            ServiceType::CruciblePantry { .. } => {
+                SRV::Service(ServiceName::CruciblePantry)
+            }
         }
     }
 
@@ -463,10 +528,21 @@ impl ServiceZoneRequest {
             ServiceType::Oximeter => {
                 Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
             }
+            ServiceType::ManagementGatewayService => {
+                Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
+            }
+            // TODO: Is this correct?
+            ServiceType::Wicketd => None,
             ServiceType::Dendrite { .. } => {
                 Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
             }
             ServiceType::Tfport { .. } => None,
+            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
+                self.addresses[0],
+                CRUCIBLE_PANTRY_PORT,
+                0,
+                0,
+            )),
         }
     }
 }
@@ -480,7 +556,7 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
 
         Self {
             id: s.id,
-            zone_name: s.zone_name.to_string(),
+            zone_type: s.zone_type.into(),
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
             services,

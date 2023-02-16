@@ -10,8 +10,10 @@ use http::StatusCode;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, objects_list_page_authz,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
@@ -24,7 +26,7 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, &o2_name).await;
 
     // Verify GET /organizations/{org} works
-    let o1_url = format!("/organizations/{}", o1_name);
+    let o1_url = format!("/v1/organizations/{}", o1_name);
     let organization: Organization = NexusRequest::object_get(&client, &o1_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -34,7 +36,7 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(organization.identity.name, o1_name);
 
-    let o2_url = format!("/organizations/{}", o2_name);
+    let o2_url = format!("/v1/organizations/{}", o2_name);
     let organization: Organization = NexusRequest::object_get(&client, &o2_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -49,7 +51,7 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
         &client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        &"/organizations/fake-org",
+        &"/v1/organizations/fake-org",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -58,7 +60,7 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
 
     // Verify GET /organizations works
     let organizations =
-        objects_list_page_authz::<Organization>(client, "/organizations")
+        objects_list_page_authz::<Organization>(client, "/v1/organizations")
             .await
             .items;
     assert_eq!(organizations.len(), 2);
@@ -88,7 +90,7 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
 
     // Verify the org is gone from the organizations list
     let organizations =
-        objects_list_page_authz::<Organization>(client, "/organizations")
+        objects_list_page_authz::<Organization>(client, "/v1/organizations")
             .await
             .items;
     assert_eq!(organizations.len(), 1);
@@ -109,7 +111,8 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
 
     // Attempt to delete a non-empty organization
     let project_name = "p1";
-    let project_url = format!("{}/projects/{}", o2_url, project_name);
+    let project_url =
+        format!("/organizations/{}/projects/{}", o2_name, project_name);
     create_project(&client, &o2_name, &project_name).await;
     NexusRequest::expect_failure(
         &client,
@@ -122,7 +125,27 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("failed to make request");
 
-    // Delete the project, then delete the organization
+    // Delete:
+    // - The default subnet within the default VPC for the project
+    // - The default VPC for the project
+    // - The project
+    // - The organization
+    NexusRequest::object_delete(
+        &client,
+        &format!("{project_url}/vpcs/default/subnets/default"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+    NexusRequest::object_delete(
+        &client,
+        &format!("{project_url}/vpcs/default"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
     NexusRequest::object_delete(&client, &project_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

@@ -16,13 +16,15 @@ use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
-use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::{CreateResult, ResourceType};
+use omicron_common::api::external::{CreateResult, LookupType};
+use omicron_common::api::external::{DataPageParams, ResourceType};
+use omicron_common::bail_unless;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -44,20 +46,12 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn silos_list_by_name(
+    pub async fn silos_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore.silos_list_by_name(opctx, pagparams).await
-    }
-
-    pub async fn silos_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore.silos_list_by_id(opctx, pagparams).await
+        self.db_datastore.silos_list(opctx, pagparams).await
     }
 
     pub async fn silo_fetch(
@@ -238,7 +232,7 @@ impl super::Nexus {
         silo_name: &Name,
         new_user_params: params::UserCreate,
     ) -> CreateResult<db::model::SiloUser> {
-        let (authz_silo, _) =
+        let (authz_silo, db_silo) =
             self.local_idp_fetch_silo(opctx, silo_name).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         // TODO-cleanup This authz check belongs in silo_user_create().
@@ -250,8 +244,22 @@ impl super::Nexus {
             Uuid::new_v4(),
             new_user_params.external_id.as_ref().to_owned(),
         );
+        // TODO These two steps should happen in a transaction.
         let (_, db_silo_user) =
             self.datastore().silo_user_create(&authz_silo, silo_user).await?;
+        let authz_silo_user = authz::SiloUser::new(
+            authz_silo.clone(),
+            db_silo_user.id(),
+            LookupType::ById(db_silo_user.id()),
+        );
+        self.silo_user_password_set_internal(
+            opctx,
+            &db_silo,
+            &authz_silo_user,
+            &db_silo_user,
+            new_user_params.password,
+        )
+        .await?;
         Ok(db_silo_user)
     }
 
@@ -374,6 +382,167 @@ impl super::Nexus {
             .await?;
 
         Ok(Some(db_silo_user))
+    }
+
+    // Silo user passwords
+
+    /// Set or invalidate a Silo user's password
+    ///
+    /// If `password` is `UserPassword::Password`, the password is set to the
+    /// requested value.  Otherwise, any existing password is invalidated so
+    /// that it cannot be used for authentication any more.
+    pub async fn local_idp_user_set_password(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        silo_user_id: Uuid,
+        password_value: params::UserPassword,
+    ) -> UpdateResult<()> {
+        let (authz_silo, db_silo) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let (authz_silo_user, db_silo_user) = self
+            .silo_user_lookup_by_id(
+                opctx,
+                &authz_silo,
+                silo_user_id,
+                authz::Action::Modify,
+            )
+            .await?;
+        self.silo_user_password_set_internal(
+            opctx,
+            &db_silo,
+            &authz_silo_user,
+            &db_silo_user,
+            password_value,
+        )
+        .await
+    }
+
+    /// Internal helper for setting a user's password
+    ///
+    /// The caller should have already verified that this is a `LocalOnly` Silo
+    /// and that the specified user is in that Silo.
+    async fn silo_user_password_set_internal(
+        &self,
+        opctx: &OpContext,
+        db_silo: &db::model::Silo,
+        authz_silo_user: &authz::SiloUser,
+        db_silo_user: &db::model::SiloUser,
+        password_value: params::UserPassword,
+    ) -> UpdateResult<()> {
+        let password_hash = match password_value {
+            params::UserPassword::InvalidPassword => None,
+            params::UserPassword::Password(password) => {
+                let mut hasher = nexus_passwords::Hasher::default();
+                let password_hash = hasher
+                    .create_password(password.as_ref())
+                    .map_err(|e| {
+                    Error::internal_error(&format!("setting password: {:#}", e))
+                })?;
+                Some(db::model::SiloUserPasswordHash::new(
+                    authz_silo_user.id(),
+                    nexus_db_model::PasswordHashString::from(password_hash),
+                ))
+            }
+        };
+
+        self.datastore()
+            .silo_user_password_hash_set(
+                opctx,
+                db_silo,
+                authz_silo_user,
+                db_silo_user,
+                password_hash,
+            )
+            .await
+    }
+
+    /// Verify a Silo user's password
+    ///
+    /// To prevent timing attacks that would allow an attacker to learn the
+    /// identity of a valid user, it's important that password verification take
+    /// the same amount of time whether a user exists or not.  To achieve that,
+    /// callers are expected to invoke this function during authentication even
+    /// if they've found no user to match the requested credentials.  That's why
+    /// this function accepts `Option<SiloUser>` rather than just a `SiloUser`.
+    pub async fn silo_user_password_verify(
+        &self,
+        opctx: &OpContext,
+        maybe_authz_silo_user: Option<&authz::SiloUser>,
+        password: &nexus_passwords::Password,
+    ) -> Result<bool, Error> {
+        let maybe_hash = match maybe_authz_silo_user {
+            None => None,
+            Some(authz_silo_user) => {
+                self.datastore()
+                    .silo_user_password_hash_fetch(opctx, authz_silo_user)
+                    .await?
+            }
+        };
+
+        let mut hasher = nexus_passwords::Hasher::default();
+        match maybe_hash {
+            None => {
+                // If the user or their password hash does not exist, create a
+                // dummy password hash anyway.  This avoids exposing a timing
+                // attack where an attacker can learn that a user exists by
+                // seeing how fast it took a login attempt to fail.
+                let _ = hasher.create_password(password);
+                Ok(false)
+            }
+            Some(silo_user_password_hash) => Ok(hasher
+                .verify_password(password, &silo_user_password_hash.hash)
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "verifying password: {:#}",
+                        e
+                    ))
+                })?),
+        }
+    }
+
+    /// Given a silo name and username/password credentials, verify the
+    /// credentials and return the corresponding SiloUser.
+    pub async fn login_local(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        credentials: params::UsernamePasswordCredentials,
+    ) -> Result<Option<db::model::SiloUser>, Error> {
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
+
+        // NOTE: It's very important that we not bail out early if we fail to
+        // find a user with this external id.  See the note in
+        // silo_user_password_verify().
+        // TODO-security There may still be some vulnerability to timing attack
+        // here, in that we'll do one fewer database lookup if a user does not
+        // exist.
+        let fetch_user = self
+            .datastore()
+            .silo_user_fetch_by_external_id(
+                opctx,
+                &authz_silo,
+                credentials.username.as_ref(),
+            )
+            .await?;
+        let verified = self
+            .silo_user_password_verify(
+                opctx,
+                fetch_user.as_ref().map(|(authz_silo_user, _)| authz_silo_user),
+                credentials.password.as_ref(),
+            )
+            .await?;
+        if verified {
+            bail_unless!(
+                fetch_user.is_some(),
+                "passed password verification without a valid user"
+            );
+            let db_user = fetch_user.unwrap().1;
+            Ok(Some(db_user))
+        } else {
+            Ok(None)
+        }
     }
 
     // Silo groups
@@ -570,14 +739,17 @@ impl super::Nexus {
             }
 
             params::IdpMetadataSource::Base64EncodedXml { data } => {
-                let bytes =
-                    base64::decode(data).map_err(|e| Error::InvalidValue {
-                        label: String::from("data"),
-                        message: format!(
-                            "error getting decoding base64 data: {}",
-                            e
-                        ),
-                    })?;
+                let bytes = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    data,
+                )
+                .map_err(|e| Error::InvalidValue {
+                    label: String::from("data"),
+                    message: format!(
+                        "error getting decoding base64 data: {}",
+                        e
+                    ),
+                })?;
                 String::from_utf8_lossy(&bytes).into_owned()
             }
         };

@@ -302,7 +302,16 @@ impl PortManager {
         );
 
         // Initialize firewall rules for the new port.
-        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+        let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+
+        // TODO-remove: This is part of the external IP hack.
+        //
+        // We need to allow incoming ARP packets past the firewall layer so
+        // that they may be handled properly at the gateway layer.
+        rules.push(
+            "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
+        );
+
         debug!(
             self.inner.log,
             "Setting firewall rules";

@@ -12,11 +12,15 @@ use nexus_types::identity::Resource;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use serde::Deserialize;
+use serde::Serialize;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
 /// An Instance (VM).
-#[derive(Queryable, Insertable, Debug, Selectable, Resource)]
+#[derive(
+    Queryable, Insertable, Debug, Selectable, Resource, Serialize, Deserialize,
+)]
 #[diesel(table_name = instance)]
 pub struct Instance {
     #[diesel(embed)]
@@ -84,7 +88,16 @@ impl DatastoreAttachTargetConfig<Disk> for Instance {
 /// metadata
 ///
 /// This state is owned by the sled agent running that Instance.
-#[derive(Clone, Debug, AsChangeset, Selectable, Insertable, Queryable)]
+#[derive(
+    Clone,
+    Debug,
+    AsChangeset,
+    Selectable,
+    Insertable,
+    Queryable,
+    Serialize,
+    Deserialize,
+)]
 #[diesel(table_name = instance)]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance

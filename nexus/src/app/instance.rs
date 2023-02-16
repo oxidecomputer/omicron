@@ -10,19 +10,19 @@ use super::MAX_NICS_PER_INSTANCE;
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
-use crate::authz::ApiResource;
 use crate::cidata::InstanceCiData;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::queries::network_interface;
 use crate::external_api::params;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
 use nexus_db_model::Name;
 use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -32,9 +32,11 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use ref_cast::RefCast;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
@@ -53,18 +55,53 @@ use uuid::Uuid;
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
 impl super::Nexus {
+    pub fn instance_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        instance_selector: &'a params::InstanceSelector,
+    ) -> LookupResult<lookup::Instance<'a>> {
+        match instance_selector {
+            params::InstanceSelector {
+                project_selector: None,
+                instance: NameOrId::Id(id),
+            } => {
+                let instance =
+                    LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
+                Ok(instance)
+            }
+            params::InstanceSelector {
+                project_selector: Some(project_selector),
+                instance: NameOrId::Name(name),
+            } => {
+                let instance = self
+                    .project_lookup(opctx, project_selector)?
+                    .instance_name(Name::ref_cast(name));
+                Ok(instance)
+            }
+            params::InstanceSelector {
+                project_selector: Some(_),
+                instance: NameOrId::Id(_),
+            } => {
+                Err(Error::invalid_request(
+                    "when providing instance as an ID, project should not be specified",
+                ))
+            }
+            _ => {
+                Err(Error::invalid_request(
+                    "instance should either be UUID or project should be specified",
+                ))
+            }
+        }
+    }
+
     pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         params: &params::InstanceCreate,
     ) -> CreateResult<db::model::Instance> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
@@ -133,8 +170,6 @@ impl super::Nexus {
 
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            organization_name: organization_name.clone().into(),
-            project_name: project_name.clone().into(),
             project_id: authz_project.id(),
             create_params: params.clone(),
         };
@@ -192,99 +227,51 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
-    pub async fn project_list_instances(
+    pub async fn instance_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Instance> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore
-            .project_list_instances(opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn instance_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-    ) -> LookupResult<db::model::Instance> {
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .fetch()
-            .await?;
-        Ok(db_instance)
-    }
-
-    pub async fn instance_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        instance_id: &Uuid,
-    ) -> LookupResult<db::model::Instance> {
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(*instance_id)
-            .fetch()
-            .await?;
-        Ok(db_instance)
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore.instance_list(opctx, &authz_project, pagparams).await
     }
 
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
     pub async fn project_destroy_instance(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> DeleteResult {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(authz::Action::Delete).await?;
 
-        self.db_datastore
-            .project_delete_instance(opctx, &authz_instance)
-            .await?;
-        self.db_datastore
-            .instance_delete_all_network_interfaces(opctx, &authz_instance)
-            .await?;
-        // Ignore the count of addresses deleted
-        self.db_datastore
-            .deallocate_external_ip_by_instance_id(opctx, authz_instance.id())
-            .await?;
+        let saga_params = sagas::instance_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_instance,
+            instance,
+        };
+        self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
+            saga_params,
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
         params: params::InstanceMigrate,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         // Kick off the migration saga
         let saga_params = sagas::instance_migrate::Params {
@@ -338,9 +325,7 @@ impl super::Nexus {
     pub async fn instance_reboot(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
         // To implement reboot, we issue a call to the sled agent to set a
         // runtime state of "reboot". We cannot simply stop the Instance and
@@ -353,13 +338,7 @@ impl super::Nexus {
         // even if the whole rack powered off while this was going on, we would
         // never lose track of the fact that this Instance was supposed to be
         // running.
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Reboot,
             migration_params: None,
@@ -378,17 +357,9 @@ impl super::Nexus {
     pub async fn instance_start(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Running,
             migration_params: None,
@@ -407,17 +378,9 @@ impl super::Nexus {
     pub async fn instance_stop(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         let requested = InstanceRuntimeStateRequested {
             run_state: InstanceStateRequested::Stopped,
             migration_params: None,
@@ -503,25 +466,24 @@ impl super::Nexus {
             .instance_list_disks(
                 &opctx,
                 &authz_instance,
-                &DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
                         .unwrap(),
-                },
+                }),
             )
             .await?;
 
         let mut disk_reqs = vec![];
         for (i, disk) in disks.iter().enumerate() {
-            let volume = self.db_datastore.volume_get(disk.volume_id).await?;
-            let gen: i64 = (&disk.runtime_state.gen.0).into();
+            let volume =
+                self.db_datastore.volume_checkout(disk.volume_id).await?;
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(i as u8),
                 read_only: false,
                 device: "nvme".to_string(),
-                gen: gen as u64,
                 volume_construction_request: serde_json::from_str(
                     &volume.data(),
                 )?,
@@ -635,7 +597,8 @@ impl super::Nexus {
             external_ips,
             firewall_rules,
             disks: disk_reqs,
-            cloud_init_bytes: Some(base64::encode(
+            cloud_init_bytes: Some(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&public_keys)?,
             )),
         };
@@ -726,17 +689,11 @@ impl super::Nexus {
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Disk> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .instance_list_disks(opctx, &authz_instance, pagparams)
             .await
@@ -746,24 +703,34 @@ impl super::Nexus {
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_project_disk, authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        // TODO-v1: Write test to verify this case
+        // Because both instance and disk can be provided by ID it's possible for someone
+        // to specify resources from different projects. The lookups would resolve the resources
+        // (assuming the user had sufficient permissions on both) without verifying the shared hierarchy.
+        // To mitigate that we verify that their parent projects have the same ID.
+        if authz_project.id() != authz_project_disk.id() {
+            return Err(Error::InvalidRequest {
+                message: "disk must be in the same project as the instance"
+                    .to_string(),
+            });
+        }
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
@@ -794,25 +761,22 @@ impl super::Nexus {
     pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        disk_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
+        disk: NameOrId,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .disk_name(disk_name)
-                .fetch()
-                .await?;
-        let (.., authz_instance, _) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
-
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_disk) = self
+            .disk_lookup(
+                opctx,
+                &params::DiskSelector::new(
+                    None,
+                    Some(authz_project.id().into()),
+                    disk,
+                ),
+            )?
+            .lookup_for(authz::Action::Modify)
+            .await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk detach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
@@ -831,220 +795,6 @@ impl super::Nexus {
             .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(disk)
-    }
-
-    /// Create a network interface attached to the provided instance.
-    // TODO-performance: Add a version of this that accepts the instance ID
-    // directly. This will avoid all the internal database lookups in the event
-    // that we create many NICs for the same instance, such as in a saga.
-    pub async fn instance_create_network_interface(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        params: &params::NetworkInterfaceCreate,
-    ) -> CreateResult<db::model::NetworkInterface> {
-        let (.., authz_project, authz_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .lookup_for(authz::Action::Modify)
-                .await?;
-
-        // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
-        // IDs for creating the network interface.
-        //
-        // TODO-correctness: There are additional races here. The VPC and VPC
-        // Subnet could both be deleted between the time we fetch them and
-        // actually insert the record for the interface. The solution is likely
-        // to make both objects implement `DatastoreCollection` for their
-        // children, and then use `VpcSubnet::insert_resource` inside the
-        // `instance_create_network_interface` method. See
-        // https://github.com/oxidecomputer/omicron/issues/738.
-        let vpc_name = db::model::Name(params.vpc_name.clone());
-        let subnet_name = db::model::Name(params.subnet_name.clone());
-        let (.., authz_vpc, authz_subnet, db_subnet) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .project_id(authz_project.id())
-                .vpc_name(&vpc_name)
-                .vpc_subnet_name(&subnet_name)
-                .fetch()
-                .await?;
-        let interface_id = Uuid::new_v4();
-        let interface = db::model::IncompleteNetworkInterface::new(
-            interface_id,
-            authz_instance.id(),
-            authz_vpc.id(),
-            db_subnet,
-            params.identity.clone(),
-            params.ip,
-        )?;
-        self.db_datastore
-            .instance_create_network_interface(
-                opctx,
-                &authz_subnet,
-                &authz_instance,
-                interface,
-            )
-            .await
-            .map_err(|e| {
-                debug!(
-                    self.log,
-                    "failed to create network interface";
-                    "instance_id" => ?authz_instance.id(),
-                    "interface_id" => ?interface_id,
-                    "error" => ?e,
-                );
-                if matches!(
-                    e,
-                    network_interface::InsertError::InstanceNotFound(_)
-                ) {
-                    // Return the not-found message of the authz interface
-                    // object, so that the message reflects how the caller
-                    // originally looked it up
-                    authz_instance.not_found()
-                } else {
-                    // Convert other errors into an appropriate client error
-                    network_interface::InsertError::into_external(e)
-                }
-            })
-    }
-
-    /// Lists network interfaces attached to the instance.
-    pub async fn instance_list_network_interfaces(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::NetworkInterface> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore
-            .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
-            .await
-    }
-
-    /// Fetch a network interface attached to the given instance.
-    pub async fn network_interface_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        interface_name: &Name,
-    ) -> LookupResult<db::model::NetworkInterface> {
-        let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .network_interface_name(interface_name)
-            .fetch()
-            .await?;
-        Ok(db_interface)
-    }
-
-    pub async fn network_interface_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        interface_id: &Uuid,
-    ) -> LookupResult<db::model::NetworkInterface> {
-        let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
-            .network_interface_id(*interface_id)
-            .fetch()
-            .await?;
-        Ok(db_interface)
-    }
-
-    /// Update a network interface for the given instance.
-    pub async fn network_interface_update(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        interface_name: &Name,
-        updates: params::NetworkInterfaceUpdate,
-    ) -> UpdateResult<db::model::NetworkInterface> {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(authz_instance.id())
-            .network_interface_name(interface_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        self.db_datastore
-            .instance_update_network_interface(
-                opctx,
-                &authz_instance,
-                &authz_interface,
-                db::model::NetworkInterfaceUpdate::from(updates),
-            )
-            .await
-    }
-
-    /// Delete a network interface from the provided instance.
-    ///
-    /// Note that the primary interface for an instance cannot be deleted if
-    /// there are any secondary interfaces.
-    pub async fn instance_delete_network_interface(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-        interface_name: &Name,
-    ) -> DeleteResult {
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(authz_instance.id())
-            .network_interface_name(interface_name)
-            .lookup_for(authz::Action::Delete)
-            .await?;
-        self.db_datastore
-            .instance_delete_network_interface(
-                opctx,
-                &authz_instance,
-                &authz_interface,
-            )
-            .await
-            .map_err(|e| {
-                debug!(
-                    self.log,
-                    "failed to delete network interface";
-                    "instance_id" => ?authz_instance.id(),
-                    "interface_id" => ?authz_interface.id(),
-                    "error" => ?e,
-                );
-                if matches!(
-                    e,
-                    network_interface::DeleteError::InstanceNotFound(_)
-                ) {
-                    // Return the not-found message of the authz interface
-                    // object, so that the message reflects how the caller
-                    // originally looked it up
-                    authz_instance.not_found()
-                } else {
-                    // Convert other errors into an appropriate client error
-                    network_interface::DeleteError::into_external(e)
-                }
-            })
     }
 
     /// Invoked by a sled agent to publish an updated runtime state for an
@@ -1110,20 +860,10 @@ impl super::Nexus {
     /// provided they are still in the sled-agent's cache.
     pub(crate) async fn instance_serial_console_data(
         &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let db_instance = self
-            .instance_fetch(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
+        let (.., db_instance) = instance_lookup.fetch().await?;
 
         let sa = self.instance_sled(&db_instance).await?;
         let data = sa
@@ -1145,20 +885,11 @@ impl super::Nexus {
 
     pub(crate) async fn instance_serial_console_stream(
         &self,
-        opctx: &OpContext,
         conn: dropshot::WebsocketConnection,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
+        instance_lookup: &lookup::Instance<'_>,
     ) -> Result<(), Error> {
-        let instance = self
-            .instance_fetch(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
+        // TODO: Technically the stream is two way so the user of this method can modify the instance in some way. Should we use different permissions?
+        let (.., instance) = instance_lookup.fetch().await?;
         let ip_addr = instance
             .runtime_state
             .propolis_ip

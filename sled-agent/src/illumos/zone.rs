@@ -10,7 +10,9 @@ use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{
+    EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL,
+};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
@@ -84,6 +86,26 @@ pub enum GetControlInterfaceError {
     NotFound { zone: String },
 }
 
+/// Errors from [`Zones::get_bootstrap_interface`].
+/// Error which may be returned accessing the bootstrap interface of a zone.
+#[derive(thiserror::Error, Debug)]
+pub enum GetBootstrapInterfaceError {
+    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    Execution {
+        zone: String,
+        #[source]
+        err: crate::illumos::ExecutionError,
+    },
+
+    #[error("VNIC starting with 'oxBootstrap' not found in {zone}")]
+    NotFound { zone: String },
+
+    #[error(
+        "VNIC starting with 'oxBootstrap' found in non-switch zone: {zone}"
+    )]
+    Unexpected { zone: String },
+}
+
 /// Errors which may be encountered ensuring addresses.
 #[derive(thiserror::Error, Debug)]
 #[error(
@@ -140,10 +162,10 @@ impl Zones {
     ///
     /// Returns the state the zone was in before it was removed, or None if the
     /// zone did not exist.
-    pub fn halt_and_remove(
+    pub async fn halt_and_remove(
         name: &str,
     ) -> Result<Option<zone::State>, AdmError> {
-        match Self::find(name)? {
+        match Self::find(name).await? {
             None => Ok(None),
             Some(zone) => {
                 let state = zone.state();
@@ -158,40 +180,44 @@ impl Zones {
                 };
 
                 if halt {
-                    zone::Adm::new(name).halt().map_err(|err| AdmError {
-                        op: Operation::Halt,
-                        zone: name.to_string(),
-                        err,
+                    zone::Adm::new(name).halt().await.map_err(|err| {
+                        AdmError {
+                            op: Operation::Halt,
+                            zone: name.to_string(),
+                            err,
+                        }
                     })?;
                 }
                 if uninstall {
-                    zone::Adm::new(name).uninstall(/* force= */ true).map_err(
-                        |err| AdmError {
+                    zone::Adm::new(name)
+                        .uninstall(/* force= */ true)
+                        .await
+                        .map_err(|err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
                             err,
-                        },
-                    )?;
+                        })?;
                 }
                 zone::Config::new(name)
                     .delete(/* force= */ true)
                     .run()
+                    .await
                     .map_err(|err| AdmError {
-                        op: Operation::Delete,
-                        zone: name.to_string(),
-                        err,
-                    })?;
+                    op: Operation::Delete,
+                    zone: name.to_string(),
+                    err,
+                })?;
                 Ok(Some(state))
             }
         }
     }
 
     /// Halt and remove the zone, logging the state in which the zone was found.
-    pub fn halt_and_remove_logged(
+    pub async fn halt_and_remove_logged(
         log: &Logger,
         name: &str,
     ) -> Result<(), AdmError> {
-        if let Some(state) = Self::halt_and_remove(name)? {
+        if let Some(state) = Self::halt_and_remove(name).await? {
             info!(
                 log,
                 "halt_and_remove_logged: Previous zone state: {:?}", state
@@ -200,26 +226,31 @@ impl Zones {
         Ok(())
     }
 
-    pub fn install_omicron_zone(
+    /// Installs a zone with the provided arguments.
+    ///
+    /// - If a zone with the name `zone_name` exists and is currently running,
+    /// we return immediately.
+    /// - Otherwise, the zone is deleted.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn install_omicron_zone(
         log: &Logger,
         zone_name: &str,
         zone_image: &std::path::Path,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         vnics: Vec<String>,
+        limit_priv: Vec<String>,
     ) -> Result<(), AdmError> {
-        if let Some(zone) = Self::find(zone_name)? {
+        if let Some(zone) = Self::find(zone_name).await? {
             info!(
                 log,
                 "install_omicron_zone: Found zone: {} in state {:?}",
                 zone.name(),
                 zone.state()
             );
-            if zone.state() == zone::State::Installed
-                || zone.state() == zone::State::Running
-            {
+            if zone.state() == zone::State::Running {
                 // TODO: Admittedly, the zone still might be messed up. However,
-                // for now, we assume that "installed" means "good to go".
+                // for now, we assume that "running" means "good to go".
                 return Ok(());
             } else {
                 info!(
@@ -227,7 +258,7 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove_logged(log, zone.name())?;
+                Zones::halt_and_remove_logged(log, zone.name()).await?;
             }
         }
 
@@ -244,6 +275,10 @@ impl Zones {
             .set_path(&path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
+        if !limit_priv.is_empty() {
+            let limit_priv = std::collections::BTreeSet::from_iter(limit_priv);
+            cfg.get_global().set_limitpriv(limit_priv);
+        }
 
         for dataset in datasets {
             cfg.add_dataset(&dataset);
@@ -257,7 +292,7 @@ impl Zones {
                 ..Default::default()
             });
         }
-        cfg.run().map_err(|err| AdmError {
+        cfg.run().await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
             err,
@@ -265,19 +300,20 @@ impl Zones {
 
         info!(log, "Installing Omicron zone: {}", zone_name);
 
-        zone::Adm::new(zone_name).install(&[zone_image.as_ref()]).map_err(
-            |err| AdmError {
+        zone::Adm::new(zone_name)
+            .install(&[zone_image.as_ref()])
+            .await
+            .map_err(|err| AdmError {
                 op: Operation::Install,
                 zone: zone_name.to_string(),
                 err,
-            },
-        )?;
+            })?;
         Ok(())
     }
 
     /// Boots a zone (named `name`).
-    pub fn boot(name: &str) -> Result<(), AdmError> {
-        zone::Adm::new(name).boot().map_err(|err| AdmError {
+    pub async fn boot(name: &str) -> Result<(), AdmError> {
+        zone::Adm::new(name).boot().await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
             err,
@@ -288,8 +324,9 @@ impl Zones {
     /// Returns all zones that may be managed by the Sled Agent.
     ///
     /// These zones must have names starting with [`ZONE_PREFIX`].
-    pub fn get() -> Result<Vec<zone::Zone>, AdmError> {
+    pub async fn get() -> Result<Vec<zone::Zone>, AdmError> {
         Ok(zone::Adm::list()
+            .await
             .map_err(|err| AdmError {
                 op: Operation::List,
                 zone: "<all>".to_string(),
@@ -304,8 +341,8 @@ impl Zones {
     ///
     /// Can only return zones that start with [`ZONE_PREFIX`], as they
     /// are managed by the Sled Agent.
-    pub fn find(name: &str) -> Result<Option<zone::Zone>, AdmError> {
-        Ok(Self::get()?.into_iter().find(|zone| zone.name() == name))
+    pub async fn find(name: &str) -> Result<Option<zone::Zone>, AdmError> {
+        Ok(Self::get().await?.into_iter().find(|zone| zone.name() == name))
     }
 
     /// Returns the name of the VNIC used to communicate with the control plane.
@@ -337,6 +374,46 @@ impl Zones {
             .ok_or(GetControlInterfaceError::NotFound {
                 zone: zone.to_string(),
             })
+    }
+
+    /// Returns the name of the VNIC used to communicate with the bootstrap network.
+    pub fn get_bootstrap_interface(
+        zone: &str,
+    ) -> Result<Option<String>, GetBootstrapInterfaceError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            ZLOGIN,
+            zone,
+            DLADM,
+            "show-vnic",
+            "-p",
+            "-o",
+            "LINK",
+        ]);
+        let output = execute(cmd).map_err(|err| {
+            GetBootstrapInterfaceError::Execution {
+                zone: zone.to_string(),
+                err,
+            }
+        })?;
+        let vnic =
+            String::from_utf8_lossy(&output.stdout).lines().find_map(|name| {
+                if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
+                    Some(name.to_string())
+                } else {
+                    None
+                }
+            });
+
+        if zone == "oxz_switch" && vnic.is_none() {
+            Err(GetBootstrapInterfaceError::NotFound { zone: zone.to_string() })
+        } else if zone != "oxz_switch" && vnic.is_some() {
+            Err(GetBootstrapInterfaceError::Unexpected {
+                zone: zone.to_string(),
+            })
+        } else {
+            Ok(vnic)
+        }
     }
 
     /// Ensures that an IP address on an interface matches the requested value.
@@ -560,12 +637,12 @@ impl Zones {
             )
             .map_err(|err| anyhow!(err))?;
 
-            // Ensure that a static IPv6 address has been allocated
-            // to the Global Zone. Without this, we don't have a way
-            // to route to IP addresses that we want to create in
-            // the non-GZ. Note that we use a `/64` prefix, as all addresses
-            // allocated for services on this sled itself are within the underlay
-            // prefix. Anything else must be routed through Sidecar.
+            // Ensure that a static IPv6 address has been allocated to the
+            // Global Zone. Without this, we don't have a way to route to IP
+            // addresses that we want to create in the non-GZ. Note that we
+            // use a `/64` prefix, as all addresses allocated for services on
+            // this sled itself are within the underlay or bootstrap prefix.
+            // Anything else must be routed through Sidecar.
             Self::ensure_address(
                 None,
                 &gz_link_local_addrobj

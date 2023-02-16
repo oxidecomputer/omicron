@@ -92,7 +92,9 @@ pub enum IdentityType {
 
 /// Describes how identities are managed and users are authenticated in this
 /// Silo
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SiloIdentityMode {
     /// Users are authenticated with SAML using an external authentication
@@ -147,6 +149,14 @@ pub enum UserProvisionType {
     /// Users and groups are created or updated during authentication using
     /// information provided by the authentication provider
     Jit,
+}
+
+/// The service intended to use this certificate.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceUsingCertificate {
+    /// This certificate is intended for access to the external API.
+    ExternalApi,
 }
 
 /// An IP Range is a contiguous range of IP addresses, usually within an IP
@@ -315,6 +325,23 @@ impl TryFrom<AnyIpv6Range> for Ipv6Range {
 pub enum IpKind {
     Ephemeral,
     Floating,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateableComponentType {
+    BootloaderForRot,
+    BootloaderForSp,
+    BootloaderForHostProc,
+    HubrisForPscRot,
+    HubrisForPscSp,
+    HubrisForSidecarRot,
+    HubrisForSidecarSp,
+    HubrisForGimletRot,
+    HubrisForGimletSp,
+    HeliosHostPhase1,
+    HeliosHostPhase2,
+    HostOmicron,
 }
 
 #[cfg(test)]

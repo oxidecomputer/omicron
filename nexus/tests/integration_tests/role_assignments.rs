@@ -14,7 +14,6 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
@@ -25,6 +24,9 @@ use omicron_nexus::db::identity::Resource;
 use omicron_nexus::db::model::DatabaseString;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 /// Describes the role assignment test for a particular kind of resource
 ///
@@ -175,7 +177,7 @@ async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
         fn policy_url(&self) -> String {
             format!(
                 "/system/silos/{}/policy",
-                fixed_data::silo::DEFAULT_SILO.identity().name.to_string()
+                fixed_data::silo::DEFAULT_SILO.identity().name
             )
         }
 

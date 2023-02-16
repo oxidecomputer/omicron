@@ -7,21 +7,43 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use uuid::Uuid;
+use ref_cast::RefCast;
 
 impl super::Nexus {
+    pub fn organization_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        organization_selector: &'a params::OrganizationSelector,
+    ) -> LookupResult<lookup::Organization<'a>> {
+        match organization_selector {
+            params::OrganizationSelector { organization: NameOrId::Id(id) } => {
+                let organization = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_id(*id);
+                Ok(organization)
+            }
+            params::OrganizationSelector {
+                organization: NameOrId::Name(name),
+            } => {
+                let organization = LookupPath::new(opctx, &self.db_datastore)
+                    .organization_name(Name::ref_cast(name));
+                Ok(organization)
+            }
+        }
+    }
     pub async fn organization_create(
         &self,
         opctx: &OpContext,
@@ -30,70 +52,31 @@ impl super::Nexus {
         self.db_datastore.organization_create(opctx, new_organization).await
     }
 
-    pub async fn organization_fetch(
+    pub async fn organizations_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-    ) -> LookupResult<db::model::Organization> {
-        let (.., db_organization) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .fetch()
-            .await?;
-        Ok(db_organization)
-    }
-
-    pub async fn organization_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        organization_id: &Uuid,
-    ) -> LookupResult<db::model::Organization> {
-        let (.., db_organization) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_id(*organization_id)
-            .fetch()
-            .await?;
-        Ok(db_organization)
-    }
-
-    pub async fn organizations_list_by_name(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_name(opctx, pagparams).await
-    }
-
-    pub async fn organizations_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Organization> {
-        self.db_datastore.organizations_list_by_id(opctx, pagparams).await
+        self.db_datastore.organizations_list(opctx, pagparams).await
     }
 
     pub async fn organization_delete(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
+        organization_lookup: &lookup::Organization<'_>,
     ) -> DeleteResult {
-        let (.., authz_org, db_org) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .fetch()
-                .await?;
+        let (.., authz_org, db_org) = organization_lookup.fetch().await?;
         self.db_datastore.organization_delete(opctx, &authz_org, &db_org).await
     }
 
     pub async fn organization_update(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
+        organization_lookup: &lookup::Organization<'_>,
         new_params: &params::OrganizationUpdate,
     ) -> UpdateResult<db::model::Organization> {
         let (.., authz_organization) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .lookup_for(authz::Action::Modify)
-                .await?;
+            organization_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
             .organization_update(
                 opctx,
@@ -108,12 +91,10 @@ impl super::Nexus {
     pub async fn organization_fetch_policy(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
+        organization_lookup: &lookup::Organization<'_>,
     ) -> LookupResult<shared::Policy<authz::OrganizationRole>> {
-        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .lookup_for(authz::Action::ReadPolicy)
-            .await?;
+        let (.., authz_org) =
+            organization_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz_org)
@@ -128,13 +109,11 @@ impl super::Nexus {
     pub async fn organization_update_policy(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
+        organization_lookup: &lookup::Organization<'_>,
         policy: &shared::Policy<authz::OrganizationRole>,
     ) -> UpdateResult<shared::Policy<authz::OrganizationRole>> {
-        let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .lookup_for(authz::Action::ModifyPolicy)
-            .await?;
+        let (.., authz_org) =
+            organization_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
         let role_assignments = self
             .db_datastore

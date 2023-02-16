@@ -6,9 +6,10 @@
 
 use mockall::mock;
 use nexus_client::types::{
-    DatasetPutRequest, DatasetPutResponse, DiskRuntimeState,
-    InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
-    ZpoolPutRequest, ZpoolPutResponse,
+    DiskRuntimeState, InstanceRuntimeState, KnownArtifactKind,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
+    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
+    ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -28,6 +29,14 @@ mock! {
             id: &Uuid,
             info: &SledAgentStartupInfo,
         ) -> Result<()>;
+        pub async fn physical_disk_put(
+            &self,
+            request: &PhysicalDiskPutRequest,
+        ) -> Result<()>;
+        pub async fn physical_disk_delete(
+            &self,
+            request: &PhysicalDiskDeleteRequest,
+        ) -> Result<()>;
         pub async fn cpapi_instances_put(
             &self,
             id: &Uuid,
@@ -40,9 +49,9 @@ mock! {
             ) -> Result<()>;
         pub async fn cpapi_artifact_download(
             &self,
-            kind: UpdateArtifactKind,
+            kind: KnownArtifactKind,
             name: &str,
-            version: i64,
+            version: &str,
         ) -> Result<progenitor::progenitor_client::ByteStream>;
         pub async fn zpool_put(
             &self,
@@ -50,11 +59,10 @@ mock! {
             zpool_id: &Uuid,
             info: &ZpoolPutRequest,
         ) -> Result<ZpoolPutResponse>;
-        pub async fn dataset_put(
+        pub async fn rack_initialization_complete(
             &self,
-            zpool_id: &Uuid,
-            dataset_id: &Uuid,
-            info: &DatasetPutRequest,
-        ) -> Result<DatasetPutResponse>;
+            rack_id: &Uuid,
+            request: &RackInitializationRequest,
+        ) -> Result<()>;
     }
 }
