@@ -52,10 +52,10 @@ impl UpdateScreen {
     ) -> Vec<Action> {
         match event.code {
             KeyCode::Tab => {
-                state.rack_state.inc_tab_index();
+                state.updates.scroll_down();
             }
             KeyCode::BackTab => {
-                state.rack_state.dec_tab_index();
+                state.updates.scroll_up();
             }
             KeyCode::Up => {
                 state.updates.scroll_up();

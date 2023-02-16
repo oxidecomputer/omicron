@@ -143,11 +143,13 @@ impl CommonScreenState {
         let prev = self.prev_screen_label();
         let next = self.next_screen_label();
         if let Some(p) = prev {
+            // One space from right border and 2 spaces between prev and next
+            let padding = 3;
             let width = p.width() as u16;
             let prev =
                 Paragraph::new(p).style(Style::default().fg(OX_OFF_WHITE));
             let rect = Rect {
-                x: f.size().width - width - next.width() as u16 - 3,
+                x: f.size().width - width - next.width() as u16 - padding,
                 y: 1,
                 width,
                 height: 3,
@@ -155,11 +157,17 @@ impl CommonScreenState {
             f.render_widget(prev, rect);
         }
 
+        // Leave a space on the right side of the screen
+        let padding = 1;
         let width = next.width() as u16;
         let next =
             Paragraph::new(next).style(Style::default().fg(OX_OFF_WHITE));
-        let rect =
-            Rect { x: f.size().width - width - 1, y: 1, width, height: 3 };
+        let rect = Rect {
+            x: f.size().width - width - padding,
+            y: 1,
+            width,
+            height: 3,
+        };
         f.render_widget(next, rect);
     }
 
