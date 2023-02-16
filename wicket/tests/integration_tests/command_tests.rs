@@ -19,7 +19,7 @@ fn test_wicket_shell_like() {
     cmd.assert().success();
 
     let mut cmd = make_cmd(tempdir.path());
-    cmd.args(["-c", "upload foo 0.1.0 --no-upload"]).write_stdin("upload-test");
+    cmd.args(["-c", "upload --no-upload"]).write_stdin("upload-test");
     cmd.assert().success();
 }
 

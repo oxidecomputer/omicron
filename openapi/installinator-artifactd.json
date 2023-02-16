@@ -10,11 +10,20 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts/{name}/{version}": {
+    "/artifacts/{kind}/{name}/{version}": {
       "get": {
         "summary": "Fetch an artifact from the in-memory cache.",
         "operationId": "get_artifact",
         "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "description": "The kind of artifact this is.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "name",
@@ -27,7 +36,7 @@
           {
             "in": "path",
             "name": "version",
-            "description": "The version of the artifact.",
+            "description": "The artifact's version.",
             "required": true,
             "schema": {
               "type": "string"

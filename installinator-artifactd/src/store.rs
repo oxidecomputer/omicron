@@ -8,22 +8,8 @@ use std::fmt;
 
 use async_trait::async_trait;
 use hyper::Body;
-use schemars::JsonSchema;
-use serde::Deserialize;
+use omicron_common::update::ArtifactId;
 use slog::Logger;
-
-/// Path parameters for artifacts.
-#[derive(
-    Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Deserialize, JsonSchema,
-)]
-#[allow(dead_code)]
-pub struct ArtifactId {
-    /// The artifact's name.
-    pub name: String,
-
-    /// The version of the artifact.
-    pub version: String,
-}
 
 /// Represents a way to fetch artifacts.
 #[async_trait]

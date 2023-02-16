@@ -5,11 +5,14 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow.workspace = true
 async-trait.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
+camino.workspace = true
 clap.workspace = true
 debug-ignore.workspace = true
+display-error-chain.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 http.workspace = true
@@ -19,7 +22,10 @@ schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+tough.workspace = true
 snafu.workspace = true
 toml.workspace = true
 uuid.workspace = true
@@ -27,6 +33,7 @@ uuid.workspace = true
 gateway-client.workspace = true
 installinator-artifactd.workspace = true
 omicron-common.workspace = true
+tufaceous-lib.workspace = true
 
 [[bin]]
 name = "wicketd"

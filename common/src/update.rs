@@ -1,4 +1,7 @@
+use std::fmt;
+
 use crate::api::internal::nexus::KnownArtifactKind;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Description of the `artifacts.json` target found in rack update
@@ -15,7 +18,7 @@ pub struct ArtifactsDocument {
 /// Describes an artifact available in the repository.
 ///
 /// See also [`crate::api::internal::nexus::UpdateArtifactId`], which is used
-/// internally between Nexus and Sled Agent.
+/// internally in Nexus and Sled Agent.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
     pub name: String,
@@ -24,13 +27,63 @@ pub struct Artifact {
     pub target: String,
 }
 
+impl Artifact {
+    /// Returns the artifact ID for this artifact.
+    pub fn id(&self) -> ArtifactId {
+        ArtifactId {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            kind: self.kind.clone(),
+        }
+    }
+}
+
+/// An identifier for an artifact.
+///
+/// The kind is [`ArtifactKind`], indicating that it might represent an artifact
+/// whose kind is unknown.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct ArtifactId {
+    /// The artifact's name.
+    pub name: String,
+
+    /// The artifact's version.
+    pub version: String,
+
+    /// The kind of artifact this is.
+    pub kind: ArtifactKind,
+}
+
 /// The kind of artifact we are dealing with.
 ///
 /// To ensure older versions of Nexus can work with update repositories that
 /// describe artifact kinds it is not yet aware of, this is a newtype wrapper
 /// around a string. The set of known artifact kinds is described in
 /// [`KnownArtifactKind`], and this type has conversions to and from it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
 pub struct ArtifactKind(String);
 
 impl ArtifactKind {
@@ -58,6 +111,12 @@ impl ArtifactKind {
 impl From<KnownArtifactKind> for ArtifactKind {
     fn from(kind: KnownArtifactKind) -> Self {
         Self::from_known(kind)
+    }
+}
+
+impl fmt::Display for ArtifactKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
     }
 }
 

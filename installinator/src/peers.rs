@@ -14,6 +14,7 @@ use display_error_chain::DisplayErrorChain;
 use futures::StreamExt;
 use installinator_artifact_client::ClientError;
 use itertools::Itertools;
+use omicron_common::update::ArtifactKind;
 use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
@@ -373,7 +374,11 @@ impl ArtifactClient {
     async fn fetch(&self, artifact_id: ArtifactId, sender: FetchSender) {
         let artifact_bytes = match self
             .client
-            .get_artifact(&artifact_id.name, &artifact_id.version)
+            .get_artifact(
+                artifact_id.kind.as_str(),
+                &artifact_id.name,
+                &artifact_id.version,
+            )
             .await
         {
             Ok(artifact_bytes) => artifact_bytes,
@@ -403,12 +408,19 @@ impl ArtifactClient {
 pub(crate) struct ArtifactId {
     name: String,
     version: String,
+    kind: ArtifactKind,
 }
 
 impl ArtifactId {
     #[cfg(test)]
     pub(crate) fn dummy() -> Self {
-        Self { name: "dummy".to_owned(), version: "0.1.0".to_owned() }
+        use omicron_common::api::internal::nexus::KnownArtifactKind;
+
+        Self {
+            name: "dummy".to_owned(),
+            version: "0.1.0".to_owned(),
+            kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
+        }
     }
 }
 
@@ -422,13 +434,20 @@ impl FromStr for ArtifactId {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.rsplit_once(':') {
-            Some((name, version)) => {
-                Ok(Self { name: name.to_owned(), version: version.to_owned() })
+        let mut split = s.splitn(3, ':');
+        let kind = split.next();
+        let name = split.next();
+        let version = split.next();
+
+        let (kind, name, version) = match (kind, name, version) {
+            (Some(kind), Some(name), Some(version)) => (kind, name, version),
+            _ => {
+                bail!("invalid format for input `{s}`: expected 'kind:name:version'")
             }
-            None => {
-                bail!("input `{s}` did not contain `:`");
-            }
-        }
+        };
+
+        let kind = ArtifactKind::new(kind.to_owned());
+
+        Ok(Self { name: name.to_owned(), version: version.to_owned(), kind })
     }
 }
