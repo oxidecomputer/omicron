@@ -8,7 +8,7 @@ use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
     RequestContext,
 };
-use omicron_common::update::ArtifactId;
+use omicron_common::update::{ArtifactHashId, ArtifactId};
 
 use crate::context::ServerContext;
 
@@ -20,6 +20,7 @@ pub fn api() -> ArtifactServerApiDesc {
         api: &mut ArtifactServerApiDesc,
     ) -> Result<(), String> {
         api.register(get_artifact)?;
+        api.register(get_artifact_by_hash)?;
         Ok(())
     }
 
@@ -30,10 +31,10 @@ pub fn api() -> ArtifactServerApiDesc {
     api
 }
 
-/// Fetch an artifact from the in-memory cache.
+/// Fetch an artifact from this server.
 #[endpoint {
     method = GET,
-    path = "/artifacts/{kind}/{name}/{version}"
+    path = "/artifacts/by-id/{kind}/{name}/{version}"
 }]
 async fn get_artifact(
     rqctx: RequestContext<ServerContext>,
@@ -43,6 +44,28 @@ async fn get_artifact(
     path: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     match rqctx.context().artifact_store.get_artifact(&path.into_inner()).await
+    {
+        Some(body) => Ok(HttpResponseOk(body.into())),
+        None => {
+            Err(HttpError::for_not_found(None, "Artifact not found".into()))
+        }
+    }
+}
+
+/// Fetch an artifact by hash.
+#[endpoint {
+    method = GET,
+    path = "/artifacts/by-hash/{kind}/{hash}",
+}]
+async fn get_artifact_by_hash(
+    rqctx: RequestContext<ServerContext>,
+    path: Path<ArtifactHashId>,
+) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    match rqctx
+        .context()
+        .artifact_store
+        .get_artifact_by_hash(&path.into_inner())
+        .await
     {
         Some(body) => Ok(HttpResponseOk(body.into())),
         None => {

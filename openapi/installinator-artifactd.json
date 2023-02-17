@@ -10,9 +10,52 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts/{kind}/{name}/{version}": {
+    "/artifacts/by-hash/{kind}/{hash}": {
       "get": {
-        "summary": "Fetch an artifact from the in-memory cache.",
+        "summary": "Fetch an artifact by hash.",
+        "operationId": "get_artifact_by_hash",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hash",
+            "description": "The hash of the artifact.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "description": "The kind of artifact this is.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/artifacts/by-id/{kind}/{name}/{version}": {
+      "get": {
+        "summary": "Fetch an artifact from this server.",
         "operationId": "get_artifact",
         "parameters": [
           {

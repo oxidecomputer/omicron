@@ -2774,7 +2774,10 @@ dependencies = [
  "ddm-admin-client",
  "display-error-chain",
  "futures",
+ "hex",
+ "hex-literal",
  "installinator-artifact-client",
+ "ipcc-key-value",
  "itertools",
  "omicron-common",
  "once_cell",
@@ -3714,6 +3717,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "hex",
  "http",
  "hyper",
  "ipnetwork",
@@ -3728,6 +3732,7 @@ dependencies = [
  "semver 1.0.16",
  "serde",
  "serde_derive",
+ "serde_human_bytes",
  "serde_json",
  "serde_urlencoded",
  "serde_with",
@@ -5861,6 +5866,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "serde_human_bytes"
+version = "0.1.0"
+source = "git+http://github.com/oxidecomputer/serde_human_bytes#0a09794501b6208120528c3b457d5f3a8cb17424"
+dependencies = [
+ "hex",
+ "serde",
 ]
 
 [[package]]
