@@ -21,7 +21,7 @@ use tokio::time::Instant;
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
-use wicketd_client::types::RackV1Inventory;
+use wicketd_client::types::{RackV1Inventory, UpdateLogAll};
 
 use crate::inventory::{ComponentId, Inventory};
 use crate::screens::{Height, ScreenId, Screens};
@@ -227,6 +227,9 @@ impl Wizard {
                         screen.draw(&self.state, &mut self.terminal)?;
                     }
                 }
+                Event::UpdateLog(logs) => {
+                    info!(self.log, "{:?}", logs);
+                }
                 _ => info!(self.log, "{:?}", event),
             }
         }
@@ -383,6 +386,9 @@ pub enum Event {
 
     /// An Inventory Update Event
     Inventory(InventoryEvent),
+
+    /// Update Log Event
+    UpdateLog(UpdateLogAll),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal

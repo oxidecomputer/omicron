@@ -10,7 +10,9 @@ use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
-use wicketd_client::types::{RackV1Inventory, SpIdentifier, SpType};
+use wicketd_client::types::{
+    RackV1Inventory, SpIdentifier, SpType, UpdateLogAll,
+};
 use wicketd_client::GetInventoryResponse;
 
 use crate::inventory::ComponentId;
@@ -59,6 +61,7 @@ pub struct WicketdManager {
     wizard_tx: Sender<Event>,
     inventory_client: wicketd_client::Client,
     update_client: wicketd_client::Client,
+    update_status_client: wicketd_client::Client,
 }
 
 impl WicketdManager {
@@ -71,6 +74,7 @@ impl WicketdManager {
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
         let inventory_client = create_wicketd_client(&log, wicketd_addr);
         let update_client = create_wicketd_client(&log, wicketd_addr);
+        let update_status_client = create_wicketd_client(&log, wicketd_addr);
         let handle = WicketdHandle { tx };
         let manager = WicketdManager {
             log,
@@ -78,6 +82,7 @@ impl WicketdManager {
             wizard_tx,
             inventory_client,
             update_client,
+            update_status_client,
         };
 
         (handle, manager)
@@ -93,6 +98,9 @@ impl WicketdManager {
         let mut inventory_rx =
             poll_inventory(&self.log, self.inventory_client).await;
 
+        let mut update_logs_rx =
+            poll_update_log(&self.log, self.update_status_client).await;
+
         loop {
             tokio::select! {
                 Some(event) = inventory_rx.recv() => {
@@ -100,10 +108,15 @@ impl WicketdManager {
                     // died and the process is exiting.
                     let _ = self.wizard_tx.send(Event::Inventory(event));
                 }
+                Some(logs) = update_logs_rx.recv() => {
+                    // XXX: Should we log an error and exit here? This means the wizard
+                    // died and the process is exiting.
+                    let _ = self.wizard_tx.send(Event::UpdateLog(logs));
+                }
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
                     let Request::StartUpdate(component_id) = request;
-                    let sp:SpIdentifier= component_id.into();
+                    let sp: SpIdentifier = component_id.into();
                     let res = self.update_client.post_start_update(sp.type_, sp.slot).await;
                     // TODO: Better error handling
                     slog::info!(self.log,  "Update response: {:?}", res);
@@ -127,6 +140,37 @@ pub(crate) fn create_wicketd_client(
         .unwrap();
 
     wicketd_client::Client::new_with_client(&endpoint, client, log.clone())
+}
+
+async fn poll_update_log(
+    log: &Logger,
+    client: wicketd_client::Client,
+) -> mpsc::Receiver<UpdateLogAll> {
+    let log = log.clone();
+
+    // We only want one oustanding request at a time
+    let (tx, rx) = mpsc::channel(1);
+
+    tokio::spawn(async move {
+        let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            // TODO: We should really be using ETAGs here
+            match client.get_update_all().await {
+                Ok(val) => {
+                    // TODO: Only send on changes
+                    let logs = val.into_inner();
+                    let _ = tx.send(logs).await;
+                }
+                Err(e) => {
+                    warn!(log, "{e}");
+                }
+            }
+        }
+    });
+
+    rx
 }
 
 async fn poll_inventory(
