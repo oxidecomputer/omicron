@@ -148,7 +148,7 @@ impl<'a> Widget for Update<'a> {
         let status = Paragraph::new(text)
             .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(OX_OFF_WHITE))
-            .alignment(Alignment::Center);
+            .alignment(Alignment::Left);
         status.render(self.state.status_rect, buf);
     }
 }
