@@ -334,6 +334,7 @@
           "vpcs"
         ],
         "summary": "Get a router by id",
+        "description": "Use `GET /v1/vpc-routers/{router}` instead",
         "operationId": "vpc_router_view_by_id",
         "parameters": [
           {
@@ -363,7 +364,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/vpc-subnets/{id}": {
@@ -10995,7 +10997,8 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List the routes associated with a router in a particular VPC.",
+        "summary": "List routes",
+        "description": "List the routes associated with a router in a particular VPC.",
         "operationId": "vpc_router_route_list_v1",
         "parameters": [
           {

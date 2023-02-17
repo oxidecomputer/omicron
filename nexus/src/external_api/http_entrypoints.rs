@@ -5894,10 +5894,12 @@ async fn vpc_router_view(
 }
 
 /// Get a router by id
+/// Use `GET /v1/vpc-routers/{router}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/vpc-routers/{id}",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_router_view_by_id(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -6118,7 +6120,7 @@ async fn vpc_router_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// List routes
+/// List routes
 ///
 /// List the routes associated with a router in a particular VPC.
 #[endpoint {
