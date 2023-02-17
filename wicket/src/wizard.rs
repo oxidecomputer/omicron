@@ -233,11 +233,17 @@ impl Wizard {
                     for (sp_type, sp_logs) in logs.sps {
                         if sp_type == "sled" {
                             for (i, log) in sp_logs {
+                                let id = ComponentId::Sled(i.parse().unwrap());
+
+                                if log.current.is_some() {
+                                    self.state.updates.start_update(id);
+                                } else {
+                                    // TODO: Parse events for success/failure
+                                    self.state.updates.successful_update(id);
+                                }
+
                                 // TODO: Sanity check slot number
-                                self.state.updates.status.insert(
-                                    ComponentId::Sled(i.parse().unwrap()),
-                                    log,
-                                );
+                                self.state.updates.status.insert(id, log);
                             }
                         }
                     }

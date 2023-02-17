@@ -104,9 +104,19 @@ impl UpdateState {
         self.components.scroll_up()
     }
 
-    pub fn start_update(&mut self) {
-        self.components.selection_mut().indicator.style =
+    pub fn start_update(&mut self, id: ComponentId) {
+        self.components.item_mut(id).indicator.style =
             Style::default().fg(OX_YELLOW);
+    }
+
+    pub fn successful_update(&mut self, id: ComponentId) {
+        self.components.item_mut(id).indicator.style =
+            Style::default().fg(OX_GREEN_LIGHT);
+    }
+
+    pub fn failed_update(&mut self, id: ComponentId) {
+        self.components.item_mut(id).indicator.style =
+            Style::default().fg(OX_RED);
     }
 
     pub fn selected(&mut self) -> ComponentId {

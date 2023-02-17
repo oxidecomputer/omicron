@@ -67,7 +67,7 @@ pub struct ListState<T> {
     mouse: Point,
 }
 
-impl<T: Display> ListState<T> {
+impl<T: Display + PartialEq + Eq> ListState<T> {
     pub fn new() -> ListState<T> {
         ListState {
             control_id: get_control_id(),
@@ -110,6 +110,10 @@ impl<T: Display> ListState<T> {
 
     pub fn items(&self) -> impl Iterator<Item = &T> {
         self.items.iter().map(|entry| &entry.item)
+    }
+
+    pub fn item_mut(&mut self, id: T) -> &mut ListEntry<T> {
+        self.items.iter_mut().find(|x| x.item == id).unwrap()
     }
 
     pub fn on_mouse_move(&mut self, x: u16, y: u16) -> HoverResult {
@@ -225,7 +229,7 @@ pub struct List<'a, T> {
     pub border_style: Style,
 }
 
-impl<'a, T: Display> Widget for List<'a, T> {
+impl<'a, T: Display + PartialEq + Eq> Widget for List<'a, T> {
     fn render(self, _: Rect, buf: &mut tui::buffer::Buffer) {
         let selected = self.state.selected;
         let hovered = self

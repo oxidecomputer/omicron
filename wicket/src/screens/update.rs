@@ -65,8 +65,8 @@ impl UpdateScreen {
                 state.updates.scroll_down();
             }
             KeyCode::Char('U') => {
-                state.updates.start_update();
                 let component_id = state.updates.selected();
+                state.updates.start_update(component_id);
                 actions.push(Action::Update(component_id));
             }
             // Delegate to common handler
