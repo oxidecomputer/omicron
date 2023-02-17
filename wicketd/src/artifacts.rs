@@ -88,7 +88,7 @@ impl ArtifactGetter for WicketdArtifactStore {
                             );
                         })
                         .ok()?;
-            let mut bytes = BytesMut::with_capacity(size as usize);
+            let mut bytes = BytesMut::with_capacity(size);
             bytes.put_bytes(0, size);
             return Some(Body::from(bytes.freeze()));
         }
