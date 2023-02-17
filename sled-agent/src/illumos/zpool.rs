@@ -209,7 +209,7 @@ impl Zpool {
 
 /// A wrapper around a zpool name.
 ///
-/// This expects that the format will be: oxp_<UUID> - we parse
+/// This expects that the format will be: `oxp_<UUID>` - we parse
 /// the prefix when reading the structure, and validate that the UUID
 /// can be utilized.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
