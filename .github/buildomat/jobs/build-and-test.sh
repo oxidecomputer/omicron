@@ -3,7 +3,7 @@
 #: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "stable-1.66.1"
+#: rust_toolchain = "1.66.1"
 #: output_rules = [
 #:	"/var/tmp/omicron_tmp/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
