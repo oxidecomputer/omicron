@@ -5,16 +5,33 @@
 //! Code for talking to wicketd
 
 use slog::{o, warn, Logger};
+use std::convert::From;
 use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
-use wicketd_client::types::{RackV1Inventory, SpIdentifier};
+use wicketd_client::types::{RackV1Inventory, SpIdentifier, SpType};
 use wicketd_client::GetInventoryResponse;
 
 use crate::inventory::ComponentId;
 use crate::wizard::Event;
 use crate::InventoryEvent;
+
+impl From<ComponentId> for SpIdentifier {
+    fn from(id: ComponentId) -> Self {
+        match id {
+            ComponentId::Sled(i) => {
+                SpIdentifier { type_: SpType::Sled, slot: i as u32 }
+            }
+            ComponentId::Psc(i) => {
+                SpIdentifier { type_: SpType::Power, slot: i as u32 }
+            }
+            ComponentId::Switch(i) => {
+                SpIdentifier { type_: SpType::Switch, slot: i as u32 }
+            }
+        }
+    }
+}
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const WICKETD_TIMEOUT_MS: u32 = 1000;
@@ -85,6 +102,11 @@ impl WicketdManager {
                 }
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
+                    let Request::StartUpdate(component_id) = request;
+                    let sp:SpIdentifier= component_id.into();
+                    let res = self.update_client.post_start_update(sp.type_, sp.slot).await;
+                    // TODO: Better error handling
+                    slog::info!(self.log,  "Update response: {:?}", res);
                 }
             }
         }
