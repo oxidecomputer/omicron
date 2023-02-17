@@ -2788,10 +2788,12 @@ async fn instance_list_v1(
 }
 
 /// List instances
+/// Use `GET /v1/instances` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2967,10 +2969,12 @@ async fn instance_view(
 }
 
 /// Fetch an instance by id
+/// Use `GET /v1/instances/{instance}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/instances/{id}",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_view_by_id(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4239,10 +4243,12 @@ async fn instance_network_interface_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 /// List network interfaces
+/// Use `GET /v1/network-interfaces` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_network_interface_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4395,10 +4401,13 @@ async fn instance_network_interface_delete_v1(
 /// are any secondary interfaces. A new primary interface must be designated
 /// first. The primary interface can be deleted if there are no secondary
 /// interfaces.
+///
+/// Use `DELETE /v1/network-interfaces/{interface}` instead
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_network_interface_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4486,10 +4495,13 @@ async fn instance_network_interface_view(
 }
 
 /// Fetch a network interface by id
+///
+/// Use `GET /v1/network-interfaces/{interface}` instead
 #[endpoint {
     method = GET,
     path = "/by-id/network-interfaces/{id}",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_network_interface_view_by_id(
     rqctx: RequestContext<Arc<ServerContext>>,

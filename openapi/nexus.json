@@ -94,6 +94,7 @@
           "instances"
         ],
         "summary": "Fetch an instance by id",
+        "description": "Use `GET /v1/instances/{instance}` instead",
         "operationId": "instance_view_by_id",
         "parameters": [
           {
@@ -123,7 +124,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/network-interfaces/{id}": {
@@ -132,6 +134,7 @@
           "instances"
         ],
         "summary": "Fetch a network interface by id",
+        "description": "Use `GET /v1/network-interfaces/{interface}` instead",
         "operationId": "instance_network_interface_view_by_id",
         "parameters": [
           {
@@ -161,7 +164,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/organizations/{id}": {
@@ -1929,6 +1933,7 @@
           "instances"
         ],
         "summary": "List instances",
+        "description": "Use `GET /v1/instances` instead",
         "operationId": "instance_list",
         "parameters": [
           {
@@ -1995,6 +2000,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -2492,6 +2498,7 @@
           "instances"
         ],
         "summary": "List network interfaces",
+        "description": "Use `GET /v1/network-interfaces` instead",
         "operationId": "instance_network_interface_list",
         "parameters": [
           {
@@ -2564,6 +2571,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -2768,7 +2776,7 @@
           "instances"
         ],
         "summary": "Delete a network interface",
-        "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
+        "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.\nUse `DELETE /v1/network-interfaces/{interface}` instead",
         "operationId": "instance_network_interface_delete",
         "parameters": [
           {
@@ -2814,7 +2822,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
