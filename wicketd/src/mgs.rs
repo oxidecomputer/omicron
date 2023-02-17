@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
-const MGS_TIMEOUT: Duration = Duration::from_secs(10);
+const MGS_TIMEOUT: Duration = Duration::from_secs(15);
 
 // We support:
 //   * One outstanding query request from wicket

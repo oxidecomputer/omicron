@@ -21,11 +21,13 @@ use tokio::time::Instant;
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
-use wicketd_client::types::RackV1Inventory;
+use wicketd_client::types::{
+    RackV1Inventory, SpType, UpdateEvent, UpdateEventKind, UpdateLogAll,
+};
 
-use crate::inventory::Inventory;
+use crate::inventory::{ComponentId, Inventory};
 use crate::screens::{Height, ScreenId, Screens};
-use crate::wicketd::{WicketdHandle, WicketdManager};
+use crate::wicketd::{self, WicketdHandle, WicketdManager};
 use crate::widgets::{RackState, StatusBar, UpdateState};
 
 pub const TOP_MARGIN: Height = Height(5);
@@ -227,6 +229,39 @@ impl Wizard {
                         screen.draw(&self.state, &mut self.terminal)?;
                     }
                 }
+                Event::UpdateLog(logs) => {
+                    info!(self.log, "{:?}", logs);
+                    // TODO: deal with more than sleds
+                    for (sp_type, sp_logs) in logs.sps {
+                        if sp_type == "sled" {
+                            for (i, log) in sp_logs {
+                                // TODO: Sanity check slot number
+                                let id = ComponentId::Sled(i.parse().unwrap());
+
+                                if log.current.is_some() {
+                                    self.state.updates.start_update(id);
+                                } else {
+                                    for event in &log.events {
+                                        match event.kind {
+                                            UpdateEventKind::Success(_) => self
+                                                .state
+                                                .updates
+                                                .successful_update(id),
+                                            UpdateEventKind::Failure(_) => self
+                                                .state
+                                                .updates
+                                                .failed_update(id),
+                                            _ => (),
+                                        }
+                                    }
+                                }
+
+                                self.state.updates.status.insert(id, log);
+                            }
+                        }
+                    }
+                    screen.draw(&self.state, &mut self.terminal)?;
+                }
                 _ => info!(self.log, "{:?}", event),
             }
         }
@@ -262,6 +297,12 @@ impl Wizard {
                     // we are about to draw.
                     let _ = screen.on(&mut self.state, event);
                     screen.draw(&self.state, &mut self.terminal)?;
+                }
+                Action::Update(component_id) => {
+                    // TODO: Error handling
+                    self.wicketd.tx.blocking_send(
+                        wicketd::Request::StartUpdate(component_id),
+                    );
                 }
             }
         }
@@ -378,6 +419,9 @@ pub enum Event {
     /// An Inventory Update Event
     Inventory(InventoryEvent),
 
+    /// Update Log Event
+    UpdateLog(UpdateLogAll),
+
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
     Tick,
@@ -393,6 +437,7 @@ pub enum Event {
 pub enum Action {
     Redraw,
     SwitchScreen(ScreenId),
+    Update(ComponentId),
 }
 
 /// Events sent to a screen
