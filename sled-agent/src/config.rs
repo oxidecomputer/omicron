@@ -5,7 +5,11 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::common::vlan::VlanID;
-use crate::illumos::dladm::{self, Dladm, PhysicalLink};
+use crate::hardware::is_gimlet;
+use crate::illumos::dladm::Dladm;
+use crate::illumos::dladm::FindPhysicalLinkError;
+use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::CHELSIO_LINK_PREFIX;
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
@@ -28,7 +32,13 @@ pub struct Config {
 
     /// The data link on which we infer the bootstrap address.
     ///
-    /// If unsupplied, we default to the first physical device.
+    /// If unsupplied, we default to:
+    ///
+    /// - The first physical link on a non-Gimlet machine.
+    /// - The first Chelsio link on a Gimlet.
+    ///
+    /// This allows continued support for development and testing on emulated
+    /// systems.
     pub data_link: Option<PhysicalLink>,
 }
 
@@ -46,6 +56,10 @@ pub enum ConfigError {
         #[source]
         err: toml::de::Error,
     },
+    #[error("Could not determine if host is a Gimlet: {0}")]
+    SystemDetection(#[from] anyhow::Error),
+    #[error("Could not enumerate physical links")]
+    FindLinks(#[from] FindPhysicalLinkError),
 }
 
 impl Config {
@@ -58,14 +72,23 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_link(
-        &self,
-    ) -> Result<PhysicalLink, dladm::FindPhysicalLinkError> {
-        let link = if let Some(link) = self.data_link.clone() {
-            link
+    pub fn get_link(&self) -> Result<PhysicalLink, ConfigError> {
+        if let Some(link) = self.data_link.as_ref() {
+            Ok(link.clone())
         } else {
-            Dladm::find_physical()?
-        };
-        Ok(link)
+            if is_gimlet()? {
+                Dladm::list_physical()
+                    .map_err(ConfigError::FindLinks)?
+                    .into_iter()
+                    .find(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
+                    .ok_or_else(|| {
+                        ConfigError::FindLinks(
+                            FindPhysicalLinkError::NoPhysicalLinkFound,
+                        )
+                    })
+            } else {
+                Dladm::find_physical().map_err(ConfigError::FindLinks)
+            }
+        }
     }
 }

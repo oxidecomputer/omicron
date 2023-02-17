@@ -40,6 +40,28 @@ enum Error {
     NoDevLinks(PathBuf),
 }
 
+const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
+
+/// Return true if the host system is an Oxide Gimlet.
+#[cfg(not(test))]
+pub fn is_gimlet() -> anyhow::Result<bool> {
+    let mut device_info = DevInfo::new_force_load()?;
+    let mut node_walker = device_info.walk_node();
+    let Some(root) = node_walker.next().transpose()? else {
+        return Err(anyhow::anyhow!("No nodes in device tree"));
+    };
+    Ok(root.node_name() == GIMLET_ROOT_NODE_NAME)
+}
+
+/// Return true if the host system is an Oxide Gimlet.
+//
+// TODO-testing: This assumes we never test on real Gimlets. That seems like a
+// very bad assumption.
+#[cfg(test)]
+pub fn is_gimlet() -> anyhow::Result<bool> {
+    Ok(false)
+}
+
 // A snapshot of information about the underlying Tofino device
 #[derive(Copy, Clone)]
 struct TofinoSnapshot {
@@ -73,7 +95,7 @@ impl HardwareSnapshot {
             return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
         };
         let root_node = root.node_name();
-        if root_node != "Oxide,Gimlet" {
+        if root_node != GIMLET_ROOT_NODE_NAME {
             return Err(Error::NotAGimlet(root_node));
         }
 

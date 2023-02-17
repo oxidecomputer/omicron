@@ -4,12 +4,20 @@
 
 //! Finding the underlay network physical links and address objects.
 
+use crate::hardware::is_gimlet;
 use crate::illumos::addrobj;
 use crate::illumos::addrobj::AddrObject;
+use crate::illumos::dladm::Dladm;
+use crate::illumos::dladm::FindPhysicalLinkError;
 use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::CHELSIO_LINK_PREFIX;
 use crate::zone::Zones;
 
 // Names of VNICs used as underlay devices for the xde driver.
+//
+// NOTE: These are only used on non-Gimlet systems. In that case, they are
+// expected to have been created by a run of
+// `./tools/create_virtual_hardware.sh`.
 const XDE_VNIC_NAMES: [&str; 2] = ["net0", "net1"];
 
 #[derive(thiserror::Error, Debug)]
@@ -21,6 +29,12 @@ pub enum Error {
 
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),
+
+    #[error("Could not determine if host is a Gimlet: {0}")]
+    SystemDetection(#[from] anyhow::Error),
+
+    #[error("Could not enumerate physical links")]
+    FindLinks(#[from] FindPhysicalLinkError),
 }
 
 pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
@@ -28,7 +42,7 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
 
     let mut addr_objs = Vec::with_capacity(underlay_nics.len());
     for nic in underlay_nics {
-        let addrobj = AddrObject::new(&nic.0, "linklocal")?;
+        let addrobj = AddrObject::link_local(&nic.0)?;
         Zones::ensure_has_link_local_v6_address(None, &addrobj)?;
         addr_objs.push(addrobj);
     }
@@ -36,13 +50,23 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
     Ok(addr_objs)
 }
 
+/// Return the Chelsio links on the system.
+///
+/// For a real Gimlet, this should return the devices like `cxgbeN`. For a
+/// developer machine, or generally a non-Gimlet, this will return the
+/// VNICs we use to emulate those Chelsio links.
 pub(crate) fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
-    // TODO-correctness: This should eventually be determined by a call to
-    // `Dladm` to get the real Chelsio links on a Gimlet. These will likely be
-    // called `cxgbeN`, but we explicitly call them `netN` to be clear that
-    // they're likely VNICs for the time being.
-    Ok(XDE_VNIC_NAMES
-        .into_iter()
-        .map(|name| PhysicalLink(name.to_string()))
-        .collect())
+    if is_gimlet()? {
+        Dladm::list_physical().map_err(Error::FindLinks).map(|links| {
+            links
+                .into_iter()
+                .filter(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
+                .collect()
+        })
+    } else {
+        Ok(XDE_VNIC_NAMES
+            .into_iter()
+            .map(|name| PhysicalLink(name.to_string()))
+            .collect())
+    }
 }
