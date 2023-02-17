@@ -80,9 +80,9 @@ fn overlay_sp_configs(server_dirs: &[PathBuf]) -> Result<()> {
             trust_quorum_members: trust_quorum_members.clone(),
         };
 
-        let bytes = toml::ser::to_vec(&config).unwrap();
+        let contents = toml::to_string(&config).unwrap();
         let path = server_dir.join("config-sp.toml");
-        std::fs::write(&path, bytes)
+        std::fs::write(&path, contents)
             .with_context(|| format!("failed to write {}", path.display()))?;
     }
 

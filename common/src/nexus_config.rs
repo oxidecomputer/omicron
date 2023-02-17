@@ -407,7 +407,7 @@ mod test {
         let error =
             read_config("bad_toml", "foo =").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
-            assert_eq!(error.line_col(), Some((0, 5)));
+            assert_eq!(error.span(), Some(0..5));
             assert_eq!(
                 error.to_string(),
                 "unexpected eof encountered at line 1 column 6"
@@ -427,7 +427,7 @@ mod test {
     fn test_config_empty() {
         let error = read_config("empty", "").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
-            assert_eq!(error.line_col(), None);
+            assert_eq!(error.span(), None);
             assert_eq!(error.to_string(), "missing field `deployment`");
         } else {
             panic!(
