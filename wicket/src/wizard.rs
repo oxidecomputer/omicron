@@ -21,7 +21,7 @@ use tokio::time::Instant;
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
-use wicketd_client::types::{RackV1Inventory, UpdateLogAll};
+use wicketd_client::types::{RackV1Inventory, SpType, UpdateLogAll};
 
 use crate::inventory::{ComponentId, Inventory};
 use crate::screens::{Height, ScreenId, Screens};
@@ -229,6 +229,19 @@ impl Wizard {
                 }
                 Event::UpdateLog(logs) => {
                     info!(self.log, "{:?}", logs);
+                    // TODO: deal with more than sleds
+                    for (sp_type, sp_logs) in logs.sps {
+                        if sp_type == "sled" {
+                            for (i, log) in sp_logs {
+                                // TODO: Sanity check slot number
+                                self.state.updates.status.insert(
+                                    ComponentId::Sled(i.parse().unwrap()),
+                                    log,
+                                );
+                            }
+                        }
+                    }
+                    screen.draw(&self.state, &mut self.terminal)?;
                 }
                 _ => info!(self.log, "{:?}", event),
             }
