@@ -122,7 +122,7 @@ function add_publisher {
 # `helios-netdev` provides the xde kernel driver and the `opteadm` userland tool
 # for interacting with it.
 HELIOS_NETDEV_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo"
-HELIOS_NETDEV_COMMIT="f501445f5a6c275c79f08a876fff6a861df31d46"
+HELIOS_NETDEV_COMMIT="6be54acd2438f0864a68bca44d7511f2ee50d761"
 HELIOS_NETDEV_REPO_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p"
 HELIOS_NETDEV_REPO_SHA_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p.sha256"
 HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
