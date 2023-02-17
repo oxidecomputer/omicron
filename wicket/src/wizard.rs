@@ -23,9 +23,9 @@ use tui::backend::CrosstermBackend;
 use tui::Terminal;
 use wicketd_client::types::RackV1Inventory;
 
-use crate::inventory::Inventory;
+use crate::inventory::{ComponentId, Inventory};
 use crate::screens::{Height, ScreenId, Screens};
-use crate::wicketd::{WicketdHandle, WicketdManager};
+use crate::wicketd::{self, WicketdHandle, WicketdManager};
 use crate::widgets::{RackState, StatusBar, UpdateState};
 
 pub const TOP_MARGIN: Height = Height(5);
@@ -263,6 +263,12 @@ impl Wizard {
                     let _ = screen.on(&mut self.state, event);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
+                Action::Update(component_id) => {
+                    // TODO: Error handling
+                    self.wicketd.tx.blocking_send(
+                        wicketd::Request::StartUpdate(component_id),
+                    );
+                }
             }
         }
         Ok(())
@@ -393,6 +399,7 @@ pub enum Event {
 pub enum Action {
     Redraw,
     SwitchScreen(ScreenId),
+    Update(ComponentId),
 }
 
 /// Events sent to a screen

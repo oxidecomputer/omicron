@@ -50,6 +50,7 @@ impl UpdateScreen {
         state: &mut State,
         event: KeyEvent,
     ) -> Vec<Action> {
+        let mut actions = vec![];
         match event.code {
             KeyCode::Tab => {
                 state.updates.scroll_down();
@@ -63,10 +64,16 @@ impl UpdateScreen {
             KeyCode::Down => {
                 state.updates.scroll_down();
             }
+            KeyCode::Char('U') => {
+                state.updates.start_update();
+                let component_id = state.updates.selected();
+                actions.push(Action::Update(component_id));
+            }
             // Delegate to common handler
             _ => return self.common.handle_key_event(event),
         }
-        vec![Action::Redraw]
+        actions.push(Action::Redraw);
+        actions
     }
 
     fn handle_mouse_event(

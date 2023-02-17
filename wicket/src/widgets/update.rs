@@ -108,14 +108,7 @@ impl UpdateState {
                         ComponentId::Psc(i - 34)
                     };
 
-                    // TODO: Fix this hardcoding nonsense
-                    let style = if i == 4 {
-                        Style::default().fg(OX_GREEN_LIGHT)
-                    } else if i == 1 {
-                        Style::default().fg(OX_YELLOW)
-                    } else {
-                        Style::default().fg(OX_GRAY)
-                    };
+                    let style = Style::default().fg(OX_GRAY);
 
                     ListEntry {
                         item,
@@ -148,6 +141,15 @@ impl UpdateState {
 
     pub fn scroll_up(&mut self) {
         self.components.scroll_up()
+    }
+
+    pub fn start_update(&mut self) {
+        self.components.selection_mut().indicator.style =
+            Style::default().fg(OX_YELLOW);
+    }
+
+    pub fn selected(&mut self) -> ComponentId {
+        self.components.selection().item
     }
 
     pub fn to_widget(&self) -> Update<'_> {

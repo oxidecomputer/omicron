@@ -104,6 +104,10 @@ impl<T: Display> ListState<T> {
         &self.items[self.selected]
     }
 
+    pub fn selection_mut(&mut self) -> &mut ListEntry<T> {
+        &mut self.items[self.selected]
+    }
+
     pub fn items(&self) -> impl Iterator<Item = &T> {
         self.items.iter().map(|entry| &entry.item)
     }

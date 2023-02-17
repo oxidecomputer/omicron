@@ -9,9 +9,10 @@ use std::net::SocketAddrV6;
 use std::sync::mpsc::Sender;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
-use wicketd_client::types::RackV1Inventory;
+use wicketd_client::types::{RackV1Inventory, SpIdentifier};
 use wicketd_client::GetInventoryResponse;
 
+use crate::inventory::ComponentId;
 use crate::wizard::Event;
 use crate::InventoryEvent;
 
@@ -24,23 +25,23 @@ const WICKETD_TIMEOUT_MS: u32 = 1000;
 const CHANNEL_CAPACITY: usize = 1000;
 
 // Eventually this will be filled in with things like triggering updates from the UI
-pub enum Request {}
+#[derive(Debug)]
+pub enum Request {
+    StartUpdate(ComponentId),
+}
 
-#[allow(unused)]
 pub struct WicketdHandle {
-    tx: mpsc::Sender<Request>,
+    pub tx: mpsc::Sender<Request>,
 }
 
 /// Wrapper around Wicketd clients used to poll inventory
 /// and perform updates.
 pub struct WicketdManager {
     log: Logger,
-
-    //TODO: We'll use this onece we start implementing updates
-    #[allow(unused)]
     rx: mpsc::Receiver<Request>,
     wizard_tx: Sender<Event>,
     inventory_client: wicketd_client::Client,
+    update_client: wicketd_client::Client,
 }
 
 impl WicketdManager {
@@ -52,8 +53,15 @@ impl WicketdManager {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
         let inventory_client = create_wicketd_client(&log, wicketd_addr);
+        let update_client = create_wicketd_client(&log, wicketd_addr);
         let handle = WicketdHandle { tx };
-        let manager = WicketdManager { log, rx, wizard_tx, inventory_client };
+        let manager = WicketdManager {
+            log,
+            rx,
+            wizard_tx,
+            inventory_client,
+            update_client,
+        };
 
         (handle, manager)
     }
@@ -64,16 +72,21 @@ impl WicketdManager {
     /// * Receive responses / errors
     /// * Translate any responses/errors into [`Event`]s
     ///   that can be utilized by the UI.
-    pub async fn run(self) {
+    pub async fn run(mut self) {
         let mut inventory_rx =
             poll_inventory(&self.log, self.inventory_client).await;
 
-        // TODO: Eventually there will be a tokio::select! here that also
-        // allows issuing updates.
-        while let Some(event) = inventory_rx.recv().await {
-            // XXX: Should we log an error and exit here? This means the wizard
-            // died and the process is exiting.
-            let _ = self.wizard_tx.send(Event::Inventory(event));
+        loop {
+            tokio::select! {
+                Some(event) = inventory_rx.recv() => {
+                    // XXX: Should we log an error and exit here? This means the wizard
+                    // died and the process is exiting.
+                    let _ = self.wizard_tx.send(Event::Inventory(event));
+                }
+                Some(request) = self.rx.recv() => {
+                    slog::info!(self.log, "Got wicketd req: {:?}", request);
+                }
+            }
         }
     }
 }
