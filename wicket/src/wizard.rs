@@ -21,7 +21,9 @@ use tokio::time::Instant;
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
-use wicketd_client::types::{RackV1Inventory, SpType, UpdateLogAll};
+use wicketd_client::types::{
+    RackV1Inventory, SpType, UpdateEvent, UpdateEventKind, UpdateLogAll,
+};
 
 use crate::inventory::{ComponentId, Inventory};
 use crate::screens::{Height, ScreenId, Screens};
@@ -233,16 +235,27 @@ impl Wizard {
                     for (sp_type, sp_logs) in logs.sps {
                         if sp_type == "sled" {
                             for (i, log) in sp_logs {
+                                // TODO: Sanity check slot number
                                 let id = ComponentId::Sled(i.parse().unwrap());
 
                                 if log.current.is_some() {
                                     self.state.updates.start_update(id);
                                 } else {
-                                    // TODO: Parse events for success/failure
-                                    self.state.updates.successful_update(id);
+                                    for event in &log.events {
+                                        match event.kind {
+                                            UpdateEventKind::Success(_) => self
+                                                .state
+                                                .updates
+                                                .successful_update(id),
+                                            UpdateEventKind::Failure(_) => self
+                                                .state
+                                                .updates
+                                                .failed_update(id),
+                                            _ => (),
+                                        }
+                                    }
                                 }
 
-                                // TODO: Sanity check slot number
                                 self.state.updates.status.insert(id, log);
                             }
                         }
