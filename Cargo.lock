@@ -1495,13 +1495,13 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=18748d9f76c94e1f4400fbec0859b3e77a221a8d#18748d9f76c94e1f4400fbec0859b3e77a221a8d"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=309bd361d886a237fbdd5d74992bdbd783f98bff#309bd361d886a237fbdd5d74992bdbd783f98bff"
 dependencies = [
  "diesel",
- "lock_api",
  "serde",
  "usdt",
  "uuid",
+ "version_check",
 ]
 
 [[package]]
@@ -2175,7 +2175,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=482bae9bfa704282e981008abae9328344150d36#482bae9bfa704282e981008abae9328344150d36"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e35df234f9db57b1b7fc0a8ca279fb2774ff1046#e35df234f9db57b1b7fc0a8ca279fb2774ff1046"
 dependencies = [
  "bitflags",
  "hubpack 0.1.1",
@@ -2190,7 +2190,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=482bae9bfa704282e981008abae9328344150d36#482bae9bfa704282e981008abae9328344150d36"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e35df234f9db57b1b7fc0a8ca279fb2774ff1046#e35df234f9db57b1b7fc0a8ca279fb2774ff1046"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2212,6 +2212,7 @@ dependencies = [
  "tokio",
  "usdt",
  "uuid",
+ "version_check",
  "zip",
 ]
 
@@ -3803,6 +3804,7 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
@@ -3933,6 +3935,7 @@ name = "omicron-sled-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "base64 0.21.0",
  "bincode",

@@ -579,7 +579,8 @@ impl super::Nexus {
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_matches::assert_matches, num::NonZeroU32};
+    use assert_matches::assert_matches;
+    use std::num::NonZeroU32;
 
     use crate::context::OpContext;
     use crate::db::model::UpdateStatus;

@@ -11,8 +11,6 @@
 #![allow(clippy::unnecessary_wraps)]
 // Clippy's style lints are useful, but not worth running automatically.
 #![allow(clippy::style)]
-// assert_matches! is pretty useful for tests so just enable it conditionally.
-#![cfg_attr(test, feature(assert_matches))]
 
 pub mod app; // Public for documentation examples
 pub mod authn; // Public only for testing

@@ -210,7 +210,7 @@ impl From<omicron_common::api::external::Vni> for types::Vni {
 
 impl From<types::Vni> for omicron_common::api::external::Vni {
     fn from(s: types::Vni) -> Self {
-        Self::try_from(s.0 as u32).unwrap()
+        Self::try_from(s.0).unwrap()
     }
 }
 
