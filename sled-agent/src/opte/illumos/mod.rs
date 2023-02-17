@@ -55,7 +55,7 @@ pub enum Error {
 
 /// Delete all xde devices on the system.
 pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
-    let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
+    let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
     for port_info in hdl.list_ports()?.ports.into_iter() {
         let name = &port_info.name;
         info!(
@@ -104,7 +104,7 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
             String::from(MESSAGE),
         )));
     }
-    match OpteHdl::open(OpteHdl::DLD_CTL)?.set_xde_underlay(
+    match OpteHdl::open(OpteHdl::XDE_CTL)?.set_xde_underlay(
         underlay_nics[0].interface(),
         underlay_nics[1].interface(),
     ) {
