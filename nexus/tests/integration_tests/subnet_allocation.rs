@@ -169,13 +169,13 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         objects_list_page_authz::<NetworkInterface>(client, &url_ips)
             .await
             .items;
-    assert_eq!(network_interfaces.len(), subnet_size as usize);
+    assert_eq!(network_interfaces.len(), subnet_size);
 
     // Sort by IP address to simplify the checks
     network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
     for (iface, addr) in network_interfaces
         .iter()
-        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES as usize))
+        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
     {
         assert_eq!(
             iface.ip,
