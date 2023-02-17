@@ -269,6 +269,7 @@ mod test {
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use crate::external_api::params;
+    use assert_matches::assert_matches;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::{
@@ -276,7 +277,6 @@ mod test {
     };
     use omicron_test_utils::dev;
     use ref_cast::RefCast;
-    use std::assert_matches::assert_matches;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;

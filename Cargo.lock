@@ -3803,6 +3803,7 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
@@ -3933,6 +3934,7 @@ name = "omicron-sled-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "base64 0.21.0",
  "bincode",

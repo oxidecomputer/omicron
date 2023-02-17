@@ -85,6 +85,7 @@ oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 criterion.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
