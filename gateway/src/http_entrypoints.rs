@@ -788,7 +788,7 @@ async fn sp_component_active_slot_set(
     let component = component_from_str(&component)?;
     let slot = body.into_inner().slot;
 
-    sp.set_component_active_slot(component, slot)
+    sp.set_component_active_slot(component, slot, false)
         .await
         .map_err(SpCommsError::from)?;
 
