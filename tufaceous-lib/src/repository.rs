@@ -250,7 +250,7 @@ impl OmicronRepoEditor {
             self.artifacts.artifacts.iter_mut().find(|artifact| {
                 artifact.name == new_artifact.name()
                     && artifact.version == new_artifact.version()
-                    && artifact.kind == new_artifact.kind().into()
+                    && artifact.kind == new_artifact.kind().clone()
             })
         {
             self.editor.remove_target(&artifact.target.as_str().try_into()?)?;
@@ -269,7 +269,7 @@ impl OmicronRepoEditor {
             self.artifacts.artifacts.push(Artifact {
                 name: new_artifact.name().to_owned(),
                 version: new_artifact.version().to_owned(),
-                kind: new_artifact.kind().into(),
+                kind: new_artifact.kind().clone(),
                 target: filename.clone(),
             })
         }
