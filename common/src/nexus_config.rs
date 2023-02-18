@@ -67,7 +67,7 @@ impl fmt::Display for LoadError {
                 write!(f, "read \"{}\": {}", self.path.display(), e)
             }
             LoadErrorKind::Parse(e) => {
-                write!(f, "parse \"{}\": {}", self.path.display(), e)
+                write!(f, "parse \"{}\": {}", self.path.display(), e.message())
             }
             LoadErrorKind::InvalidTunable(inner) => {
                 write!(
