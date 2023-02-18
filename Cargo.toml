@@ -5,6 +5,8 @@ members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "dns-server",
+    "dns-service-client",
     "end-to-end-tests",
     "gateway",
     "gateway-cli",
@@ -12,8 +14,6 @@ members = [
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
-    "internal-dns",
-    "internal-dns-client",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -51,14 +51,14 @@ default-members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "dns-server",
+    "dns-service-client",
     "gateway",
     "gateway-cli",
     "gateway-client",
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
-    "internal-dns",
-    "internal-dns-client",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -142,8 +142,8 @@ hyper = "0.14"
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
-internal-dns = { path = "internal-dns" }
-internal-dns-client = { path = "internal-dns-client" }
+dns-server = { path = "dns-server" }
+dns-service-client = { path = "dns-service-client" }
 ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = "0.20"
 itertools = "0.10.5"
