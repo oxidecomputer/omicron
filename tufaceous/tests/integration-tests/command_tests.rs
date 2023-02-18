@@ -10,6 +10,7 @@ use camino::Utf8PathBuf;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
 };
+use predicates::prelude::*;
 use tufaceous_lib::{Key, OmicronRepo};
 
 #[test]
@@ -21,9 +22,11 @@ fn test_init_and_add() -> Result<()> {
     cmd.args(["init"]);
     cmd.assert().success();
 
-    // Create a stub nexus file on disk.
+    // Create a couple of stub files on disk.
     let nexus_path = tempdir.path().join("omicron-nexus.tar.gz");
     fs_err::write(&nexus_path, "test")?;
+    let unknown_path = tempdir.path().join("my-unknown-kind.tar.gz");
+    fs_err::write(&unknown_path, "unknown test")?;
 
     let mut cmd = make_cmd(tempdir.path(), &key);
     cmd.args(["add", "gimlet_sp"]);
@@ -31,17 +34,35 @@ fn test_init_and_add() -> Result<()> {
     cmd.arg("42.0.0");
     cmd.assert().success();
 
-    // Now read the repository and ensure that artifacts includes omicron-nexus.
+    // Try adding an unknown kind without --allow-unknown-kinds.
+    let mut cmd = make_cmd(tempdir.path(), &key);
+    cmd.args(["add", "my_unknown_kind"]);
+    cmd.arg(&nexus_path);
+    cmd.arg("0.0.0");
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "invalid value 'my_unknown_kind' for '<KIND>'",
+    ));
+
+    // Try adding one with --allow-unknown-kinds.
+    let mut cmd = make_cmd(tempdir.path(), &key);
+    cmd.args(["add", "my_unknown_kind", "--allow-unknown-kinds"]);
+    cmd.arg(&unknown_path);
+    cmd.arg("0.1.0");
+    cmd.assert().success();
+
+    // Now read the repository and ensure the list of expected artifacts.
     let repo_path: Utf8PathBuf = tempdir.path().join("repo").try_into()?;
     let repo = OmicronRepo::load(&repo_path)?;
 
     let artifacts = repo.read_artifacts()?;
     assert_eq!(
         artifacts.artifacts.len(),
-        1,
-        "repo should contain exactly 1 artifact: {artifacts:?}"
+        2,
+        "repo should contain exactly 2 artifacts: {artifacts:?}"
     );
-    let artifact = artifacts.artifacts.into_iter().next().unwrap();
+
+    let mut artifacts_iter = artifacts.artifacts.into_iter();
+    let artifact = artifacts_iter.next().unwrap();
     assert_eq!(artifact.name, "omicron-nexus", "artifact name");
     assert_eq!(artifact.version, "42.0.0", "artifact version");
     assert_eq!(
@@ -51,6 +72,19 @@ fn test_init_and_add() -> Result<()> {
     );
     assert_eq!(
         artifact.target, "omicron-nexus-42.0.0.tar.gz",
+        "artifact target"
+    );
+
+    let artifact = artifacts_iter.next().unwrap();
+    assert_eq!(artifact.name, "my-unknown-kind", "artifact name");
+    assert_eq!(artifact.version, "0.1.0", "artifact version");
+    assert_eq!(
+        artifact.kind,
+        ArtifactKind::new("my_unknown_kind".to_owned()),
+        "artifact kind"
+    );
+    assert_eq!(
+        artifact.target, "my-unknown-kind-0.1.0.tar.gz",
         "artifact target"
     );
 

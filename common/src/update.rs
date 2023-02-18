@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{convert::Infallible, fmt, str::FromStr};
 
 use crate::api::internal::nexus::KnownArtifactKind;
 use schemars::JsonSchema;
@@ -117,6 +117,14 @@ impl From<KnownArtifactKind> for ArtifactKind {
 impl fmt::Display for ArtifactKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl FromStr for ArtifactKind {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_owned()))
     }
 }
 
