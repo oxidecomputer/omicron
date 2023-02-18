@@ -193,6 +193,7 @@ percent-encoding = "2.2.0"
 pem = "1.1"
 petgraph = "0.6.3"
 postgres-protocol = "0.6.4"
+predicates = "2.1.5"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
