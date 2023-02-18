@@ -18,4 +18,5 @@ tufaceous-lib.workspace = true
 assert_cmd.workspace = true
 fs-err.workspace = true
 omicron-common.workspace = true
+predicates.workspace = true
 tempfile.workspace = true

@@ -4,8 +4,8 @@ mod hint;
 use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
-use clap::Parser;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use clap::{CommandFactory, Parser};
+use omicron_common::update::ArtifactKind;
 use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
@@ -40,7 +40,11 @@ enum Command {
     },
     Add {
         /// The kind of artifact this is.
-        kind: KnownArtifactKind,
+        kind: ArtifactKind,
+
+        /// Allow artifact kinds that aren't known to tufaceous
+        #[clap(long)]
+        allow_unknown_kinds: bool,
 
         /// Path to the artifact.
         path: Utf8PathBuf,
@@ -88,7 +92,29 @@ fn main() -> Result<()> {
             println!("Initialized TUF repository in {}", repo.repo_path());
             Ok(())
         }
-        Command::Add { kind, path, name, version } => {
+        Command::Add { kind, allow_unknown_kinds, path, name, version } => {
+            if !allow_unknown_kinds {
+                // Try converting kind to a known kind.
+                if kind.to_known().is_none() {
+                    // Simulate a failure to parse (though ideally there would
+                    // be a way to also specify the underlying error -- there
+                    // doesn't appear to be a public API to do so in clap 4).
+                    let mut error = clap::Error::new(
+                        clap::error::ErrorKind::ValueValidation,
+                    )
+                    .with_cmd(&Args::command());
+                    error.insert(
+                        clap::error::ContextKind::InvalidArg,
+                        clap::error::ContextValue::String("<KIND>".to_owned()),
+                    );
+                    error.insert(
+                        clap::error::ContextKind::InvalidValue,
+                        clap::error::ContextValue::String(kind.to_string()),
+                    );
+                    error.exit();
+                }
+            }
+
             let repo = OmicronRepo::load_ignore_expiration(&repo_path)?;
             let mut editor = repo.into_editor()?;
 

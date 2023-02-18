@@ -16,7 +16,7 @@ use crate::wizard::Event;
 use crate::InventoryEvent;
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const WICKETD_TIMEOUT_MS: u32 = 1000;
+const WICKETD_TIMEOUT: Duration = Duration::from_millis(1000);
 
 // Assume that these requests are periodic on the order of seconds or the
 // result of human interaction. In either case, this buffer should be plenty
@@ -51,7 +51,8 @@ impl WicketdManager {
     ) -> (WicketdHandle, WicketdManager) {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
-        let inventory_client = create_wicketd_client(&log, wicketd_addr);
+        let inventory_client =
+            create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
         let handle = WicketdHandle { tx };
         let manager = WicketdManager { log, rx, wizard_tx, inventory_client };
 
@@ -81,10 +82,10 @@ impl WicketdManager {
 pub(crate) fn create_wicketd_client(
     log: &Logger,
     wicketd_addr: SocketAddrV6,
+    timeout: Duration,
 ) -> wicketd_client::Client {
     let endpoint =
         format!("http://[{}]:{}", wicketd_addr.ip(), wicketd_addr.port());
-    let timeout = std::time::Duration::from_millis(WICKETD_TIMEOUT_MS.into());
     let client = reqwest::ClientBuilder::new()
         .connect_timeout(timeout)
         .timeout(timeout)

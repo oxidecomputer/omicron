@@ -293,6 +293,8 @@ impl PortManager {
             phys_gw_mac: Some(MacAddr::from(
                 self.inner.gateway_mac.into_array(),
             )),
+            // TODO-completeness (#2153): Plumb domain search list
+            domain_list: vec![],
         };
         hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
         debug!(

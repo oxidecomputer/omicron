@@ -117,7 +117,7 @@ impl InstallOpts {
             // TODO: currently we're assuming that wicket will unpack the host
             // phase 2 image. We may instead have the installinator do it.
             // kind: KnownArtifactKind::Host.into(),
-            kind: ArtifactKind::new("host_phase_2".to_owned()),
+            kind: ArtifactKind::HOST_PHASE_2,
             hash: artifact_hashes.host_phase_2,
         };
 

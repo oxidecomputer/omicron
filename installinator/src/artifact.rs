@@ -41,7 +41,7 @@ impl FromStr for ArtifactIdsOpt {
             return Ok(Self::FromIpcc);
         }
 
-        let (host_phase_2,control_plane) = s.split_once(",").ok_or_else(|| anyhow!(
+        let (host_phase_2,control_plane) = s.split_once(',').ok_or_else(|| anyhow!(
             "expected data in the format host_phase_2:<hash>,control_plane:<hash>")
         )?;
 
@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn test_parse_artifact_ids() -> Result<()> {
         let valid = [
-            ("auto", ArtifactIdsOpt::FromIpcc),
+            ("from-ipcc", ArtifactIdsOpt::FromIpcc),
             (
                 "host_phase_2:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef,\
                  control_plane:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",

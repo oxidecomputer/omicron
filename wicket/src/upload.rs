@@ -4,13 +4,15 @@
 
 //! Support for uploading artifacts to wicketd.
 
-use std::net::SocketAddrV6;
+use std::{net::SocketAddrV6, time::Duration};
 
 use anyhow::{Context, Result};
 use clap::Args;
 use tokio::io::AsyncReadExt;
 
 use crate::wicketd::create_wicketd_client;
+
+const WICKETD_UPLOAD_TIMEOUT: Duration = Duration::from_millis(30_000);
 
 #[derive(Debug, Args)]
 pub(crate) struct UploadArgs {
@@ -58,7 +60,11 @@ impl UploadArgs {
             );
         } else {
             slog::info!(log, "uploading repository to wicketd");
-            let wicketd_client = create_wicketd_client(&log, wicketd_addr);
+            let wicketd_client = create_wicketd_client(
+                &log,
+                wicketd_addr,
+                WICKETD_UPLOAD_TIMEOUT,
+            );
 
             wicketd_client
                 .put_repository(repo_bytes)

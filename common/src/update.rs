@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, str::FromStr};
+use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
 use crate::api::internal::nexus::KnownArtifactKind;
 use hex::FromHexError;
@@ -117,17 +117,22 @@ pub struct ArtifactHashId {
     JsonSchema,
 )]
 #[serde(transparent)]
-pub struct ArtifactKind(String);
+pub struct ArtifactKind(Cow<'static, str>);
 
 impl ArtifactKind {
     /// Creates a new `ArtifactKind` from a string.
     pub fn new(kind: String) -> Self {
-        Self(kind)
+        Self(kind.into())
+    }
+
+    /// Creates a new `ArtifactKind` from a static string.
+    pub const fn from_static(kind: &'static str) -> Self {
+        Self(Cow::Borrowed(kind))
     }
 
     /// Creates a new `ArtifactKind` from a known kind.
     pub fn from_known(kind: KnownArtifactKind) -> Self {
-        Self(kind.to_string())
+        Self::new(kind.to_string())
     }
 
     /// Returns the kind as a string.
@@ -141,6 +146,32 @@ impl ArtifactKind {
     }
 }
 
+/// These artifact kinds are not stored anywhere, but are derived from stored
+/// kinds and used as internal identifiers.
+impl ArtifactKind {
+    /// Host phase 1 identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::Host`].
+    pub const HOST_PHASE_1: Self = Self::from_static("host_phase_1");
+
+    /// Host phase 2 identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::Host`].
+    pub const HOST_PHASE_2: Self = Self::from_static("host_phase_2");
+
+    /// Trampoline phase 1 identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::Trampoline`].
+    pub const TRAMPOLINE_PHASE_1: Self =
+        Self::from_static("trampoline_phase_1");
+
+    /// Trampoline phase 2 identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::Trampoline`].
+    pub const TRAMPOLINE_PHASE_2: Self =
+        Self::from_static("trampoline_phase_2");
+}
+
 impl From<KnownArtifactKind> for ArtifactKind {
     fn from(kind: KnownArtifactKind) -> Self {
         Self::from_known(kind)
@@ -150,6 +181,14 @@ impl From<KnownArtifactKind> for ArtifactKind {
 impl fmt::Display for ArtifactKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl FromStr for ArtifactKind {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s.to_owned()))
     }
 }
 

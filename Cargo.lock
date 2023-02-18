@@ -1495,13 +1495,13 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=18748d9f76c94e1f4400fbec0859b3e77a221a8d#18748d9f76c94e1f4400fbec0859b3e77a221a8d"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=309bd361d886a237fbdd5d74992bdbd783f98bff#309bd361d886a237fbdd5d74992bdbd783f98bff"
 dependencies = [
  "diesel",
- "lock_api",
  "serde",
  "usdt",
  "uuid",
+ "version_check",
 ]
 
 [[package]]
@@ -2175,7 +2175,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=482bae9bfa704282e981008abae9328344150d36#482bae9bfa704282e981008abae9328344150d36"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e35df234f9db57b1b7fc0a8ca279fb2774ff1046#e35df234f9db57b1b7fc0a8ca279fb2774ff1046"
 dependencies = [
  "bitflags",
  "hubpack 0.1.1",
@@ -2190,7 +2190,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=482bae9bfa704282e981008abae9328344150d36#482bae9bfa704282e981008abae9328344150d36"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e35df234f9db57b1b7fc0a8ca279fb2774ff1046#e35df234f9db57b1b7fc0a8ca279fb2774ff1046"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2212,6 +2212,7 @@ dependencies = [
  "tokio",
  "usdt",
  "uuid",
+ "version_check",
  "zip",
 ]
 
@@ -2709,7 +2710,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f501445f5a6c275c79f08a876fff6a861df31d46#f501445f5a6c275c79f08a876fff6a861df31d46"
+source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -2993,7 +2994,7 @@ checksum = "f9b7d56ba4a8344d6be9729995e6b06f928af29998cdf79fe390cbf6b1fee838"
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f501445f5a6c275c79f08a876fff6a861df31d46#f501445f5a6c275c79f08a876fff6a861df31d46"
+source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
 dependencies = [
  "quote",
  "syn",
@@ -3808,6 +3809,7 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
@@ -3938,6 +3940,7 @@ name = "omicron-sled-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "base64 0.21.0",
  "bincode",
@@ -4134,7 +4137,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f501445f5a6c275c79f08a876fff6a861df31d46#f501445f5a6c275c79f08a876fff6a861df31d46"
+source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
 dependencies = [
  "cfg-if 0.1.10",
  "dyn-clone",
@@ -4152,7 +4155,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f501445f5a6c275c79f08a876fff6a861df31d46#f501445f5a6c275c79f08a876fff6a861df31d46"
+source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -4164,7 +4167,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f501445f5a6c275c79f08a876fff6a861df31d46#f501445f5a6c275c79f08a876fff6a861df31d46"
+source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
 dependencies = [
  "libc",
  "libnet",
@@ -4226,7 +4229,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f501445f5a6c275c79f08a876fff6a861df31d46#f501445f5a6c275c79f08a876fff6a861df31d46"
+source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -4799,9 +4802,9 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
 name = "predicates"
-version = "2.1.1"
+version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5aab5be6e4732b473071984b3164dbbfb7a3674d30ea5ff44410b6bcd960c3c"
+checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
 dependencies = [
  "difflib",
  "float-cmp",
@@ -5393,9 +5396,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.36.0"
+version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf49b8ecfac8cb6c7798584418beefa051ab0c96a98baf044be3f5a77d8e219d"
+checksum = "e6cdd0c99823d858b1cab6b77bd0cdf4069e30a5212bbf5d94c478f7c9887b28"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -7224,6 +7227,7 @@ dependencies = [
  "fs-err",
  "humantime",
  "omicron-common",
+ "predicates",
  "tempfile",
  "tufaceous-lib",
 ]

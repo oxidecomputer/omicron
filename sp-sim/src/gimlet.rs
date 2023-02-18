@@ -1044,6 +1044,7 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
         slot: u16,
+        persist: bool,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "asked to set component active slot (not supported for sim components)";
@@ -1051,6 +1052,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
             "slot" => slot,
+            "persist" => persist,
         );
         Err(SpError::RequestUnsupportedForComponent)
     }
