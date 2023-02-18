@@ -8,7 +8,7 @@ use crate::ipv6;
 use crate::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
+use dns_service_client::names::{BackendName, ServiceName, AAAA, SRV};
 use nexus_types::identity::Asset;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};

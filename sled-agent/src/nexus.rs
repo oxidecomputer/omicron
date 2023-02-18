@@ -7,7 +7,7 @@ pub use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
-use internal_dns_client::{
+use dns_service_client::{
     multiclient::{ResolveError, Resolver},
     names::{ServiceName, SRV},
 };

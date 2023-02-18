@@ -11,7 +11,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
 };
-use internal_dns_client::{
+use dns_service_client::{
     multiclient::{ResolveError, Resolver},
     names::{ServiceName, SRV},
 };

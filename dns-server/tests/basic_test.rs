@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use dropshot::test_util::LogContext;
-use internal_dns_client::{
+use dns_service_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };

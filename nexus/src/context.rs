@@ -19,7 +19,7 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
-use internal_dns_client::names::{ServiceName, SRV};
+use dns_service_client::names::{ServiceName, SRV};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;
@@ -147,7 +147,7 @@ impl ServerContext {
             Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
         info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
         let resolver =
-            internal_dns_client::multiclient::Resolver::new(&az_subnet)
+            dns_service_client::multiclient::Resolver::new(&az_subnet)
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
 
         // Set up DB pool

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
+use dns_service_client::names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
     CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
     OXIMETER_PORT,

@@ -11,7 +11,7 @@ use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
-use internal_dns_client::{
+use dns_service_client::{
     multiclient::{ResolveError, Resolver},
     names::{ServiceName, SRV},
 };
