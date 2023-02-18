@@ -312,9 +312,9 @@ mod test {
 
     struct DnsServer {
         _storage: TempDir,
-        dns_server: internal_dns::dns_server::Server,
+        dns_server: dns_server::dns_server::Server,
         dropshot_server:
-            dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+            dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
     }
 
     impl DnsServer {
@@ -327,17 +327,17 @@ mod test {
             let dns_server = {
                 let db = db.clone();
                 let log = log.clone();
-                let dns_config = internal_dns::dns_server::Config {
+                let dns_config = dns_server::dns_server::Config {
                     bind_address: "[::1]:0".to_string(),
                     zone: crate::names::DNS_ZONE.into(),
                 };
 
-                internal_dns::dns_server::run(log, db, dns_config)
+                dns_server::dns_server::run(log, db, dns_config)
                     .await
                     .unwrap()
             };
 
-            let config = internal_dns::Config {
+            let config = dns_server::Config {
                 log: dropshot::ConfigLogging::StderrTerminal {
                     level: dropshot::ConfigLoggingLevel::Info,
                 },
@@ -346,14 +346,14 @@ mod test {
                     request_body_max_bytes: 1024,
                     ..Default::default()
                 },
-                data: internal_dns::dns_data::Config {
+                data: dns_server::dns_data::Config {
                     nmax_messages: 16,
                     storage_path: storage.path().to_string_lossy().into(),
                 },
             };
 
             let dropshot_server =
-                internal_dns::start_dropshot_server(config, log.clone(), db)
+                dns_server::start_dropshot_server(config, log.clone(), db)
                     .await
                     .unwrap();
 

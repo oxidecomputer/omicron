@@ -37,7 +37,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let config_file = &args.config_file;
     let config_file_contents = std::fs::read_to_string(config_file)
         .with_context(|| format!("read config file {:?}", config_file))?;
-    let mut config: internal_dns::Config =
+    let mut config: dns_server::Config =
         toml::from_str(&config_file_contents)
             .with_context(|| format!("parse config file {:?}", config_file))?;
 
@@ -49,7 +49,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .to_logger("internal-dns")
         .context("failed to create logger")?;
 
-    let (_dns_server, dropshot_server) = internal_dns::start(
+    let (_dns_server, dropshot_server) = dns_server::start(
         log,
         config,
         args.dns_zone,

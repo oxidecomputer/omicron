@@ -32,10 +32,10 @@ pub struct Server {
     /// real internal dns server storage dir
     pub dns_server_storage_dir: tempfile::TempDir,
     /// real internal dns server
-    pub dns_server: internal_dns::dns_server::Server,
+    pub dns_server: dns_server::dns_server::Server,
     /// real internal dns dropshot server
     pub dns_dropshot_server:
-        dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+        dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
 }
 
 impl Server {
@@ -153,7 +153,7 @@ impl Server {
         let dns_server_storage_dir =
             tempfile::tempdir().map_err(|e| e.to_string())?;
 
-        let dns_server_config = internal_dns::Config {
+        let dns_server_config = dns_server::Config {
             log: dropshot::ConfigLogging::StderrTerminal {
                 level: dropshot::ConfigLoggingLevel::Trace,
             },
@@ -161,7 +161,7 @@ impl Server {
                 bind_address: "[::1]:0".parse().unwrap(),
                 ..Default::default()
             },
-            data: internal_dns::dns_data::Config {
+            data: dns_server::dns_data::Config {
                 nmax_messages: 16,
                 storage_path: dns_server_storage_dir
                     .path()
@@ -173,7 +173,7 @@ impl Server {
         let zone = "control-plane.oxide.internal".to_string();
         let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
 
-        let (dns_server, dns_dropshot_server) = internal_dns::start(
+        let (dns_server, dns_dropshot_server) = dns_server::start(
             dns_log,
             dns_server_config,
             zone,
