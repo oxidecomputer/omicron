@@ -100,7 +100,7 @@ struct InstallOpts {
     #[command(flatten)]
     discover_opts: DiscoverOpts,
 
-    /// Optional ID for the artifact. If not specified,
+    /// Artifact ID ["from-ipcc" or "host_phase_2:<sha256>,control_plane:<sha256>"]
     artifact_ids: ArtifactIdsOpt,
 
     // TODO: checksum?
@@ -116,6 +116,7 @@ impl InstallOpts {
         let host_phase_2_id = ArtifactHashId {
             // TODO: currently we're assuming that wicket will unpack the host
             // phase 2 image. We may instead have the installinator do it.
+            // kind: KnownArtifactKind::Host.into(),
             kind: ArtifactKind::new("host_phase_2".to_owned()),
             hash: artifact_hashes.host_phase_2,
         };
@@ -149,14 +150,14 @@ impl InstallOpts {
         write_artifact(
             &host_phase_2_id,
             host_phase_2_artifact.artifact,
-            &self.destination,
+            &self.destination.join("host_phase_2.bin"),
         )
         .await?;
 
         write_artifact(
             &control_plane_id,
             control_plane_artifact.artifact,
-            &self.destination,
+            &self.destination.join("control_plane.bin"),
         )
         .await?;
 
