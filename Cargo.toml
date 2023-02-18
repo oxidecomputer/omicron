@@ -123,15 +123,15 @@ db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
 diesel = { version = "2.0.3" }
-diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
+diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 expectorate = "1.0.6"
 fatfs = "0.3.6"
 fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "482bae9bfa704282e981008abae9328344150d36" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "482bae9bfa704282e981008abae9328344150d36" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -169,7 +169,7 @@ omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.5.1"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f501445f5a6c275c79f08a876fff6a861df31d46", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "6be54acd2438f0864a68bca44d7511f2ee50d761", features = [ "api", "std" ] }
 once_cell = "1.17.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
@@ -177,7 +177,7 @@ openapiv3 = "1.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.2"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f501445f5a6c275c79f08a876fff6a861df31d46" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "6be54acd2438f0864a68bca44d7511f2ee50d761" }
 oso = "0.26"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "oximeter-client" }
@@ -193,6 +193,7 @@ percent-encoding = "2.2.0"
 pem = "1.1"
 petgraph = "0.6.3"
 postgres-protocol = "0.6.4"
+predicates = "2.1.5"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }

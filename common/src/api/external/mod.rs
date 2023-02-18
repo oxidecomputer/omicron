@@ -2299,7 +2299,7 @@ mod test {
         assert_eq!(2793, tb3.to_whole_gibibytes());
         assert_eq!(2, tb3.to_whole_tebibytes());
 
-        let three_tebibytes = (3u64 * 1024 * 1024 * 1024 * 1024) as u64;
+        let three_tebibytes = 3u64 * 1024 * 1024 * 1024 * 1024;
         let tib3 = ByteCount::try_from(three_tebibytes).unwrap();
         assert_eq!(three_tebibytes, tib3.to_bytes());
         assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
