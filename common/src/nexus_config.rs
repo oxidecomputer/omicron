@@ -407,11 +407,12 @@ mod test {
         let error =
             read_config("bad_toml", "foo =").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
-            assert_eq!(error.span(), Some(0..5));
-            assert_eq!(
-                error.to_string(),
-                "unexpected eof encountered at line 1 column 6"
-            );
+            assert_eq!(error.span(), Some(5..5));
+            // See https://github.com/toml-rs/toml/issues/519
+            // assert_eq!(
+            //     error.message(),
+            //     "unexpected eof encountered at line 1 column 6"
+            // );
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",
@@ -427,8 +428,8 @@ mod test {
     fn test_config_empty() {
         let error = read_config("empty", "").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
-            assert_eq!(error.span(), None);
-            assert_eq!(error.to_string(), "missing field `deployment`");
+            assert_eq!(error.span(), Some(0..0));
+            assert_eq!(error.message(), "missing field `deployment`");
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",
@@ -609,7 +610,7 @@ mod test {
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert!(
                 error
-                    .to_string()
+                    .message()
                     .starts_with("unsupported authn scheme: \"trust-me\""),
                 "error = {}",
                 error
@@ -663,7 +664,7 @@ mod test {
         )
         .expect_err("Expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
-            assert!(error.to_string().starts_with(
+            assert!(error.message().starts_with(
                 r#"invalid "max_vpc_ipv4_subnet_prefix": "IPv4 subnet prefix must"#,
             ));
         } else {
