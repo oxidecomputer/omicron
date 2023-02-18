@@ -43,7 +43,7 @@ impl<'de> DeserializeAs<'de, MacAddr6> for ZeroPadded {
     where
         D: Deserializer<'de>,
     {
-        <&str>::deserialize(deserializer)?
+        String::deserialize(deserializer)?
             .split(':')
             .map(|segment| format!("{:0>2}", segment))
             .collect::<Vec<String>>()

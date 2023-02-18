@@ -777,8 +777,8 @@ impl PersistentSledAgentRequest<'_> {
         }
 
         let mut out = String::with_capacity(128);
-        let mut serializer = toml::Serializer::new(&mut out);
-        PersistentSledAgentRequestDef::serialize(self, &mut serializer)?;
+        let serializer = toml::Serializer::new(&mut out);
+        PersistentSledAgentRequestDef::serialize(self, serializer)?;
         Ok(out)
     }
 }
@@ -827,7 +827,7 @@ mod tests {
 
         let serialized = request.danger_serialize_as_toml().unwrap();
         let deserialized: PersistentSledAgentRequest =
-            toml::from_slice(serialized.as_bytes()).unwrap();
+            toml::from_str(&serialized).unwrap();
 
         assert!(request == deserialized, "serialization round trip failed");
     }

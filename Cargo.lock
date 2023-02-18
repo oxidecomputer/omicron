@@ -1410,7 +1410,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.5.11",
+ "toml 0.7.1",
 ]
 
 [[package]]
@@ -2790,7 +2790,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.1",
 ]
 
 [[package]]
@@ -2859,7 +2859,7 @@ dependencies = [
  "subprocess",
  "tempdir",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.1",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -3738,7 +3738,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.5.11",
+ "toml 0.7.1",
  "uuid",
 ]
 
@@ -3756,7 +3756,7 @@ dependencies = [
  "sp-sim",
  "sprockets-rot",
  "thiserror",
- "toml 0.5.11",
+ "toml 0.7.1",
 ]
 
 [[package]]
@@ -3795,7 +3795,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
- "toml 0.5.11",
+ "toml 0.7.1",
  "uuid",
 ]
 
@@ -3891,7 +3891,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-tungstenite",
- "toml 0.5.11",
+ "toml 0.7.1",
  "tough",
  "usdt",
  "uuid",
@@ -3922,7 +3922,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.1",
  "walkdir",
 ]
 
@@ -3994,7 +3994,7 @@ dependencies = [
  "tofino",
  "tokio",
  "tokio-tungstenite",
- "toml 0.5.11",
+ "toml 0.7.1",
  "uuid",
  "vsss-rs",
  "zone",
@@ -4286,7 +4286,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.1",
  "uuid",
 ]
 
@@ -6340,7 +6340,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.1",
 ]
 
 [[package]]
@@ -7750,7 +7750,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.1",
  "tui",
  "wicketd-client",
 ]
@@ -7789,7 +7789,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.1",
  "tough",
  "tufaceous-lib",
  "uuid",
