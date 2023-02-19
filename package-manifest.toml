@@ -61,6 +61,12 @@ source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
 output.type = "zone"
 
+[package.external-dns]
+service_name = "external_dns"
+source.type = "composite"
+source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
+output.type = "zone"
+
 [package.dns-server]
 service_name = "dns_server"
 source.type = "local"
@@ -74,6 +80,13 @@ output.intermediate_only = true
 service_name = "internal_dns_customizations"
 source.type = "local"
 source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal_dns" } ]
+output.intermediate_only = true
+output.type = "zone"
+
+[package.external-dns-customizations]
+service_name = "external_dns_customizations"
+source.type = "local"
+source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" } ]
 output.intermediate_only = true
 output.type = "zone"
 
