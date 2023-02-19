@@ -368,7 +368,7 @@ fn test_config(
 ) -> Result<(tempdir::TempDir, dns_server::Config, LogContext), anyhow::Error>
 {
     let logctx = test_setup_log(test_name);
-    let tmp_dir = tempdir::TempDir::new("internal-dns-test")?;
+    let tmp_dir = tempdir::TempDir::new("dns-server-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
     let storage_path = storage_path.to_str().unwrap().into();

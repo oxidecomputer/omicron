@@ -1608,6 +1608,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.1.4",
+ "dns-service-client",
+ "dropshot",
+ "expectorate",
+ "omicron-test-utils",
+ "openapi-lint",
+ "openapiv3",
+ "pretty-hex 0.3.0",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sled",
+ "slog",
+ "slog-async",
+ "slog-envlogger",
+ "slog-term",
+ "subprocess",
+ "tempdir",
+ "tokio",
+ "toml 0.7.1",
+ "trust-dns-client",
+ "trust-dns-proto",
+ "trust-dns-resolver",
+ "trust-dns-server",
+]
+
+[[package]]
+name = "dns-service-client"
+version = "0.1.0"
+dependencies = [
+ "dns-server",
+ "dropshot",
+ "futures",
+ "omicron-common",
+ "omicron-test-utils",
+ "progenitor",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sled",
+ "slog",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "trust-dns-proto",
+ "trust-dns-resolver",
+ "uuid",
+]
+
+[[package]]
 name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2836,60 +2890,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "internal-dns"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 4.1.4",
- "dropshot",
- "expectorate",
- "internal-dns-client",
- "omicron-test-utils",
- "openapi-lint",
- "openapiv3",
- "pretty-hex 0.3.0",
- "schemars",
- "serde",
- "serde_json",
- "sled",
- "slog",
- "slog-async",
- "slog-envlogger",
- "slog-term",
- "subprocess",
- "tempdir",
- "tokio",
- "toml 0.7.1",
- "trust-dns-client",
- "trust-dns-proto",
- "trust-dns-resolver",
- "trust-dns-server",
-]
-
-[[package]]
-name = "internal-dns-client"
-version = "0.1.0"
-dependencies = [
- "dropshot",
- "futures",
- "internal-dns",
- "omicron-common",
- "omicron-test-utils",
- "progenitor",
- "reqwest",
- "serde",
- "serde_json",
- "sled",
- "slog",
- "tempfile",
- "thiserror",
- "tokio",
- "trust-dns-proto",
- "trust-dns-resolver",
- "uuid",
-]
-
-[[package]]
 name = "io-lifetimes"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3415,8 +3415,8 @@ dependencies = [
  "chrono",
  "db-macros",
  "diesel",
+ "dns-service-client",
  "hex",
- "internal-dns-client",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -3467,8 +3467,8 @@ name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "dns-service-client",
  "dropshot",
- "internal-dns-client",
  "omicron-common",
  "slog",
  "uuid",
@@ -3481,11 +3481,11 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
+ "dns-service-client",
  "dropshot",
  "headers",
  "http",
  "hyper",
- "internal-dns-client",
  "nexus-test-interface",
  "omicron-common",
  "omicron-nexus",
@@ -3819,6 +3819,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
+ "dns-service-client",
  "dropshot",
  "expectorate",
  "fatfs",
@@ -3829,7 +3830,6 @@ dependencies = [
  "httptest",
  "hyper",
  "hyper-rustls",
- "internal-dns-client",
  "ipnetwork",
  "itertools",
  "lazy_static",
@@ -3946,13 +3946,13 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
+ "dns-server",
+ "dns-service-client",
  "dropshot",
  "expectorate",
  "futures",
  "http",
  "illumos-devinfo",
- "internal-dns",
- "internal-dns-client",
  "ipnetwork",
  "libc",
  "libefi-illumos",
@@ -4267,10 +4267,10 @@ name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "clap 4.1.4",
+ "dns-service-client",
  "dropshot",
  "expectorate",
  "futures",
- "internal-dns-client",
  "nexus-client",
  "omicron-common",
  "omicron-test-utils",

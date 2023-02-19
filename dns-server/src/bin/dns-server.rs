@@ -46,7 +46,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let log = config
         .log
-        .to_logger("internal-dns")
+        .to_logger("dns-server")
         .context("failed to create logger")?;
 
     let (_dns_server, dropshot_server) = dns_server::start(

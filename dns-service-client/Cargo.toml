@@ -1,5 +1,5 @@
 [package]
-name = "internal-dns-client"
+name = "dns-service-client"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -19,7 +19,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 dropshot.workspace = true
-internal-dns.workspace = true
+dns-server.workspace = true
 omicron-test-utils.workspace = true
 sled.workspace = true
 tempfile.workspace = true
