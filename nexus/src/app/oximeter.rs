@@ -10,11 +10,11 @@ use crate::db;
 use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
-use dropshot::PaginationParams;
 use dns_service_client::{
     multiclient::{ResolveError, Resolver},
     names::{ServiceName, SRV},
 };
+use dropshot::PaginationParams;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;

@@ -332,9 +332,7 @@ mod test {
                     zone: crate::names::DNS_ZONE.into(),
                 };
 
-                dns_server::dns_server::run(log, db, dns_config)
-                    .await
-                    .unwrap()
+                dns_server::dns_server::run(log, db, dns_config).await.unwrap()
             };
 
             let config = dns_server::Config {

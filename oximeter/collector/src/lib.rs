@@ -6,14 +6,14 @@
 
 // Copyright 2021 Oxide Computer Company
 
+use dns_service_client::{
+    multiclient::{ResolveError, Resolver},
+    names::{ServiceName, SRV},
+};
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
-};
-use dns_service_client::{
-    multiclient::{ResolveError, Resolver},
-    names::{ServiceName, SRV},
 };
 use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
 use omicron_common::api::internal::nexus::ProducerEndpoint;

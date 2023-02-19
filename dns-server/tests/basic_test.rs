@@ -6,11 +6,11 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use dropshot::test_util::LogContext;
 use dns_service_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
+use dropshot::test_util::LogContext;
 use omicron_test_utils::dev::test_setup_log;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
@@ -365,8 +365,7 @@ async fn init_client_server(
 
 fn test_config(
     test_name: &str,
-) -> Result<(tempdir::TempDir, dns_server::Config, LogContext), anyhow::Error>
-{
+) -> Result<(tempdir::TempDir, dns_server::Config, LogContext), anyhow::Error> {
     let logctx = test_setup_log(test_name);
     let tmp_dir = tempdir::TempDir::new("dns-server-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
@@ -382,10 +381,7 @@ fn test_config(
             request_body_max_bytes: 1024,
             ..Default::default()
         },
-        data: dns_server::dns_data::Config {
-            nmax_messages: 16,
-            storage_path,
-        },
+        data: dns_server::dns_data::Config { nmax_messages: 16, storage_path },
     };
 
     Ok((tmp_dir, config, logctx))
