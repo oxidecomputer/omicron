@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Rack`]s.
 
 use super::DataStore;
+use super::SERVICE_IP_POOL_NAME;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -338,7 +339,7 @@ impl DataStore {
 
         let params = params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
-                name: "oxide-service-pool".parse::<Name>().unwrap(),
+                name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
             },
         };

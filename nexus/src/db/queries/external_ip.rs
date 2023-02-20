@@ -756,6 +756,7 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 mod tests {
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
+    use crate::db::datastore::SERVICE_IP_POOL_NAME;
     use crate::db::identity::Resource;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
@@ -1157,7 +1158,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1215,7 +1216,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 4),
         ))
         .unwrap();
-        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1295,7 +1296,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 4),
         ))
         .unwrap();
-        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         let id = Uuid::new_v4();
         let err = context
@@ -1327,7 +1328,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1371,7 +1372,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.initialize_ip_pool("oxide-service-pool", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
