@@ -118,7 +118,7 @@ impl DataStore {
                         )
                     }
                 }
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => crate::db::queries::external_ip::from_pool(e),
             }
         })
     }

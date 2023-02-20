@@ -12,6 +12,7 @@ use crate::db::model::IpKindEnum;
 use crate::db::model::Name;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
+use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::pg::Pg;
@@ -21,8 +22,10 @@ use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::sql_types;
 use diesel::Column;
+use diesel::Expression;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
+use omicron_common::api::external;
 use uuid::Uuid;
 
 type FromClause<T> =
@@ -33,6 +36,29 @@ const IP_POOL_RANGE_FROM_CLAUSE: IpPoolRangeFromClause =
 type ExternalIpFromClause = FromClause<schema::external_ip::table>;
 const EXTERNAL_IP_FROM_CLAUSE: ExternalIpFromClause =
     ExternalIpFromClause::new();
+
+const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
+    "Reallocation of IP with different value";
+
+/// Translates a generic pool error to an external error.
+pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
+    use crate::db::error;
+
+    let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];
+    if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
+        match sentinel {
+            REALLOCATION_WITH_DIFFERENT_IP_SENTINEL => {
+                return external::Error::invalid_request(
+                    "Re-allocating IP address with a different value",
+                );
+            }
+            // Fall-through to the generic error conversion.
+            _ => {}
+        }
+    }
+
+    error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
+}
 
 // The number of ports available to an instance when doing source NAT. Note
 // that for static NAT, this value isn't used, and all ports are available.
@@ -125,6 +151,41 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///     ORDER BY
 ///         candidate_ip, candidate_first_port
 ///     LIMIT 1
+/// ),
+/// -- Identify if the IP address has already been allocated, to validate
+/// -- that the request looks the same (for idempotency).
+/// previously_allocated_ip AS (
+///     SELECT
+///         id as old_id,
+///         ip as old_ip
+///     FROM external_ip
+///     WHERE
+///         id = <id> AND time_deleted IS NULL
+/// ),
+/// -- Compare `next_external_ip` with `previously_allocated_ip`, and throw
+/// -- an error if the request is not idempotent.
+/// validate_prior_allocation AS MATERIALIZED (
+///     CAST(
+///         -- If this expression evaluates to false, we throw an error.
+///         IF(
+///             -- Either the previously_allocated_ip does not exist, or...
+///             NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR
+///             -- ... If it does exist, the IP address must be the same for
+///             -- both the old and new request.
+///             (
+///                 SELECT ip = old_ip
+///                 FROM
+///                     (
+///                         SELECT ip, old_ip
+///                         FROM next_external_ip
+///                         INNER JOIN
+///                         previously_allocated_ip ON old_id = id
+///                     )
+///             ),
+///             TRUE,
+///             <Error Message> AS BOOL
+///         )
+///     )
 /// ),
 /// external_ip AS (
 ///     -- Insert the record into the actual table.
@@ -345,23 +406,18 @@ impl NextExternalIp {
         // In either case, we follow this with a filter `WHERE ip IS NULL`,
         // meaning we select the candidate address and first port that does not
         // have a matching record in the table already.
+        out.push_sql(" ON (");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(",");
         if matches!(self.ip.kind(), &IpKind::SNat) {
-            out.push_sql(" ON (");
-            out.push_identifier(dsl::ip::NAME)?;
-            out.push_sql(", candidate_first_port >= ");
+            out.push_sql(" candidate_first_port >= ");
             out.push_identifier(dsl::first_port::NAME)?;
             out.push_sql(" AND candidate_last_port <= ");
             out.push_identifier(dsl::last_port::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_deleted::NAME)?;
-            out.push_sql(" IS NULL) = (candidate_ip, TRUE, TRUE) ");
-        } else {
-            out.push_sql(" ON (");
-            out.push_identifier(dsl::ip::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_deleted::NAME)?;
-            out.push_sql(" IS NULL) = (candidate_ip, TRUE) ");
+            out.push_sql(" AND ");
         }
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" IS NULL) = (candidate_ip, TRUE) ");
 
         // In all cases, we're selecting rows from the join that don't have a
         // match in the existing table.
@@ -386,6 +442,74 @@ impl NextExternalIp {
             LIMIT 1",
         );
 
+        Ok(())
+    }
+
+    fn push_prior_allocation_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        use schema::external_ip::dsl;
+
+        out.push_sql("SELECT ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" AS old_id,");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(" AS old_ip FROM ");
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.id())?;
+        out.push_sql(" AND ");
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" IS NULL");
+
+        Ok(())
+    }
+
+    fn push_validate_prior_allocation_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        // Describes a boolean expression within the CTE to check if the "old IP
+        // address" matches the "to-be-allocated" IP address.
+        //
+        // This validates that, in a case where we're re-allocating the same IP,
+        // we don't attempt to assign a different value.
+        struct CheckIfOldAllocationHasSameIp {}
+        impl Expression for CheckIfOldAllocationHasSameIp {
+            type SqlType = diesel::sql_types::Bool;
+        }
+        impl QueryFragment<Pg> for CheckIfOldAllocationHasSameIp {
+            fn walk_ast<'a>(
+                &'a self,
+                mut out: AstPass<'_, 'a, Pg>,
+            ) -> diesel::QueryResult<()> {
+                use schema::external_ip::dsl;
+                out.unsafe_to_cache_prepared();
+                // Either the allocation to this UUID needs to be new...
+                out.push_sql(
+                    "NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR",
+                );
+                // ... Or we are allocating the same IP adress...
+                out.push_sql("(SELECT ");
+                out.push_identifier(dsl::ip::NAME)?;
+                out.push_sql(" = old_ip FROM (SELECT ");
+                out.push_identifier(dsl::ip::NAME)?;
+                out.push_sql(", old_ip FROM next_external_ip INNER JOIN previously_allocated_ip ON old_id = id))");
+                Ok(())
+            }
+        }
+
+        out.push_sql("SELECT ");
+
+        const QUERY: TrueOrCastError<CheckIfOldAllocationHasSameIp> =
+            TrueOrCastError::new(
+                CheckIfOldAllocationHasSameIp {},
+                REALLOCATION_WITH_DIFFERENT_IP_SENTINEL,
+            );
+        QUERY.walk_ast(out.reborrow())?;
         Ok(())
     }
 
@@ -576,18 +700,28 @@ impl QueryFragment<Pg> for NextExternalIp {
         // their IP address ranges.
         out.push_sql("WITH next_external_ip AS (");
         self.push_next_ip_and_port_range_subquery(out.reborrow())?;
+        out.push_sql("), ");
+
+        out.push_sql("previously_allocated_ip AS (");
+        self.push_prior_allocation_subquery(out.reborrow())?;
+        out.push_sql("), ");
+        out.push_sql("validate_previously_allocated_ip AS MATERIALIZED(");
+        self.push_validate_prior_allocation_subquery(out.reborrow())?;
+        out.push_sql("), ");
 
         // Push the subquery that potentially inserts this record, or ignores
         // primary key conflicts (for idempotency).
-        out.push_sql("), external_ip AS (");
+        out.push_sql("external_ip AS (");
         self.push_update_external_ip_subquery(out.reborrow())?;
+        out.push_sql("), ");
 
         // Push the subquery that bumps the `rcgen` of the IP Pool range table
-        out.push_sql("), updated_pool_range AS (");
+        out.push_sql("updated_pool_range AS (");
         self.push_update_ip_pool_range_subquery(out.reborrow())?;
+        out.push_sql(") ");
 
         // Select the contents of the actual record that was created or updated.
-        out.push_sql(") SELECT * FROM external_ip");
+        out.push_sql("SELECT * FROM external_ip");
 
         Ok(())
     }
@@ -1097,8 +1231,24 @@ mod tests {
         assert_eq!(ip.ip.ip(), ip_again.ip.ip());
 
         // Try allocating the same service IP once more, but do it with a
+        // different UUID.
+        let err = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+            )
+            .await
+            .expect_err("Should have failed to re-allocate same IP address (different UUID)");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Requested external IP address not available"
+        );
+
+        // Try allocating the same service IP once more, but do it with a
         // different input address.
-        let ip_again = context
+        let err = context
             .db_datastore
             .allocate_explicit_service_ip(
                 &context.opctx,
@@ -1106,11 +1256,11 @@ mod tests {
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
             )
             .await
-            .expect("Failed to allocate service IP address");
-
-        // We return success, but with the address requested the first time.
-        assert_eq!(ip.id, ip_again.id);
-        assert_eq!(ip.ip.ip(), ip_again.ip.ip());
+            .expect_err("Should have failed to re-allocate different IP address (same UUID)");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Re-allocating IP address with a different value"
+        );
 
         context.success().await;
     }
