@@ -511,8 +511,11 @@ impl NextExternalIp {
         Ok(())
     }
 
-    // Push a subquery that selects the sequence of IP addresses, from each range in
-    // each IP Pool, along with the pool/range IDs.
+    // Push a subquery which selects either:
+    // - A sequence of candidate IP addresses from the IP pool range, if no
+    // explicit IP address has been supplied, or
+    // - A single IP address within the range, if an explicit IP address has
+    // been supplied.
     //
     // ```sql
     // SELECT * FROM (
