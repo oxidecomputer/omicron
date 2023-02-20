@@ -116,16 +116,14 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///             SELECT
 ///                 ip_pool_id,
 ///                 id AS ip_pool_range_id,
-///                 first_address +
-///                     generate_series(0, last_address - first_address)
-///                     AS candidate_ip
+///                 <Candidate IP Query> AS candidate_ip
 ///             FROM
 ///                 ip_pool_range
 ///             WHERE
 ///                 <pool restriction clause> AND
 ///                 time_deleted IS NULL
 ///         ) AS candidates
-///         <Optional WHERE restriction clause on explicit IP>
+///         WHERE candidates.candidate_ip IS NOT NULL
 ///     CROSS JOIN
 ///         (
 ///             -- Cartesian product with all first/last port values
@@ -521,8 +519,14 @@ impl NextExternalIp {
     //   SELECT
     //       ip_pool_id,
     //       id AS ip_pool_range_id,
-    //       first_address +
-    //           generate_series(0, last_address - first_address)
+    //       -- Candidates with no explicit IP:
+    //       first_address + generate_series(0, last_address - first_address)
+    //       -- Candidates with explicit IP:
+    //       CASE
+    //          first_address <= <explicit_ip> AND
+    //          <explicit_ip> <= last_address
+    //       WHEN TRUE THEN <explicit_ip> ELSE NULL END
+    //       -- Either way:
     //           AS candidate_ip
     //   FROM
     //       ip_pool_range
@@ -530,14 +534,8 @@ impl NextExternalIp {
     //       <pool_restriction> AND
     //       time_deleted IS NULL
     // ) AS candidates
+    // WHERE candidates.candidate_ip IS NOT NULL
     // ```
-    //
-    // This has the optional addendum:
-    // ```sql
-    // WHERE candidates.candidate_ip = <explicit_ip>
-    // ```
-    //
-    // Which filters candidate IPs that only match the input explicit IP.
     fn push_address_sequence_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -550,12 +548,35 @@ impl NextExternalIp {
         out.push_sql(", ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" AS ip_pool_range_id, ");
-        out.push_identifier(dsl::first_address::NAME)?;
-        out.push_sql(" + generate_series(0, ");
-        out.push_identifier(dsl::last_address::NAME)?;
-        out.push_sql(" - ");
-        out.push_identifier(dsl::first_address::NAME)?;
-        out.push_sql(") AS candidate_ip FROM ");
+
+        if let Some(explicit_ip) = self.ip.explicit_ip() {
+            out.push_sql("CASE ");
+            out.push_identifier(dsl::first_address::NAME)?;
+            out.push_sql(" <= ");
+            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+                explicit_ip,
+            )?;
+            out.push_sql(" AND ");
+            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+                explicit_ip,
+            )?;
+            out.push_sql(" <= ");
+            out.push_identifier(dsl::last_address::NAME)?;
+            out.push_sql(" WHEN TRUE THEN ");
+            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+                explicit_ip,
+            )?;
+            out.push_sql(" ELSE NULL END");
+        } else {
+            out.push_identifier(dsl::first_address::NAME)?;
+            out.push_sql(" + generate_series(0, ");
+            out.push_identifier(dsl::last_address::NAME)?;
+            out.push_sql(" - ");
+            out.push_identifier(dsl::first_address::NAME)?;
+            out.push_sql(") ");
+        }
+
+        out.push_sql(" AS candidate_ip FROM ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         out.push_identifier(dsl::ip_pool_id::NAME)?;
@@ -565,13 +586,7 @@ impl NextExternalIp {
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
         out.push_sql(") AS candidates ");
-
-        if let Some(explicit_ip) = self.ip.explicit_ip() {
-            out.push_sql("WHERE candidates.candidate_ip = ");
-            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
-                explicit_ip,
-            )?;
-        }
+        out.push_sql("WHERE candidates.candidate_ip IS NOT NULL");
         Ok(())
     }
 
