@@ -665,13 +665,25 @@ mod test {
             observed_external_ips[&observed_nexus_services[0].external_ip_id]
                 .ip
                 .ip(),
-            IpAddr::V4(nexus_ip_start),
+            if let internal_params::ServiceKind::Nexus { external_address } =
+                services[0].kind
+            {
+                external_address
+            } else {
+                panic!("Unexpected service kind")
+            }
         );
         assert_eq!(
             observed_external_ips[&observed_nexus_services[1].external_ip_id]
                 .ip
                 .ip(),
-            IpAddr::V4(nexus_ip_end),
+            if let internal_params::ServiceKind::Nexus { external_address } =
+                services[1].kind
+            {
+                external_address
+            } else {
+                panic!("Unexpected service kind")
+            }
         );
 
         // Furthermore, we should be able to see that this IP addresses have been
