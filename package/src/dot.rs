@@ -250,7 +250,7 @@ fn edge_attributes(
 ) -> String {
     // Switch the direction of the arrows because we want them to flow from
     // dependency *to* dependent.
-    format!("dir=back color=gray35 fontcolor=gray35")
+    "dir=back color=gray35 fontcolor=gray35".to_string()
 }
 
 // Helper function that returns the Graphviz attributes for each node in the
@@ -262,7 +262,7 @@ fn node_attributes(
     let (_, node) = noderef;
 
     if let GraphNode::TopLevel = node {
-        return format!("fontcolor=gray35 shape=plaintext");
+        return "fontcolor=gray35 shape=plaintext".to_string();
     }
 
     let fillcolor = match node {
