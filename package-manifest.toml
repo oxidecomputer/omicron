@@ -68,7 +68,7 @@ source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
 output.type = "zone"
 
 [package.dns-server]
-service_name = "dns_server"
+service_name = "dns-server"
 source.type = "local"
 source.rust.binary_names = ["dnsadm", "dns-server"]
 source.rust.release = true
@@ -77,16 +77,16 @@ output.type = "zone"
 output.intermediate_only = true
 
 [package.internal-dns-customizations]
-service_name = "internal_dns_customizations"
+service_name = "internal-dns-customizations"
 source.type = "local"
-source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal_dns" } ]
+source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal-dns" } ]
 output.intermediate_only = true
 output.type = "zone"
 
 [package.external-dns-customizations]
-service_name = "external_dns_customizations"
+service_name = "external-dns-customizations"
 source.type = "local"
-source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" } ]
+source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external-dns" } ]
 output.intermediate_only = true
 output.type = "zone"
 
