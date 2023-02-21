@@ -15,10 +15,11 @@ use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use buf_list::BufList;
+use bytes::Bytes;
+use futures::TryStream;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
-use gateway_client::types::UpdateBody;
 use gateway_messages::SpComponent;
 use omicron_common::update::ArtifactId;
 use slog::error;
@@ -261,9 +262,12 @@ impl UpdateDriver {
     async fn update_sp(&self, artifact: &ArtifactIdData) -> anyhow::Result<()> {
         const SP_COMPONENT: &str = SpComponent::SP_ITSELF.const_as_str();
 
-        let image = buf_list_to_vec(&artifact.data);
         let update_id = Uuid::new_v4();
-        let body = UpdateBody { id: update_id, image, slot: 0 };
+
+        // The SP only has one updateable firmware slot ("the inactive bank") -
+        // we always pass 0.
+        let firmware_slot = 0;
+
         self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
             artifact: artifact.id.clone(),
         });
@@ -272,7 +276,11 @@ impl UpdateDriver {
                 self.sp.type_,
                 self.sp.slot,
                 SP_COMPONENT,
-                &body,
+                firmware_slot,
+                &update_id,
+                reqwest::Body::wrap_stream(buf_list_to_try_stream(
+                    artifact.data.0.clone(),
+                )),
             )
             .await
             .context("failed to start update")?;
@@ -364,15 +372,8 @@ impl UpdateDriver {
     }
 }
 
-// Helper function to convert a `BufList` into a `Vec<u8>` for use with
-// `gateway_client::Client`.
-//
-// TODO-performance Can we pass `BufList`s directly (or wrapped) to
-// `gateway_client::Client` endpoints without copying the data?
-fn buf_list_to_vec(data: &BufList) -> Vec<u8> {
-    let mut image = Vec::with_capacity(data.num_bytes());
-    for chunk in data {
-        image.extend_from_slice(chunk);
-    }
-    image
+fn buf_list_to_try_stream(
+    data: BufList,
+) -> impl TryStream<Ok = Bytes, Error = std::convert::Infallible> {
+    futures::stream::iter(data.into_iter().map(Ok))
 }
