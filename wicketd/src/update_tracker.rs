@@ -81,33 +81,28 @@ impl From<UpdateLog> for crate::update_events::UpdateLog {
 }
 
 #[derive(Debug)]
+struct SpUpdateData {
+    task: JoinHandle<()>,
+    // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
+    // hold it only log enough to update its state or push a new update event
+    // into its running log; occasionally we hold it long enough to clone it.
+    update_log: Arc<StdMutex<UpdateLog>>,
+}
+
+#[derive(Debug)]
 pub(crate) struct UpdateTracker {
     mgs_client: gateway_client::Client,
-    running_updates: Mutex<BTreeMap<SpIdentifier, JoinHandle<()>>>,
-    // Note: Our inner mutex here is a standard mutex, not a tokio mutex. We
-    // generally hold it only log enough to update its state or push a new
-    // update event into its running log; occasionally we hold it long enough to
-    // clone it.
-    update_logs: Mutex<BTreeMap<SpIdentifier, Arc<StdMutex<UpdateLog>>>>,
+    sp_update_data: Mutex<BTreeMap<SpIdentifier, SpUpdateData>>,
     log: Logger,
 }
 
 impl UpdateTracker {
-    pub(crate) fn new(
-        mgs_addr: SocketAddrV6,
-        log: &Logger,
-    ) -> Self {
+    pub(crate) fn new(mgs_addr: SocketAddrV6, log: &Logger) -> Self {
         let log = log.new(o!("component" => "wicketd update planner"));
-        let running_updates = Mutex::default();
-        let update_logs = Mutex::default();
+        let sp_update_data = Mutex::default();
         let mgs_client = make_mgs_client(log.clone(), mgs_addr);
 
-        Self {
-            mgs_client,
-            log,
-            running_updates,
-            update_logs,
-        }
+        Self { mgs_client, sp_update_data, log }
     }
 
     pub(crate) async fn start(
@@ -116,26 +111,22 @@ impl UpdateTracker {
         plan: UpdatePlan,
     ) -> Result<(), StartUpdateError> {
         let spawn_update_driver = || async {
-            // Get a reference to the update log for this SP...
-            let update_log = Arc::clone(
-                self.update_logs.lock().await.entry(sp).or_default(),
-            );
-
-            // ...and then reset it to the empty state, removing any events or
-            // state from a previous update attempt.
-            *update_log.lock().unwrap() = UpdateLog::default();
+            let update_log = Arc::default();
 
             let update_driver = UpdateDriver {
                 sp,
                 mgs_client: self.mgs_client.clone(),
-                update_log,
+                update_log: Arc::clone(&update_log),
                 log: self.log.new(o!("sp" => format!("{sp:?}"))),
             };
-            tokio::spawn(update_driver.run(plan))
+
+            let task = tokio::spawn(update_driver.run(plan));
+
+            SpUpdateData { task, update_log }
         };
 
-        let mut running_updates = self.running_updates.lock().await;
-        match running_updates.entry(sp) {
+        let mut sp_update_data = self.sp_update_data.lock().await;
+        match sp_update_data.entry(sp) {
             // Vacant: this is the first time we've started an update to this
             // sp.
             Entry::Vacant(slot) => {
@@ -145,7 +136,7 @@ impl UpdateTracker {
             // Occupied: we've previously started an update to this sp; only
             // allow this one if that update is no longer running.
             Entry::Occupied(mut slot) => {
-                if slot.get().is_finished() {
+                if slot.get().task.is_finished() {
                     slot.insert(spawn_update_driver().await);
                     Ok(())
                 } else {
@@ -159,10 +150,12 @@ impl UpdateTracker {
         &self,
         sp: SpIdentifier,
     ) -> crate::update_events::UpdateLog {
-        let mut update_logs = self.update_logs.lock().await;
-        match update_logs.entry(sp) {
+        let mut sp_update_data = self.sp_update_data.lock().await;
+        match sp_update_data.entry(sp) {
             Entry::Vacant(_) => crate::update_events::UpdateLog::default(),
-            Entry::Occupied(slot) => slot.get().lock().unwrap().clone().into(),
+            Entry::Occupied(slot) => {
+                slot.get().update_log.lock().unwrap().clone().into()
+            }
         }
     }
 
@@ -171,10 +164,10 @@ impl UpdateTracker {
     pub(crate) async fn update_log_all(
         &self,
     ) -> BTreeMap<SpType, BTreeMap<u32, crate::update_events::UpdateLog>> {
-        let update_logs = self.update_logs.lock().await;
+        let sp_update_data = self.sp_update_data.lock().await;
         let mut converted_logs = BTreeMap::new();
-        for (sp, update_log) in &*update_logs {
-            let update_log = update_log.lock().unwrap().clone();
+        for (sp, update_data) in &*sp_update_data {
+            let update_log = update_data.update_log.lock().unwrap().clone();
             let inner: &mut BTreeMap<_, _> =
                 converted_logs.entry(sp.type_).or_default();
             inner.insert(sp.slot, update_log.into());
