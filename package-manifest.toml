@@ -22,7 +22,7 @@
 # (3) "composite": packages whose contents come from combining the results of
 #     one or more other packages
 #
-# (4) "manual" packages whose contents are assumed to be put into place by hand
+# (4) "manual": packages whose contents are assumed to be put into place by hand
 #
 #     Manual packages are intended for developers (in development) to override
 #     the source of prebuilt packages with custom contents.
