@@ -2778,6 +2778,7 @@ dependencies = [
  "installinator-artifact-client",
  "itertools",
  "omicron-common",
+ "omicron-test-utils",
  "once_cell",
  "progenitor-client",
  "proptest",

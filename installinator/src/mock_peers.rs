@@ -423,12 +423,11 @@ mod tests {
     use crate::{
         errors::DiscoverPeersError,
         peers::{FetchedArtifact, Peers},
-        stderr_env_drain,
     };
 
     use bytes::Buf;
     use futures::future;
-    use slog::Drain;
+    use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
 
     use std::future::Future;
@@ -441,19 +440,21 @@ mod tests {
         #[strategy((0..2000u64).prop_map(Duration::from_millis))]
         timeout: Duration,
     ) {
+        let log = test_setup_log("proptest_fetch_artifact");
         with_test_runtime(move || async move {
-            let log = test_logger();
             let expected_success = universe.expected_success(timeout);
             let expected_artifact = universe.artifact.clone();
 
             let mut attempts = universe.attempts();
 
             let fetched_artifact = FetchedArtifact::loop_fetch_from_peers(
-                &log,
+                &log.log,
                 || match attempts.next() {
-                    Some(Ok(peers)) => {
-                        future::ok(Peers::new(&log, Box::new(peers), timeout))
-                    }
+                    Some(Ok(peers)) => future::ok(Peers::new(
+                        &log.log,
+                        Box::new(peers),
+                        timeout,
+                    )),
                     Some(Err(error)) => {
                         future::err(DiscoverPeersError::Retry(error))
                     }
@@ -507,12 +508,5 @@ mod tests {
             .build()
             .expect("tokio Runtime built successfully");
         runtime.block_on(f())
-    }
-
-    fn test_logger() -> slog::Logger {
-        // To control logging, use RUST_TEST_LOG.
-        let drain = stderr_env_drain("RUST_TEST_LOG");
-        let drain = slog_async::Async::new(drain).build().fuse();
-        slog::Logger::root(drain, slog::o!())
     }
 }
