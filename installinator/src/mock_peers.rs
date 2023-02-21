@@ -440,18 +440,18 @@ mod tests {
         #[strategy((0..2000u64).prop_map(Duration::from_millis))]
         timeout: Duration,
     ) {
-        let log = test_setup_log("proptest_fetch_artifact");
         with_test_runtime(move || async move {
+            let logctx = test_setup_log("proptest_fetch_artifact");
             let expected_success = universe.expected_success(timeout);
             let expected_artifact = universe.artifact.clone();
 
             let mut attempts = universe.attempts();
 
             let fetched_artifact = FetchedArtifact::loop_fetch_from_peers(
-                &log.log,
+                &logctx.log,
                 || match attempts.next() {
                     Some(Ok(peers)) => future::ok(Peers::new(
-                        &log.log,
+                        &logctx.log,
                         Box::new(peers),
                         timeout,
                     )),
@@ -494,7 +494,8 @@ mod tests {
                     panic!("expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}");
                 }
             }
-        })
+            logctx.cleanup_successful();
+        });
     }
 
     fn with_test_runtime<F, Fut, T>(f: F) -> T
