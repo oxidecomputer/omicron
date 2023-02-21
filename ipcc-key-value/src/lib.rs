@@ -11,6 +11,19 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
+mod ioctl_common;
+pub use ioctl_common::*;
+
+#[cfg(target_os = "illumos")]
+mod ioctl;
+#[cfg(target_os = "illumos")]
+pub use ioctl::Ipcc;
+
+#[cfg(not(target_os = "illumos"))]
+mod ioctl_stub;
+#[cfg(not(target_os = "illumos"))]
+pub use ioctl_stub::Ipcc;
+
 #[cfg(test)]
 use proptest::arbitrary::any;
 #[cfg(test)]
@@ -49,6 +62,18 @@ pub struct InstallinatorImageId {
     /// SHA-256 hash of the control plane image to fetch.
     #[serde(with = "serde_bytes_array")]
     pub control_plane: [u8; 32],
+}
+
+impl InstallinatorImageId {
+    /// The size in bytes of an `InstallinatorImageId` serialized into CBOR via
+    /// [`InstallinatorImageId::serialize()`].
+    #[allow(dead_code)] // Used by tests and platform-specific modules
+    const CBOR_SERIALIZED_SIZE: usize = 1 // map
+            + 1 + "update_id".len() // key
+            + 1 + "host_phase_2".len() // key
+            + 1 + "control_plane".len() // key
+            + 1 + 16 // UUID byte array
+            + 2*(2 + 32); // 2 32-long byte arrays
 }
 
 // Adapted from https://github.com/serde-rs/bytes/issues/26: this is a
@@ -187,23 +212,8 @@ mod tests {
 
     #[proptest]
     fn serialized_size(image_id: InstallinatorImageId) {
-        // Double-check that ciborium is encoding this how we expect. Our
-        // serialized size should be:
-        //
-        // 1. 1 byte to identify a map
-        // 2. 1 byte + strlen for each key
-        // 3. 1 byte for the 16-long array (Uuid)
-        // 3. 2 bytes for each 32-long array
-        // 4. 1 byte per u8 in each of the arrays
-        const EXPECTED_SIZE: usize = 1 // map
-            + 1 + "update_id".len() // key
-            + 1 + "host_phase_2".len() // key
-            + 1 + "control_plane".len() // key
-            + 1 + 16 // UUID byte array
-            + 2*(2 + 32); // 2 32-long byte arrays
-
         let serialized = image_id.serialize();
-        assert!(serialized.len() == EXPECTED_SIZE);
+        assert!(serialized.len() == InstallinatorImageId::CBOR_SERIALIZED_SIZE);
     }
 
     #[test]
