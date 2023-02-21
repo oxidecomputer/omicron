@@ -432,7 +432,6 @@ mod tests {
         api::internal::nexus::KnownArtifactKind, update::ArtifactHash,
     };
     use omicron_test_utils::dev::test_setup_log;
-    use slog::Drain;
     use test_strategy::proptest;
 
     use std::future::Future;
