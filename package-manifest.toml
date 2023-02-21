@@ -1,6 +1,38 @@
-# This manifest describes packages which will be ingested by
-# the "omicron-package" tool - instructing how they should be
-# build, thrown into a tarball, and installed on the target system.
+# Omicron Packages
+# ----------------
+#
+# The Oxide control plane software (Omicron) is built and assembled into
+# *packages* that can be shipped to Oxide systems and deployed.  Note that
+# "package" here is an Omicron concept.  There is overlap with Rust packages,
+# but they're not the same thing.  This "package" has nothing to do with illumos
+# IPS packages or any other kind of operating system or ecosystem package.
+#
+# Four kinds of packages are supported, as determined by their _source_ type:
+#
+# (1) "local": packages whose contents come from any combination of files in the
+#     current directory, blobs stored in S3, or the result of building a Rust
+#     package in the current workspace
+#
+#     If the package involves building a Rust package in the same workspace,
+#     then the Rust package *must* have the same name as the Omicron package.
+#
+# (2) "prebuilt": packages whose contents come wholesale from the output of a
+#     buildomat job
+#
+# (3) "composite": packages whose contents come from combining the results of
+#     one or more other packages
+#
+# (4) "manual" packages whose contents are assumed to be put into place by hand
+#
+#     Manual packages are intended for developers (in development) to override
+#     the source of prebuilt packages with custom contents.
+#
+# For more on these, see the documentation on
+# `omicron_zone_package::PackageSource`.
+#
+# This file defines all of the packages that make up Omicron and how to build
+# each one.  `omicron-package` and `thing-flinger` process this file to build
+# and deploy these packages.
 
 [package.omicron-sled-agent]
 service_name = "sled-agent"
