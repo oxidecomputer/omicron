@@ -34,6 +34,7 @@ pub struct ShutdownInProgress;
 #[derive(Debug)]
 enum MgsRequest {
     GetInventory {
+        #[allow(dead_code)]
         etag: Option<String>,
         reply_tx: oneshot::Sender<GetInventoryResponse>,
     },

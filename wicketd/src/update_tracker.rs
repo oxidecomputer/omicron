@@ -372,7 +372,7 @@ impl UpdateDriver {
 fn buf_list_to_vec(data: &BufList) -> Vec<u8> {
     let mut image = Vec::with_capacity(data.num_bytes());
     for chunk in data {
-        image.extend_from_slice(&*chunk);
+        image.extend_from_slice(chunk);
     }
     image
 }
