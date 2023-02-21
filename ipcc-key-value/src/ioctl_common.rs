@@ -10,18 +10,31 @@
 use std::io;
 use thiserror::Error;
 
+/// IPCC keys; the source of truth for these is RFD 316 + the
+/// `host-sp-messages` crate in hubris.
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum IpccKey {
+    Ping = 0,
+    InstallinatorImageId = 1,
+}
+
 #[derive(Debug, Error)]
 pub enum IpccKeyLookupError {
-    #[error("IPCC key lookup ioctl failed: {error}")]
-    IoctlFailed { error: io::Error },
-    #[error("IPCC key lookup failed: unknown key {key}")]
-    UnknownKey { key: String },
-    #[error("IPCC key lookup failed: no value for key")]
-    NoValueForKey,
-    #[error("IPCC key lookup failed: buffer too small for value")]
-    BufferTooSmallForValue,
-    #[error("IPCC key lookup failed: unknown result value {0}")]
-    UnknownResultValue(u8),
+    #[error("IPCC key lookup ioctl failed for key {key:?}: {error}")]
+    IoctlFailed { key: IpccKey, error: io::Error },
+    #[error("IPCC key lookup failed for key {key:?}: unknown key")]
+    UnknownKey { key: IpccKey },
+    #[error("IPCC key lookup failed for key {key:?}: no value for key")]
+    NoValueForKey { key: IpccKey },
+    #[error(
+        "IPCC key lookup failed for key {key:?}: buffer too small for value"
+    )]
+    BufferTooSmallForValue { key: IpccKey },
+    #[error(
+        "IPCC key lookup failed for key {key:?}: unknown result value {result}"
+    )]
+    UnknownResultValue { key: IpccKey, result: u8 },
 }
 
 #[derive(Debug, Error)]

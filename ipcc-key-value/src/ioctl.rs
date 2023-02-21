@@ -11,6 +11,7 @@
 
 use crate::InstallinatorImageId;
 use crate::InstallinatorImageIdError;
+use crate::IpccKey;
 use crate::IpccKeyLookupError;
 use crate::PingError;
 use crate::Pong;
@@ -76,33 +77,26 @@ impl Ipcc {
 
         if result != 0 {
             let error = io::Error::last_os_error();
-            return Err(IpccKeyLookupError::IoctlFailed { error });
+            return Err(IpccKeyLookupError::IoctlFailed { key, error });
         }
 
         match kl.result {
             IPCC_KEYLOOKUP_SUCCESS => Ok(usize::from(kl.datalen)),
             IPCC_KEYLOOKUP_UNKNOWN_KEY => {
-                Err(IpccKeyLookupError::UnknownKey { key: format!("{key:?}") })
+                Err(IpccKeyLookupError::UnknownKey { key })
             }
-            IPCC_KEYLOOKUP_NO_VALUE => Err(IpccKeyLookupError::NoValueForKey),
+            IPCC_KEYLOOKUP_NO_VALUE => {
+                Err(IpccKeyLookupError::NoValueForKey { key })
+            }
             IPCC_KEYLOOKUP_BUFFER_TOO_SMALL => {
-                Err(IpccKeyLookupError::BufferTooSmallForValue)
+                Err(IpccKeyLookupError::BufferTooSmallForValue { key })
             }
-            _ => Err(IpccKeyLookupError::UnknownResultValue(kl.result)),
+            _ => Err(IpccKeyLookupError::UnknownResultValue {
+                key,
+                result: kl.result,
+            }),
         }
     }
-}
-
-// --------------------------------------------------------------------
-// IPCC keys; the source of truth for these is RFD 316 + the
-// `host-sp-messages` crate in hubris.
-// --------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-enum IpccKey {
-    Ping = 0,
-    InstallinatorImageId = 1,
 }
 
 // --------------------------------------------------------------------
