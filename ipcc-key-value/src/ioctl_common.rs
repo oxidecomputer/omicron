@@ -4,8 +4,8 @@
 
 // Copyright 2023 Oxide Computer Company
 
-//! This module is logically part of the [`crate::ioctl`] module, but is split
-//! out to be shared with the non-illumos stub module.
+//! This module contains types shared between the real (illumos-only)
+//! `crate::ioctl` module and the generic `crate::ioctl_stub` module.
 
 use thiserror::Error;
 
