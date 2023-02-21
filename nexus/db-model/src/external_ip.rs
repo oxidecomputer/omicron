@@ -18,6 +18,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
 use std::convert::TryFrom;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -90,6 +91,8 @@ pub struct IncompleteExternalIp {
     kind: IpKind,
     instance_id: Option<Uuid>,
     pool_id: Uuid,
+    // Optional address requesting that a specific IP address be allocated.
+    explicit_ip: Option<IpNetwork>,
 }
 
 impl IncompleteExternalIp {
@@ -106,6 +109,7 @@ impl IncompleteExternalIp {
             kind: IpKind::SNat,
             instance_id: Some(instance_id),
             pool_id,
+            explicit_ip: None,
         }
     }
 
@@ -118,6 +122,7 @@ impl IncompleteExternalIp {
             kind: IpKind::Ephemeral,
             instance_id: Some(instance_id),
             pool_id,
+            explicit_ip: None,
         }
     }
 
@@ -135,6 +140,24 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             instance_id: None,
             pool_id,
+            explicit_ip: None,
+        }
+    }
+
+    pub fn for_service_explicit(
+        id: Uuid,
+        pool_id: Uuid,
+        address: IpAddr,
+    ) -> Self {
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::Service,
+            instance_id: None,
+            pool_id,
+            explicit_ip: Some(IpNetwork::from(address)),
         }
     }
 
@@ -147,6 +170,7 @@ impl IncompleteExternalIp {
             kind: IpKind::Service,
             instance_id: None,
             pool_id,
+            explicit_ip: None,
         }
     }
 
@@ -176,6 +200,10 @@ impl IncompleteExternalIp {
 
     pub fn pool_id(&self) -> &Uuid {
         &self.pool_id
+    }
+
+    pub fn explicit_ip(&self) -> &Option<IpNetwork> {
+        &self.explicit_ip
     }
 }
 

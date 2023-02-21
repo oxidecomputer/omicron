@@ -674,7 +674,10 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
         .unwrap()
         .parsed_body()
         .unwrap();
-    assert_eq!(fetched_pool.identity.name, "oxide-service-pool");
+    assert_eq!(
+        fetched_pool.identity.name,
+        omicron_nexus::db::datastore::SERVICE_IP_POOL_NAME
+    );
     assert_eq!(fetched_pool.identity.description, "IP Pool for Oxide Services");
 
     // Add some ranges. Pagination is tested more explicitly in the IP pool

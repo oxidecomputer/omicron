@@ -11,6 +11,7 @@ use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use std::str::Utf8Error;
 
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
@@ -38,6 +39,9 @@ pub const UNDERLAY_ETHERSTUB_VNIC_NAME: &str = "underlay0";
 /// bootstrap network.
 pub const BOOTSTRAP_ETHERSTUB_VNIC_NAME: &str = "bootstrap0";
 
+/// The prefix for Chelsio link names.
+pub const CHELSIO_LINK_PREFIX: &str = "cxgbe";
+
 /// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
 pub enum FindPhysicalLinkError {
@@ -46,6 +50,9 @@ pub enum FindPhysicalLinkError {
 
     #[error("No Physical Link devices found")]
     NoPhysicalLinkFound,
+
+    #[error("Unexpected non-UTF-8 link name")]
+    NonUtf8Output(Utf8Error),
 }
 
 /// Errors returned from [`Dladm::get_mac`].
@@ -248,19 +255,30 @@ impl Dladm {
 
     /// Returns the name of the first observed physical data link.
     pub fn find_physical() -> Result<PhysicalLink, FindPhysicalLinkError> {
+        // TODO: This is arbitrary, but we're currently grabbing the first
+        // physical device. Should we have a more sophisticated method for
+        // selection?
+        Self::list_physical()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| FindPhysicalLinkError::NoPhysicalLinkFound)
+    }
+
+    /// List the extant physical data links on the system.
+    ///
+    /// Note that this returns _all_ links.
+    pub fn list_physical() -> Result<Vec<PhysicalLink>, FindPhysicalLinkError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-phys", "-p", "-o", "LINK"]);
         let output = execute(cmd)?;
-        let name = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            // TODO: This is arbitrary, but we're currently grabbing the first
-            // physical device. Should we have a more sophisticated method for
-            // selection?
-            .next()
-            .map(|s| s.trim())
-            .ok_or_else(|| FindPhysicalLinkError::NoPhysicalLinkFound)?
-            .to_string();
-        Ok(PhysicalLink(name))
+        std::str::from_utf8(&output.stdout)
+            .map_err(FindPhysicalLinkError::NonUtf8Output)
+            .map(|stdout| {
+                stdout
+                    .lines()
+                    .map(|name| PhysicalLink(name.trim().to_string()))
+                    .collect()
+            })
     }
 
     /// Returns the MAC address of a physical link.

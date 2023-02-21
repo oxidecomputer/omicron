@@ -320,4 +320,21 @@ impl DataStore {
             .append_cpu_metrics(&provisions);
         Ok(provisions)
     }
+
+    pub async fn load_builtin_fleet_virtual_provisioning_collection(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        let id = *db::fixed_data::FLEET_ID;
+        self.virtual_provisioning_collection_create(
+            opctx,
+            db::model::VirtualProvisioningCollection::new(
+                id,
+                db::model::CollectionTypeProvisioned::Fleet,
+            ),
+        )
+        .await?;
+
+        Ok(())
+    }
 }
