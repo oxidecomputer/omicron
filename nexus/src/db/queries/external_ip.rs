@@ -12,6 +12,7 @@ use crate::db::model::IpKindEnum;
 use crate::db::model::Name;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
+use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::pg::Pg;
@@ -21,8 +22,10 @@ use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::sql_types;
 use diesel::Column;
+use diesel::Expression;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
+use omicron_common::api::external;
 use uuid::Uuid;
 
 type FromClause<T> =
@@ -33,6 +36,29 @@ const IP_POOL_RANGE_FROM_CLAUSE: IpPoolRangeFromClause =
 type ExternalIpFromClause = FromClause<schema::external_ip::table>;
 const EXTERNAL_IP_FROM_CLAUSE: ExternalIpFromClause =
     ExternalIpFromClause::new();
+
+const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
+    "Reallocation of IP with different value";
+
+/// Translates a generic pool error to an external error.
+pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
+    use crate::db::error;
+
+    let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];
+    if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
+        match sentinel {
+            REALLOCATION_WITH_DIFFERENT_IP_SENTINEL => {
+                return external::Error::invalid_request(
+                    "Re-allocating IP address with a different value",
+                );
+            }
+            // Fall-through to the generic error conversion.
+            _ => {}
+        }
+    }
+
+    error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
+}
 
 // The number of ports available to an instance when doing source NAT. Note
 // that for static NAT, this value isn't used, and all ports are available.
@@ -85,20 +111,19 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///         CAST(candidate_first_port AS INT4) AS first_port,
 ///         CAST(candidate_last_port AS INT4) AS last_port
 ///     FROM
-///         (
+///         SELECT * FROM (
 ///             -- Select all IP addresses by pool and range.
 ///             SELECT
 ///                 ip_pool_id,
 ///                 id AS ip_pool_range_id,
-///                 first_address +
-///                     generate_series(0, last_address - first_address)
-///                     AS candidate_ip
+///                 <Candidate IP Query> AS candidate_ip
 ///             FROM
 ///                 ip_pool_range
 ///             WHERE
 ///                 <pool restriction clause> AND
 ///                 time_deleted IS NULL
-///         )
+///         ) AS candidates
+///         WHERE candidates.candidate_ip IS NOT NULL
 ///     CROSS JOIN
 ///         (
 ///             -- Cartesian product with all first/last port values
@@ -124,6 +149,41 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///     ORDER BY
 ///         candidate_ip, candidate_first_port
 ///     LIMIT 1
+/// ),
+/// -- Identify if the IP address has already been allocated, to validate
+/// -- that the request looks the same (for idempotency).
+/// previously_allocated_ip AS (
+///     SELECT
+///         id as old_id,
+///         ip as old_ip
+///     FROM external_ip
+///     WHERE
+///         id = <id> AND time_deleted IS NULL
+/// ),
+/// -- Compare `next_external_ip` with `previously_allocated_ip`, and throw
+/// -- an error if the request is not idempotent.
+/// validate_prior_allocation AS MATERIALIZED (
+///     CAST(
+///         -- If this expression evaluates to false, we throw an error.
+///         IF(
+///             -- Either the previously_allocated_ip does not exist, or...
+///             NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR
+///             -- ... If it does exist, the IP address must be the same for
+///             -- both the old and new request.
+///             (
+///                 SELECT ip = old_ip
+///                 FROM
+///                     (
+///                         SELECT ip, old_ip
+///                         FROM next_external_ip
+///                         INNER JOIN
+///                         previously_allocated_ip ON old_id = id
+///                     )
+///             ),
+///             TRUE,
+///             <Error Message> AS BOOL
+///         )
+///     )
 /// ),
 /// external_ip AS (
 ///     -- Insert the record into the actual table.
@@ -344,23 +404,18 @@ impl NextExternalIp {
         // In either case, we follow this with a filter `WHERE ip IS NULL`,
         // meaning we select the candidate address and first port that does not
         // have a matching record in the table already.
+        out.push_sql(" ON (");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(",");
         if matches!(self.ip.kind(), &IpKind::SNat) {
-            out.push_sql(" ON (");
-            out.push_identifier(dsl::ip::NAME)?;
-            out.push_sql(", candidate_first_port >= ");
+            out.push_sql(" candidate_first_port >= ");
             out.push_identifier(dsl::first_port::NAME)?;
             out.push_sql(" AND candidate_last_port <= ");
             out.push_identifier(dsl::last_port::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_deleted::NAME)?;
-            out.push_sql(" IS NULL) = (candidate_ip, TRUE, TRUE) ");
-        } else {
-            out.push_sql(" ON (");
-            out.push_identifier(dsl::ip::NAME)?;
-            out.push_sql(", ");
-            out.push_identifier(dsl::time_deleted::NAME)?;
-            out.push_sql(" IS NULL) = (candidate_ip, TRUE) ");
+            out.push_sql(" AND ");
         }
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" IS NULL) = (candidate_ip, TRUE) ");
 
         // In all cases, we're selecting rows from the join that don't have a
         // match in the existing table.
@@ -388,38 +443,143 @@ impl NextExternalIp {
         Ok(())
     }
 
-    // Push a subquery that selects the sequence of IP addresses, from each range in
-    // each IP Pool, along with the pool/range IDs.
+    fn push_prior_allocation_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        use schema::external_ip::dsl;
+
+        out.push_sql("SELECT ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" AS old_id,");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(" AS old_ip FROM ");
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.id())?;
+        out.push_sql(" AND ");
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" IS NULL");
+
+        Ok(())
+    }
+
+    fn push_validate_prior_allocation_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        // Describes a boolean expression within the CTE to check if the "old IP
+        // address" matches the "to-be-allocated" IP address.
+        //
+        // This validates that, in a case where we're re-allocating the same IP,
+        // we don't attempt to assign a different value.
+        struct CheckIfOldAllocationHasSameIp {}
+        impl Expression for CheckIfOldAllocationHasSameIp {
+            type SqlType = diesel::sql_types::Bool;
+        }
+        impl QueryFragment<Pg> for CheckIfOldAllocationHasSameIp {
+            fn walk_ast<'a>(
+                &'a self,
+                mut out: AstPass<'_, 'a, Pg>,
+            ) -> diesel::QueryResult<()> {
+                use schema::external_ip::dsl;
+                out.unsafe_to_cache_prepared();
+                // Either the allocation to this UUID needs to be new...
+                out.push_sql(
+                    "NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR",
+                );
+                // ... Or we are allocating the same IP adress...
+                out.push_sql("(SELECT ");
+                out.push_identifier(dsl::ip::NAME)?;
+                out.push_sql(" = old_ip FROM (SELECT ");
+                out.push_identifier(dsl::ip::NAME)?;
+                out.push_sql(", old_ip FROM next_external_ip INNER JOIN previously_allocated_ip ON old_id = id))");
+                Ok(())
+            }
+        }
+
+        out.push_sql("SELECT ");
+
+        const QUERY: TrueOrCastError<CheckIfOldAllocationHasSameIp> =
+            TrueOrCastError::new(
+                CheckIfOldAllocationHasSameIp {},
+                REALLOCATION_WITH_DIFFERENT_IP_SENTINEL,
+            );
+        QUERY.walk_ast(out.reborrow())?;
+        Ok(())
+    }
+
+    // Push a subquery which selects either:
+    // - A sequence of candidate IP addresses from the IP pool range, if no
+    // explicit IP address has been supplied, or
+    // - A single IP address within the range, if an explicit IP address has
+    // been supplied.
     //
     // ```sql
-    // SELECT
-    //     ip_pool_id,
-    //     id AS ip_pool_range_id,
-    //     first_address +
-    //         generate_series(0, last_address - first_address)
-    //         AS candidate_ip
-    // FROM
-    //     ip_pool_range
-    // WHERE
-    //     <pool_restriction> AND
-    //     time_deleted IS NULL
+    // SELECT * FROM (
+    //   SELECT
+    //       ip_pool_id,
+    //       id AS ip_pool_range_id,
+    //       -- Candidates with no explicit IP:
+    //       first_address + generate_series(0, last_address - first_address)
+    //       -- Candidates with explicit IP:
+    //       CASE
+    //          first_address <= <explicit_ip> AND
+    //          <explicit_ip> <= last_address
+    //       WHEN TRUE THEN <explicit_ip> ELSE NULL END
+    //       -- Either way:
+    //           AS candidate_ip
+    //   FROM
+    //       ip_pool_range
+    //   WHERE
+    //       <pool_restriction> AND
+    //       time_deleted IS NULL
+    // ) AS candidates
+    // WHERE candidates.candidate_ip IS NOT NULL
     // ```
     fn push_address_sequence_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         use schema::ip_pool_range::dsl;
+        out.push_sql("SELECT * FROM (");
+
         out.push_sql("SELECT ");
         out.push_identifier(dsl::ip_pool_id::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" AS ip_pool_range_id, ");
-        out.push_identifier(dsl::first_address::NAME)?;
-        out.push_sql(" + generate_series(0, ");
-        out.push_identifier(dsl::last_address::NAME)?;
-        out.push_sql(" - ");
-        out.push_identifier(dsl::first_address::NAME)?;
-        out.push_sql(") AS candidate_ip FROM ");
+
+        if let Some(explicit_ip) = self.ip.explicit_ip() {
+            out.push_sql("CASE ");
+            out.push_identifier(dsl::first_address::NAME)?;
+            out.push_sql(" <= ");
+            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+                explicit_ip,
+            )?;
+            out.push_sql(" AND ");
+            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+                explicit_ip,
+            )?;
+            out.push_sql(" <= ");
+            out.push_identifier(dsl::last_address::NAME)?;
+            out.push_sql(" WHEN TRUE THEN ");
+            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
+                explicit_ip,
+            )?;
+            out.push_sql(" ELSE NULL END");
+        } else {
+            out.push_identifier(dsl::first_address::NAME)?;
+            out.push_sql(" + generate_series(0, ");
+            out.push_identifier(dsl::last_address::NAME)?;
+            out.push_sql(" - ");
+            out.push_identifier(dsl::first_address::NAME)?;
+            out.push_sql(") ");
+        }
+
+        out.push_sql(" AS candidate_ip FROM ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         out.push_identifier(dsl::ip_pool_id::NAME)?;
@@ -428,6 +588,8 @@ impl NextExternalIp {
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
+        out.push_sql(") AS candidates ");
+        out.push_sql("WHERE candidates.candidate_ip IS NOT NULL");
         Ok(())
     }
 
@@ -556,18 +718,28 @@ impl QueryFragment<Pg> for NextExternalIp {
         // their IP address ranges.
         out.push_sql("WITH next_external_ip AS (");
         self.push_next_ip_and_port_range_subquery(out.reborrow())?;
+        out.push_sql("), ");
+
+        out.push_sql("previously_allocated_ip AS (");
+        self.push_prior_allocation_subquery(out.reborrow())?;
+        out.push_sql("), ");
+        out.push_sql("validate_previously_allocated_ip AS MATERIALIZED(");
+        self.push_validate_prior_allocation_subquery(out.reborrow())?;
+        out.push_sql("), ");
 
         // Push the subquery that potentially inserts this record, or ignores
         // primary key conflicts (for idempotency).
-        out.push_sql("), external_ip AS (");
+        out.push_sql("external_ip AS (");
         self.push_update_external_ip_subquery(out.reborrow())?;
+        out.push_sql("), ");
 
         // Push the subquery that bumps the `rcgen` of the IP Pool range table
-        out.push_sql("), updated_pool_range AS (");
+        out.push_sql("updated_pool_range AS (");
         self.push_update_ip_pool_range_subquery(out.reborrow())?;
+        out.push_sql(") ");
 
         // Select the contents of the actual record that was created or updated.
-        out.push_sql(") SELECT * FROM external_ip");
+        out.push_sql("SELECT * FROM external_ip");
 
         Ok(())
     }
@@ -584,6 +756,7 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 mod tests {
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
+    use crate::db::datastore::SERVICE_IP_POOL_NAME;
     use crate::db::identity::Resource;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
@@ -591,6 +764,7 @@ mod tests {
     use crate::db::model::Name;
     use crate::external_api::shared::IpRange;
     use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Error;
@@ -624,12 +798,8 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool_internal(
-            &self,
-            name: &str,
-            range: IpRange,
-            internal: bool,
-        ) {
+        async fn create_ip_pool(&self, name: &str, range: IpRange) {
+            let internal = false;
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
@@ -638,7 +808,8 @@ mod tests {
                 internal,
             );
 
-            diesel::insert_into(crate::db::schema::ip_pool::dsl::ip_pool)
+            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            diesel::insert_into(ip_pool_dsl::ip_pool)
                 .values(pool.clone())
                 .execute_async(
                     self.db_datastore
@@ -649,6 +820,26 @@ mod tests {
                 .await
                 .expect("Failed to create IP Pool");
 
+            self.initialize_ip_pool(name, range).await;
+        }
+
+        async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
+            // Find the target IP pool
+            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            let pool = ip_pool_dsl::ip_pool
+                .filter(ip_pool_dsl::name.eq(name.to_string()))
+                .filter(ip_pool_dsl::time_deleted.is_null())
+                .select(IpPool::as_select())
+                .get_result_async(
+                    self.db_datastore
+                        .pool_authorized(&self.opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .expect("Failed to 'SELECT' IP Pool");
+
+            // Insert a range into this IP pool
             let pool_range = IpPoolRange::new(&range, pool.id());
             diesel::insert_into(
                 crate::db::schema::ip_pool_range::dsl::ip_pool_range,
@@ -659,15 +850,6 @@ mod tests {
             )
             .await
             .expect("Failed to create IP Pool range");
-        }
-
-        async fn create_service_ip_pool(&self, name: &str, range: IpRange) {
-            self.create_ip_pool_internal(name, range, /*internal=*/ true).await;
-        }
-
-        async fn create_ip_pool(&self, name: &str, range: IpRange) {
-            self.create_ip_pool_internal(name, range, /*internal=*/ false)
-                .await;
         }
 
         async fn default_pool_id(&self) -> Uuid {
@@ -698,7 +880,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
         for first_port in
             (0..super::MAX_PORT).step_by(super::NUM_SOURCE_NAT_PORTS)
         {
@@ -755,7 +937,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
@@ -839,7 +1021,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         // TODO-completess: Implementing Iterator for IpRange would be nice.
         let addresses = [
@@ -942,7 +1124,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
@@ -976,7 +1158,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.create_service_ip_pool("for-nexus", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1023,7 +1205,119 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_insert_external_ip_for_service_is_idempoent() {
+    async fn test_explicit_external_ip_for_service_is_idempotent() {
+        let context = TestContext::new(
+            "test_explicit_external_ip_for_service_is_idempotent",
+        )
+        .await;
+
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 4),
+        ))
+        .unwrap();
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
+
+        // Allocate an IP address as we would for an external, rack-associated
+        // service.
+        let id = Uuid::new_v4();
+        let ip = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip.kind, IpKind::Service);
+        assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)));
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+        assert!(ip.instance_id.is_none());
+
+        // Try allocating the same service IP again.
+        let ip_again = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip.id, ip_again.id);
+        assert_eq!(ip.ip.ip(), ip_again.ip.ip());
+
+        // Try allocating the same service IP once more, but do it with a
+        // different UUID.
+        let err = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+            )
+            .await
+            .expect_err("Should have failed to re-allocate same IP address (different UUID)");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Requested external IP address not available"
+        );
+
+        // Try allocating the same service IP once more, but do it with a
+        // different input address.
+        let err = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            )
+            .await
+            .expect_err("Should have failed to re-allocate different IP address (same UUID)");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Re-allocating IP address with a different value"
+        );
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_explicit_external_ip_for_service_out_of_range() {
+        let context = TestContext::new(
+            "test_explicit_external_ip_for_service_out_of_range",
+        )
+        .await;
+
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 4),
+        ))
+        .unwrap();
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
+
+        let id = Uuid::new_v4();
+        let err = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+            )
+            .await
+            .expect_err("Should have failed to allocate out-of-bounds IP");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Requested external IP address not available"
+        );
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_external_ip_for_service_is_idempotent() {
         let context = TestContext::new(
             "test_insert_external_ip_for_service_is_idempotent",
         )
@@ -1034,7 +1328,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
         ))
         .unwrap();
-        context.create_service_ip_pool("for-nexus", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1078,7 +1372,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_service_ip_pool("for-nexus", ip_range).await;
+        context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
@@ -1117,7 +1411,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.initialize_ip_pool("default", range).await;
 
         // Create one SNAT IP address.
         let instance_id = Uuid::new_v4();
@@ -1182,7 +1476,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", first_range).await;
+        context.initialize_ip_pool("default", first_range).await;
         let second_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 4),
             Ipv4Addr::new(10, 0, 0, 6),
@@ -1226,7 +1520,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", first_range).await;
+        context.initialize_ip_pool("default", first_range).await;
         let first_address = Ipv4Addr::new(10, 0, 0, 4);
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =

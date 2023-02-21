@@ -65,22 +65,6 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // Convert from parameter -> DB type.
-        let services: Vec<_> = request
-            .services
-            .into_iter()
-            .map(|svc| {
-                db::model::Service::new(
-                    svc.service_id,
-                    svc.sled_id,
-                    svc.address,
-                    svc.kind.into(),
-                )
-            })
-            .collect();
-
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1958): If nexus, add a pool?
-
         let datasets: Vec<_> = request
             .datasets
             .into_iter()
@@ -94,6 +78,7 @@ impl super::Nexus {
             })
             .collect();
 
+        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         let certificates: Vec<_> = request
             .certs
             .into_iter()
@@ -126,8 +111,9 @@ impl super::Nexus {
             .rack_set_initialized(
                 opctx,
                 rack_id,
-                services,
+                request.services,
                 datasets,
+                service_ip_pool_ranges,
                 certificates,
             )
             .await?;

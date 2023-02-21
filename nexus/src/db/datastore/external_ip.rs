@@ -14,10 +14,11 @@ use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::Name;
+use crate::db::pool::DbConnection;
 use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Resource;
@@ -25,6 +26,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name as ExternalName;
+use std::net::IpAddr;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -83,20 +85,58 @@ impl DataStore {
         opctx: &OpContext,
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
-        NextExternalIp::new(data)
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                use async_bb8_diesel::ConnectionError::Query;
-                use async_bb8_diesel::PoolError::Connection;
-                use diesel::result::Error::NotFound;
-                match e {
-                    Connection(Query(NotFound)) => Error::invalid_request(
-                        "No external IP addresses available",
-                    ),
-                    _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+        let conn = self.pool_authorized(opctx).await?;
+        Self::allocate_external_ip_on_connection(conn, data).await
+    }
+
+    /// Variant of [Self::allocate_external_ip] which may be called from a
+    /// transaction context.
+    pub(crate) async fn allocate_external_ip_on_connection<ConnErr>(
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
+        data: IncompleteExternalIp,
+    ) -> CreateResult<ExternalIp>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        let explicit_ip = data.explicit_ip().is_some();
+        NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use async_bb8_diesel::ConnectionError::Query;
+            use async_bb8_diesel::PoolError::Connection;
+            use diesel::result::Error::NotFound;
+            let e = PoolError::from(e);
+            match e {
+                Connection(Query(NotFound)) => {
+                    if explicit_ip {
+                        Error::invalid_request(
+                            "Requested external IP address not available",
+                        )
+                    } else {
+                        Error::invalid_request(
+                            "No external IP addresses available",
+                        )
+                    }
                 }
-            })
+                _ => crate::db::queries::external_ip::from_pool(e),
+            }
+        })
+    }
+
+    /// Allocates an explicit IP address for an internal service.
+    ///
+    /// Unlike the other IP allocation requests, this does not search for an
+    /// available IP address, it asks for one explicitly.
+    pub async fn allocate_explicit_service_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        ip: IpAddr,
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let data =
+            IncompleteExternalIp::for_service_explicit(ip_id, pool.id(), ip);
+        self.allocate_external_ip(opctx, data).await
     }
 
     /// Deallocate the external IP address with the provided ID.
@@ -104,7 +144,6 @@ impl DataStore {
     /// To support idempotency, such as in saga operations, this method returns
     /// an extra boolean, rather than the usual `DeleteResult`. The meaning of
     /// return values are:
-    ///
     /// - `Ok(true)`: The record was deleted during this call
     /// - `Ok(false)`: The record was already deleted, such as by a previous
     /// call

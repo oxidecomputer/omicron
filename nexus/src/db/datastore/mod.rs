@@ -81,6 +81,9 @@ pub use volume::CrucibleResources;
 // TODO: This should likely turn into a configuration option.
 pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
+/// The name of the built-in IP pool for Oxide services.
+pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
+
 // Represents a query that is ready to be executed.
 //
 // This helper trait lets the statement either be executed or explained.
@@ -236,12 +239,20 @@ pub async fn datastore_test(
         authn::Context::internal_db_init(),
         Arc::clone(&datastore),
     );
+
+    // TODO: Can we just call "Populate" instead of doing this?
+    let rack_id = Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap();
     datastore.load_builtin_users(&opctx).await.unwrap();
     datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
     datastore.load_builtin_silos(&opctx).await.unwrap();
     datastore.load_silo_users(&opctx).await.unwrap();
     datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
+    datastore
+        .load_builtin_fleet_virtual_provisioning_collection(&opctx)
+        .await
+        .unwrap();
+    datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
 
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
@@ -1067,14 +1078,28 @@ mod test {
 
         // Initialize the Rack.
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![], vec![], vec![])
+            .rack_set_initialized(
+                &opctx,
+                rack.id(),
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            )
             .await
             .unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![], vec![], vec![])
+            .rack_set_initialized(
+                &opctx,
+                rack.id(),
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            )
             .await
             .unwrap();
         assert!(result.initialized);

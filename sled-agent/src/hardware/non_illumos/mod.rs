@@ -55,3 +55,8 @@ pub fn ensure_partition_layout(
 ) -> Result<Vec<Partition>, DiskError> {
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }
+
+/// Return true if the host system is an Oxide Gimlet.
+pub fn is_gimlet() -> anyhow::Result<bool> {
+    Ok(false)
+}

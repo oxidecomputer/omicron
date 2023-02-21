@@ -43,14 +43,11 @@
 //! each populator behaves as expected in the above ways.
 
 use crate::context::OpContext;
-use crate::db::{self, DataStore};
-use crate::external_api::params;
+use crate::db::DataStore;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Name;
 use omicron_common::backoff;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -279,18 +276,9 @@ impl Populator for PopulateFleet {
         'a: 'b,
     {
         async {
-            let id = *db::fixed_data::FLEET_ID;
             datastore
-                .virtual_provisioning_collection_create(
-                    opctx,
-                    db::model::VirtualProvisioningCollection::new(
-                        id,
-                        db::model::CollectionTypeProvisioned::Fleet,
-                    ),
-                )
-                .await?;
-
-            Ok(())
+                .load_builtin_fleet_virtual_provisioning_collection(opctx)
+                .await
         }
         .boxed()
     }
@@ -308,44 +296,8 @@ impl Populator for PopulateRack {
     where
         'a: 'b,
     {
-        async {
-            datastore
-                .rack_insert(opctx, &db::model::Rack::new(args.rack_id))
-                .await?;
-
-            let params = params::IpPoolCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "oxide-service-pool".parse::<Name>().unwrap(),
-                    description: String::from("IP Pool for Oxide Services"),
-                },
-            };
-            datastore
-                .ip_pool_create(opctx, &params, /*internal=*/ true)
-                .await
-                .map(|_| ())
-                .or_else(|e| match e {
-                    Error::ObjectAlreadyExists { .. } => Ok(()),
-                    _ => Err(e),
-                })?;
-
-            let params = params::IpPoolCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "default".parse::<Name>().unwrap(),
-                    description: String::from("default IP pool"),
-                },
-            };
-            datastore
-                .ip_pool_create(opctx, &params, /*internal=*/ false)
-                .await
-                .map(|_| ())
-                .or_else(|e| match e {
-                    Error::ObjectAlreadyExists { .. } => Ok(()),
-                    _ => Err(e),
-                })?;
-
-            Ok(())
-        }
-        .boxed()
+        async { datastore.load_builtin_rack_data(opctx, args.rack_id).await }
+            .boxed()
     }
 }
 
