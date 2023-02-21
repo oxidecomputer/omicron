@@ -16,11 +16,11 @@ use std::path::Path;
 
 fn main() -> Result<()> {
     // Find the current maghemite repo commit from our package manifest.
-    let manifest = fs::read("../package-manifest.toml")
+    let manifest = fs::read_to_string("../package-manifest.toml")
         .context("failed to read ../package-manifest.toml")?;
     println!("cargo:rerun-if-changed=../package-manifest.toml");
 
-    let config: Config = toml::de::from_slice(&manifest)
+    let config: Config = toml::from_str(&manifest)
         .context("failed to parse ../package-manifest.toml")?;
     let maghemite = config
         .packages
