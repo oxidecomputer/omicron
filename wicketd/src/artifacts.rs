@@ -157,7 +157,7 @@ fn extract_and_validate(
     // if time were available, we might want to be able to load older
     // versions of artifacts over the technician port in an emergency.
     //
-    // XXX we aren't checking against a root of trust at this point --
+    // XXX we aren't checking against a trust anchor at this point --
     // anyone can sign the repositories and this code will accept that.
     let repository = OmicronRepo::load_ignore_expiration(temp_path)
         .map_err(RepositoryError::LoadRepository)?;
@@ -282,8 +282,37 @@ enum RepositoryError {
 
 impl RepositoryError {
     fn to_http_error(&self) -> HttpError {
-        // TODO: add better errors than just 503
-        HttpError::for_unavail(None, DisplayErrorChain::new(self).to_string())
+        let message = DisplayErrorChain::new(self).to_string();
+
+        match self {
+            // Errors we had that are unrelated to the contents of a repository
+            // uploaded by a client.
+            RepositoryError::TempDirCreate(_) => {
+                HttpError::for_unavail(None, message)
+            }
+
+            // Errors that are definitely caused by bad repository contents.
+            RepositoryError::DuplicateEntry(_)
+            | RepositoryError::DuplicateArtifactKind(_)
+            | RepositoryError::LocateTarget { .. }
+            | RepositoryError::MissingArtifactKind(_)
+            | RepositoryError::MissingTarget(_) => {
+                HttpError::for_bad_request(None, message)
+            }
+
+            // Gray area - these are _probably_ caused by bad repository
+            // contents, but there might be some cases (or cases-with-cases)
+            // where good contents still produce one of these errors. We'll opt
+            // for sending a 4xx bad request in hopes that it was our client's
+            // fault.
+            RepositoryError::OpenArchive(_)
+            | RepositoryError::Extract(_)
+            | RepositoryError::LoadRepository(_)
+            | RepositoryError::ReadArtifactsDocument(_)
+            | RepositoryError::ReadTarget { .. } => {
+                HttpError::for_bad_request(None, message)
+            }
+        }
     }
 }
 
