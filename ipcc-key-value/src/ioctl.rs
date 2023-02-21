@@ -75,8 +75,8 @@ impl Ipcc {
         };
 
         if result != 0 {
-            let errno = unsafe { *libc::___errno() };
-            return Err(IpccKeyLookupError::IoctlFailed { errno });
+            let error = io::Error::last_os_error();
+            return Err(IpccKeyLookupError::IoctlFailed { error });
         }
 
         match kl.result {

@@ -7,12 +7,13 @@
 //! This module contains types shared between the real (illumos-only)
 //! `crate::ioctl` module and the generic `crate::ioctl_stub` module.
 
+use std::io;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum IpccKeyLookupError {
-    #[error("IPCC key lookup ioctl failed: errno {errno}")]
-    IoctlFailed { errno: i32 },
+    #[error("IPCC key lookup ioctl failed: {error}")]
+    IoctlFailed { error: io::Error },
     #[error("IPCC key lookup failed: unknown key {key}")]
     UnknownKey { key: String },
     #[error("IPCC key lookup failed: no value for key")]
