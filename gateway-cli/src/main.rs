@@ -18,7 +18,6 @@ use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
-use gateway_client::types::UpdateBody;
 use gateway_client::Client;
 use serde::Serialize;
 use slog::o;
@@ -614,9 +613,10 @@ async fn update(
     let update_id = Uuid::new_v4();
     println!("generated update ID {update_id}");
 
-    let body = UpdateBody { id: update_id, image, slot };
     client
-        .sp_component_update(sp.type_, sp.slot, component, &body)
+        .sp_component_update(
+            sp.type_, sp.slot, component, slot, &update_id, image,
+        )
         .await
         .context("failed to start update")?;
 

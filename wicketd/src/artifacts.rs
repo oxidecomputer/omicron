@@ -19,10 +19,19 @@ use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{ArtifactHash, ArtifactHashId, ArtifactId};
 use thiserror::Error;
 use tough::TargetName;
 use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
+
+// A collection of artifacts along with an update plan using those artifacts.
+#[derive(Debug, Default)]
+struct ArtifactsWithPlan {
+    by_id: DebugIgnore<HashMap<ArtifactId, BufList>>,
+    by_hash: DebugIgnore<HashMap<ArtifactHashId, BufList>>,
+    plan: Option<UpdatePlan>,
+}
 
 /// The artifact store for wicketd.
 ///
@@ -33,22 +42,32 @@ pub(crate) struct WicketdArtifactStore {
     log: slog::Logger,
     // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex` because the critical
     // sections are extremely small.
-    artifacts: Arc<Mutex<DebugIgnore<TufRepoArtifacts>>>,
+    artifacts_with_plan: Arc<Mutex<ArtifactsWithPlan>>,
 }
 
 impl WicketdArtifactStore {
     pub(crate) fn new(log: &slog::Logger) -> Self {
         let log = log.new(slog::o!("component" => "wicketd artifact store"));
-        Self { log, artifacts: Default::default() }
+        Self { log, artifacts_with_plan: Default::default() }
     }
 
     pub(crate) fn put_repository(&self, bytes: &[u8]) -> Result<(), HttpError> {
         slog::debug!(self.log, "adding repository"; "size" => bytes.len());
 
-        let new_artifacts = TufRepoArtifacts::from_zip(&bytes, &self.log)
+        let new_artifacts = ArtifactsWithPlan::from_zip(&bytes, &self.log)
             .map_err(|error| error.to_http_error())?;
         self.replace(new_artifacts);
         Ok(())
+    }
+
+    pub(crate) fn artifact_ids(&self) -> Vec<ArtifactId> {
+        self.artifacts_with_plan.lock().unwrap().by_id.keys().cloned().collect()
+    }
+
+    pub(crate) fn current_plan(&self) -> Option<UpdatePlan> {
+        // We expect this hashmap to be relatively small (order ~10), and
+        // cloning both ArtifactIds and BufLists are cheap.
+        self.artifacts_with_plan.lock().unwrap().plan.clone()
     }
 
     // ---
@@ -58,19 +77,19 @@ impl WicketdArtifactStore {
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
-        self.artifacts.lock().unwrap().get(id)
+        self.artifacts_with_plan.lock().unwrap().get(id)
     }
 
     fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
-        self.artifacts.lock().unwrap().get_by_hash(id)
+        self.artifacts_with_plan.lock().unwrap().get_by_hash(id)
     }
 
     /// Replaces the artifact hash map, returning the previous map.
-    fn replace(&self, new_artifacts: TufRepoArtifacts) -> TufRepoArtifacts {
-        let mut artifacts = self.artifacts.lock().unwrap();
-        std::mem::replace(&mut **artifacts, new_artifacts)
+    fn replace(&self, new_artifacts: ArtifactsWithPlan) -> ArtifactsWithPlan {
+        let mut artifacts = self.artifacts_with_plan.lock().unwrap();
+        std::mem::replace(&mut *artifacts, new_artifacts)
     }
 }
 
@@ -111,13 +130,7 @@ impl ArtifactGetter for WicketdArtifactStore {
     }
 }
 
-#[derive(Debug, Default)]
-struct TufRepoArtifacts {
-    by_id: HashMap<ArtifactId, BufList>,
-    by_hash: HashMap<ArtifactHashId, BufList>,
-}
-
-impl TufRepoArtifacts {
+impl ArtifactsWithPlan {
     fn from_zip(
         zip_bytes: &[u8],
         log: &slog::Logger,
@@ -262,9 +275,15 @@ impl TufRepoArtifacts {
             );
         }
 
-        // TODO: build out update planner here
+        // Ensure we know how to apply updates from this set of artifacts; we'll
+        // remember the plan we create.
+        let plan = UpdatePlan::new(&by_id)?;
 
-        Ok(TufRepoArtifacts { by_id, by_hash })
+        Ok(Self {
+            by_id: by_id.into(),
+            by_hash: by_hash.into(),
+            plan: Some(plan),
+        })
     }
 
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
@@ -327,6 +346,12 @@ enum RepositoryError {
     )]
     DuplicateEntry(ArtifactId),
 
+    #[error("multiple artifacts found for kind `{0:?}`")]
+    DuplicateArtifactKind(KnownArtifactKind),
+
+    #[error("missing artifact of kind `{0:?}`")]
+    MissingArtifactKind(KnownArtifactKind),
+
     #[error(
         "duplicate hash entries found in artifacts.json for kind `{}`, hash `{}`", .0.kind, .0.hash
     )]
@@ -335,7 +360,115 @@ enum RepositoryError {
 
 impl RepositoryError {
     fn to_http_error(&self) -> HttpError {
-        // TODO: add better errors than just 503
-        HttpError::for_unavail(None, DisplayErrorChain::new(self).to_string())
+        let message = DisplayErrorChain::new(self).to_string();
+
+        match self {
+            // Errors we had that are unrelated to the contents of a repository
+            // uploaded by a client.
+            RepositoryError::TempDirCreate(_) => {
+                HttpError::for_unavail(None, message)
+            }
+
+            // Errors that are definitely caused by bad repository contents.
+            RepositoryError::DuplicateEntry(_)
+            | RepositoryError::DuplicateArtifactKind(_)
+            | RepositoryError::LocateTarget { .. }
+            | RepositoryError::TargetHashLength(_)
+            | RepositoryError::MissingArtifactKind(_)
+            | RepositoryError::MissingTarget(_)
+            | RepositoryError::DuplicateHashEntry(_) => {
+                HttpError::for_bad_request(None, message)
+            }
+
+            // Gray area - these are _probably_ caused by bad repository
+            // contents, but there might be some cases (or cases-with-cases)
+            // where good contents still produce one of these errors. We'll opt
+            // for sending a 4xx bad request in hopes that it was our client's
+            // fault.
+            RepositoryError::OpenArchive(_)
+            | RepositoryError::Extract(_)
+            | RepositoryError::LoadRepository(_)
+            | RepositoryError::ReadArtifactsDocument(_)
+            | RepositoryError::TargetHashRead { .. }
+            | RepositoryError::ReadTarget { .. } => {
+                HttpError::for_bad_request(None, message)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ArtifactIdData {
+    pub(crate) id: ArtifactId,
+    pub(crate) data: DebugIgnore<BufList>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UpdatePlan {
+    pub(crate) gimlet_sp: ArtifactIdData,
+    pub(crate) psc_sp: ArtifactIdData,
+    pub(crate) sidecar_sp: ArtifactIdData,
+}
+
+impl UpdatePlan {
+    fn new(
+        artifacts: &HashMap<ArtifactId, BufList>,
+    ) -> Result<Self, RepositoryError> {
+        // We expect exactly one of each of these kinds to be present in the
+        // snapshot. Scan the snapshot and record the first of each we find,
+        // failing if we find a second.
+        let mut gimlet_sp = None;
+        let mut psc_sp = None;
+        let mut sidecar_sp = None;
+
+        let artifact_found =
+            |out: &mut Option<ArtifactIdData>, id, data: &BufList| {
+                let data = DebugIgnore(data.clone());
+                match out.replace(ArtifactIdData { id, data }) {
+                    None => Ok(()),
+                    Some(prev) => {
+                        // This closure is only called with well-known kinds.
+                        let kind = prev.id.kind.to_known().unwrap();
+                        Err(RepositoryError::DuplicateArtifactKind(kind))
+                    }
+                }
+            };
+
+        for (artifact_id, data) in artifacts.iter() {
+            // In generating an update plan, skip any artifact kinds that are
+            // unknown to us (we wouldn't know how to incorporate them into our
+            // plan).
+            let Some(artifact_kind) = artifact_id.kind.to_known() else { continue };
+            let artifact_id = artifact_id.clone();
+
+            match artifact_kind {
+                KnownArtifactKind::GimletSp => {
+                    artifact_found(&mut gimlet_sp, artifact_id, data)?
+                }
+                KnownArtifactKind::PscSp => {
+                    artifact_found(&mut psc_sp, artifact_id, data)?
+                }
+                KnownArtifactKind::SwitchSp => {
+                    artifact_found(&mut sidecar_sp, artifact_id, data)?
+                }
+                _ => continue,
+            }
+        }
+
+        Ok(Self {
+            gimlet_sp: gimlet_sp.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::GimletSp,
+                ),
+            )?,
+            psc_sp: psc_sp.ok_or(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::PscSp,
+            ))?,
+            sidecar_sp: sidecar_sp.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::SwitchSp,
+                ),
+            )?,
+        })
     }
 }

@@ -7787,6 +7787,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
+ "gateway-messages",
  "hex",
  "http",
  "hyper",
