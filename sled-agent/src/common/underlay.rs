@@ -31,7 +31,7 @@ pub enum Error {
     BadAddrObj(#[from] addrobj::ParseError),
 
     #[error("Could not determine if host is a Gimlet: {0}")]
-    SystemDetection(#[from] anyhow::Error),
+    SystemDetection(#[source] anyhow::Error),
 
     #[error("Could not enumerate physical links")]
     FindLinks(#[from] FindPhysicalLinkError),
@@ -56,7 +56,7 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
 /// developer machine, or generally a non-Gimlet, this will return the
 /// VNICs we use to emulate those Chelsio links.
 pub(crate) fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
-    if is_gimlet()? {
+    if is_gimlet().map_err(Error::SystemDetection)? {
         Dladm::list_physical().map_err(Error::FindLinks).map(|links| {
             links
                 .into_iter()

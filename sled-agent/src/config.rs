@@ -57,7 +57,7 @@ pub enum ConfigError {
         err: toml::de::Error,
     },
     #[error("Could not determine if host is a Gimlet: {0}")]
-    SystemDetection(#[from] anyhow::Error),
+    SystemDetection(#[source] anyhow::Error),
     #[error("Could not enumerate physical links")]
     FindLinks(#[from] FindPhysicalLinkError),
 }
@@ -76,7 +76,7 @@ impl Config {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
-            if is_gimlet()? {
+            if is_gimlet().map_err(ConfigError::SystemDetection)? {
                 Dladm::list_physical()
                     .map_err(ConfigError::FindLinks)?
                     .into_iter()
