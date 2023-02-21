@@ -4,7 +4,8 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use crate::artifacts::WicketdArtifactStore;
+use crate::artifacts::ArtifactIdData;
+use crate::artifacts::UpdatePlan;
 use crate::mgs::make_mgs_client;
 use crate::update_events::UpdateEventFailureKind;
 use crate::update_events::UpdateEventKind;
@@ -14,13 +15,11 @@ use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use buf_list::BufList;
-use debug_ignore::DebugIgnore;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateBody;
 use gateway_messages::SpComponent;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::ArtifactId;
 use slog::error;
 use slog::info;
@@ -82,10 +81,8 @@ impl From<UpdateLog> for crate::update_events::UpdateLog {
 }
 
 #[derive(Debug)]
-pub(crate) struct UpdatePlanner {
+pub(crate) struct UpdateTracker {
     mgs_client: gateway_client::Client,
-    artifact_store: WicketdArtifactStore,
-    update_plan: StdMutex<Result<UpdatePlan, UpdatePlanError>>,
     running_updates: Mutex<BTreeMap<SpIdentifier, JoinHandle<()>>>,
     // Note: Our inner mutex here is a standard mutex, not a tokio mutex. We
     // generally hold it only log enough to update its state or push a new
@@ -95,9 +92,8 @@ pub(crate) struct UpdatePlanner {
     log: Logger,
 }
 
-impl UpdatePlanner {
+impl UpdateTracker {
     pub(crate) fn new(
-        artifact_store: WicketdArtifactStore,
         mgs_addr: SocketAddrV6,
         log: &Logger,
     ) -> Self {
@@ -106,43 +102,19 @@ impl UpdatePlanner {
         let update_logs = Mutex::default();
         let mgs_client = make_mgs_client(log.clone(), mgs_addr);
 
-        // We don't expect to be able to create an update plan before a TUF
-        // repository has been uploaded, and presumably we're being created
-        // before such a thing could happen. Therefore, we store the `Result` of
-        // creating the update plan; if someone tries to call `start()` before
-        // we've been able to successfully generate a plan, we have an error
-        // ready to hand them.
-        let update_plan = StdMutex::new(UpdatePlan::new(&artifact_store));
-
         Self {
             mgs_client,
-            artifact_store,
-            update_plan,
             log,
             running_updates,
             update_logs,
         }
     }
 
-    pub(crate) fn regenerate_plan(&self) -> Result<(), UpdatePlanError> {
-        match UpdatePlan::new(&self.artifact_store) {
-            Ok(plan) => {
-                *self.update_plan.lock().unwrap() = Ok(plan);
-                Ok(())
-            }
-            Err(err) => {
-                *self.update_plan.lock().unwrap() = Err(err.clone());
-                Err(err)
-            }
-        }
-    }
-
     pub(crate) async fn start(
         &self,
         sp: SpIdentifier,
-    ) -> Result<(), UpdatePlanError> {
-        let plan = self.update_plan.lock().unwrap().clone()?;
-
+        plan: UpdatePlan,
+    ) -> Result<(), StartUpdateError> {
         let spawn_update_driver = || async {
             // Get a reference to the update log for this SP...
             let update_log = Arc::clone(
@@ -177,7 +149,7 @@ impl UpdatePlanner {
                     slot.insert(spawn_update_driver().await);
                     Ok(())
                 } else {
-                    Err(UpdatePlanError::UpdateInProgress(sp))
+                    Err(StartUpdateError::UpdateInProgress(sp))
                 }
             }
         }
@@ -212,85 +184,9 @@ impl UpdatePlanner {
 }
 
 #[derive(Debug, Clone, Error)]
-pub(crate) enum UpdatePlanError {
-    #[error(
-        "invalid TUF repository: more than one artifact present of kind {0:?}"
-    )]
-    DuplicateArtifacts(KnownArtifactKind),
-    #[error("invalid TUF repository: no artifact present of kind {0:?}")]
-    MissingArtifact(KnownArtifactKind),
+pub(crate) enum StartUpdateError {
     #[error("target is already being updated: {0:?}")]
     UpdateInProgress(SpIdentifier),
-}
-
-#[derive(Debug, Clone)]
-struct ArtifactIdData {
-    id: ArtifactId,
-    data: DebugIgnore<BufList>,
-}
-
-#[derive(Debug, Clone)]
-struct UpdatePlan {
-    gimlet_sp: ArtifactIdData,
-    psc_sp: ArtifactIdData,
-    sidecar_sp: ArtifactIdData,
-}
-
-impl UpdatePlan {
-    fn new(
-        artifact_store: &WicketdArtifactStore,
-    ) -> Result<Self, UpdatePlanError> {
-        let snapshot = artifact_store.snapshot();
-
-        // We expect exactly one of each of these kinds to be present in the
-        // snapshot. Scan the snapshot and record the first of each we find,
-        // failing if we find a second.
-        let mut gimlet_sp = None;
-        let mut psc_sp = None;
-        let mut sidecar_sp = None;
-
-        let artifact_found = |out: &mut Option<ArtifactIdData>, id, data| {
-            let data = DebugIgnore(data);
-            match out.replace(ArtifactIdData { id, data }) {
-                None => Ok(()),
-                Some(prev) => {
-                    // This closure is only called with well-known kinds.
-                    let kind = prev.id.kind.to_known().unwrap();
-                    Err(UpdatePlanError::DuplicateArtifacts(kind))
-                }
-            }
-        };
-
-        for (id, data) in snapshot {
-            let Some(kind) = id.kind.to_known() else { continue };
-            match kind {
-                KnownArtifactKind::GimletSp => {
-                    artifact_found(&mut gimlet_sp, id, data)?
-                }
-                KnownArtifactKind::PscSp => {
-                    artifact_found(&mut psc_sp, id, data)?
-                }
-                KnownArtifactKind::SwitchSp => {
-                    artifact_found(&mut sidecar_sp, id, data)?
-                }
-                _ => {
-                    // ignore other known kinds for now
-                }
-            }
-        }
-
-        Ok(Self {
-            gimlet_sp: gimlet_sp.ok_or(UpdatePlanError::MissingArtifact(
-                KnownArtifactKind::GimletSp,
-            ))?,
-            psc_sp: psc_sp.ok_or(UpdatePlanError::MissingArtifact(
-                KnownArtifactKind::PscSp,
-            ))?,
-            sidecar_sp: sidecar_sp.ok_or(UpdatePlanError::MissingArtifact(
-                KnownArtifactKind::SwitchSp,
-            ))?,
-        })
-    }
 }
 
 #[derive(Debug)]

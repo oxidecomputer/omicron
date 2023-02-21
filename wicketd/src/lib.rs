@@ -9,7 +9,7 @@ mod http_entrypoints;
 mod inventory;
 mod mgs;
 mod update_events;
-mod update_planner;
+mod update_tracker;
 
 use artifacts::WicketdArtifactStore;
 pub use config::Config;
@@ -21,7 +21,7 @@ pub(crate) use mgs::{MgsHandle, MgsManager};
 use dropshot::ConfigDropshot;
 use slog::{debug, error, o, Drain};
 use std::net::{SocketAddr, SocketAddrV6};
-use update_planner::UpdatePlanner;
+use update_tracker::UpdateTracker;
 
 /// Run the OpenAPI generator for the API; which emits the OpenAPI spec
 /// to stdout.
@@ -75,8 +75,7 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     });
 
     let store = WicketdArtifactStore::new(&log);
-    let update_planner =
-        UpdatePlanner::new(store.clone(), args.mgs_address, &log);
+    let update_tracker = UpdateTracker::new(args.mgs_address, &log);
 
     let wicketd_server_fut = {
         let log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -88,7 +87,7 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
                 mgs_handle,
                 mgs_client,
                 artifact_store: store.clone(),
-                update_planner,
+                update_tracker,
             },
             &log,
         )

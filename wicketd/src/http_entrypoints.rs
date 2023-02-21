@@ -6,13 +6,13 @@
 
 use crate::mgs::GetInventoryResponse;
 use crate::update_events::UpdateLog;
-use crate::update_planner::UpdatePlanError;
-use dropshot::Path;
+use crate::update_tracker::StartUpdateError;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
+use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::UntypedBody;
 use gateway_client::types::SpIdentifier;
@@ -89,16 +89,6 @@ async fn put_repository(
     // and allocations. Replace this with a better solution once it's available in dropshot.
     rqctx.artifact_store.put_repository(body.as_bytes())?;
 
-    // Ensure we can actually apply updates from this repository.
-    //
-    // TODO-correctness If this fails, we've left `artifact_store` in a bad
-    // state. Maybe we should try to plan before replacing the existing
-    // artifact_store contents?
-    rqctx
-        .update_planner
-        .regenerate_plan()
-        .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -134,18 +124,27 @@ async fn post_start_update(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    match rqctx.context().update_planner.start(target.into_inner()).await {
+    let rqctx = rqctx.context();
+
+    // Do we have a plan with which we can apply updates (i.e., has a valid TUF
+    // repository been uploaded)?
+    let plan = rqctx.artifact_store.current_plan().ok_or_else(|| {
+        // TODO-correctness `for_bad_request` is a little questionable because
+        // the problem isn't this request specifically, but that we haven't
+        // gotten request yet with a valid TUF repository. `for_unavail` might
+        // be more accurate, but `for_unavail` doesn't give us away to give the
+        // client a meaningful error.
+        HttpError::for_bad_request(
+            None,
+            "upload a valid TUF repository first".to_string(),
+        )
+    })?;
+
+    match rqctx.update_tracker.start(target.into_inner(), plan).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => match err {
-            UpdatePlanError::DuplicateArtifacts(_)
-            | UpdatePlanError::MissingArtifact(_) => {
-                // TODO-correctness for_bad_request may not be right - both of
-                // these errors are issues with the TUF repository, not this
-                // request itself.
+            StartUpdateError::UpdateInProgress(_) => {
                 Err(HttpError::for_bad_request(None, err.to_string()))
-            }
-            UpdatePlanError::UpdateInProgress(_) => {
-                Err(HttpError::for_unavail(None, err.to_string()))
             }
         },
     }
@@ -168,7 +167,7 @@ pub struct UpdateLogAll {
 async fn get_update_all(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<UpdateLogAll>, HttpError> {
-    let sps = rqctx.context().update_planner.update_log_all().await;
+    let sps = rqctx.context().update_tracker.update_log_all().await;
     Ok(HttpResponseOk(UpdateLogAll { sps }))
 }
 
@@ -183,6 +182,6 @@ async fn get_update_sp(
     target: Path<SpIdentifier>,
 ) -> Result<HttpResponseOk<UpdateLog>, HttpError> {
     let update_log =
-        rqctx.context().update_planner.update_log(target.into_inner()).await;
+        rqctx.context().update_tracker.update_log(target.into_inner()).await;
     Ok(HttpResponseOk(update_log))
 }
