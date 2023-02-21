@@ -629,7 +629,7 @@ impl Zones {
         // Call the guts of this function within a closure to make it easier
         // to wrap the error with appropriate context.
         |link: EtherstubVnic, address, name| -> Result<(), anyhow::Error> {
-            let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")
+            let gz_link_local_addrobj = AddrObject::link_local(&link.0)
                 .map_err(|err| anyhow!(err))?;
             Self::ensure_has_link_local_v6_address(
                 None,
@@ -701,7 +701,7 @@ impl Zones {
                         // Finally, actually ensure that the v6 address we want
                         // exists within the zone.
                         let link_local_addrobj =
-                            addrobj.on_same_interface("linklocal")?;
+                            addrobj.link_local_on_same_interface()?;
                         Self::ensure_has_link_local_v6_address(
                             Some(zone),
                             &link_local_addrobj,

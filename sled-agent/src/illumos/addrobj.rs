@@ -4,6 +4,9 @@
 
 //! API for operating on addrobj objects.
 
+/// The name provided to all link-local IPv6 addresses.
+pub const IPV6_LINK_LOCAL_NAME: &str = "ll";
+
 /// Describes an "addrobj", which is the combination of an interface
 /// with an associated name.
 ///
@@ -53,6 +56,12 @@ impl AddrObject {
         Self::new(&self.interface, name)
     }
 
+    /// Create a new addrobj on the same interface with the IPv6 link-local
+    /// name.
+    pub fn link_local_on_same_interface(&self) -> Result<Self, ParseError> {
+        self.on_same_interface(IPV6_LINK_LOCAL_NAME)
+    }
+
     pub fn new(interface: &str, name: &str) -> Result<Self, ParseError> {
         if interface.contains('/') {
             return Err(ParseError {
@@ -63,6 +72,11 @@ impl AddrObject {
             return Err(ParseError { name: BadName::Object(name.to_string()) });
         }
         Ok(Self { interface: interface.to_string(), name: name.to_string() })
+    }
+
+    /// A link-local IPv6 addrobj over the provided interface.
+    pub fn link_local(interface: &str) -> Result<Self, ParseError> {
+        Self::new(interface, IPV6_LINK_LOCAL_NAME)
     }
 
     pub fn interface(&self) -> &str {
