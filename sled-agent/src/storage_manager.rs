@@ -1030,8 +1030,8 @@ impl StorageWorker {
         );
         let pool_name = pool.info.name();
         let dataset_info: DatasetInfo =
-            toml::from_slice(
-                &tokio::fs::read(&config_path).await.map_err(|err| Error::Io {
+            toml::from_str(
+                &tokio::fs::read_to_string(&config_path).await.map_err(|err| Error::Io {
                     message: format!("read config for pool {pool_name}, dataset {dataset_name:?} from {config_path:?}"),
                     err,
                 })?
