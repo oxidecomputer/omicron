@@ -40,6 +40,38 @@ enum Error {
     NoDevLinks(PathBuf),
 }
 
+const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
+
+/// Return true if the host system is an Oxide Gimlet.
+#[cfg(not(test))]
+pub fn is_gimlet() -> anyhow::Result<bool> {
+    let mut device_info = DevInfo::new_force_load()?;
+    let mut node_walker = device_info.walk_node();
+    let Some(root) = node_walker.next().transpose()? else {
+        anyhow::bail!("No nodes in device tree");
+    };
+    Ok(root.node_name() == GIMLET_ROOT_NODE_NAME)
+}
+
+/// Return true if the host system is an Oxide Gimlet.
+//
+// TODO-testing: This assumes we never test on real Gimlets. That's likely to be
+// a bad assumption in the long-term. For now, however, we catch permissions
+// errors and return `Ok(false)`, on the assumption that (1) either you're not a
+// Gimlet, so that's the correct answer or (2) if you are on a Gimlet, you are
+// root or have configured the right permissions anyway.
+#[cfg(test)]
+pub fn is_gimlet() -> anyhow::Result<bool> {
+    let Ok(mut device_info) = DevInfo::new_force_load() else {
+        return Ok(false);
+    };
+    let mut node_walker = device_info.walk_node();
+    let Ok(Some(root)) = node_walker.next().transpose() else {
+        return Ok(false);
+    };
+    Ok(root.node_name() == GIMLET_ROOT_NODE_NAME)
+}
+
 // A snapshot of information about the underlying Tofino device
 #[derive(Copy, Clone)]
 struct TofinoSnapshot {
@@ -73,7 +105,7 @@ impl HardwareSnapshot {
             return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
         };
         let root_node = root.node_name();
-        if root_node != "Oxide,Gimlet" {
+        if root_node != GIMLET_ROOT_NODE_NAME {
             return Err(Error::NotAGimlet(root_node));
         }
 
