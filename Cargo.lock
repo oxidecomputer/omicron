@@ -817,9 +817,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.1.4"
+version = "4.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f13b9c79b5d1dd500d20ef541215a6423c75829ef43117e1b4d17fd8af0b5d76"
+checksum = "ec0b0588d44d4d63a87dbd75c136c166bbfd9a86a31cb89e09906521c7d3f5e3"
 dependencies = [
  "bitflags",
  "clap_derive 4.1.0",
@@ -1410,7 +1410,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.5.11",
+ "toml 0.7.2",
 ]
 
 [[package]]
@@ -1664,7 +1664,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls",
- "toml 0.7.1",
+ "toml 0.7.2",
  "usdt",
  "uuid",
  "version_check",
@@ -2139,7 +2139,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.4",
+ "clap 4.1.6",
  "futures",
  "gateway-client",
  "hex",
@@ -2771,7 +2771,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.1.4",
+ "clap 4.1.6",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -2793,7 +2793,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.2",
 ]
 
 [[package]]
@@ -2813,7 +2813,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.1.4",
+ "clap 4.1.6",
  "dropshot",
  "expectorate",
  "hyper",
@@ -2843,7 +2843,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.4",
+ "clap 4.1.6",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -2862,7 +2862,7 @@ dependencies = [
  "subprocess",
  "tempdir",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.2",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -3743,7 +3743,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.5.11",
+ "toml 0.7.2",
  "uuid",
 ]
 
@@ -3752,7 +3752,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.4",
+ "clap 4.1.6",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -3761,7 +3761,7 @@ dependencies = [
  "sp-sim",
  "sprockets-rot",
  "thiserror",
- "toml 0.5.11",
+ "toml 0.7.2",
 ]
 
 [[package]]
@@ -3770,7 +3770,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "ciborium",
- "clap 4.1.4",
+ "clap 4.1.6",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -3800,7 +3800,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
- "toml 0.5.11",
+ "toml 0.7.2",
  "uuid",
 ]
 
@@ -3816,7 +3816,7 @@ dependencies = [
  "base64 0.21.0",
  "bb8",
  "chrono",
- "clap 4.1.4",
+ "clap 4.1.6",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3896,7 +3896,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-tungstenite",
- "toml 0.5.11",
+ "toml 0.7.2",
  "tough",
  "usdt",
  "uuid",
@@ -3907,7 +3907,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.4",
+ "clap 4.1.6",
  "futures",
  "hex",
  "indicatif",
@@ -3927,7 +3927,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.2",
  "walkdir",
 ]
 
@@ -3947,7 +3947,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.1.4",
+ "clap 4.1.6",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -3999,7 +3999,7 @@ dependencies = [
  "tofino",
  "tokio",
  "tokio-tungstenite",
- "toml 0.5.11",
+ "toml 0.7.2",
  "uuid",
  "vsss-rs",
  "zone",
@@ -4010,7 +4010,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.4",
+ "clap 4.1.6",
  "dropshot",
  "expectorate",
  "futures",
@@ -4052,9 +4052,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.17.0"
+version = "1.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f61fba1741ea2b3d6a1e3178721804bb716a68a6aeba1149b5d52e3d464ea66"
+checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
 
 [[package]]
 name = "oorandom"
@@ -4271,7 +4271,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.1.4",
+ "clap 4.1.6",
  "dropshot",
  "expectorate",
  "futures",
@@ -4291,7 +4291,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.2",
  "uuid",
 ]
 
@@ -4303,7 +4303,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.1.4",
+ "clap 4.1.6",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4893,7 +4893,7 @@ source = "git+https://github.com/oxidecomputer/progenitor?branch=main#680150559a
 dependencies = [
  "anyhow",
  "built",
- "clap 4.1.4",
+ "clap 4.1.6",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -6341,7 +6341,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.1.4",
+ "clap 4.1.6",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -6354,7 +6354,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.2",
 ]
 
 [[package]]
@@ -6995,9 +6995,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "772c1426ab886e7362aedf4abc9c0d1348a979517efedfc25862944d10137af0"
+checksum = "f7afcae9e3f0fe2c370fd4657108972cbb2fa9db1b9f84849cefd80741b01cb6"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -7016,9 +7016,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.19.1"
+version = "0.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90a238ee2e6ede22fb95350acc78e21dc40da00bb66c0334bde83de4ed89424e"
+checksum = "5e6a7712b49e1775fb9a7b998de6635b299237f48b404dde71704f2e0e7f37e5"
 dependencies = [
  "indexmap",
  "nom8",
@@ -7222,7 +7222,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.1.4",
+ "clap 4.1.6",
  "console",
  "fs-err",
  "humantime",
@@ -7745,7 +7745,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "camino",
- "clap 4.1.4",
+ "clap 4.1.6",
  "crossterm 0.26.0",
  "futures",
  "hex",
@@ -7765,7 +7765,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.2",
  "tui",
  "wicketd-client",
 ]
@@ -7779,7 +7779,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.1.4",
+ "clap 4.1.6",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -7805,7 +7805,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.2",
  "tough",
  "tufaceous-lib",
  "uuid",
