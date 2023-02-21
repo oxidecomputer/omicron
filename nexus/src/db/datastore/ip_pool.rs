@@ -21,10 +21,11 @@ use crate::db::model::IpPoolRange;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
@@ -287,6 +288,24 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
+        let conn = self.pool_authorized(opctx).await?;
+        Self::ip_pool_add_range_on_connection(conn, opctx, authz_pool, range)
+            .await
+    }
+
+    /// Variant of [Self::ip_pool_add_range] which may be called from a
+    /// transaction context.
+    pub(crate) async fn ip_pool_add_range_on_connection<ConnErr>(
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+        range: &IpRange,
+    ) -> CreateResult<IpPoolRange>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
         use db::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
         let pool_id = authz_pool.id();
@@ -295,7 +314,7 @@ impl DataStore {
         let insert_query =
             diesel::insert_into(dsl::ip_pool_range).values(filter_subquery);
         IpPool::insert_resource(pool_id, insert_query)
-            .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+            .insert_and_get_result_async(conn)
             .await
             .map_err(|e| {
                 use async_bb8_diesel::ConnectionError::Query;

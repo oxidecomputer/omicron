@@ -219,6 +219,15 @@ impl IpRange {
     }
 }
 
+impl From<IpAddr> for IpRange {
+    fn from(addr: IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(addr) => IpRange::V4(Ipv4Range::from(addr)),
+            IpAddr::V6(addr) => IpRange::V6(Ipv6Range::from(addr)),
+        }
+    }
+}
+
 impl TryFrom<(Ipv4Addr, Ipv4Addr)> for IpRange {
     type Error = String;
 
@@ -263,6 +272,12 @@ impl Ipv4Range {
     }
 }
 
+impl From<Ipv4Addr> for Ipv4Range {
+    fn from(addr: Ipv4Addr) -> Self {
+        Self { first: addr, last: addr }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize)]
 struct AnyIpv4Range {
     first: Ipv4Addr,
@@ -302,6 +317,12 @@ impl Ipv6Range {
 
     pub fn last_address(&self) -> Ipv6Addr {
         self.last
+    }
+}
+
+impl From<Ipv6Addr> for Ipv6Range {
+    fn from(addr: Ipv6Addr) -> Self {
+        Self { first: addr, last: addr }
     }
 }
 
