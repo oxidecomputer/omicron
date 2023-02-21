@@ -31,6 +31,7 @@ tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 
 [dev-dependencies]
+omicron-test-utils.workspace = true
 hex-literal.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true

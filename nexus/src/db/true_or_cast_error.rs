@@ -29,7 +29,7 @@ impl<E> TrueOrCastError<E>
 where
     E: Expression<SqlType = diesel::sql_types::Bool>,
 {
-    pub fn new(expression: E, error: &'static str) -> Self {
+    pub const fn new(expression: E, error: &'static str) -> Self {
         Self { expression, error }
     }
 }

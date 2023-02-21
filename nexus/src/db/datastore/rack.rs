@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Rack`]s.
 
 use super::DataStore;
+use super::SERVICE_IP_POOL_NAME;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -16,17 +17,22 @@ use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::model::Certificate;
 use crate::db::model::Dataset;
+use crate::db::model::IncompleteExternalIp;
+use crate::db::model::NexusService;
 use crate::db::model::Rack;
 use crate::db::model::Service;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
+use crate::internal_api::params as internal_params;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_types::external_api::shared::IpRange;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -85,8 +91,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        services: Vec<Service>,
+        services: Vec<internal_params::ServicePutRequest>,
         datasets: Vec<Dataset>,
+        service_ip_pool_ranges: Vec<IpRange>,
         certificates: Vec<Certificate>,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
@@ -95,11 +102,15 @@ impl DataStore {
 
         #[derive(Debug)]
         enum RackInitError {
+            AddingIp(Error),
             ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
             DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
             RackUpdate(PoolError),
         }
         type TxnError = TransactionError<RackInitError>;
+
+        let (authz_service_pool, service_pool) =
+            self.ip_pools_service_lookup(&opctx).await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
@@ -114,6 +125,7 @@ impl DataStore {
                     .get_result_async(&conn)
                     .await
                     .map_err(|e| {
+                        warn!(log, "Initializing Rack: Rack UUID not found");
                         TxnError::CustomError(RackInitError::RackUpdate(
                             PoolError::from(e),
                         ))
@@ -123,14 +135,36 @@ impl DataStore {
                     return Ok(rack);
                 }
 
-                // Otherwise, insert services and datasets
-                for svc in services {
+                // Otherwise, insert services and datasets.
+
+                // Set up the IP pool for internal services.
+                for range in service_ip_pool_ranges {
+                    Self::ip_pool_add_range_on_connection(
+                        &conn,
+                        opctx,
+                        &authz_service_pool,
+                        &range,
+                    ).await.map_err(|err| {
+                        warn!(log, "Initializing Rack: Failed to add IP pool range");
+                        TxnError::CustomError(RackInitError::AddingIp(err))
+                    })?;
+                }
+
+                // Allocate records for all services.
+                for service in services {
+                    let service_db = db::model::Service::new(
+                        service.service_id,
+                        service.sled_id,
+                        service.address,
+                        service.kind.into(),
+                    );
+
                     use db::schema::service::dsl;
-                    let sled_id = svc.sled_id;
+                    let sled_id = service.sled_id;
                     <Sled as DatastoreCollection<Service>>::insert_resource(
                         sled_id,
                         diesel::insert_into(dsl::service)
-                            .values(svc.clone())
+                            .values(service_db.clone())
                             .on_conflict(dsl::id)
                             .do_update()
                             .set((
@@ -143,14 +177,47 @@ impl DataStore {
                     .insert_and_get_result_async(&conn)
                     .await
                     .map_err(|err| {
+                        warn!(log, "Initializing Rack: Failed to insert service");
                         TxnError::CustomError(RackInitError::ServiceInsert {
                             err,
                             sled_id,
-                            svc_id: svc.id(),
+                            svc_id: service.service_id,
                         })
                     })?;
+
+                    if let internal_params::ServiceKind::Nexus { external_address } = service.kind {
+                        // Allocate the explicit IP address that is currently
+                        // in-use by this Nexus service.
+                        let ip_id = Uuid::new_v4();
+                        let data = IncompleteExternalIp::for_service_explicit(
+                            ip_id,
+                            service_pool.id(),
+                            external_address
+                        );
+                        let allocated_ip = Self::allocate_external_ip_on_connection(
+                            &conn,
+                            data
+                        ).await.map_err(|err| {
+                            warn!(log, "Initializing Rack: Failed to allocate IP address");
+                            TxnError::CustomError(RackInitError::AddingIp(err))
+                        })?;
+                        assert_eq!(allocated_ip.ip.ip(), external_address);
+
+                        // Add a service record for Nexus.
+                        let nexus_service = NexusService::new(service.service_id, allocated_ip.id);
+                        use db::schema::nexus_service::dsl;
+                        diesel::insert_into(dsl::nexus_service)
+                            .values(nexus_service)
+                            .execute_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                warn!(log, "Initializing Rack: Failed to insert Nexus Service record");
+                                e
+                            })?;
+                    }
                 }
                 info!(log, "Inserted services");
+
                 for dataset in datasets {
                     use db::schema::dataset::dsl;
                     let zpool_id = dataset.pool_id;
@@ -188,6 +255,7 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
                 }
+                info!(log, "Inserted certificates");
 
                 let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
@@ -207,6 +275,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| match e {
+                TxnError::CustomError(RackInitError::AddingIp(err)) => err,
                 TxnError::CustomError(RackInitError::DatasetInsert {
                     err,
                     zpool_id,
@@ -255,5 +324,490 @@ impl DataStore {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }
             })
+    }
+
+    pub async fn load_builtin_rack_data(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<(), Error> {
+        use crate::external_api::params;
+        use omicron_common::api::external::IdentityMetadataCreateParams;
+        use omicron_common::api::external::Name;
+
+        self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
+
+        let params = params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
+                description: String::from("IP Pool for Oxide Services"),
+            },
+        };
+        self.ip_pool_create(opctx, &params, /*internal=*/ true)
+            .await
+            .map(|_| ())
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            })?;
+
+        let params = params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "default".parse::<Name>().unwrap(),
+                description: String::from("default IP pool"),
+            },
+        };
+        self.ip_pool_create(opctx, &params, /*internal=*/ false)
+            .await
+            .map(|_| ())
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            })?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::datastore::datastore_test;
+    use crate::db::model::ExternalIp;
+    use crate::db::model::IpKind;
+    use crate::db::model::IpPoolRange;
+    use crate::db::model::ServiceKind;
+    use async_bb8_diesel::AsyncSimpleConnection;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::identity::Asset;
+    use omicron_test_utils::dev;
+    use std::collections::HashMap;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+
+    fn rack_id() -> Uuid {
+        Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_empty() {
+        let logctx = dev::test_setup_log("rack_set_initialized_empty");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let services = vec![];
+        let datasets = vec![];
+        let service_ip_pool_ranges = vec![];
+        let certificates = vec![];
+
+        // Initializing the rack with no data is odd, but allowed.
+        let rack = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                service_ip_pool_ranges.clone(),
+                certificates.clone(),
+            )
+            .await
+            .expect("Failed to initialize rack");
+
+        assert_eq!(rack.id(), rack_id());
+        assert!(rack.initialized);
+
+        // It should also be idempotent.
+        let rack2 = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services,
+                datasets,
+                service_ip_pool_ranges,
+                certificates,
+            )
+            .await
+            .expect("Failed to initialize rack");
+        assert_eq!(rack.time_modified(), rack2.time_modified());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn create_test_sled(db: &DataStore) -> Sled {
+        let sled_id = Uuid::new_v4();
+        let is_scrimlet = false;
+        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        let identifier = String::from("identifier");
+        let model = String::from("model");
+        let revision = 0;
+        let sled = Sled::new(
+            sled_id,
+            addr,
+            is_scrimlet,
+            identifier,
+            model,
+            revision,
+            rack_id(),
+        );
+        db.sled_upsert(sled)
+            .await
+            .expect("Could not upsert sled during test prep")
+    }
+
+    // Hacky macro helper to:
+    // - Perform a transaction...
+    // - ... That queries a particular table for all values...
+    // - ... and Selects them as the requested model type.
+    macro_rules! fn_to_get_all {
+        ($table:ident, $model:ident) => {
+            paste::paste! {
+                async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
+                    use crate::db::schema::$table::dsl;
+                    db.pool_for_tests()
+                        .await
+                        .unwrap()
+                        .transaction_async(|conn| async move {
+                            conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                                .await
+                                .unwrap();
+                            Ok::<_, crate::db::TransactionError<()>>(
+                                dsl::$table
+                                    .select($model::as_select())
+                                    .get_results_async(&conn)
+                                    .await
+                                    .unwrap()
+                            )
+                        })
+                        .await
+                        .unwrap()
+                }
+            }
+        }
+    }
+
+    fn_to_get_all!(service, Service);
+    fn_to_get_all!(nexus_service, NexusService);
+    fn_to_get_all!(external_ip, ExternalIp);
+    fn_to_get_all!(ip_pool_range, IpPoolRange);
+    fn_to_get_all!(dataset, Dataset);
+
+    #[tokio::test]
+    async fn rack_set_initialized_with_nexus_service() {
+        let logctx =
+            dev::test_setup_log("rack_set_initialized_with_nexus_service");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled = create_test_sled(&datastore).await;
+
+        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let services = vec![internal_params::ServicePutRequest {
+            service_id: Uuid::new_v4(),
+            sled_id: sled.id(),
+            address: Ipv6Addr::LOCALHOST,
+            kind: internal_params::ServiceKind::Nexus {
+                external_address: nexus_ip,
+            },
+        }];
+        let datasets = vec![];
+        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
+        let certificates = vec![];
+
+        let rack = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                service_ip_pool_ranges,
+                certificates.clone(),
+            )
+            .await
+            .expect("Failed to initialize rack");
+
+        assert_eq!(rack.id(), rack_id());
+        assert!(rack.initialized);
+
+        let observed_services = get_all_services(&datastore).await;
+        let observed_nexus_services = get_all_nexus_services(&datastore).await;
+        let observed_datasets = get_all_datasets(&datastore).await;
+
+        // We should only see the one nexus we inserted earlier
+        assert_eq!(observed_services.len(), 1);
+        assert_eq!(observed_services[0].sled_id, sled.id());
+        assert_eq!(observed_services[0].kind, ServiceKind::Nexus);
+
+        // It should have a corresponding "Nexus service record"
+        assert_eq!(observed_nexus_services.len(), 1);
+        assert_eq!(observed_services[0].id(), observed_nexus_services[0].id);
+
+        // We should also see the single external IP allocated for this nexus
+        // interface.
+        let observed_external_ips = get_all_external_ips(&datastore).await;
+        assert_eq!(observed_external_ips.len(), 1);
+        assert_eq!(
+            observed_external_ips[0].id,
+            observed_nexus_services[0].external_ip_id
+        );
+        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
+
+        // Furthermore, we should be able to see that this IP address has been
+        // allocated as a part of the service IP pool.
+        let (.., svc_pool) =
+            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
+        assert!(svc_pool.internal);
+
+        let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
+        assert_eq!(observed_ip_pool_ranges.len(), 1);
+        assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
+
+        // Verify the allocated external IP
+        assert_eq!(observed_external_ips[0].ip_pool_id, svc_pool.id());
+        assert_eq!(
+            observed_external_ips[0].ip_pool_range_id,
+            observed_ip_pool_ranges[0].id
+        );
+        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
+        assert_eq!(observed_external_ips[0].ip.ip(), nexus_ip,);
+
+        assert!(observed_datasets.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_with_many_nexus_services() {
+        let logctx = dev::test_setup_log(
+            "rack_set_initialized_with_many_nexus_services",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled = create_test_sled(&datastore).await;
+
+        // Ask for two Nexus services, with different external IPs.
+        let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
+        let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
+        let mut services = vec![
+            internal_params::ServicePutRequest {
+                service_id: Uuid::new_v4(),
+                sled_id: sled.id(),
+                address: Ipv6Addr::LOCALHOST,
+                kind: internal_params::ServiceKind::Nexus {
+                    external_address: IpAddr::V4(nexus_ip_start),
+                },
+            },
+            internal_params::ServicePutRequest {
+                service_id: Uuid::new_v4(),
+                sled_id: sled.id(),
+                address: Ipv6Addr::LOCALHOST,
+                kind: internal_params::ServiceKind::Nexus {
+                    external_address: IpAddr::V4(nexus_ip_end),
+                },
+            },
+        ];
+        services
+            .sort_by(|a, b| a.service_id.partial_cmp(&b.service_id).unwrap());
+
+        let datasets = vec![];
+        let service_ip_pool_ranges =
+            vec![IpRange::try_from((nexus_ip_start, nexus_ip_end))
+                .expect("Cannot create IP Range")];
+        let certificates = vec![];
+
+        let rack = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                service_ip_pool_ranges,
+                certificates.clone(),
+            )
+            .await
+            .expect("Failed to initialize rack");
+
+        assert_eq!(rack.id(), rack_id());
+        assert!(rack.initialized);
+
+        let mut observed_services = get_all_services(&datastore).await;
+        let mut observed_nexus_services =
+            get_all_nexus_services(&datastore).await;
+        let observed_datasets = get_all_datasets(&datastore).await;
+
+        // We should see both of the Nexus services we provisioned.
+        assert_eq!(observed_services.len(), 2);
+        observed_services.sort_by(|a, b| a.id().partial_cmp(&b.id()).unwrap());
+
+        assert_eq!(observed_services[0].sled_id, sled.id());
+        assert_eq!(observed_services[1].sled_id, sled.id());
+        assert_eq!(observed_services[0].kind, ServiceKind::Nexus);
+        assert_eq!(observed_services[1].kind, ServiceKind::Nexus);
+
+        // It should have a corresponding "Nexus service record"
+        assert_eq!(observed_nexus_services.len(), 2);
+        observed_nexus_services
+            .sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+        assert_eq!(observed_services[0].id(), observed_nexus_services[0].id);
+        assert_eq!(observed_services[1].id(), observed_nexus_services[1].id);
+
+        // We should see both IPs allocated for these services.
+        let observed_external_ips: HashMap<_, _> =
+            get_all_external_ips(&datastore)
+                .await
+                .into_iter()
+                .map(|ip| (ip.id, ip))
+                .collect();
+        assert_eq!(observed_external_ips.len(), 2);
+
+        // The address referenced by the "NexusService" should match the input.
+        assert_eq!(
+            observed_external_ips[&observed_nexus_services[0].external_ip_id]
+                .ip
+                .ip(),
+            if let internal_params::ServiceKind::Nexus { external_address } =
+                services[0].kind
+            {
+                external_address
+            } else {
+                panic!("Unexpected service kind")
+            }
+        );
+        assert_eq!(
+            observed_external_ips[&observed_nexus_services[1].external_ip_id]
+                .ip
+                .ip(),
+            if let internal_params::ServiceKind::Nexus { external_address } =
+                services[1].kind
+            {
+                external_address
+            } else {
+                panic!("Unexpected service kind")
+            }
+        );
+
+        // Furthermore, we should be able to see that this IP addresses have been
+        // allocated as a part of the service IP pool.
+        let (.., svc_pool) =
+            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
+        assert!(svc_pool.internal);
+
+        let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
+        assert_eq!(observed_ip_pool_ranges.len(), 1);
+        assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
+
+        assert!(observed_datasets.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_missing_service_pool_ip_throws_error() {
+        let logctx = dev::test_setup_log(
+            "rack_set_initialized_missing_service_pool_ip_throws_error",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled = create_test_sled(&datastore).await;
+
+        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let services = vec![internal_params::ServicePutRequest {
+            service_id: Uuid::new_v4(),
+            sled_id: sled.id(),
+            address: Ipv6Addr::LOCALHOST,
+            kind: internal_params::ServiceKind::Nexus {
+                external_address: nexus_ip,
+            },
+        }];
+        let datasets = vec![];
+        let service_ip_pool_ranges = vec![];
+        let certificates = vec![];
+
+        let result = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                service_ip_pool_ranges,
+                certificates.clone(),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid Request: Requested external IP address not available"
+        );
+
+        assert!(get_all_services(&datastore).await.is_empty());
+        assert!(get_all_nexus_services(&datastore).await.is_empty());
+        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_external_ips(&datastore).await.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_set_initialized_overlapping_ips_throws_error() {
+        let logctx = dev::test_setup_log(
+            "rack_set_initialized_overlapping_ips_throws_error",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled = create_test_sled(&datastore).await;
+
+        // Request two services which happen to be using the same IP address.
+        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+
+        let services = vec![
+            internal_params::ServicePutRequest {
+                service_id: Uuid::new_v4(),
+                sled_id: sled.id(),
+                address: Ipv6Addr::LOCALHOST,
+                kind: internal_params::ServiceKind::Nexus {
+                    external_address: nexus_ip,
+                },
+            },
+            internal_params::ServicePutRequest {
+                service_id: Uuid::new_v4(),
+                sled_id: sled.id(),
+                address: Ipv6Addr::LOCALHOST,
+                kind: internal_params::ServiceKind::Nexus {
+                    external_address: nexus_ip,
+                },
+            },
+        ];
+        let datasets = vec![];
+        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
+        let certificates = vec![];
+
+        let result = datastore
+            .rack_set_initialized(
+                &opctx,
+                rack_id(),
+                services.clone(),
+                datasets.clone(),
+                service_ip_pool_ranges,
+                certificates.clone(),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid Request: Requested external IP address not available",
+        );
+
+        assert!(get_all_services(&datastore).await.is_empty());
+        assert!(get_all_nexus_services(&datastore).await.is_empty());
+        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_external_ips(&datastore).await.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

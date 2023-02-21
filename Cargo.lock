@@ -2781,6 +2781,7 @@ dependencies = [
  "ipcc-key-value",
  "itertools",
  "omicron-common",
+ "omicron-test-utils",
  "once_cell",
  "progenitor-client",
  "proptest",
