@@ -111,9 +111,8 @@ enum IpccKey {
 
 const IPCC_DEV: &str = "/dev/ipcc";
 
-const IPCC_IOC: c_int = ((b'i' as c_int) << 24)
-    | ((b'c' as c_int) << 16)
-    | ((b'c' as c_int) << 8);
+const IPCC_IOC: c_int =
+    ((b'i' as c_int) << 24) | ((b'c' as c_int) << 16) | ((b'c' as c_int) << 8);
 
 const IPCC_KEYLOOKUP: c_int = IPCC_IOC | 4;
 
