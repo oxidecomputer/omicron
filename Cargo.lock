@@ -1597,10 +1597,11 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 
 [[package]]
 name = "dlpi"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dlpi-sys#ca2366edd3d19fa0deefd800b3d356b901ef7cb0"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/dlpi-sys#1d587ea98cf2d36f1b1624b0b960559c76d475d2"
 dependencies = [
  "libc",
+ "libdlpi-sys",
  "num_enum",
  "pretty-hex 0.2.1",
  "thiserror",
@@ -2711,7 +2712,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
+source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -2999,7 +3000,7 @@ checksum = "f9b7d56ba4a8344d6be9729995e6b06f928af29998cdf79fe390cbf6b1fee838"
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
+source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 dependencies = [
  "quote",
  "syn",
@@ -3052,6 +3053,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 
 [[package]]
+name = "libdlpi-sys"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dlpi-sys#1d587ea98cf2d36f1b1624b0b960559c76d475d2"
+
+[[package]]
 name = "libefi-illumos"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/libefi-illumos?branch=master#54c398c139f0e65252c2c0f9565d2eec7116bf02"
@@ -3099,7 +3105,7 @@ checksum = "348108ab3fba42ec82ff6e9564fc4ca0247bdccdc68dd8af9764bbc79c3c8ffb"
 [[package]]
 name = "libnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/netadm-sys#bf0fcd1b5d8b224e0821d14942cddfe1808f3996"
+source = "git+https://github.com/oxidecomputer/netadm-sys#e632591ab052ec1ddd6898822706c95a5098638e"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -4144,11 +4150,10 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
+source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 dependencies = [
  "cfg-if 0.1.10",
  "dyn-clone",
- "heapless",
  "illumos-sys-hdrs",
  "kstat-macro",
  "opte-api",
@@ -4162,7 +4167,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
+source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -4174,7 +4179,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
+source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 dependencies = [
  "libc",
  "libnet",
@@ -4236,7 +4241,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6be54acd2438f0864a68bca44d7511f2ee50d761#6be54acd2438f0864a68bca44d7511f2ee50d761"
+source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",

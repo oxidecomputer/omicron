@@ -170,7 +170,7 @@ omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.5.1"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "6be54acd2438f0864a68bca44d7511f2ee50d761", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37", features = [ "api", "std" ] }
 once_cell = "1.17.1"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
@@ -178,7 +178,7 @@ openapiv3 = "1.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.2"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "6be54acd2438f0864a68bca44d7511f2ee50d761" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37" }
 oso = "0.26"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "oximeter-client" }

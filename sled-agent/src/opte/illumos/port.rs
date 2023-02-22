@@ -68,7 +68,7 @@ impl Drop for PortInner {
             );
             return;
         }
-        let err = match opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::DLD_CTL)
+        let err = match opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)
         {
             Ok(hdl) => {
                 if let Err(e) = hdl.delete_xde(&self.name) {
