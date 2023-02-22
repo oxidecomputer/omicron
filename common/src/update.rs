@@ -206,6 +206,7 @@ impl FromStr for ArtifactKind {
     JsonSchema,
 )]
 #[serde(transparent)]
+#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub struct ArtifactHash(
     #[serde(with = "serde_human_bytes::hex_array")]
     #[schemars(schema_with = "hex_schema::<32>")]

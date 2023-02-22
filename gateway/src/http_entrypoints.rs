@@ -28,6 +28,7 @@ use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
+use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -411,8 +412,8 @@ pub struct ImageVersion {
 #[serde(rename_all = "snake_case")]
 pub struct InstallinatorImageId {
     pub update_id: Uuid,
-    pub host_phase_2: [u8; 32],
-    pub control_plane: [u8; 32],
+    pub host_phase_2: ArtifactHash,
+    pub control_plane: ArtifactHash,
 }
 
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for

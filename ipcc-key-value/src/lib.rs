@@ -7,6 +7,7 @@
 //! Utilities for key/value pairs passed from the control plane to the SP
 //! (through MGS) to the host (through the host/SP uart) via IPCC.
 
+use omicron_common::update::ArtifactHash;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -57,11 +58,9 @@ pub struct InstallinatorImageId {
     #[cfg_attr(test, strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes)))]
     pub update_id: Uuid,
     /// SHA-256 hash of the host phase 2 image to fetch.
-    #[serde(with = "serde_bytes_array")]
-    pub host_phase_2: [u8; 32],
+    pub host_phase_2: ArtifactHash,
     /// SHA-256 hash of the control plane image to fetch.
-    #[serde(with = "serde_bytes_array")]
-    pub control_plane: [u8; 32],
+    pub control_plane: ArtifactHash,
 }
 
 impl InstallinatorImageId {
@@ -74,61 +73,6 @@ impl InstallinatorImageId {
             + 1 + "control_plane".len() // key
             + 1 + 16 // UUID byte array
             + 2*(2 + 32); // 2 32-long byte arrays
-}
-
-// Adapted from https://github.com/serde-rs/bytes/issues/26: this is a
-// workaround to serialize our `[u8; 32]` arrays above as bytes instead of
-// arbitrary sequences, which results in a shorter CBOR encoding.
-//
-// Uuid's serde implementation already does the equivalent of this, so it is
-// already serialized as a 16-long byte sequence.
-mod serde_bytes_array {
-    use serde::de::{self, Error};
-    use serde::{Deserializer, Serializer};
-
-    // Call `serialize_bytes` instead of the derived `serialized_seq`.
-    pub(crate) fn serialize<S>(
-        bytes: &[u8],
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(bytes)
-    }
-
-    struct BytesVisitor<const N: usize>;
-
-    impl<'vi, const N: usize> de::Visitor<'vi> for BytesVisitor<N> {
-        type Value = [u8; N];
-
-        fn expecting(
-            &self,
-            formatter: &mut std::fmt::Formatter,
-        ) -> std::fmt::Result {
-            write!(formatter, "[u8; {N}]")
-        }
-
-        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-        where
-            E: Error,
-        {
-            Self::Value::try_from(v).map_err(|_| {
-                let expected = format!("[u8; {}]", N);
-                E::invalid_length(v.len(), &expected.as_str())
-            })
-        }
-    }
-
-    // Deserialize a byte sequence into a `[u8; N]`.
-    pub(crate) fn deserialize<'de, D, const N: usize>(
-        deserializer: D,
-    ) -> Result<[u8; N], D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_bytes(BytesVisitor)
-    }
 }
 
 // The existence of these methods is a _little_ dubious: `InstallinatorImageId`
@@ -321,14 +265,14 @@ mod tests {
             update_id: Uuid::from_bytes([
                 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
             ]),
-            host_phase_2: [
+            host_phase_2: ArtifactHash([
                 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
                 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            ],
-            control_plane: [
+            ]),
+            control_plane: ArtifactHash([
                 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
                 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
-            ],
+            ]),
         };
 
         assert_eq!(InstallinatorImageId::deserialize(SERIALIZED), Ok(expected));
