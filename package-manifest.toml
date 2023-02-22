@@ -56,13 +56,13 @@ output.type = "zone"
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
 
 [package.internal-dns]
-service_name = "internal_dns"
+service_name = "internal-dns"
 source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
 output.type = "zone"
 
 [package.external-dns]
-service_name = "external_dns"
+service_name = "external-dns"
 source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
 output.type = "zone"
