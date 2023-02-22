@@ -23,13 +23,11 @@ use tui::backend::CrosstermBackend;
 use tui::Terminal;
 use wicketd_client::types::RackV1Inventory;
 
+use crate::inventory::ComponentId;
 use crate::inventory::Inventory;
-use crate::screens::{Height, ScreenId, Screens};
+use crate::screens::Screen;
 use crate::wicketd::{WicketdHandle, WicketdManager};
 use crate::widgets::{RackState, StatusBar, UpdateState};
-
-pub const TOP_MARGIN: Height = Height(5);
-pub const BOTTOM_MARGIN: Height = Height(2);
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -44,11 +42,8 @@ pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 /// communicates with other threads and async tasks to receive user input
 /// and drive backend services.
 pub struct Wizard {
-    // The currently active screen
-    active_screen: ScreenId,
-
-    // All the screens managed by the [`Wizard`]
-    screens: Screens,
+    /// A screen that handles events and rendering
+    screen: Screen,
 
     // The [`Wizard`] is purely single threaded. Every interaction with the
     // outside world is via channels.  All receiving from the outside world
@@ -94,7 +89,6 @@ pub struct Wizard {
 #[allow(clippy::new_without_default)]
 impl Wizard {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Wizard {
-        let screens = Screens::new(&log);
         let (events_tx, events_rx) = channel();
         let state = State::new();
         let backend = CrosstermBackend::new(stdout());
@@ -106,8 +100,7 @@ impl Wizard {
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
         Wizard {
-            screens,
-            active_screen: ScreenId::Splash,
+            screen: Screen::new(),
             events_rx,
             events_tx,
             state,
@@ -139,48 +132,34 @@ impl Wizard {
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
-        let rect = self.terminal.get_frame().size();
 
         // Initialize and size the update widgets
         self.state.updates.init(&self.state.inventory);
 
         // Draw the initial screen
-        let screen = self.screens.get_mut(self.active_screen);
-        screen.resize(&mut self.state, rect.width, rect.height);
-        screen.draw(&self.state, &mut self.terminal)?;
+        self.screen.draw(&self.state, &mut self.terminal)?;
 
         loop {
-            let screen = self.screens.get_mut(self.active_screen);
             // unwrap is safe because we always hold onto a Sender
             let event = self.events_rx.recv().unwrap();
             match event {
                 Event::Tick => {
-                    let actions = screen.on(&mut self.state, ScreenEvent::Tick);
-                    self.handle_actions(actions)?;
+                    let action = self.screen.on(&mut self.state, Event::Tick);
+                    self.handle_action(action)?;
                 }
                 Event::Term(TermEvent::Key(key_event)) => {
                     if is_control_c(&key_event) {
                         info!(self.log, "CTRL-C Pressed. Exiting.");
                         break;
                     }
-                    let actions = screen.on(
+                    let action = self.screen.on(
                         &mut self.state,
-                        ScreenEvent::Term(TermEvent::Key(key_event)),
+                        Event::Term(TermEvent::Key(key_event)),
                     );
-                    self.handle_actions(actions)?;
+                    self.handle_action(action)?;
                 }
-                Event::Term(TermEvent::Resize(width, height)) => {
-                    screen.resize(&mut self.state, width, height);
-                    screen.draw(&self.state, &mut self.terminal)?;
-                }
-                Event::Term(TermEvent::Mouse(mouse_event)) => {
-                    self.state.mouse =
-                        Point { x: mouse_event.column, y: mouse_event.row };
-                    let actions = screen.on(
-                        &mut self.state,
-                        ScreenEvent::Term(TermEvent::Mouse(mouse_event)),
-                    );
-                    self.handle_actions(actions)?;
+                Event::Term(TermEvent::Resize(_, _)) => {
+                    self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Inventory(event) => {
                     let mut redraw = false;
@@ -224,7 +203,7 @@ impl Wizard {
 
                     if redraw {
                         // Inventory or status bar changed. Redraw the screen.
-                        screen.draw(&self.state, &mut self.terminal)?;
+                        self.screen.draw(&self.state, &mut self.terminal)?;
                     }
                 }
                 _ => info!(self.log, "{:?}", event),
@@ -233,37 +212,16 @@ impl Wizard {
         Ok(())
     }
 
-    fn handle_actions(&mut self, actions: Vec<Action>) -> anyhow::Result<()> {
-        for action in actions {
-            match action {
-                Action::Redraw => {
-                    let screen = self.screens.get_mut(self.active_screen);
-                    screen.draw(&self.state, &mut self.terminal)?;
-                }
-                Action::SwitchScreen(id) => {
-                    self.active_screen = id;
-                    let screen = self.screens.get_mut(id);
-                    let rect = self.terminal.get_frame().size();
+    fn handle_action(&mut self, action: Option<Action>) -> anyhow::Result<()> {
+        let Some(action) = action else {
+         return Ok(());
+        };
 
-                    screen.resize(&mut self.state, rect.width, rect.height);
-
-                    // Simulate a mouse movement for the current position
-                    // because the mouse may be in a different position when transitioning
-                    // between screens.
-                    let mouse_event = MouseEvent {
-                        kind: MouseEventKind::Moved,
-                        column: self.state.mouse.x,
-                        row: self.state.mouse.y,
-                        modifiers: KeyModifiers::NONE,
-                    };
-                    let event =
-                        ScreenEvent::Term(TermEvent::Mouse(mouse_event));
-                    // We ignore actions, as they can only be draw actions, and
-                    // we are about to draw.
-                    let _ = screen.on(&mut self.state, event);
-                    screen.draw(&self.state, &mut self.terminal)?;
-                }
+        match action {
+            Action::Redraw => {
+                self.screen.draw(&self.state, &mut self.terminal)?;
             }
+            Action::Update(_component_id) => todo!(),
         }
         Ok(())
     }
@@ -384,26 +342,24 @@ pub enum Event {
     //... TODO: Replies from MGS & RSS
 }
 
-/// An action for the system to take.
+/// Instructions for the [`Wizard`]
 ///
-/// This can be something like a screen transition or calling a downstream
-/// service. Screens never take actions directly, but they are the only ones
-/// that know what visual content an input such as a key press or mouse event
-/// is meant for and what action should be taken in that case.
+/// Event's fed through the [`MainScreen::on`]  method return an [`Action`]
+/// informing the wizard that it needs to do something. This allows separation
+/// of the UI from the rest of the system and makes each more testable.
 pub enum Action {
     Redraw,
-    SwitchScreen(ScreenId),
+    Update(ComponentId),
 }
 
-/// Events sent to a screen
-///
-/// These are a subset of [`Event`]
-pub enum ScreenEvent {
-    /// An input event from the terminal
-    Term(crossterm::event::Event),
-
-    /// The tick of a timer
-    Tick,
+impl Action {
+    /// Should the action result in a redraw
+    ///
+    /// For now, all actions result in a redraw.
+    /// Some downstream operations will not trigger this in the future.
+    pub fn should_redraw(&self) -> bool {
+        true
+    }
 }
 
 /// An inventory event occurred.

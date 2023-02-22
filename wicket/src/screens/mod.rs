@@ -2,45 +2,87 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod common;
-mod component;
-mod rack;
+mod main;
 mod splash;
-mod update;
 
-use crate::wizard::{Action, ScreenEvent, State, Term};
-use crossterm::event::Event as TermEvent;
-use slog::Logger;
+use crate::wizard::{Action, Event, State, Term};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use component::ComponentScreen;
-use rack::RackScreen;
+use main::MainScreen;
 use splash::SplashScreen;
-use update::UpdateScreen;
 
-/// An identifier for a specific [`Screen`] in the [`Wizard`](crate::Wizard).
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ScreenId {
-    Splash,
-    Rack,
-    Component,
-    Update,
+/// A specific functionality such as `Update` or `Recovery` that is selectable
+/// from the [`MainScreen`] navbar on the left.
+///
+/// Individual [`View`]s representing a subset of functionlity can be selected
+/// indside a pane using the navbar at the top of the pane.
+pub struct Pane {}
+
+/// The viewing area of a specific [`Screen`], where functionally specific
+/// widgets are rendered. [`View`]s contain [`Control`]s that represent the pre-
+/// rendered state of a widget. Controls may be focused and "stacked", such
+/// that the user can contextually deal with a single control at a time.
+pub struct View {
+    selected: ControlId,
 }
 
-impl ScreenId {
-    pub fn name(&self) -> &'static str {
-        match self {
-            ScreenId::Splash => "splash",
-            ScreenId::Rack => "rack",
-            ScreenId::Component => "component",
-            ScreenId::Update => "update",
+/// A unique id for a [`Control`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ControlId(pub usize);
+
+/// Return a unique id for a [`Control`]
+pub fn get_control_id() -> ControlId {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The primary display representation. It's sole purpose is to dispatch events
+/// to the underlying splash and main screens.
+///
+// Note: It would be nice to use an enum here, but swapping between enum
+// variants requires taking the screen by value or having a wrapper struct with
+// an option so we can `take` the inner value. This is unergomic, so we just go
+// with the simple solution.
+pub struct Screen {
+    splash: Option<SplashScreen>,
+    main: MainScreen,
+}
+
+impl Screen {
+    pub fn new() -> Screen {
+        Screen { splash: Some(SplashScreen::new()), main: MainScreen::new() }
+    }
+
+    pub fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+        if let Some(splash) = &mut self.splash {
+            if splash.on(event) {
+                self.splash = None;
+            }
+            Some(Action::Redraw)
+        } else {
+            self.main.on(state, event)
         }
     }
 
-    /// Width of the maximum string length of the name
-    pub fn width() -> u16 {
-        9
+    pub fn draw(
+        &self,
+        state: &State,
+        terminal: &mut Term,
+    ) -> anyhow::Result<()> {
+        if let Some(splash) = &self.splash {
+            splash.draw(terminal)?;
+        } else {
+            self.main.draw(state, terminal)?;
+        }
+        Ok(())
     }
 }
+
+//
+//----------------------------------------------------
+//---- Old stuff -----
+//----------------------------------------------------
+//
 
 #[derive(Debug, Clone, Copy)]
 pub struct Height(pub u16);
@@ -54,53 +96,6 @@ pub fn make_even(val: u16) -> u16 {
         val
     } else {
         val + 1
-    }
-}
-
-pub trait Screen {
-    /// Draw the [`Screen`]
-    fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()>;
-
-    /// Handle a [`ScreenEvent`] to update internal display state and output
-    /// any necessary actions for the system to take.
-    fn on(&mut self, state: &mut State, event: ScreenEvent) -> Vec<Action>;
-
-    /// Resize the screen via delivering a `Resize` event
-    fn resize(
-        &mut self,
-        state: &mut State,
-        width: u16,
-        height: u16,
-    ) -> Vec<Action> {
-        self.on(state, ScreenEvent::Term(TermEvent::Resize(width, height)))
-    }
-}
-
-/// All [`Screen`]s for wicket
-pub struct Screens {
-    splash: SplashScreen,
-    rack: RackScreen,
-    component: ComponentScreen,
-    update: UpdateScreen,
-}
-
-impl Screens {
-    pub fn new(log: &Logger) -> Screens {
-        Screens {
-            splash: SplashScreen::new(),
-            rack: RackScreen::new(log),
-            component: ComponentScreen::new(),
-            update: UpdateScreen::new(),
-        }
-    }
-
-    pub fn get_mut(&mut self, id: ScreenId) -> &mut dyn Screen {
-        match id {
-            ScreenId::Splash => &mut self.splash,
-            ScreenId::Rack => &mut self.rack,
-            ScreenId::Component => &mut self.component,
-            ScreenId::Update => &mut self.update,
-        }
     }
 }
 

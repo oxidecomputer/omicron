@@ -6,11 +6,10 @@
 //!
 //! This is the first screen the user sees
 
-use super::{Screen, ScreenId};
 use crate::defaults::colors::*;
 use crate::defaults::dimensions::RectExt;
 use crate::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
-use crate::wizard::{Action, Frame, ScreenEvent, State, Term};
+use crate::{Event, Frame, Term};
 use crossterm::event::Event as TermEvent;
 use tui::style::{Color, Style};
 use tui::widgets::Block;
@@ -58,8 +57,8 @@ impl SplashScreen {
     }
 }
 
-impl Screen for SplashScreen {
-    fn draw(&self, _state: &State, terminal: &mut Term) -> anyhow::Result<()> {
+impl SplashScreen {
+    pub fn draw(&self, terminal: &mut Term) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
             self.animate_logo(f);
@@ -67,21 +66,23 @@ impl Screen for SplashScreen {
         Ok(())
     }
 
-    fn on(&mut self, _state: &mut State, event: ScreenEvent) -> Vec<Action> {
+    /// Return true if the splash screen should transition to the main screen, false
+    /// if it should keep animating.
+    pub fn on(&mut self, event: Event) -> bool {
         match event {
-            ScreenEvent::Tick => {
+            Event::Tick => {
                 self.state.frame += 1;
                 if self.state.frame < TOTAL_FRAMES {
-                    vec![Action::Redraw]
+                    false
                 } else {
-                    vec![Action::SwitchScreen(ScreenId::Rack)]
+                    true
                 }
             }
-            ScreenEvent::Term(TermEvent::Key(_)) => {
+            Event::Term(TermEvent::Key(_)) => {
                 // Allow the user to skip the splash screen with any key press
-                vec![Action::SwitchScreen(ScreenId::Rack)]
+                true
             }
-            _ => vec![],
+            _ => false,
         }
     }
 }
