@@ -1197,24 +1197,12 @@
         "type": "object",
         "properties": {
           "control_plane": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            },
-            "minItems": 32,
-            "maxItems": 32
+            "type": "string",
+            "format": "hex string (32 bytes)"
           },
           "host_phase_2": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            },
-            "minItems": 32,
-            "maxItems": 32
+            "type": "string",
+            "format": "hex string (32 bytes)"
           },
           "update_id": {
             "type": "string",
