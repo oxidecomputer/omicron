@@ -19,9 +19,8 @@ use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind, update::ArtifactId,
-};
+use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::update::{ArtifactHash, ArtifactHashId, ArtifactId};
 use thiserror::Error;
 use tough::TargetName;
 use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
@@ -29,7 +28,8 @@ use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
 // A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug, Default)]
 struct ArtifactsWithPlan {
-    artifacts: DebugIgnore<HashMap<ArtifactId, BufList>>,
+    by_id: DebugIgnore<HashMap<ArtifactId, BufList>>,
+    by_hash: DebugIgnore<HashMap<ArtifactHashId, BufList>>,
     plan: Option<UpdatePlan>,
 }
 
@@ -54,20 +54,14 @@ impl WicketdArtifactStore {
     pub(crate) fn put_repository(&self, bytes: &[u8]) -> Result<(), HttpError> {
         slog::debug!(self.log, "adding repository"; "size" => bytes.len());
 
-        let (new_artifacts, plan) = extract_and_validate(bytes, &self.log)
+        let new_artifacts = ArtifactsWithPlan::from_zip(&bytes, &self.log)
             .map_err(|error| error.to_http_error())?;
-        self.replace(new_artifacts, plan);
+        self.replace(new_artifacts);
         Ok(())
     }
 
     pub(crate) fn artifact_ids(&self) -> Vec<ArtifactId> {
-        self.artifacts_with_plan
-            .lock()
-            .unwrap()
-            .artifacts
-            .keys()
-            .cloned()
-            .collect()
+        self.artifacts_with_plan.lock().unwrap().by_id.keys().cloned().collect()
     }
 
     pub(crate) fn current_plan(&self) -> Option<UpdatePlan> {
@@ -83,23 +77,19 @@ impl WicketdArtifactStore {
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
-        self.artifacts_with_plan.lock().unwrap().artifacts.get(id).cloned()
+        self.artifacts_with_plan.lock().unwrap().get(id)
+    }
+
+    fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
+        // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
+        // Cloning it here also means we can release the lock quickly.
+        self.artifacts_with_plan.lock().unwrap().get_by_hash(id)
     }
 
     /// Replaces the artifact hash map, returning the previous map.
-    fn replace(
-        &self,
-        new_artifacts: HashMap<ArtifactId, BufList>,
-        new_plan: UpdatePlan,
-    ) -> ArtifactsWithPlan {
+    fn replace(&self, new_artifacts: ArtifactsWithPlan) -> ArtifactsWithPlan {
         let mut artifacts = self.artifacts_with_plan.lock().unwrap();
-        std::mem::replace(
-            &mut *artifacts,
-            ArtifactsWithPlan {
-                artifacts: DebugIgnore(new_artifacts),
-                plan: Some(new_plan),
-            },
-        )
+        std::mem::replace(&mut *artifacts, new_artifacts)
     }
 }
 
@@ -131,105 +121,178 @@ impl ArtifactGetter for WicketdArtifactStore {
             buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
         )))
     }
+
+    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<Body> {
+        let buf_list = self.get_by_hash(id)?;
+        Some(Body::wrap_stream(stream::iter(
+            buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
+        )))
+    }
 }
 
-fn extract_and_validate(
-    zip_bytes: &[u8],
-    log: &slog::Logger,
-) -> Result<(HashMap<ArtifactId, BufList>, UpdatePlan), RepositoryError> {
-    let mut extractor = ArchiveExtractor::from_borrowed_bytes(zip_bytes)
-        .map_err(RepositoryError::OpenArchive)?;
+impl ArtifactsWithPlan {
+    fn from_zip(
+        zip_bytes: &[u8],
+        log: &slog::Logger,
+    ) -> Result<Self, RepositoryError> {
+        let mut extractor = ArchiveExtractor::from_borrowed_bytes(zip_bytes)
+            .map_err(RepositoryError::OpenArchive)?;
 
-    // Create a temporary directory to hold artifacts in (we'll read them
-    // into memory as we extract them).
-    let dir = tempfile::tempdir().map_err(RepositoryError::TempDirCreate)?;
-    let temp_path = <&Utf8Path>::try_from(dir.path()).map_err(|error| {
-        RepositoryError::TempDirCreate(error.into_io_error())
-    })?;
-
-    slog::info!(log, "extracting uploaded archive to {temp_path}");
-
-    // XXX: might be worth differentiating between server-side issues (503)
-    // and issues with the uploaded archive (400).
-    extractor.extract(temp_path).map_err(RepositoryError::Extract)?;
-
-    // Time is unavailable during initial setup, so ignore expiration. Even
-    // if time were available, we might want to be able to load older
-    // versions of artifacts over the technician port in an emergency.
-    //
-    // XXX we aren't checking against a trust anchor at this point --
-    // anyone can sign the repositories and this code will accept that.
-    let repository = OmicronRepo::load_ignore_expiration(temp_path)
-        .map_err(RepositoryError::LoadRepository)?;
-
-    let artifacts = repository
-        .read_artifacts()
-        .map_err(RepositoryError::ReadArtifactsDocument)?;
-
-    // Read the artifact into memory.
-    //
-    // XXX Could also read the artifact from disk directly, keeping the
-    // files around. That introduces some new failure domains (e.g. what if
-    // the directory gets removed from underneath us?) but is worth
-    // revisiting.
-    //
-    // Notes:
-    //
-    // 1. With files on disk it is possible to keep the file descriptor
-    //    open, preventing deletes from affecting us. However, tough doesn't
-    //    quite provide an interface to do that.
-    // 2. Ideally we'd write the zip to disk, implement a zip transport, and
-    //    just keep the zip's file descriptor open. Unfortunately, a zip
-    //    transport can't currently be written in safe Rust due to
-    //    https://github.com/awslabs/tough/pull/563. If that lands and/or we
-    //    write our own TUF implementation, we should switch to that approach.
-    let mut new_artifacts = HashMap::new();
-    for artifact in artifacts.artifacts {
-        // The artifact kind might be unknown here: possibly attempting to do an
-        // update where the current version of wicketd isn't aware of a new
-        // artifact kind.
-        let artifact_id = artifact.id();
-
-        let target_name = TargetName::try_from(artifact.target.as_str())
-            .map_err(|error| RepositoryError::LocateTarget {
-                target: artifact.target.clone(),
-                error,
-            })?;
-
-        let mut reader = repository
-            .repo()
-            .read_target(&target_name)
-            .map_err(|error| RepositoryError::LocateTarget {
-                target: artifact.target.clone(),
-                error,
-            })?
-            .ok_or_else(|| {
-                RepositoryError::MissingTarget(artifact.target.clone())
-            })?;
-        let mut buf = Vec::new();
-        reader.read_to_end(&mut buf).map_err(|error| {
-            RepositoryError::ReadTarget {
-                target: artifact.target.clone(),
-                error,
-            }
+        // Create a temporary directory to hold artifacts in (we'll read them
+        // into memory as we extract them).
+        let dir =
+            tempfile::tempdir().map_err(RepositoryError::TempDirCreate)?;
+        let temp_path = <&Utf8Path>::try_from(dir.path()).map_err(|error| {
+            RepositoryError::TempDirCreate(error.into_io_error())
         })?;
 
-        match new_artifacts.entry(artifact_id.clone()) {
-            Entry::Occupied(_) => {
-                // We got two entries for an artifact?
-                return Err(RepositoryError::DuplicateEntry(artifact_id));
+        slog::info!(log, "extracting uploaded archive to {temp_path}");
+
+        // XXX: might be worth differentiating between server-side issues (503)
+        // and issues with the uploaded archive (400).
+        extractor.extract(temp_path).map_err(RepositoryError::Extract)?;
+
+        // Time is unavailable during initial setup, so ignore expiration. Even
+        // if time were available, we might want to be able to load older
+        // versions of artifacts over the technician port in an emergency.
+        //
+        // XXX we aren't checking against a root of trust at this point --
+        // anyone can sign the repositories and this code will accept that.
+        let repository = OmicronRepo::load_ignore_expiration(temp_path)
+            .map_err(RepositoryError::LoadRepository)?;
+
+        let artifacts = repository
+            .read_artifacts()
+            .map_err(RepositoryError::ReadArtifactsDocument)?;
+
+        // Read the artifact into memory.
+        //
+        // XXX Could also read the artifact from disk directly, keeping the
+        // files around. That introduces some new failure domains (e.g. what if
+        // the directory gets removed from underneath us?) but is worth
+        // revisiting.
+        //
+        // Notes:
+        //
+        // 1. With files on disk it is possible to keep the file descriptor
+        //    open, preventing deletes from affecting us. However, tough doesn't
+        //    quite provide an interface to do that.
+        // 2. Ideally we'd write the zip to disk, implement a zip transport, and
+        //    just keep the zip's file descriptor open. Unfortunately, a zip
+        //    transport can't currently be written in safe Rust due to
+        //    https://github.com/awslabs/tough/pull/563. If that lands and/or we
+        //    write our own TUF implementation, we should switch to that approach.
+        let mut by_id = HashMap::new();
+        let mut by_hash = HashMap::new();
+        for artifact in artifacts.artifacts {
+            // The artifact kind might be unknown here: possibly attempting to do an
+            // update where the current version of wicketd isn't aware of a new
+            // artifact kind.
+            let artifact_id = artifact.id();
+
+            let target_name = TargetName::try_from(artifact.target.as_str())
+                .map_err(|error| RepositoryError::LocateTarget {
+                    target: artifact.target.clone(),
+                    error,
+                })?;
+
+            let target_hash = repository
+                .repo()
+                .targets()
+                .signed
+                .find_target(&target_name)
+                .map_err(|error| RepositoryError::TargetHashRead {
+                    target: artifact.target.clone(),
+                    error,
+                })?
+                .hashes
+                .sha256
+                .clone()
+                .into_vec();
+
+            // The target hash is SHA-256, which is 32 bytes long.
+            let artifact_hash = ArtifactHash(
+                target_hash
+                    .try_into()
+                    .map_err(RepositoryError::TargetHashLength)?,
+            );
+            let artifact_hash_id = ArtifactHashId {
+                kind: artifact_id.kind.clone(),
+                hash: artifact_hash,
+            };
+
+            let mut reader = repository
+                .repo()
+                .read_target(&target_name)
+                .map_err(|error| RepositoryError::LocateTarget {
+                    target: artifact.target.clone(),
+                    error,
+                })?
+                .ok_or_else(|| {
+                    RepositoryError::MissingTarget(artifact.target.clone())
+                })?;
+            let mut buf = Vec::new();
+            reader.read_to_end(&mut buf).map_err(|error| {
+                RepositoryError::ReadTarget {
+                    target: artifact.target.clone(),
+                    error,
+                }
+            })?;
+
+            let buf_list = BufList::from_iter([Bytes::from(buf)]);
+            let num_bytes = buf_list.num_bytes();
+
+            match by_id.entry(artifact_id.clone()) {
+                Entry::Occupied(_) => {
+                    // We got two entries for an artifact?
+                    return Err(RepositoryError::DuplicateEntry(artifact_id));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(buf_list.clone());
+                }
             }
-            Entry::Vacant(entry) => {
-                entry.insert(BufList::from_iter([Bytes::from(buf)]));
+
+            match by_hash.entry(artifact_hash_id.clone()) {
+                Entry::Occupied(_) => {
+                    // We got two entries for an artifact?
+                    return Err(RepositoryError::DuplicateHashEntry(
+                        artifact_hash_id,
+                    ));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(buf_list);
+                }
             }
+
+            slog::debug!(
+                log,
+                "added artifact with kind {}, id {}:{}, hash {}, length {}",
+                artifact_id.kind,
+                artifact_id.name,
+                artifact_id.version,
+                artifact_hash,
+                num_bytes,
+            );
         }
+
+        // Ensure we know how to apply updates from this set of artifacts; we'll
+        // remember the plan we create.
+        let plan = UpdatePlan::new(&by_id)?;
+
+        Ok(Self {
+            by_id: by_id.into(),
+            by_hash: by_hash.into(),
+            plan: Some(plan),
+        })
     }
 
-    // Ensure we know how to apply updates from this set of artifacts; we'll
-    // remember the plan we create.
-    let plan = UpdatePlan::new(&new_artifacts)?;
+    fn get(&self, id: &ArtifactId) -> Option<BufList> {
+        self.by_id.get(id).cloned()
+    }
 
-    Ok((new_artifacts, plan))
+    fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
+        self.by_hash.get(id).cloned()
+    }
 }
 
 #[derive(Debug, Error)]
@@ -248,6 +311,16 @@ enum RepositoryError {
 
     #[error("error reading artifacts.json")]
     ReadArtifactsDocument(#[source] anyhow::Error),
+
+    #[error("error reading target hash for `{target}` in repository")]
+    TargetHashRead {
+        target: String,
+        #[source]
+        error: tough::schema::Error,
+    },
+
+    #[error("target hash `{}` expected to be 32 bytes long, was {}", hex::encode(.0), .0.len())]
+    TargetHashLength(Vec<u8>),
 
     #[error("error locating target `{target}` in repository")]
     LocateTarget {
@@ -278,6 +351,11 @@ enum RepositoryError {
 
     #[error("missing artifact of kind `{0:?}`")]
     MissingArtifactKind(KnownArtifactKind),
+
+    #[error(
+        "duplicate hash entries found in artifacts.json for kind `{}`, hash `{}`", .0.kind, .0.hash
+    )]
+    DuplicateHashEntry(ArtifactHashId),
 }
 
 impl RepositoryError {
@@ -295,8 +373,10 @@ impl RepositoryError {
             RepositoryError::DuplicateEntry(_)
             | RepositoryError::DuplicateArtifactKind(_)
             | RepositoryError::LocateTarget { .. }
+            | RepositoryError::TargetHashLength(_)
             | RepositoryError::MissingArtifactKind(_)
-            | RepositoryError::MissingTarget(_) => {
+            | RepositoryError::MissingTarget(_)
+            | RepositoryError::DuplicateHashEntry(_) => {
                 HttpError::for_bad_request(None, message)
             }
 
@@ -309,6 +389,7 @@ impl RepositoryError {
             | RepositoryError::Extract(_)
             | RepositoryError::LoadRepository(_)
             | RepositoryError::ReadArtifactsDocument(_)
+            | RepositoryError::TargetHashRead { .. }
             | RepositoryError::ReadTarget { .. } => {
                 HttpError::for_bad_request(None, message)
             }

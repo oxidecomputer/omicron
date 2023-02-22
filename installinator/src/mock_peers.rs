@@ -9,12 +9,13 @@ use std::{
 use anyhow::{bail, Result};
 use bytes::Bytes;
 use installinator_artifact_client::ClientError;
+use omicron_common::update::ArtifactHashId;
 use progenitor_client::ResponseValue;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 
-use crate::peers::{ArtifactId, FetchSender, PeersImpl};
+use crate::peers::{FetchSender, PeersImpl};
 
 struct MockPeersUniverse {
     artifact: Bytes,
@@ -222,7 +223,7 @@ impl PeersImpl for MockPeers {
         &self,
         peer: SocketAddrV6,
         // We don't (yet) use the artifact ID in MockPeers
-        _artifact_id: ArtifactId,
+        _artifact_hash_id: ArtifactHashId,
         sender: FetchSender,
     ) -> Pin<Box<dyn futures::Future<Output = ()> + Send>> {
         let peer_data = self
@@ -427,6 +428,9 @@ mod tests {
 
     use bytes::Buf;
     use futures::future;
+    use omicron_common::{
+        api::internal::nexus::KnownArtifactKind, update::ArtifactHash,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
 
@@ -462,7 +466,7 @@ mod tests {
                         anyhow::anyhow!("ran out of attempts"),
                     )),
                 },
-                &ArtifactId::dummy(),
+                &dummy_artifact_hash_id(),
             )
             .await;
 
@@ -509,5 +513,14 @@ mod tests {
             .build()
             .expect("tokio Runtime built successfully");
         runtime.block_on(f())
+    }
+
+    fn dummy_artifact_hash_id() -> ArtifactHashId {
+        ArtifactHashId {
+            kind: KnownArtifactKind::ControlPlane.into(),
+            hash: ArtifactHash(
+                hex_literal::hex!("b5bb9d8014a0f9b1d61e21e796d78dcc" "df1352f23cd32812f4850b878ae4944c"),
+            ),
+        }
     }
 }

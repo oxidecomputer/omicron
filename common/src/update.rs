@@ -1,7 +1,16 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
 use crate::api::internal::nexus::KnownArtifactKind;
-use schemars::JsonSchema;
+use hex::FromHexError;
+use schemars::{
+    gen::SchemaGenerator,
+    schema::{Schema, SchemaObject},
+    JsonSchema,
+};
 use serde::{Deserialize, Serialize};
 
 /// Description of the `artifacts.json` target found in rack update
@@ -63,6 +72,30 @@ pub struct ArtifactId {
 
     /// The kind of artifact this is.
     pub kind: ArtifactKind,
+}
+
+/// A hash-based identifier for an artifact.
+///
+/// Some places, e.g. the installinator, request artifacts by hash rather than
+/// by name and version. This type indicates that.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct ArtifactHashId {
+    /// The kind of artifact this is.
+    pub kind: ArtifactKind,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
 }
 
 /// The kind of artifact we are dealing with.
@@ -157,6 +190,54 @@ impl FromStr for ArtifactKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::new(s.to_owned()))
     }
+}
+
+/// The hash of an artifact.
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+pub struct ArtifactHash(
+    #[serde(with = "serde_human_bytes::hex_array")]
+    #[schemars(schema_with = "hex_schema::<32>")]
+    pub [u8; 32],
+);
+
+impl fmt::Debug for ArtifactHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ArtifactHash").field(&hex::encode(self.0)).finish()
+    }
+}
+
+impl fmt::Display for ArtifactHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&hex::encode(self.0))
+    }
+}
+
+impl FromStr for ArtifactHash {
+    type Err = FromHexError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let mut out = [0u8; 32];
+        hex::decode_to_slice(s, &mut out)?;
+        Ok(Self(out))
+    }
+}
+
+fn hex_schema<const N: usize>(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some(format!("hex string ({N} bytes)"));
+    schema.into()
 }
 
 #[cfg(test)]

@@ -8,10 +8,17 @@ use anyhow::{Context, Result};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
+use omicron_common::{
+    api::internal::nexus::KnownArtifactKind,
+    update::{ArtifactHashId, ArtifactKind},
+};
 use slog::Drain;
 use tokio::io::AsyncWriteExt;
 
-use crate::peers::{ArtifactId, DiscoveryMechanism, FetchedArtifact, Peers};
+use crate::{
+    artifact::ArtifactIdsOpt,
+    peers::{DiscoveryMechanism, FetchedArtifact, Peers},
+};
 
 /// Installinator app.
 #[derive(Debug, Parser)]
@@ -93,7 +100,8 @@ struct InstallOpts {
     #[command(flatten)]
     discover_opts: DiscoverOpts,
 
-    artifact_id: ArtifactId,
+    /// Artifact ID ["from-ipcc" or "host_phase_2:<sha256>,control_plane:<sha256>"]
+    artifact_ids: ArtifactIdsOpt,
 
     // TODO: checksum?
 
@@ -103,47 +111,97 @@ struct InstallOpts {
 
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        // Assume that buffering up the entire artifact in memory is OK, because we expect to have
-        // much more RAM available than the size of the host image. (If this changes in the future,
-        // we'll need to have some sort of streaming here.)
-        let artifact = FetchedArtifact::loop_fetch_from_peers(
+        let artifact_hashes = self.artifact_ids.resolve()?;
+
+        let host_phase_2_id = ArtifactHashId {
+            // TODO: currently we're assuming that wicket will unpack the host
+            // phase 2 image. We may instead have the installinator do it.
+            // kind: KnownArtifactKind::Host.into(),
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: artifact_hashes.host_phase_2,
+        };
+
+        let host_phase_2_artifact = fetch_artifact(
+            &host_phase_2_id,
+            &self.discover_opts.mechanism,
             &log,
-            || {
-                // TODO: discover nodes via the bootstrap network
-                async {
-                    Ok(Peers::new(
-                        &log,
-                        self.discover_opts
-                            .mechanism
-                            .discover_peers(&log)
-                            .await?,
-                        Duration::from_secs(10),
-                    ))
-                }
-            },
-            &self.artifact_id,
         )
         .await?;
 
-        slog::info!(
-            log,
-            "for artifact {}, fetched {} bytes from {}, writing to {}",
-            self.artifact_id,
-            artifact.artifact.num_bytes(),
-            artifact.addr,
-            self.destination,
-        );
+        let control_plane_id = ArtifactHashId {
+            kind: KnownArtifactKind::ControlPlane.into(),
+            hash: artifact_hashes.control_plane,
+        };
 
-        // TODO: add retries to this?
-        write_artifact(&self.artifact_id, artifact.artifact, &self.destination)
-            .await?;
+        let control_plane_artifact = fetch_artifact(
+            &control_plane_id,
+            &self.discover_opts.mechanism,
+            &log,
+        )
+        .await?;
+
+        // TODO: figure out the actual destination.
+
+        // TODO: add retries to this process?
+        std::fs::create_dir_all(&self.destination).with_context(|| {
+            format!("error creating directories at {}", self.destination)
+        })?;
+
+        write_artifact(
+            &host_phase_2_id,
+            host_phase_2_artifact.artifact,
+            &self.destination.join("host_phase_2.bin"),
+        )
+        .await?;
+
+        write_artifact(
+            &control_plane_id,
+            control_plane_artifact.artifact,
+            &self.destination.join("control_plane.bin"),
+        )
+        .await?;
 
         Ok(())
     }
 }
 
+async fn fetch_artifact(
+    id: &ArtifactHashId,
+    discovery: &DiscoveryMechanism,
+    log: &slog::Logger,
+) -> Result<FetchedArtifact> {
+    // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
+    // out at some point.
+    let log = log.new(slog::o!("artifact" => format!("{id:?}")));
+    let artifact = FetchedArtifact::loop_fetch_from_peers(
+        &log,
+        || {
+            // TODO: discover nodes via the bootstrap network
+            async {
+                Ok(Peers::new(
+                    &log,
+                    discovery.discover_peers(&log).await?,
+                    Duration::from_secs(10),
+                ))
+            }
+        },
+        id,
+    )
+    .await
+    .with_context(|| format!("error fetching image with id {id:?}"))?;
+
+    slog::info!(
+        log,
+        "fetched {} bytes from {}",
+        artifact.artifact.num_bytes(),
+        artifact.addr,
+    );
+
+    Ok(artifact)
+}
+
 async fn write_artifact(
-    artifact_id: &ArtifactId,
+    artifact_id: &ArtifactHashId,
     mut artifact: BufList,
     destination: &Utf8Path,
 ) -> Result<()> {
@@ -161,7 +219,7 @@ async fn write_artifact(
     let num_bytes = artifact.num_bytes();
 
     file.write_all_buf(&mut artifact).await.with_context(|| {
-        format!("failed to write artifact {artifact_id} ({num_bytes} bytes) to destination `{destination}`")
+        format!("failed to write artifact {artifact_id:?} ({num_bytes} bytes) to destination `{destination}`")
     })?;
 
     Ok(())
