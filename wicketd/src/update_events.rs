@@ -4,6 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use gateway_client::types::PowerState;
 use gateway_client::types::UpdatePreparationProgress;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
@@ -34,6 +35,9 @@ pub enum UpdateStateKind {
     },
     WaitingForStatus {
         artifact: ArtifactId,
+    },
+    SettingHostPowerState {
+        power_state: PowerState,
     },
 }
 

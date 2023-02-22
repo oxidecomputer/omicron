@@ -11,12 +11,14 @@ use crate::update_events::UpdateEventFailureKind;
 use crate::update_events::UpdateEventKind;
 use crate::update_events::UpdateEventSuccessKind;
 use crate::update_events::UpdateStateKind;
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use buf_list::BufList;
 use bytes::Bytes;
 use futures::TryStream;
+use gateway_client::types::PowerState;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
@@ -290,7 +292,7 @@ struct UpdateDriver {
 }
 
 impl UpdateDriver {
-    async fn run(self, plan: UpdatePlan) {
+    async fn run(mut self, plan: UpdatePlan) {
         if let Err(err) = self.run_impl(plan).await {
             error!(self.log, "update failed"; "err" => ?err);
             self.push_update_failure(err);
@@ -325,9 +327,15 @@ impl UpdateDriver {
     }
 
     async fn run_impl(
-        &self,
+        &mut self,
         plan: UpdatePlan,
     ) -> Result<(), UpdateEventFailureKind> {
+        // TODO-correctness Is the general order here correct? Host then SP then
+        // RoT, then reboot the SP/RoT?
+        if self.sp.type_ == SpType::Sled {
+            self.run_sled(&plan).await?;
+        }
+
         let sp_artifact = match self.sp.type_ {
             SpType::Sled => &plan.gimlet_sp,
             SpType::Power => &plan.psc_sp,
@@ -355,6 +363,142 @@ impl UpdateDriver {
         self.push_update_success(UpdateEventSuccessKind::SpResetComplete, None);
 
         Ok(())
+    }
+
+    async fn run_sled(
+        &mut self,
+        plan: &UpdatePlan,
+    ) -> Result<(), UpdateEventFailureKind> {
+        info!(self.log, "starting host recovery via trampoline image");
+
+        // We arbitrarily choose to store the trampoline phase 1 in host boot
+        // slot 0.
+        let trampoline_phase_1_boot_slot = 0;
+        self.deliver_host_phase1(
+            &plan.trampoline_phase_1,
+            trampoline_phase_1_boot_slot,
+        )
+        .await
+        .map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                artifact: plan.trampoline_phase_1.id.clone(),
+                reason: format!("{err:#}"),
+            }
+        })?;
+
+        // Wait (if necessary) for the trampoline phase 2 upload to MGS to
+        // complete. We started a task to do this the first time a sled update
+        // was started with this plan.
+        self.wait_for_upload_tramponline_to_mgs(plan).await.map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                artifact: plan.trampoline_phase_2.id.clone(),
+                reason: err.to_string(),
+            }
+        })?;
+
+        // TODO set installinator image ID
+        _ = plan.host_phase_2;
+        _ = plan.control_plane;
+
+        // TODO boot host, wait for trampoline phase 2 delivery over the
+        // management network
+
+        // TODO wait for installinator completion
+
+        // TODO deliver matching host phase 1
+        _ = plan.host_phase_1;
+
+        Ok(())
+    }
+
+    async fn wait_for_upload_tramponline_to_mgs(
+        &mut self,
+        plan: &UpdatePlan,
+    ) -> anyhow::Result<()> {
+        // Did the upload already complete before we got here?
+        if self.upload_trampoline_phase_2_to_mgs.borrow().complete {
+            return Ok(());
+        }
+
+        self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
+            artifact: plan.trampoline_phase_2.id.clone(),
+        });
+
+        while !self.upload_trampoline_phase_2_to_mgs.borrow().complete {
+            // `upload_trampoline_phase_2_to_mgs` waits for all receivers,
+            // so if `changed()` fails that means the task has either
+            // panicked or been cancelled due to a new repo upload - either
+            // way, we can't continue.
+            self.upload_trampoline_phase_2_to_mgs.changed().await.map_err(
+                |_recv_err| {
+                    anyhow!(concat!(
+                        "failed to upload trampoline phase 2 to MGS ",
+                        "(was a new TUF repo uploaded?)"
+                    ))
+                },
+            )?;
+        }
+
+        Ok(())
+    }
+
+    async fn deliver_host_phase1(
+        &self,
+        artifact: &ArtifactIdData,
+        boot_slot: u16,
+    ) -> anyhow::Result<()> {
+        const HOST_BOOT_FLASH: &str =
+            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
+
+        let phase1_image = buf_list_to_try_stream(artifact.data.0.clone());
+
+        // Ensure host is in A2.
+        self.set_host_power_state(PowerState::A2).await?;
+
+        // Start delivering image.
+        info!(self.log, "sending trampoline phase 1");
+        let update_id = Uuid::new_v4();
+        self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
+            artifact: artifact.id.clone(),
+        });
+        self.mgs_client
+            .sp_component_update(
+                self.sp.type_,
+                self.sp.slot,
+                HOST_BOOT_FLASH,
+                boot_slot,
+                &update_id,
+                reqwest::Body::wrap_stream(phase1_image),
+            )
+            .await
+            .context("failed to write host boot flash slot A")?;
+
+        // Wait for image delivery to complete.
+        info!(self.log, "waiting for trampoline phase 1 deliver to complete");
+        self.set_current_update_state(UpdateStateKind::WaitingForStatus {
+            artifact: artifact.id.clone(),
+        });
+        self.poll_for_component_update_completion(
+            &artifact.id,
+            update_id,
+            HOST_BOOT_FLASH,
+        )
+        .await
+    }
+
+    async fn set_host_power_state(
+        &self,
+        power_state: PowerState,
+    ) -> anyhow::Result<()> {
+        info!(self.log, "moving host to {power_state:?}");
+        self.set_current_update_state(UpdateStateKind::SettingHostPowerState {
+            power_state,
+        });
+        self.mgs_client
+            .sp_power_state_set(self.sp.type_, self.sp.slot, power_state)
+            .await
+            .with_context(|| format!("failed to put sled into {power_state:?}"))
+            .map(|response| response.into_inner())
     }
 
     async fn update_sp(&self, artifact: &ArtifactIdData) -> anyhow::Result<()> {
