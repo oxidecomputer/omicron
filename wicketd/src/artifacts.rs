@@ -21,6 +21,7 @@ use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{ArtifactHash, ArtifactHashId, ArtifactId};
+use sha2::{Digest, Sha256};
 use slog::{warn, Logger};
 use thiserror::Error;
 use tough::TargetName;
@@ -422,6 +423,11 @@ pub(crate) struct UpdatePlan {
     pub(crate) trampoline_phase_2: ArtifactIdData,
 
     pub(crate) control_plane: ArtifactIdData,
+
+    // We need to send installinator the hash of the host_phase_2 data it should
+    // fetch from us; to avoid recomputing it, record it in our plan. This is
+    // the SHA2-256 hash of the `host_phase_2.data`.
+    pub(crate) host_phase_2_hash: ArtifactHash,
 }
 
 impl UpdatePlan {
@@ -500,6 +506,17 @@ impl UpdatePlan {
             }
         }
 
+        let host_phase_2 = host_phase_2.ok_or(
+            RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
+        )?;
+
+        let mut host_phase_2_hash = Sha256::new();
+        for chunk in host_phase_2.data.iter() {
+            host_phase_2_hash.update(chunk);
+        }
+        let host_phase_2_hash =
+            ArtifactHash(host_phase_2_hash.finalize().into());
+
         Ok(Self {
             gimlet_sp: gimlet_sp.ok_or(
                 RepositoryError::MissingArtifactKind(
@@ -517,9 +534,7 @@ impl UpdatePlan {
             host_phase_1: host_phase_1.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
             )?,
-            host_phase_2: host_phase_2.ok_or(
-                RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
-            )?,
+            host_phase_2,
             trampoline_phase_1: trampoline_phase_1.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::Trampoline,
@@ -535,6 +550,7 @@ impl UpdatePlan {
                     KnownArtifactKind::ControlPlane,
                 ),
             )?,
+            host_phase_2_hash,
         })
     }
 }
