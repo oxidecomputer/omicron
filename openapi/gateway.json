@@ -625,13 +625,35 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "firmware_slot",
+            "description": "The update slot to apply this image to. Supply 0 if the component only has one update slot.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "description": "An identifier for this update.\n\nThis ID applies to this single instance of the API call; it is not an ID of `image` itself. Multiple API calls with the same `image` should use different IDs.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateBody"
+                "type": "string",
+                "format": "binary"
               }
             }
           },
@@ -1175,24 +1197,12 @@
         "type": "object",
         "properties": {
           "control_plane": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            },
-            "minItems": 32,
-            "maxItems": 32
+            "type": "string",
+            "format": "hex string (32 bytes)"
           },
           "host_phase_2": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            },
-            "minItems": 32,
-            "maxItems": 32
+            "type": "string",
+            "format": "hex string (32 bytes)"
           },
           "update_id": {
             "type": "string",
@@ -2648,36 +2658,6 @@
         },
         "required": [
           "id"
-        ]
-      },
-      "UpdateBody": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "An identifier for this update.\n\nThis ID applies to this single instance of the API call; it is not an ID of `image` itself. Multiple API calls with the same `image` should use different IDs.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "image": {
-            "description": "The binary blob containing the update image (component-specific).",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          },
-          "slot": {
-            "description": "The update slot to apply this image to. Supply 0 if the component only has one update slot.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "id",
-          "image",
-          "slot"
         ]
       },
       "UpdatePreparationProgress": {

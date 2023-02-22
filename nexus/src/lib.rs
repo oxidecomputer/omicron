@@ -212,6 +212,7 @@ impl nexus_test_interface::NexusServer for Server {
                 internal_api::params::RackInitializationRequest {
                     services: vec![],
                     datasets: vec![],
+                    internal_services_ip_pool_ranges: vec![],
                     certs: vec![],
                 },
             )

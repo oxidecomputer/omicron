@@ -19,6 +19,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
+use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use dropshot::UntypedBody;
@@ -27,6 +28,7 @@ use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
+use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -410,8 +412,8 @@ pub struct ImageVersion {
 #[serde(rename_all = "snake_case")]
 pub struct InstallinatorImageId {
     pub update_id: Uuid,
-    pub host_phase_2: [u8; 32],
-    pub control_plane: [u8; 32],
+    pub host_phase_2: ArtifactHash,
+    pub control_plane: ArtifactHash,
 }
 
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
@@ -856,20 +858,17 @@ async fn sp_component_serial_console_detach(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
-// TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
-pub struct UpdateBody {
+pub struct ComponentUpdateIdSlot {
     /// An identifier for this update.
     ///
     /// This ID applies to this single instance of the API call; it is not an
     /// ID of `image` itself. Multiple API calls with the same `image` should
     /// use different IDs.
     pub id: Uuid,
-    /// The binary blob containing the update image (component-specific).
-    pub image: Vec<u8>,
     /// The update slot to apply this image to. Supply 0 if the component only
     /// has one update slot.
-    pub slot: u16,
+    pub firmware_slot: u16,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -927,16 +926,20 @@ async fn sp_reset(
 async fn sp_component_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
-    body: TypedBody<UpdateBody>,
+    query_params: Query<ComponentUpdateIdSlot>,
+    body: UntypedBody,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
 
     let PathSpComponent { sp, component } = path.into_inner();
     let sp = apictx.mgmt_switch.sp(sp.into())?;
     let component = component_from_str(&component)?;
+    let ComponentUpdateIdSlot { id, firmware_slot } = query_params.into_inner();
 
-    let UpdateBody { id, image, slot } = body.into_inner();
-    sp.start_update(component, id, slot, image)
+    // TODO-performance: this makes a full copy of the uploaded data
+    let image = body.as_bytes().to_vec();
+
+    sp.start_update(component, id, firmware_slot, image)
         .await
         .map_err(SpCommsError::from)?;
 

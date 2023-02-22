@@ -1680,6 +1680,62 @@
           }
         ]
       },
+      "IpRange": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Range"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Range"
+              }
+            ]
+          }
+        ]
+      },
+      "Ipv4Range": {
+        "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "Ipv6Range": {
+        "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",
         "type": "object",
@@ -1969,18 +2025,28 @@
         "type": "object",
         "properties": {
           "certs": {
+            "description": "x.509 Certificates used to encrypt communication with the external API.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Certificate"
             }
           },
           "datasets": {
+            "description": "Datasets on the rack which have been provisioned by RSS.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DatasetCreateRequest"
             }
           },
+          "internal_services_ip_pool_ranges": {
+            "description": "Ranges of the service IP pool which may be used for internal services, such as Nexus.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
           "services": {
+            "description": "Services on the rack which have been created by RSS.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ServicePutRequest"
@@ -1990,6 +2056,7 @@
         "required": [
           "certs",
           "datasets",
+          "internal_services_ip_pool_ranges",
           "services"
         ]
       },

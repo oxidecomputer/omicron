@@ -43,8 +43,8 @@ use crate::serial::ByteOffset;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Physical link not in config, nor found automatically: {0}")]
-    FindPhysicalLink(#[from] crate::illumos::dladm::FindPhysicalLinkError),
+    #[error("Configuration error: {0}")]
+    Config(#[from] crate::config::ConfigError),
 
     #[error("Failed to enable routing: {0}")]
     EnablingRouting(crate::illumos::ExecutionError),

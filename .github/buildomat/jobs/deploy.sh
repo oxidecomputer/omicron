@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-opte-0.20"
+#: target = "lab-opte-0.21"
 #: output_rules = [
 #:	"%/var/svc/log/system-illumos-sled-agent:default.log",
 #:	"%/zone/oxz_nexus/root/var/svc/log/system-illumos-nexus:default.log",

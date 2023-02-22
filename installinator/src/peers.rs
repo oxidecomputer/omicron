@@ -14,7 +14,7 @@ use display_error_chain::DisplayErrorChain;
 use futures::StreamExt;
 use installinator_artifact_client::ClientError;
 use itertools::Itertools;
-use omicron_common::update::ArtifactKind;
+use omicron_common::update::ArtifactHashId;
 use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
@@ -110,7 +110,7 @@ impl FetchedArtifact {
     pub(crate) async fn loop_fetch_from_peers<F, Fut>(
         log: &slog::Logger,
         mut discover_fn: F,
-        artifact_id: &ArtifactId,
+        artifact_hash_id: &ArtifactHashId,
     ) -> Result<Self>
     where
         F: FnMut() -> Fut,
@@ -142,7 +142,7 @@ impl FetchedArtifact {
                 peers.peer_count(),
                 peers.display(),
             );
-            match peers.fetch_artifact(artifact_id).await {
+            match peers.fetch_artifact(artifact_hash_id).await {
                 Some((addr, artifact)) => {
                     return Ok(Self { attempt, addr, artifact })
                 }
@@ -195,14 +195,15 @@ impl Peers {
 
     pub(crate) async fn fetch_artifact(
         &self,
-        artifact_id: &ArtifactId,
+        artifact_hash_id: &ArtifactHashId,
     ) -> Option<(SocketAddrV6, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
         let mut remaining_peers = self.peer_count();
 
-        let log =
-            self.log.new(slog::o!("artifact_id" => artifact_id.to_string()));
+        let log = self.log.new(
+            slog::o!("artifact_hash_id" => format!("{artifact_hash_id:?}")),
+        );
 
         slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
 
@@ -216,7 +217,7 @@ impl Peers {
 
             // Attempt to download data from this peer.
             let start = Instant::now();
-            match self.fetch_from_peer(peer, artifact_id).await {
+            match self.fetch_from_peer(peer, artifact_hash_id).await {
                 Ok(artifact_bytes) => {
                     let elapsed = start.elapsed();
                     slog::info!(
@@ -255,13 +256,16 @@ impl Peers {
     async fn fetch_from_peer(
         &self,
         peer: SocketAddrV6,
-        artifact_id: &ArtifactId,
+        artifact_hash_id: &ArtifactHashId,
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
         let (sender, mut receiver) = mpsc::channel(8);
 
-        let fetch =
-            self.imp.fetch_from_peer_impl(peer, artifact_id.clone(), sender);
+        let fetch = self.imp.fetch_from_peer_impl(
+            peer,
+            artifact_hash_id.clone(),
+            sender,
+        );
 
         tokio::spawn(fetch);
 
@@ -309,7 +313,7 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
     fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
-        artifact_id: ArtifactId,
+        artifact_hash_id: ArtifactHashId,
         sender: FetchSender,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
@@ -343,14 +347,14 @@ impl PeersImpl for HttpPeers {
     fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
-        artifact_id: ArtifactId,
+        artifact_hash_id: ArtifactHashId,
         sender: FetchSender,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         // TODO: be able to fetch from sled-agent clients as well
         let artifact_client = ArtifactClient::new(peer, &self.log);
-        Box::pin(
-            async move { artifact_client.fetch(artifact_id, sender).await },
-        )
+        Box::pin(async move {
+            artifact_client.fetch(artifact_hash_id, sender).await
+        })
     }
 }
 
@@ -371,13 +375,16 @@ impl ArtifactClient {
         Self { log, client }
     }
 
-    async fn fetch(&self, artifact_id: ArtifactId, sender: FetchSender) {
+    async fn fetch(
+        &self,
+        artifact_hash_id: ArtifactHashId,
+        sender: FetchSender,
+    ) {
         let artifact_bytes = match self
             .client
-            .get_artifact(
-                artifact_id.kind.as_str(),
-                &artifact_id.name,
-                &artifact_id.version,
+            .get_artifact_by_hash(
+                artifact_hash_id.kind.as_str(),
+                &artifact_hash_id.hash.to_string(),
             )
             .await
         {
@@ -401,53 +408,5 @@ impl ArtifactClient {
                 return;
             }
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ArtifactId {
-    name: String,
-    version: String,
-    kind: ArtifactKind,
-}
-
-impl ArtifactId {
-    #[cfg(test)]
-    pub(crate) fn dummy() -> Self {
-        use omicron_common::api::internal::nexus::KnownArtifactKind;
-
-        Self {
-            name: "dummy".to_owned(),
-            version: "0.1.0".to_owned(),
-            kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
-        }
-    }
-}
-
-impl fmt::Display for ArtifactId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.name, self.version)
-    }
-}
-
-impl FromStr for ArtifactId {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut split = s.splitn(3, ':');
-        let kind = split.next();
-        let name = split.next();
-        let version = split.next();
-
-        let (kind, name, version) = match (kind, name, version) {
-            (Some(kind), Some(name), Some(version)) => (kind, name, version),
-            _ => {
-                bail!("invalid format for input `{s}`: expected 'kind:name:version'")
-            }
-        };
-
-        let kind = ArtifactKind::new(kind.to_owned());
-
-        Ok(Self { name: name.to_owned(), version: version.to_owned(), kind })
     }
 }

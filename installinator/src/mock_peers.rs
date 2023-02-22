@@ -9,12 +9,13 @@ use std::{
 use anyhow::{bail, Result};
 use bytes::Bytes;
 use installinator_artifact_client::ClientError;
+use omicron_common::update::ArtifactHashId;
 use progenitor_client::ResponseValue;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 
-use crate::peers::{ArtifactId, FetchSender, PeersImpl};
+use crate::peers::{FetchSender, PeersImpl};
 
 struct MockPeersUniverse {
     artifact: Bytes,
@@ -222,7 +223,7 @@ impl PeersImpl for MockPeers {
         &self,
         peer: SocketAddrV6,
         // We don't (yet) use the artifact ID in MockPeers
-        _artifact_id: ArtifactId,
+        _artifact_hash_id: ArtifactHashId,
         sender: FetchSender,
     ) -> Pin<Box<dyn futures::Future<Output = ()> + Send>> {
         let peer_data = self
@@ -423,12 +424,14 @@ mod tests {
     use crate::{
         errors::DiscoverPeersError,
         peers::{FetchedArtifact, Peers},
-        stderr_env_drain,
     };
 
     use bytes::Buf;
     use futures::future;
-    use slog::Drain;
+    use omicron_common::{
+        api::internal::nexus::KnownArtifactKind, update::ArtifactHash,
+    };
+    use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
 
     use std::future::Future;
@@ -442,18 +445,20 @@ mod tests {
         timeout: Duration,
     ) {
         with_test_runtime(move || async move {
-            let log = test_logger();
+            let logctx = test_setup_log("proptest_fetch_artifact");
             let expected_success = universe.expected_success(timeout);
             let expected_artifact = universe.artifact.clone();
 
             let mut attempts = universe.attempts();
 
             let fetched_artifact = FetchedArtifact::loop_fetch_from_peers(
-                &log,
+                &logctx.log,
                 || match attempts.next() {
-                    Some(Ok(peers)) => {
-                        future::ok(Peers::new(&log, Box::new(peers), timeout))
-                    }
+                    Some(Ok(peers)) => future::ok(Peers::new(
+                        &logctx.log,
+                        Box::new(peers),
+                        timeout,
+                    )),
                     Some(Err(error)) => {
                         future::err(DiscoverPeersError::Retry(error))
                     }
@@ -461,7 +466,7 @@ mod tests {
                         anyhow::anyhow!("ran out of attempts"),
                     )),
                 },
-                &ArtifactId::dummy(),
+                &dummy_artifact_hash_id(),
             )
             .await;
 
@@ -493,7 +498,8 @@ mod tests {
                     panic!("expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}");
                 }
             }
-        })
+            logctx.cleanup_successful();
+        });
     }
 
     fn with_test_runtime<F, Fut, T>(f: F) -> T
@@ -509,10 +515,12 @@ mod tests {
         runtime.block_on(f())
     }
 
-    fn test_logger() -> slog::Logger {
-        // To control logging, use RUST_TEST_LOG.
-        let drain = stderr_env_drain("RUST_TEST_LOG");
-        let drain = slog_async::Async::new(drain).build().fuse();
-        slog::Logger::root(drain, slog::o!())
+    fn dummy_artifact_hash_id() -> ArtifactHashId {
+        ArtifactHashId {
+            kind: KnownArtifactKind::ControlPlane.into(),
+            hash: ArtifactHash(
+                hex_literal::hex!("b5bb9d8014a0f9b1d61e21e796d78dcc" "df1352f23cd32812f4850b878ae4944c"),
+            ),
+        }
     }
 }

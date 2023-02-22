@@ -8,7 +8,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use hyper::Body;
-use omicron_common::update::ArtifactId;
+use omicron_common::update::{ArtifactHashId, ArtifactId};
 use slog::Logger;
 
 /// Represents a way to fetch artifacts.
@@ -16,6 +16,9 @@ use slog::Logger;
 pub trait ArtifactGetter: fmt::Debug + Send + Sync + 'static {
     /// Gets an artifact, returning it as a [`Body`].
     async fn get(&self, id: &ArtifactId) -> Option<Body>;
+
+    /// Gets an artifact by hash, returning it as a [`Body`].
+    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<Body>;
 }
 
 /// The artifact store -- a simple wrapper around a dynamic [`ArtifactGetter`] that does some basic
@@ -39,5 +42,13 @@ impl ArtifactStore {
     pub(crate) async fn get_artifact(&self, id: &ArtifactId) -> Option<Body> {
         slog::debug!(self.log, "Artifact requested: {:?}", id);
         self.getter.get(id).await
+    }
+
+    pub(crate) async fn get_artifact_by_hash(
+        &self,
+        id: &ArtifactHashId,
+    ) -> Option<Body> {
+        slog::debug!(self.log, "Artifact requested by hash: {:?}", id);
+        self.getter.get_by_hash(id).await
     }
 }
