@@ -40,7 +40,7 @@ const OXIMETER_COUNT: usize = 1;
 const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
-const MINIMUM_ZPOOL_COUNT: usize = 3;
+const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
 const PANTRY_COUNT: usize = 1;
@@ -116,8 +116,8 @@ impl Plan {
         }
     }
 
-    // Gets zpool UUIDs from the sled.
-    async fn get_zpools_from_sled(
+    // Gets zpool UUIDs from U.2 devices on the sled.
+    async fn get_u2_zpools_from_sled(
         log: &Logger,
         address: SocketAddrV6,
     ) -> Result<Vec<Uuid>, PlanError> {
@@ -133,7 +133,7 @@ impl Plan {
             log.new(o!("SledAgentClient" => address.to_string())),
         );
 
-        let get_zpools = || async {
+        let get_u2_zpools = || async {
             let zpools: Vec<Uuid> = client
                 .zpools_get()
                 .await
@@ -141,7 +141,10 @@ impl Plan {
                     response
                         .into_inner()
                         .into_iter()
-                        .map(|zpool| zpool.id)
+                        .filter_map(|zpool| match zpool.disk_type {
+                            SledAgentTypes::DiskType::U2 => Some(zpool.id),
+                            SledAgentTypes::DiskType::M2 => None,
+                        })
                         .collect()
                 })
                 .map_err(|err| {
@@ -154,7 +157,7 @@ impl Plan {
             //
             // Once this responsibility shifts to Nexus, we actually only
             // need enough zpools to provision CRDB.
-            if zpools.len() < MINIMUM_ZPOOL_COUNT {
+            if zpools.len() < MINIMUM_U2_ZPOOL_COUNT {
                 return Err(BackoffError::transient(
                     PlanError::SledInitialization(
                         "Awaiting zpools".to_string(),
@@ -167,14 +170,14 @@ impl Plan {
         let log_failure = |error, _| {
             warn!(log, "failed to get zpools"; "error" => ?error);
         };
-        let zpools = retry_notify(
+        let u2_zpools = retry_notify(
             retry_policy_internal_service_aggressive(),
-            get_zpools,
+            get_u2_zpools,
             log_failure,
         )
         .await?;
 
-        Ok(zpools)
+        Ok(u2_zpools)
     }
 
     pub async fn create(
@@ -191,7 +194,8 @@ impl Plan {
             let sled_address = sled_addrs[idx];
             let subnet: Ipv6Subnet<SLED_PREFIX> =
                 Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip());
-            let zpools = Self::get_zpools_from_sled(log, sled_address).await?;
+            let u2_zpools =
+                Self::get_u2_zpools_from_sled(log, sled_address).await?;
             let mut addr_alloc = AddressBumpAllocator::new(subnet);
 
             let mut request = SledRequest::default();
@@ -235,7 +239,7 @@ impl Plan {
                 );
                 request.datasets.push(DatasetEnsureBody {
                     id: Uuid::new_v4(),
-                    zpool_id: zpools[0],
+                    zpool_id: u2_zpools[0],
                     dataset_kind: crate::params::DatasetKind::CockroachDb {
                         all_addresses: vec![address],
                     },
@@ -253,7 +257,7 @@ impl Plan {
                 );
                 request.datasets.push(DatasetEnsureBody {
                     id: Uuid::new_v4(),
-                    zpool_id: zpools[0],
+                    zpool_id: u2_zpools[0],
                     dataset_kind: crate::params::DatasetKind::Clickhouse,
                     address,
                 });
@@ -262,7 +266,7 @@ impl Plan {
             // Each zpool gets a crucible zone.
             //
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            for zpool_id in zpools {
+            for zpool_id in u2_zpools {
                 let address = SocketAddrV6::new(
                     addr_alloc.next().expect("Not enough addrs"),
                     omicron_common::address::CRUCIBLE_PORT,

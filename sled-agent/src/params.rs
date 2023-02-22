@@ -232,8 +232,25 @@ pub struct InstanceSerialConsoleData {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub enum DiskType {
+    U2,
+    M2,
+}
+
+impl From<crate::hardware::DiskVariant> for DiskType {
+    fn from(v: crate::hardware::DiskVariant) -> Self {
+        use crate::hardware::DiskVariant::*;
+        match v {
+            U2 => Self::U2,
+            M2 => Self::M2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct Zpool {
     pub id: Uuid,
+    pub disk_type: DiskType,
 }
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage

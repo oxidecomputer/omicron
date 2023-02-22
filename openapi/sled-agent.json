@@ -815,6 +815,13 @@
           }
         ]
       },
+      "DiskType": {
+        "type": "string",
+        "enum": [
+          "U2",
+          "M2"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -1909,12 +1916,16 @@
       "Zpool": {
         "type": "object",
         "properties": {
+          "disk_type": {
+            "$ref": "#/components/schemas/DiskType"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
+          "disk_type",
           "id"
         ]
       }
