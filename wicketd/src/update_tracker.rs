@@ -21,10 +21,12 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
+use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
 use slog::error;
 use slog::info;
 use slog::o;
+use slog::warn;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
@@ -34,6 +36,7 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
+use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -91,9 +94,40 @@ struct SpUpdateData {
 }
 
 #[derive(Debug)]
+struct UploadTrampolinePhase2ToMgsStatus {
+    id: ArtifactId,
+    // The upload task retries forever until it succeeds, so we don't need to
+    // keep a "tried but failed" variant here; we just need to know if the
+    // upload has completed.
+    complete: bool,
+}
+
+#[derive(Debug)]
+struct UploadTrampolinePhase2ToMgs {
+    // The tuple is the ID of the Trampoline image and a boolean for whether or
+    // not it is complete. The upload task retries forever until it succeeds, so
+    // we don't need to keep a "tried but failed" variant here.
+    status: watch::Receiver<UploadTrampolinePhase2ToMgsStatus>,
+    task: JoinHandle<()>,
+}
+
+#[derive(Debug)]
 pub(crate) struct UpdateTracker {
     mgs_client: gateway_client::Client,
     sp_update_data: Mutex<BTreeMap<SpIdentifier, SpUpdateData>>,
+
+    // Every sled update via trampoline requires MGS to serve the trampoline
+    // phase 2 image to the sled's SP over the management network; however, that
+    // doesn't mean we should upload the trampoline image to MGS for every sled
+    // update - it's always the same (for any given update plan). Therefore, we
+    // separate the status of uploading the trampoline phase 2 MGS from the
+    // status of individual SP updates: we'll start this upload the first time a
+    // sled update starts that uses it, and any update (including that one or
+    // any future sled updates) will pause at the appropriate time (if needed)
+    // to wait for the upload to complete.
+    upload_trampoline_phase_2_to_mgs:
+        Mutex<Option<UploadTrampolinePhase2ToMgs>>,
+
     log: Logger,
 }
 
@@ -102,8 +136,14 @@ impl UpdateTracker {
         let log = log.new(o!("component" => "wicketd update planner"));
         let sp_update_data = Mutex::default();
         let mgs_client = make_mgs_client(log.clone(), mgs_addr);
+        let upload_trampoline_phase_2_to_mgs = Mutex::default();
 
-        Self { mgs_client, sp_update_data, log }
+        Self {
+            mgs_client,
+            sp_update_data,
+            log,
+            upload_trampoline_phase_2_to_mgs,
+        }
     }
 
     pub(crate) async fn start(
@@ -111,12 +151,49 @@ impl UpdateTracker {
         sp: SpIdentifier,
         plan: UpdatePlan,
     ) -> Result<(), StartUpdateError> {
+        // Do we need to upload this plan's trampoline phase 2 to MGS?
+        let upload_trampoline_phase_2_to_mgs = {
+            let mut upload_trampoline_phase_2_to_mgs =
+                self.upload_trampoline_phase_2_to_mgs.lock().await;
+
+            match upload_trampoline_phase_2_to_mgs.as_mut() {
+                Some(prev) => {
+                    // We've previously started an upload - does it match this
+                    // update's artifact ID? If not, cancel the old task (which
+                    // might still be trying to upload) and start a new one with
+                    // our current image.
+                    //
+                    // TODO-correctness If we still have updates running that
+                    // expect the old image, they're probably going to fail.
+                    // Should we handle that more cleanly or just let them fail?
+                    if prev.status.borrow().id != plan.trampoline_phase_2.id {
+                        // It does _not_ match - we have a new plan with a
+                        // different trampoline image. If the old task is still
+                        // running, cancel it, and start a new one.
+                        prev.task.abort();
+                        *prev =
+                            self.spawn_upload_trampoline_phase_2_to_mgs(&plan);
+                    }
+                }
+                None => {
+                    *upload_trampoline_phase_2_to_mgs = Some(
+                        self.spawn_upload_trampoline_phase_2_to_mgs(&plan),
+                    );
+                }
+            }
+
+            // Both branches above leave `upload_trampoline_phase_2_to_mgs` with
+            // data, so we can unwrap here to clone the `watch` channel.
+            upload_trampoline_phase_2_to_mgs.as_ref().unwrap().status.clone()
+        };
+
         let spawn_update_driver = || async {
             let update_log = Arc::default();
 
             let update_driver = UpdateDriver {
                 sp,
                 mgs_client: self.mgs_client.clone(),
+                upload_trampoline_phase_2_to_mgs,
                 update_log: Arc::clone(&update_log),
                 log: self.log.new(o!("sp" => format!("{sp:?}"))),
             };
@@ -145,6 +222,25 @@ impl UpdateTracker {
                 }
             }
         }
+    }
+
+    fn spawn_upload_trampoline_phase_2_to_mgs(
+        &self,
+        plan: &UpdatePlan,
+    ) -> UploadTrampolinePhase2ToMgs {
+        let artifact = plan.trampoline_phase_2.clone();
+        let (status_tx, status_rx) =
+            watch::channel(UploadTrampolinePhase2ToMgsStatus {
+                id: artifact.id.clone(),
+                complete: false,
+            });
+        let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
+            self.mgs_client.clone(),
+            artifact,
+            status_tx,
+            self.log.clone(),
+        ));
+        UploadTrampolinePhase2ToMgs { status: status_rx, task }
     }
 
     pub(crate) async fn update_log(
@@ -187,6 +283,8 @@ pub(crate) enum StartUpdateError {
 struct UpdateDriver {
     sp: SpIdentifier,
     mgs_client: gateway_client::Client,
+    upload_trampoline_phase_2_to_mgs:
+        watch::Receiver<UploadTrampolinePhase2ToMgsStatus>,
     update_log: Arc<StdMutex<UpdateLog>>,
     log: Logger,
 }
@@ -376,4 +474,53 @@ fn buf_list_to_try_stream(
     data: BufList,
 ) -> impl TryStream<Ok = Bytes, Error = std::convert::Infallible> {
     futures::stream::iter(data.into_iter().map(Ok))
+}
+
+async fn upload_trampoline_phase_2_to_mgs(
+    mgs_client: gateway_client::Client,
+    artifact: ArtifactIdData,
+    status: watch::Sender<UploadTrampolinePhase2ToMgsStatus>,
+    log: Logger,
+) {
+    let data = artifact.data;
+    let upload_task = move || {
+        let mgs_client = mgs_client.clone();
+        let image = buf_list_to_try_stream(data.0.clone());
+
+        async move {
+            mgs_client
+                .recovery_host_phase2_upload(reqwest::Body::wrap_stream(image))
+                .await
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+        }
+    };
+
+    let log_failure = move |err, delay| {
+        warn!(
+            log,
+            "failed to upload trampoline phase 2 to MGS, will retry in {:?}",
+            delay;
+            "err" => %err,
+        );
+    };
+
+    // retry_policy_internal_service_aggressive() retries forever, so we can
+    // unwrap this call to retry_notify
+    backoff::retry_notify(
+        backoff::retry_policy_internal_service_aggressive(),
+        upload_task,
+        log_failure,
+    )
+    .await
+    .unwrap();
+
+    // Notify all receivers that we've uploaded the image.
+    _ = status.send(UploadTrampolinePhase2ToMgsStatus {
+        id: artifact.id,
+        complete: true,
+    });
+
+    // Wait for all receivers to be gone before we exit, so they don't get recv
+    // errors unless we're cancelled.
+    status.closed().await;
 }
