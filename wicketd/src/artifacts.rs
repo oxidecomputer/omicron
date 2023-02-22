@@ -281,25 +281,7 @@ impl ArtifactsWithPlan {
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = UpdatePlan::new(&by_id, log)?;
-
-        // Add the host phase 2 image to the set of artifacts we're willing to
-        // serve by hash; that's how installinator will be requesting it.
-        let host_phase_2_hash_id = ArtifactHashId {
-            kind: ArtifactKind::HOST_PHASE_2,
-            hash: plan.host_phase_2_hash,
-        };
-        match by_hash.entry(host_phase_2_hash_id.clone()) {
-            Entry::Occupied(_) => {
-                // We got two entries for an artifact?
-                return Err(RepositoryError::DuplicateHashEntry(
-                    host_phase_2_hash_id,
-                ));
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(plan.host_phase_2.data.0.clone());
-            }
-        }
+        let plan = UpdatePlan::new(&by_id, &mut by_hash, log)?;
 
         Ok(Self {
             by_id: by_id.into(),
@@ -431,28 +413,32 @@ pub(crate) struct UpdatePlan {
     pub(crate) psc_sp: ArtifactIdData,
     pub(crate) sidecar_sp: ArtifactIdData,
 
-    // Note: The Host image is broken into phase1/phase2 as part of our update
-    // plan (because they go to different destinations), but the two phases will
-    // have the _same_ `ArtifactId` (i.e., the ID of the Host artifact from the
-    // TUF repository.
+    // Note: The Trampoline image is broken into phase1/phase2 as part of our
+    // update plan (because they go to different destinations), but the two
+    // phases will have the _same_ `ArtifactId` (i.e., the ID of the Host
+    // artifact from the TUF repository.
     //
-    // The same applies to the Trampoline image.
+    // The same would apply to the host phase1/phase2, but we don't actually
+    // need the `host_phase_2` data as part of this plan (we serve it from the
+    // artifact server instead).
     pub(crate) host_phase_1: ArtifactIdData,
-    pub(crate) host_phase_2: ArtifactIdData,
     pub(crate) trampoline_phase_1: ArtifactIdData,
     pub(crate) trampoline_phase_2: ArtifactIdData,
 
-    pub(crate) control_plane: ArtifactIdData,
-
     // We need to send installinator the hash of the host_phase_2 data it should
-    // fetch from us; to avoid recomputing it, record it in our plan. This is
-    // the SHA2-256 hash of the `host_phase_2.data`.
+    // fetch from us; we compute it while generating the plan.
     pub(crate) host_phase_2_hash: ArtifactHash,
+
+    // We also need to send installinator the hash of the control_plane image it
+    // should fetch from us. This is already present in the TUF repository, but
+    // we record it here for use by the update process.
+    pub(crate) control_plane_hash: ArtifactHash,
 }
 
 impl UpdatePlan {
     fn new(
-        artifacts: &HashMap<ArtifactId, BufList>,
+        by_id: &HashMap<ArtifactId, BufList>,
+        by_hash: &mut HashMap<ArtifactHashId, BufList>,
         log: &Logger,
     ) -> Result<Self, RepositoryError> {
         // We expect exactly one of each of these kinds to be present in the
@@ -465,7 +451,6 @@ impl UpdatePlan {
         let mut host_phase_2 = None;
         let mut trampoline_phase_1 = None;
         let mut trampoline_phase_2 = None;
-        let mut control_plane = None;
 
         let artifact_found =
             |out: &mut Option<ArtifactIdData>, id, data: &BufList| {
@@ -480,7 +465,7 @@ impl UpdatePlan {
                 }
             };
 
-        for (artifact_id, data) in artifacts.iter() {
+        for (artifact_id, data) in by_id.iter() {
             // In generating an update plan, skip any artifact kinds that are
             // unknown to us (we wouldn't know how to incorporate them into our
             // plan).
@@ -519,23 +504,57 @@ impl UpdatePlan {
                         &phase2,
                     )?;
                 }
-                KnownArtifactKind::ControlPlane => {
-                    artifact_found(&mut control_plane, artifact_id, data)?;
-                }
                 _ => continue,
             }
         }
 
+        // Find the TUF hash of the control plane artifact. This is a little
+        // hokey: scan through `by_hash` looking for the right artifact kind.
+        let control_plane_hash = by_hash
+            .keys()
+            .find_map(|hash_id| {
+                if hash_id.kind.to_known()
+                    == Some(KnownArtifactKind::ControlPlane)
+                {
+                    Some(hash_id.hash)
+                } else {
+                    None
+                }
+            })
+            .ok_or(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::ControlPlane,
+            ))?;
+
+        // Ensure we found a Host artifact.
         let host_phase_2 = host_phase_2.ok_or(
             RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
         )?;
 
+        // Compute the SHA-256 of the extracted host phase 2 data.
         let mut host_phase_2_hash = Sha256::new();
         for chunk in host_phase_2.data.iter() {
             host_phase_2_hash.update(chunk);
         }
         let host_phase_2_hash =
             ArtifactHash(host_phase_2_hash.finalize().into());
+
+        // Add the host phase 2 image to the set of artifacts we're willing to
+        // serve by hash; that's how installinator will be requesting it.
+        let host_phase_2_hash_id = ArtifactHashId {
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: host_phase_2_hash,
+        };
+        match by_hash.entry(host_phase_2_hash_id.clone()) {
+            Entry::Occupied(_) => {
+                // We got two entries for an artifact?
+                return Err(RepositoryError::DuplicateHashEntry(
+                    host_phase_2_hash_id,
+                ));
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(host_phase_2.data.0.clone());
+            }
+        }
 
         Ok(Self {
             gimlet_sp: gimlet_sp.ok_or(
@@ -554,7 +573,6 @@ impl UpdatePlan {
             host_phase_1: host_phase_1.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
             )?,
-            host_phase_2,
             trampoline_phase_1: trampoline_phase_1.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::Trampoline,
@@ -565,12 +583,8 @@ impl UpdatePlan {
                     KnownArtifactKind::Trampoline,
                 ),
             )?,
-            control_plane: control_plane.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::ControlPlane,
-                ),
-            )?,
             host_phase_2_hash,
+            control_plane_hash,
         })
     }
 }

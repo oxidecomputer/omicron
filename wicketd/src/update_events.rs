@@ -39,6 +39,8 @@ pub enum UpdateStateKind {
     SettingHostPowerState {
         power_state: PowerState,
     },
+    SettingInstallinatorOptions,
+    SettingHostStartupOptions,
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
