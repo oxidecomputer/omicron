@@ -19,8 +19,10 @@ use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{ArtifactHash, ArtifactHashId, ArtifactId};
+use omicron_common::{
+    api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
+};
 use sha2::{Digest, Sha256};
 use slog::{warn, Logger};
 use thiserror::Error;
@@ -280,6 +282,24 @@ impl ArtifactsWithPlan {
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
         let plan = UpdatePlan::new(&by_id, log)?;
+
+        // Add the host phase 2 image to the set of artifacts we're willing to
+        // serve by hash; that's how installinator will be requesting it.
+        let host_phase_2_hash_id = ArtifactHashId {
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: plan.host_phase_2_hash,
+        };
+        match by_hash.entry(host_phase_2_hash_id.clone()) {
+            Entry::Occupied(_) => {
+                // We got two entries for an artifact?
+                return Err(RepositoryError::DuplicateHashEntry(
+                    host_phase_2_hash_id,
+                ));
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(plan.host_phase_2.data.0.clone());
+            }
+        }
 
         Ok(Self {
             by_id: by_id.into(),
