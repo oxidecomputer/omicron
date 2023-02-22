@@ -1613,7 +1613,7 @@ name = "dns-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.4",
+ "clap 4.1.6",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -1632,7 +1632,7 @@ dependencies = [
  "subprocess",
  "tempdir",
  "tokio",
- "toml 0.7.1",
+ "toml 0.7.2",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
