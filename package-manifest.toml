@@ -88,13 +88,13 @@ output.type = "zone"
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
 
 [package.internal-dns]
-service_name = "internal-dns"
+service_name = "internal_dns"
 source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
 output.type = "zone"
 
 [package.external-dns]
-service_name = "external-dns"
+service_name = "external_dns"
 source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
 output.type = "zone"
@@ -111,14 +111,14 @@ output.intermediate_only = true
 [package.internal-dns-customizations]
 service_name = "internal-dns-customizations"
 source.type = "local"
-source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal-dns" } ]
+source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal_dns" } ]
 output.intermediate_only = true
 output.type = "zone"
 
 [package.external-dns-customizations]
 service_name = "external-dns-customizations"
 source.type = "local"
-source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external-dns" } ]
+source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" } ]
 output.intermediate_only = true
 output.type = "zone"
 
