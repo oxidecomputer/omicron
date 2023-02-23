@@ -7,7 +7,7 @@
 use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
-use crate::opte::Port;
+use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
 use ipnetwork::IpNetwork;
@@ -59,6 +59,9 @@ pub enum EnsureAddressError {
         "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
     )]
     MissingBootstrapVnic { address: String, zone: String },
+
+    #[error("Failed ensuring address {request:?} in {zone}: missing opte port ({port_idx})")]
+    MissingOptePort { request: AddressRequest, zone: String, port_idx: usize },
 }
 
 /// Erros returned from [`RunningZone::get`].
@@ -226,26 +229,29 @@ impl RunningZone {
         Ok(())
     }
 
-    // TODO: Remove once Nexus uses OPTE - external addresses should generally
-    // be served via OPTE.
-    pub async fn ensure_external_address_with_name(
+    pub async fn ensure_address_for_port(
         &self,
         addrtype: AddressRequest,
         name: &str,
+        port_idx: usize,
     ) -> Result<IpNetwork, EnsureAddressError> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
-        let addrobj = AddrObject::new(
-                self.inner
-                    .link
-                    .as_ref()
-                    .expect("Cannot allocate external address on zone without physical NIC")
-                    .name(),
-                name
-            )
-            .map_err(|err| EnsureAddressError::AddrObject {
+        let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
+            EnsureAddressError::MissingOptePort {
                 request: addrtype,
                 zone: self.inner.name.clone(),
-                err,
+                port_idx,
+            }
+        })?;
+
+        // TODO-remove: Switch to using port directly once vnic is no longer needed.
+        let addrobj =
+            AddrObject::new(port.vnic_name(), name).map_err(|err| {
+                EnsureAddressError::AddrObject {
+                    request: addrtype,
+                    zone: self.inner.name.clone(),
+                    err,
+                }
             })?;
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
@@ -357,15 +363,15 @@ impl RunningZone {
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
-                link: None,
+                _link: None,
                 bootstrap_vnic,
             },
         })
     }
 
     /// Return references to the OPTE ports for this zone.
-    pub fn opte_ports(&self) -> &[Port] {
-        &self.inner.opte_ports
+    pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
+        self.inner.opte_ports.iter().map(|(port, _)| port)
     }
 
     /// Halts and removes the zone, awaiting its termination.
@@ -381,6 +387,19 @@ impl RunningZone {
                 .map_err(|err| err.to_string())?;
         }
         Ok(())
+    }
+
+    /// Remove the OPTE ports on this zone from the port manager.
+    ///
+    /// Returns the last error, if any.
+    pub fn release_opte_ports(&mut self) -> Result<(), crate::opte::Error> {
+        let mut result = Ok(());
+        for (_, ticket) in &mut self.inner.opte_ports {
+            if let Err(e) = ticket.release() {
+                result = Err(e);
+            }
+        }
+        result
     }
 }
 
@@ -434,11 +453,11 @@ pub struct InstalledZone {
     // Nic used for bootstrap network communication
     bootstrap_vnic: Option<Link>,
 
-    // OPTE devices for the guest network interfaces
-    opte_ports: Vec<Port>,
+    // OPTE devices for guests and services.
+    opte_ports: Vec<(Port, PortTicket)>,
 
     // Physical NIC possibly provisioned to the zone.
-    link: Option<Link>,
+    _link: Option<Link>,
 }
 
 impl InstalledZone {
@@ -468,7 +487,7 @@ impl InstalledZone {
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
-        opte_ports: Vec<Port>,
+        opte_ports: Vec<(Port, PortTicket)>,
         bootstrap_vnic: Option<Link>,
         link: Option<Link>,
         limit_priv: Vec<String>,
@@ -487,7 +506,7 @@ impl InstalledZone {
 
         let net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|port| port.vnic_name().to_string())
+            .map(|(port, _)| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(link.as_ref().map(|vnic| vnic.name().to_string()))
@@ -515,7 +534,7 @@ impl InstalledZone {
             control_vnic,
             bootstrap_vnic,
             opte_ports,
-            link,
+            _link: link,
         })
     }
 }

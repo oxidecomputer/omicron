@@ -14,12 +14,9 @@ use crate::serial::ByteOffset;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
-use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use sled_hardware::underlay;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::Ipv6Addr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -41,9 +38,6 @@ pub enum Error {
 
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
-
-    #[error("No datalinks found")]
-    NoDatalinks,
 }
 
 struct InstanceManagerInternal {
@@ -71,25 +65,15 @@ impl InstanceManager {
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
-        underlay_ip: Ipv6Addr,
-        gateway_mac: MacAddr6,
+        port_manager: PortManager,
     ) -> Result<InstanceManager, Error> {
-        let data_link = underlay::find_chelsio_links()?
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::NoDatalinks)?;
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
                 lazy_nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
-                port_manager: PortManager::new(
-                    log.new(o!("component" => "PortManager")),
-                    data_link,
-                    underlay_ip,
-                    gateway_mac,
-                ),
+                port_manager,
             }),
         })
     }
@@ -285,8 +269,10 @@ mod test {
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_hardware::underlay;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
 
@@ -328,8 +314,7 @@ mod test {
         let logctx = test_setup_log("ensure_instance");
         let log = &logctx.log;
         let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
+            LazyNexusClient::new(log.clone(), Ipv6Addr::LOCALHOST).unwrap();
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -340,14 +325,19 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
+        let data_link =
+            underlay::find_chelsio_links().unwrap().into_iter().next().unwrap();
+        let port_manager = PortManager::new(
+            log.new(o!("component" => "PortManager")),
+            data_link,
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            MacAddr6::from([0u8; 6]),
+        );
         let im = InstanceManager::new(
             log.clone(),
             lazy_nexus_client,
             Etherstub("mylink".to_string()),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-            MacAddr6::from([0u8; 6]),
+            port_manager,
         )
         .unwrap();
 
@@ -418,8 +408,7 @@ mod test {
         let logctx = test_setup_log("ensure_instance_repeatedly");
         let log = &logctx.log;
         let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
+            LazyNexusClient::new(log.clone(), Ipv6Addr::LOCALHOST).unwrap();
 
         // Instance Manager creation.
 
@@ -429,14 +418,19 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
+        let data_link =
+            underlay::find_chelsio_links().unwrap().into_iter().next().unwrap();
+        let port_manager = PortManager::new(
+            log.new(o!("component" => "PortManager")),
+            data_link,
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            MacAddr6::from([0u8; 6]),
+        );
         let im = InstanceManager::new(
             log.clone(),
             lazy_nexus_client,
             Etherstub("mylink".to_string()),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-            MacAddr6::from([0u8; 6]),
+            port_manager,
         )
         .unwrap();
 

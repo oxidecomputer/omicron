@@ -18,6 +18,7 @@ use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
+use illumos_utils::opte::PortManager;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -65,6 +66,9 @@ pub enum Error {
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
+
+    #[error("No datalinks found")]
+    NoDatalinks,
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
@@ -226,6 +230,18 @@ impl SledAgent {
         let underlay_nics = underlay::find_nics()?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
+        // Create the PortManager to manage all the OPTE ports on the sled.
+        let data_link = underlay::find_chelsio_links()?
+            .into_iter()
+            .next()
+            .ok_or(Error::NoDatalinks)?;
+        let port_manager = PortManager::new(
+            parent_log.new(o!("component" => "PortManager")),
+            data_link,
+            *sled_address.ip(),
+            request.gateway.mac,
+        );
+
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
         // This should be a no-op if already enabled.
@@ -261,8 +277,7 @@ impl SledAgent {
             parent_log.clone(),
             lazy_nexus_client.clone(),
             etherstub.clone(),
-            *sled_address.ip(),
-            request.gateway.mac,
+            port_manager.clone(),
         )?;
 
         let svc_config = services::Config::new(
@@ -280,9 +295,9 @@ impl SledAgent {
         services
             .sled_agent_started(
                 svc_config,
-                config.get_link()?,
                 *sled_address.ip(),
                 request.rack_id,
+                port_manager,
             )
             .await?;
 

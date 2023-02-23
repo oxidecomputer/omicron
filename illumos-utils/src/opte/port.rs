@@ -4,44 +4,38 @@
 
 //! A single port on the OPTE virtual switch.
 
-use crate::dladm::Dladm;
-use crate::opte::params::SourceNatConfig;
-use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::Vni;
-use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::sync::Arc;
 
+#[derive(Copy, Clone, Debug)]
+pub enum PortType {
+    /// Port attached to a guest instance.
+    Guest {
+        /// vNIC slot for the guest connected to this port.
+        slot: u8,
+    },
+    /// Port created for a service zone.
+    Service,
+}
+
 #[derive(Debug)]
+#[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 struct PortInner {
     // Name of the port as identified by OPTE
     name: String,
+    // Port type (e.g. attached to a guest or part of a service zone)
+    port_type: PortType,
     // IP address within the VPC Subnet
-    _ip: IpAddr,
-    // VPC Subnet
-    _subnet: IpNetwork,
+    ip: IpAddr,
     // VPC-private MAC address
     mac: MacAddr6,
-    // Emulated PCI slot for the guest NIC, passed to Propolis
-    slot: u8,
     // Geneve VNI for the VPC
     vni: Vni,
-    // IP address of the hosting sled
-    _underlay_ip: Ipv6Addr,
-    // The external IP address and port range provided for this port, to allow
-    // outbound network connectivity.
-    _source_nat: Option<SourceNatConfig>,
-    // The external IP addresses provided to this port, to allow _inbound_
-    // network connectivity.
-    external_ips: Option<Vec<IpAddr>>,
     // Information about the virtual gateway, aka OPTE
-    _gateway: Gateway,
-    // Information about Boundary Services, for forwarding traffic between sleds
-    // or off the rack.
-    _boundary_services: BoundaryServices,
+    gateway: Gateway,
     // TODO-correctness: Remove this once we can put Viona directly on top of an
     // OPTE port device.
     //
@@ -52,10 +46,14 @@ struct PortInner {
     // can be changed back to a real VNIC when that is resolved, and the Drop
     // impl below can simplify to just call `drop(self.vnic)`.
     vnic: String,
+    // TODO-remove: This is part of the external IP hack.
+    externally_visible: bool,
 }
 
+#[cfg(target_os = "illumos")]
 impl Drop for PortInner {
     fn drop(&mut self) {
+        use crate::dladm::Dladm;
         if let Err(e) = Dladm::delete_vnic(&self.vnic) {
             eprintln!(
                 "WARNING: Failed to delete OPTE port overlay VNIC \
@@ -103,55 +101,56 @@ impl Port {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
+        port_type: PortType,
         ip: IpAddr,
-        subnet: IpNetwork,
         mac: MacAddr6,
-        slot: u8,
         vni: Vni,
-        underlay_ip: Ipv6Addr,
-        source_nat: Option<SourceNatConfig>,
-        external_ips: Option<Vec<IpAddr>>,
         gateway: Gateway,
-        boundary_services: BoundaryServices,
         vnic: String,
+        externally_visible: bool,
     ) -> Self {
         Self {
             inner: Arc::new(PortInner {
                 name,
-                _ip: ip,
-                _subnet: subnet,
+                port_type,
+                ip,
                 mac,
-                slot,
-                vni: vni,
-                _underlay_ip: underlay_ip,
-                _source_nat: source_nat,
-                external_ips,
-                _gateway: gateway,
-                _boundary_services: boundary_services,
+                vni,
+                gateway,
                 vnic,
+                externally_visible,
             }),
         }
     }
 
-    #[allow(dead_code)]
-    pub fn external_ips(&self) -> &Option<Vec<IpAddr>> {
-        &self.inner.external_ips
+    pub fn ip(&self) -> IpAddr {
+        self.inner.ip
     }
 
-    #[allow(dead_code)]
-    pub fn mac(&self) -> &MacAddr6 {
-        &self.inner.mac
+    pub fn mac(&self) -> MacAddr6 {
+        self.inner.mac
     }
 
-    pub fn vni(&self) -> &Vni {
-        &self.inner.vni
+    pub fn vni(&self) -> Vni {
+        self.inner.vni
+    }
+
+    pub fn gateway(&self) -> Gateway {
+        self.inner.gateway
     }
 
     pub fn vnic_name(&self) -> &str {
         &self.inner.vnic
     }
 
-    pub fn slot(&self) -> u8 {
-        self.inner.slot
+    pub fn slot(&self) -> Option<u8> {
+        match self.inner.port_type {
+            PortType::Guest { slot } => Some(slot),
+            PortType::Service => None,
+        }
+    }
+
+    pub fn externally_visible(&self) -> bool {
+        self.inner.externally_visible
     }
 }

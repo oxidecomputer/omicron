@@ -102,12 +102,12 @@ impl LinkKind {
     /// Infer the kind from a VNIC's name, if this one the sled agent can
     /// manage, and `None` otherwise.
     pub fn from_name(name: &str) -> Option<Self> {
-        if name.starts_with(VNIC_PREFIX) {
+        if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
+            Some(LinkKind::OxideBootstrapVnic)
+        } else if name.starts_with(VNIC_PREFIX) {
             Some(LinkKind::OxideControlVnic)
         } else if name.starts_with(VNIC_PREFIX_GUEST) {
             Some(LinkKind::GuestVnic)
-        } else if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
-            Some(LinkKind::OxideBootstrapVnic)
         } else {
             None
         }

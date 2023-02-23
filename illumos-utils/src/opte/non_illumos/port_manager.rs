@@ -5,15 +5,16 @@
 //! Manager for all OPTE ports on a Helios system
 
 use crate::dladm::PhysicalLink;
-use crate::opte::default_boundary_services;
 use crate::opte::params::NetworkInterface;
 use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
+use crate::opte::PortType;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
+use ipnetwork::Ipv4Network;
 use macaddr::MacAddr6;
 use slog::debug;
 use slog::info;
@@ -57,7 +58,7 @@ struct PortManagerInner {
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of all ports, keyed on the instance Uuid and the port name.
+    // Map of all ports, keyed on the instance/service Uuid and the port name.
     ports: Mutex<BTreeMap<(Uuid, String), Port>>,
 }
 
@@ -102,22 +103,75 @@ impl PortManager {
         &self.inner.underlay_ip
     }
 
-    pub fn create_port(
+    #[allow(clippy::too_many_arguments)]
+    fn create_port_inner(
+        &self,
+        id: Uuid,
+        port_type: PortType,
+        port_name: Option<String>,
+        ip: IpAddr,
+        mac: MacAddr6,
+        vni: Vni,
+        gateway: Gateway,
+        _firewall_rules: &[VpcFirewallRule],
+        externally_visible: bool,
+    ) -> Result<(Port, PortTicket), Error> {
+        let port_name =
+            port_name.unwrap_or_else(|| self.inner.next_port_name());
+        let vnic = format!("v{}", port_name);
+
+        let (port, ticket) = {
+            let mut ports = self.inner.ports.lock().unwrap();
+            let ticket =
+                PortTicket::new(id, port_name.clone(), self.inner.clone());
+            let port = Port::new(
+                port_name.clone(),
+                port_type,
+                ip,
+                mac,
+                vni,
+                gateway,
+                vnic,
+                externally_visible,
+            );
+            let old = ports.insert((id, port_name.clone()), port.clone());
+            assert!(
+                old.is_none(),
+                "Duplicate OPTE port detected: id = {}, port_name = {}",
+                id,
+                &port_name,
+            );
+            (port, ticket)
+        };
+
+        info!(
+            self.inner.log,
+            "Created OPTE port";
+            "port_type" => ?port_type,
+            "port" => ?&port,
+        );
+
+        Ok((port, ticket))
+    }
+
+    pub fn create_guest_port(
         &self,
         instance_id: Uuid,
         nic: &NetworkInterface,
-        source_nat: Option<SourceNatConfig>,
+        _source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
-        _firewall_rules: &[VpcFirewallRule],
+        firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
         // TODO-completeness: Remove IPv4 restrictions once OPTE supports
         // virtual IPv6 networks.
-        let _ = match nic.ip {
-            IpAddr::V4(ip) => Ok(ip),
-            IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
-                "IPv6 is not yet supported for guest interfaces",
-            ))),
-        }?;
+        let ip = match nic.ip {
+            IpAddr::V4(_) => nic.ip,
+            IpAddr::V6(_) => {
+                return Err(Error::InvalidArgument(String::from(
+                    "IPv6 is not yet supported for guest interfaces",
+                )))
+            }
+        };
 
         // Argument checking and conversions into OPTE data types.
         let subnet = IpNetwork::from(nic.subnet);
@@ -137,47 +191,50 @@ impl PortManager {
                 "IPv6 is not yet supported for guest interfaces",
             ))),
         }?;
-        let boundary_services = default_boundary_services();
-        let port_name = self.inner.next_port_name();
-        let vnic = format!("v{}", port_name);
-        let (port, ticket) = {
-            let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(
-                instance_id,
-                port_name.clone(),
-                self.inner.clone(),
-            );
-            let port = Port::new(
-                port_name.clone(),
-                nic.ip,
-                subnet,
-                mac,
-                nic.slot,
-                vni,
-                self.inner.underlay_ip,
-                source_nat,
-                external_ips,
-                gateway,
-                boundary_services,
-                vnic,
-            );
-            let old =
-                ports.insert((instance_id, port_name.clone()), port.clone());
-            assert!(
-                old.is_none(),
-                "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
-                instance_id,
-                &port_name,
-            );
-            (port, ticket)
-        };
 
-        info!(
-            self.inner.log,
-            "Created OPTE port for guest";
-            "port" => ?&port,
-        );
-        Ok((port, ticket))
+        self.create_port_inner(
+            instance_id,
+            PortType::Guest { slot: nic.slot },
+            None,
+            ip,
+            mac,
+            vni,
+            gateway,
+            firewall_rules,
+            external_ips.is_some(),
+        )
+    }
+
+    pub fn create_svc_port(
+        &self,
+        svc_id: Uuid,
+        svc_name: &str,
+        mac: MacAddr6,
+        _external_ip: IpAddr,
+        vni: u32,
+        firewall_rules: &[VpcFirewallRule],
+    ) -> Result<(Port, PortTicket), Error> {
+        // TODO: Assume each service zone has a single port.
+        let port_name = format!("{}_{}0", XDE_LINK_PREFIX, svc_name);
+
+        // TODO: Arbitrary subnet, should come from a "service" VPC.
+        let vpc_subnet: Ipv4Network = "10.0.0.0/24".parse().unwrap();
+        // Use first non-reserved IP, see RFD 21, section 2.2, table 1.
+        let private_ip = vpc_subnet.iter().nth(5).unwrap();
+        let gateway = Gateway::from_subnet(&vpc_subnet.into());
+        let vni = Vni::new(vni).unwrap();
+
+        self.create_port_inner(
+            svc_id,
+            PortType::Service,
+            Some(port_name),
+            private_ip.into(),
+            mac,
+            vni,
+            gateway,
+            firewall_rules,
+            /* externally_visible= */ true,
+        )
     }
 
     pub fn firewall_rules_ensure(
@@ -224,8 +281,9 @@ impl PortTicket {
             debug!(
                 manager.log,
                 "Removing OPTE ports from manager";
-                "instance_id" => ?self.id,
+                "id" => ?self.id,
                 "port_name" => &self.port_name,
+
             );
         }
         Ok(())

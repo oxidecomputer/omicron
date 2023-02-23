@@ -6,10 +6,8 @@
 
 use slog::Logger;
 
-mod port;
 mod port_manager;
 
-pub use port::Port;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
 

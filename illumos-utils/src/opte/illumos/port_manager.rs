@@ -15,8 +15,10 @@ use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
+use crate::opte::PortType;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
+use ipnetwork::Ipv4Network;
 use macaddr::MacAddr6;
 use opte_ioctl::OpteHdl;
 use oxide_vpc::api::AddRouterEntryReq;
@@ -73,7 +75,7 @@ struct PortManagerInner {
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of all ports, keyed on the instance Uuid and the port name.
+    // Map of all ports, keyed on the instance/service Uuid and the port name.
     ports: Mutex<BTreeMap<(Uuid, String), Port>>,
 }
 
@@ -105,7 +107,7 @@ impl PortManagerInner {
             .filter_map(|port| {
                 // Only advertise Ports with a publicly-visible external IP
                 // address, on the primary interface for this instance.
-                if port.external_ips().is_some() {
+                if port.externally_visible() {
                     Some(port.mac().to_string())
                 } else {
                     None
@@ -168,8 +170,212 @@ impl PortManager {
         &self.inner.underlay_ip
     }
 
+    fn create_port_inner(
+        &self,
+        id: Uuid,
+        port_type: PortType,
+        port_name: Option<String>,
+        vpc_cfg: VpcCfg,
+        firewall_rules: &[VpcFirewallRule],
+        externally_visible: bool,
+    ) -> Result<(Port, PortTicket), Error> {
+        let vni = vpc_cfg.vni;
+        let mac = MacAddr6::from(vpc_cfg.guest_mac.bytes());
+        let (private_ip, vpc_subnet) = match vpc_cfg.ipv4_cfg() {
+            Some(cfg) => (
+                IpAddr::V4(cfg.private_ip.into()),
+                IpCidr::from(cfg.vpc_subnet),
+            ),
+            None => {
+                // TODO-completeness: IPv6
+                return Err(opte_ioctl::Error::InvalidArgument(
+                    "IPv6 not supported".to_string(),
+                )
+                .into());
+            }
+        };
+        let gateway = Gateway::from_subnet(&vpc_subnet.into());
+
+        let port_name =
+            port_name.unwrap_or_else(|| self.inner.next_port_name());
+
+        // Create the xde device.
+        //
+        // The sequencing here is important. We'd like to make sure things are
+        // cleaned up properly, while having a sequence of fallible operations.
+        // So we:
+        //
+        // - create the xde device
+        // - create the vnic, cleaning up the xde device if that fails
+        // - add both to the Port
+        //
+        // The Port object's drop implementation will clean up both of those, if
+        // any of the remaining fallible operations fail.
+
+        // 1. Create the xde device for the port.
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        hdl.create_xde(&port_name, vpc_cfg, /* passthru= */ false)?;
+        debug!(
+            self.inner.log,
+            "Created xde device";
+            "port_name" => &port_name,
+        );
+
+        // Initialize firewall rules for the new port.
+        let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+        // TODO-remove: This is part of the external IP hack.
+        //
+        // We need to allow incoming ARP packets past the firewall layer so
+        // that they may be handled properly at the gateway layer.
+        rules.push(
+            "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
+        );
+        debug!(
+            self.inner.log,
+            "Setting firewall rules";
+            "port_name" => &port_name,
+            "rules" => ?&rules,
+        );
+        hdl.set_fw_rules(&SetFwRulesReq {
+            port_name: port_name.clone(),
+            rules,
+        })?;
+
+        // 2. Create a VNIC on top of this device, to hook Viona into.
+        //
+        // Viona is the illumos MAC provider that implements the VIRTIO
+        // specification. It sits on top of a MAC provider, which is responsible
+        // for delivering frames to the underlying data link. The guest includes
+        // a driver that handles the virtio-net specification on their side,
+        // which talks to Viona.
+        //
+        // In theory, Viona works with any MAC provider. However, there are
+        // implicit assumptions, in both Viona _and_ MAC, that require Viona to
+        // be built on top of a VNIC specifically. There is probably a good deal
+        // of work required to relax that assumption, so in the meantime, we
+        // create a superfluous VNIC on the OPTE device, solely so Viona can use
+        // it.
+        let vnic = {
+            let phys = PhysicalLink(port_name.clone());
+            let vnic_name = format!("v{}", port_name);
+            if let Err(e) =
+                Dladm::create_vnic(&phys, &vnic_name, Some(mac.into()), None)
+            {
+                warn!(
+                    self.inner.log,
+                    "Failed to create overlay VNIC for xde device";
+                    "port_name" => port_name.as_str(),
+                    "err" => ?e
+                );
+                if let Err(e) = hdl.delete_xde(&port_name) {
+                    warn!(
+                        self.inner.log,
+                        "Failed to clean up xde device after failure to create overlay VNIC";
+                        "err" => ?e
+                    );
+                }
+                return Err(e.into());
+            }
+            debug!(
+                self.inner.log,
+                "Created overlay VNIC for xde device";
+                "port_name" => &port_name,
+                "vnic_name" => &vnic_name,
+            );
+
+            // NOTE: We intentionally use a string rather than the Vnic type
+            // here. See the notes on the `opte::PortInner::vnic` field.
+            vnic_name
+        };
+
+        // 3. Create the Port object.
+        let ticket = PortTicket::new(id, port_name.clone(), self.inner.clone());
+        let port = Port::new(
+            port_name.clone(),
+            port_type,
+            private_ip,
+            mac,
+            vni,
+            gateway,
+            vnic,
+            externally_visible,
+        );
+
+        // Update the secondary MAC of the underlay.
+        //
+        // TODO-remove: This is part of the external IP hack.
+        //
+        // Acquire the lock _after_ the ticket exists. If the
+        // `update_secondary_mac` call below fails, we'll propagate the
+        // error with `?`. We need the lock guard to be dropped first, so that
+        // the lock acquired when `ticket` is dropped is guaranteed to be free.
+        let mut ports = self.inner.ports.lock().unwrap();
+        let old = ports.insert((id, port_name.clone()), port.clone());
+        assert!(
+            old.is_none(),
+            "Duplicate OPTE port detected: id = {}, port_name = {}",
+            id,
+            port_name,
+        );
+        self.inner.update_secondary_macs(&mut ports)?;
+        drop(ports);
+
+        // Add a router entry for this interface's subnet, directing traffic to the
+        // VPC subnet.
+        let route = AddRouterEntryReq {
+            port_name: port_name.clone(),
+            dest: vpc_subnet,
+            target: RouterTarget::VpcSubnet(vpc_subnet),
+        };
+        hdl.add_router_entry(&route)?;
+        debug!(
+            self.inner.log,
+            "Added IPv4 VPC Subnet router entry for OPTE port";
+            "port_name" => &port_name,
+            "entry" => ?route,
+        );
+
+        // TODO-remove
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/1336
+        //
+        // This is another part of the workaround, allowing reply traffic from
+        // the guest back out. Normally, OPTE would drop such traffic at the
+        // router layer, as it has no route for that external IP address. This
+        // allows such traffic through.
+        //
+        // Note that this exact rule will eventually be included, since it's one
+        // of the default routing rules in the VPC System Router. However, that
+        // will likely be communicated in a different way, or could be modified,
+        // and this specific call should be removed in favor of sending the
+        // routing rules the control plane provides.
+        //
+        // This rule sends all traffic that has no better match to the gateway.
+        let route = AddRouterEntryReq {
+            port_name: port_name.clone(),
+            dest: "0.0.0.0/0".parse().unwrap(),
+            target: RouterTarget::InternetGateway,
+        };
+        hdl.add_router_entry(&route)?;
+        debug!(
+            self.inner.log,
+            "Added default internet gateway route entry";
+            "port_name" => &port_name,
+            "route" => ?route,
+        );
+
+        info!(
+            self.inner.log,
+            "Created OPTE port";
+            "port_type" => ?port_type,
+            "port" => ?&port,
+        );
+
+        Ok((port, ticket))
+    }
+
     /// Create an OPTE port for the given guest instance.
-    pub fn create_port(
+    pub fn create_guest_port(
         &self,
         instance_id: Uuid,
         nic: &NetworkInterface,
@@ -250,21 +456,6 @@ impl PortManager {
             _ => None,
         };
 
-        // Create the xde device.
-        //
-        // The sequencing here is important. We'd like to make sure things are
-        // cleaned up properly, while having a sequence of fallible operations.
-        // So we:
-        //
-        // - create the xde device
-        // - create the vnic, cleaning up the xde device if that fails
-        // - add both to the Port
-        //
-        // The Port object's drop implementation will clean up both of those, if
-        // any of the remaining fallible operations fail.
-        let port_name = self.inner.next_port_name();
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-
         // TODO-completeness: Add support for IPv6.
         let vpc_cfg = VpcCfg {
             ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
@@ -292,184 +483,98 @@ impl PortManager {
             // TODO-completeness (#2153): Plumb domain search list
             domain_list: vec![],
         };
-        hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
-        debug!(
-            self.inner.log,
-            "Created xde device for guest port";
-            "port_name" => &port_name,
-        );
 
-        // Initialize firewall rules for the new port.
-        let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
-
-        // TODO-remove: This is part of the external IP hack.
-        //
-        // We need to allow incoming ARP packets past the firewall layer so
-        // that they may be handled properly at the gateway layer.
-        rules.push(
-            "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
-        );
-
-        debug!(
-            self.inner.log,
-            "Setting firewall rules";
-            "port_name" => &port_name,
-            "rules" => ?&rules,
-        );
-        hdl.set_fw_rules(&SetFwRulesReq {
-            port_name: port_name.clone(),
-            rules,
-        })?;
-
-        // Create a VNIC on top of this device, to hook Viona into.
-        //
-        // Viona is the illumos MAC provider that implements the VIRTIO
-        // specification. It sits on top of a MAC provider, which is responsible
-        // for delivering frames to the underlying data link. The guest includes
-        // a driver that handles the virtio-net specification on their side,
-        // which talks to Viona.
-        //
-        // In theory, Viona works with any MAC provider. However, there are
-        // implicit assumptions, in both Viona _and_ MAC, that require Viona to
-        // be built on top of a VNIC specifically. There is probably a good deal
-        // of work required to relax that assumption, so in the meantime, we
-        // create a superfluous VNIC on the OPTE device, solely so Viona can use
-        // it.
-        let vnic = {
-            let phys = PhysicalLink(port_name.clone());
-            let vnic_name = format!("v{}", port_name);
-            if let Err(e) =
-                Dladm::create_vnic(&phys, &vnic_name, Some(nic.mac), None)
-            {
-                warn!(
-                    self.inner.log,
-                    "Failed to create overlay VNIC for xde device";
-                    "port_name" => port_name.as_str(),
-                    "err" => ?e
-                );
-                if let Err(e) = hdl.delete_xde(&port_name) {
-                    warn!(
-                        self.inner.log,
-                        "Failed to clean up xde device after failure to create overlay VNIC";
-                        "err" => ?e
-                    );
-                }
-                return Err(e.into());
-            }
-            debug!(
-                self.inner.log,
-                "Created overlay VNIC for xde device";
-                "port_name" => &port_name,
-                "vnic_name" => &vnic_name,
-            );
-
-            // NOTE: We intentionally use a string rather than the Vnic type
-            // here. See the notes on the `opte::PortInner::vnic` field.
-            vnic_name
-        };
-
-        let ticket =
-            PortTicket::new(instance_id, port_name.clone(), self.inner.clone());
-        let port = Port::new(
-            port_name.clone(),
-            nic.ip,
-            subnet,
-            mac,
-            nic.slot,
-            vni,
-            self.inner.underlay_ip,
-            source_nat,
-            external_ips,
-            gateway,
-            boundary_services,
-            vnic,
-        );
-
-        // Update the secondary MAC of the underlay.
-        //
-        // TODO-remove: This is part of the external IP hack.
-        //
-        // Acquire the lock _after_ the ticket exists. If the
-        // `update_secondary_mac` call below fails, we'll propagate the
-        // error with `?`. We need the lock guard to be dropped first, so that
-        // the lock acquired when `ticket` is dropped is guaranteed to be free.
-        let mut ports = self.inner.ports.lock().unwrap();
-        let old = ports.insert((instance_id, port_name.clone()), port.clone());
-        assert!(
-            old.is_none(),
-            "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
+        self.create_port_inner(
             instance_id,
-            &port_name,
-        );
-        self.inner.update_secondary_macs(&mut ports)?;
-        drop(ports);
+            PortType::Guest { slot: nic.slot },
+            None,
+            vpc_cfg,
+            firewall_rules,
+            external_ip.is_some(),
+        )
+    }
 
-        // Add a router entry for this interface's subnet, directing traffic to the
-        // VPC subnet.
-        match subnet.network() {
-            IpAddr::V4(ip) => {
-                let prefix =
-                    Ipv4PrefixLen::new(subnet.prefix()).map_err(|e| {
-                        opte_ioctl::Error::InvalidArgument(format!(
-                            "Invalid IPv4 subnet prefix: {}",
-                            e
-                        ))
-                    })?;
-                let cidr =
-                    Ipv4Cidr::new(oxide_vpc::api::Ipv4Addr::from(ip), prefix);
-                let route = AddRouterEntryReq {
-                    port_name: port_name.clone(),
-                    dest: cidr.into(),
-                    target: RouterTarget::VpcSubnet(IpCidr::Ip4(cidr)),
-                };
-                hdl.add_router_entry(&route)?;
-                debug!(
-                    self.inner.log,
-                    "Added IPv4 VPC Subnet router entry for OPTE port";
-                    "port_name" => &port_name,
-                    "entry" => ?route,
-                );
-            }
+    pub fn create_svc_port(
+        &self,
+        svc_id: Uuid,
+        svc_name: &str,
+        mac: MacAddr6,
+        external_ip: IpAddr,
+        vni: u32,
+        firewall_rules: &[VpcFirewallRule],
+    ) -> Result<(Port, PortTicket), Error> {
+        // TODO: Assume each service zone has a single port.
+        let port_name = format!("{}_{}0", XDE_LINK_PREFIX, svc_name);
+
+        // TODO: Arbitrary subnet, should come from a "service" VPC.
+        let vpc_subnet: Ipv4Network = "10.0.0.0/24".parse().unwrap();
+        // Use first non-reserved IP, see RFD 21, section 2.2, table 1.
+        let private_ip = vpc_subnet.iter().nth(5).unwrap();
+        let gateway = Gateway::from_subnet(&vpc_subnet.into());
+
+        // Convert to OPTE types
+        let vpc_subnet = Ipv4Cidr::from(vpc_subnet);
+        let private_ip = private_ip.into();
+        let gateway_ip = match gateway.ip {
+            IpAddr::V4(ip) => ip.into(),
+            IpAddr::V6(_) => unreachable!("expected IPv4 gateway"),
+        };
+        let gateway_mac = MacAddr::from(gateway.mac.into_array());
+        let guest_mac = MacAddr::from(mac.into_array());
+        let external_ip = match external_ip {
+            IpAddr::V4(ip) => ip.into(),
             IpAddr::V6(_) => {
                 return Err(opte_ioctl::Error::InvalidArgument(String::from(
-                    "IPv6 not yet supported",
+                    "IPv6 is not yet supported for external addresses",
                 ))
                 .into());
             }
-        }
+        };
 
-        // TODO-remove
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/1336
-        //
-        // This is another part of the workaround, allowing reply traffic from
-        // the guest back out. Normally, OPTE would drop such traffic at the
-        // router layer, as it has no route for that external IP address. This
-        // allows such traffic through.
-        //
-        // Note that this exact rule will eventually be included, since it's one
-        // of the default routing rules in the VPC System Router. However, that
-        // will likely be communicated in a different way, or could be modified,
-        // and this specific call should be removed in favor of sending the
-        // routing rules the control plane provides.
-        //
-        // This rule sends all traffic that has no better match to the gateway.
-        let prefix = Ipv4PrefixLen::new(0).unwrap();
-        let dest =
-            Ipv4Cidr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), prefix);
-        let target = RouterTarget::InternetGateway;
-        hdl.add_router_entry(&AddRouterEntryReq {
-            port_name,
-            dest: dest.into(),
-            target,
-        })?;
+        let snat = SNat4Cfg {
+            external_ip,
+            // TODO: Assumes IP is exlusive to this service.
+            ports: 0..=65535,
+        };
 
-        info!(
-            self.inner.log,
-            "Created OPTE port for guest";
-            "port" => ?&port,
-        );
-        Ok((port, ticket))
+        // TODO: Return error for invalid VNI.
+        let vni = Vni::new(vni).unwrap();
+
+        let vpc_cfg = VpcCfg {
+            ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
+                vpc_subnet,
+                private_ip,
+                gateway_ip,
+                snat: Some(snat),
+                external_ips: Some(external_ip),
+            }),
+            guest_mac,
+            gateway_mac,
+            vni,
+            phys_ip: self.inner.underlay_ip.into(),
+            boundary_services: default_boundary_services(),
+            // TODO-remove: Part of the external IP hack.
+            //
+            // NOTE: This value of this flag is irrelevant, since the driver
+            // always overwrites it. The field itself is used in the `oxide-vpc`
+            // code though, to determine how to set up the ARP layer, which is
+            // why it's still here.
+            proxy_arp_enable: true,
+            phys_gw_mac: Some(MacAddr::from(
+                self.inner.gateway_mac.into_array(),
+            )),
+            // TODO-completeness (#2153): Plumb domain search list
+            domain_list: vec![],
+        };
+
+        self.create_port_inner(
+            svc_id,
+            PortType::Service,
+            Some(port_name),
+            vpc_cfg,
+            firewall_rules,
+            /* externally_visible= */ true,
+        )
     }
 
     pub fn firewall_rules_ensure(
@@ -478,7 +583,7 @@ impl PortManager {
     ) -> Result<(), Error> {
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
-            let rules = opte_firewall_rules(rules, port.vni(), port.mac());
+            let rules = opte_firewall_rules(rules, &port.vni(), &port.mac());
             let port_name = port_name.clone();
             info!(
                 self.inner.log,
@@ -527,7 +632,7 @@ impl PortTicket {
             debug!(
                 manager.log,
                 "Removing OPTE port from manager";
-                "instance_id" => ?self.id,
+                "id" => ?self.id,
                 "port_name" => &self.port_name,
             );
             if let Err(e) = manager.update_secondary_macs(&mut ports) {
@@ -535,7 +640,7 @@ impl PortTicket {
                     manager.log,
                     "Failed to update secondary-macs linkprop when \
                     releasing OPTE ports for instance";
-                    "instance_id" => ?self.id,
+                    "id" => ?self.id,
                     "err" => ?e,
                 );
                 return Err(e);

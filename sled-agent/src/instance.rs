@@ -20,7 +20,6 @@ use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
-use illumos_utils::opte::PortTicket;
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -39,11 +38,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-
-#[cfg(test)]
-use illumos_utils::zone::MockZones as Zones;
-#[cfg(not(test))]
-use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -166,12 +160,10 @@ struct RunningState {
     client: Arc<PropolisClient>,
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
-    // Objects representing the instance's OPTE ports in the port manager
-    port_tickets: Option<Vec<PortTicket>>,
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
-    _running_zone: RunningZone,
+    running_zone: RunningZone,
 }
 
 impl Drop for RunningState {
@@ -200,7 +192,6 @@ impl Drop for RunningState {
 struct PropolisSetup {
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
-    port_tickets: Option<Vec<PortTicket>>,
 }
 
 struct InstanceInner {
@@ -312,16 +303,17 @@ impl InstanceInner {
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { client, running_zone, port_tickets } = setup;
+        let PropolisSetup { client, running_zone } = setup;
 
         let nics = running_zone
             .opte_ports()
-            .iter()
             .map(|port| propolis_client::api::NetworkInterfaceRequest {
-                // TODO-correctness: Remove `.vnic()` call when we use the port
+                // TODO-correctness: Remove `.vnic_name()` call when we use the port
                 // directly.
                 name: port.vnic_name().to_string(),
-                slot: propolis_client::api::Slot(port.slot()),
+                slot: propolis_client::api::Slot(
+                    port.slot().expect("invalid port type"),
+                ),
             })
             .collect();
 
@@ -379,9 +371,8 @@ impl InstanceInner {
         self.running_state = Some(RunningState {
             client,
             instance_ticket,
-            port_tickets,
             monitor_task,
-            _running_zone: running_zone,
+            running_zone,
         });
 
         Ok(())
@@ -544,14 +535,13 @@ impl Instance {
 
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
-        let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
             let (snat, external_ips) = if nic.primary {
                 (Some(inner.source_nat), Some(inner.external_ips.clone()))
             } else {
                 (None, None)
             };
-            let (port, port_ticket) = inner.port_manager.create_port(
+            let port = inner.port_manager.create_guest_port(
                 *inner.id(),
                 nic,
                 snat,
@@ -559,7 +549,6 @@ impl Instance {
                 &inner.firewall_rules,
             )?;
             opte_ports.push(port);
-            port_tickets.push(port_ticket);
         }
 
         // Create a zone for the propolis instance, using the previously
@@ -713,11 +702,7 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
-        Ok(PropolisSetup {
-            client,
-            running_zone,
-            port_tickets: Some(port_tickets),
-        })
+        Ok(PropolisSetup { client, running_zone })
     }
 
     /// Begins the execution of the instance's service (Propolis).
@@ -742,28 +727,21 @@ impl Instance {
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
-        let zname = propolis_zone_name(inner.propolis_id());
-        warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&inner.log, &zname).await.unwrap();
+        let log = inner.log.clone();
+        let running_state = inner.running_state.as_mut().unwrap();
+
+        info!(log, "Stopping propolis zone");
+        if let Err(err) = running_state.running_zone.stop().await {
+            warn!(log, "Failed to stop propolis zone: {}", err);
+        }
 
         // Remove ourselves from the instance manager's map of instances.
-        let running_state = inner.running_state.as_mut().unwrap();
         running_state.instance_ticket.terminate();
 
         // And remove the OPTE ports from the port manager
-        let mut result = Ok(());
-        if let Some(tickets) = running_state.port_tickets.as_mut() {
-            for ticket in tickets.iter_mut() {
-                // Release the port from the manager, and store any error. We
-                // don't return immediately so that we can try to clean up all
-                // ports, even if early ones fail. Return the last error, which
-                // is OK for now.
-                if let Err(e) = ticket.release() {
-                    result = Err(e.into());
-                }
-            }
-        }
-        result
+        running_state.running_zone.release_opte_ports()?;
+
+        Ok(())
     }
 
     // Monitors propolis until explicitly told to disconnect.

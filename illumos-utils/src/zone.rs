@@ -237,7 +237,7 @@ impl Zones {
         zone_image: &std::path::Path,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
-        vnics: Vec<String>,
+        links: Vec<String>,
         limit_priv: Vec<String>,
     ) -> Result<(), AdmError> {
         if let Some(zone) = Self::find(zone_name).await? {
@@ -285,11 +285,8 @@ impl Zones {
         for device in devices {
             cfg.add_device(device);
         }
-        for vnic in &vnics {
-            cfg.add_net(&zone::Net {
-                physical: vnic.to_string(),
-                ..Default::default()
-            });
+        for link in links {
+            cfg.add_net(&zone::Net { physical: link, ..Default::default() });
         }
         cfg.run().await.map_err(|err| AdmError {
             op: Operation::Configure,

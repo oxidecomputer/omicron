@@ -13,6 +13,9 @@ cfg_if::cfg_if! {
 }
 
 pub mod params;
+mod port;
+pub use port::Port;
+pub use port::PortType;
 
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
@@ -20,6 +23,7 @@ pub use oxide_vpc::api::BoundaryServices;
 pub use oxide_vpc::api::Vni;
 use std::net::IpAddr;
 
+#[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 fn default_boundary_services() -> BoundaryServices {
     use oxide_vpc::api::Ipv6Addr;
     use oxide_vpc::api::MacAddr;
@@ -66,7 +70,11 @@ impl Gateway {
             ip: subnet
                 .iter()
                 .nth(1)
-                .expect("IP subnet must have at least 1 address"),
+                .expect("IP subnet must have at least 2 addresses"),
         }
+    }
+
+    pub fn ip(&self) -> IpAddr {
+        self.ip
     }
 }
