@@ -155,6 +155,7 @@ impl UpdateTracker {
         &self,
         sp: SpIdentifier,
         plan: UpdatePlan,
+        update_id: Uuid,
     ) -> Result<(), StartUpdateError> {
         // Do we need to upload this plan's trampoline phase 2 to MGS?
         let upload_trampoline_phase_2_to_mgs = {
@@ -196,11 +197,15 @@ impl UpdateTracker {
             let update_log = Arc::default();
 
             let update_driver = UpdateDriver {
+                update_id,
                 sp,
                 mgs_client: self.mgs_client.clone(),
                 upload_trampoline_phase_2_to_mgs,
                 update_log: Arc::clone(&update_log),
-                log: self.log.new(o!("sp" => format!("{sp:?}"))),
+                log: self.log.new(o!(
+                    "sp" => format!("{sp:?}"),
+                    "update_id" => update_id.to_string(),
+                )),
             };
 
             let task = tokio::spawn(update_driver.run(plan));
@@ -286,6 +291,7 @@ pub(crate) enum StartUpdateError {
 
 #[derive(Debug)]
 struct UpdateDriver {
+    update_id: Uuid,
     sp: SpIdentifier,
     mgs_client: gateway_client::Client,
     upload_trampoline_phase_2_to_mgs:
@@ -372,23 +378,16 @@ impl UpdateDriver {
         &mut self,
         plan: &UpdatePlan,
     ) -> Result<(), UpdateEventFailureKind> {
-        let update_id = Uuid::new_v4();
+        info!(self.log, "starting host recovery via trampoline image");
 
-        info!(
-            self.log, "starting host recovery via trampoline image";
-            "update_id" => %update_id,
-        );
-
-        self.install_trampoline_image(plan, update_id).await.map_err(
-            |err| {
-                UpdateEventFailureKind::ArtifactUpdateFailed {
-                    // `trampoline_phase_1` and `trampoline_phase_2` have the same
-                    // artifact ID, so the choice here is arbitrary.
-                    artifact: plan.trampoline_phase_1.id.clone(),
-                    reason: format!("{err:#}"),
-                }
-            },
-        )?;
+        self.install_trampoline_image(plan).await.map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                // `trampoline_phase_1` and `trampoline_phase_2` have the same
+                // artifact ID, so the choice here is arbitrary.
+                artifact: plan.trampoline_phase_1.id.clone(),
+                reason: format!("{err:#}"),
+            }
+        })?;
 
         // TODO wait for installinator completion, ideally with progress for
         // both:
@@ -405,7 +404,6 @@ impl UpdateDriver {
     async fn install_trampoline_image(
         &mut self,
         plan: &UpdatePlan,
-        update_id: Uuid,
     ) -> anyhow::Result<()> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
         // slot 0.
@@ -428,7 +426,7 @@ impl UpdateDriver {
         let installinator_image_id = InstallinatorImageId {
             control_plane: plan.control_plane_hash.to_string(),
             host_phase_2: plan.host_phase_2_hash.to_string(),
-            update_id,
+            update_id: self.update_id,
         };
         self.mgs_client
             .sp_installinator_image_id_set(
