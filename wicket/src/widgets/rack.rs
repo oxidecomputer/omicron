@@ -5,9 +5,6 @@
 //! A rendering of the Oxide rack
 
 use crate::inventory::ComponentId;
-use crate::screens::TabIndex;
-use crate::{Action, Event, Frame, State};
-use crossterm::event::Event as TermEvent;
 use slog::Logger;
 use std::collections::BTreeMap;
 use tui::buffer::Buffer;
@@ -40,7 +37,7 @@ impl<'a> Rack<'a> {
         let mut block = Block::default()
             .title(format!("sled {}", i))
             .borders(borders(sled.height));
-        if self.state.tabbed == component_id {
+        if self.state.selected == component_id {
             block = block
                 .style(self.sled_selected_style)
                 .border_style(self.border_selected_style);
@@ -57,7 +54,7 @@ impl<'a> Rack<'a> {
         for x in inner.left()..inner.right() {
             for y in inner.top()..inner.bottom() {
                 let cell = buf.get_mut(x, y).set_symbol("▕");
-                if self.state.tabbed == component_id {
+                if self.state.selected == component_id {
                     if let Some(KnightRiderMode { count }) =
                         self.state.knight_rider_mode
                     {
@@ -87,7 +84,7 @@ impl<'a> Rack<'a> {
         let mut block = Block::default()
             .title(format!("switch {}", i))
             .borders(borders(switch.height));
-        if self.state.tabbed == component_id {
+        if self.state.selected == component_id {
             block = block
                 .style(self.switch_selected_style)
                 .border_style(self.border_selected_style);
@@ -111,7 +108,7 @@ impl<'a> Rack<'a> {
         let mut block = Block::default()
             .title(format!("power {}", i))
             .borders(borders(power_shelf.height));
-        if self.state.tabbed == component_id {
+        if self.state.selected == component_id {
             block = block
                 .style(self.power_shelf_selected_style)
                 .border_style(self.border_selected_style);
@@ -172,10 +169,6 @@ impl<'a> Widget for Rack<'a> {
     }
 }
 
-// Currently we only allow tabbing through the rack
-// There are 36 entries (0 - 35)
-const MAX_TAB_INDEX: u16 = 35;
-
 // Easter egg alert: Support for Knight Rider mode
 #[derive(Debug, Default)]
 pub struct KnightRiderMode {
@@ -192,10 +185,7 @@ impl KnightRiderMode {
 #[derive(Debug)]
 pub struct RackState {
     pub log: Option<Logger>,
-    pub tabbed: ComponentId,
-    pub tab_index: TabIndex,
-    pub tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
-    pub component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
+    pub selected: ComponentId,
     pub knight_rider_mode: Option<KnightRiderMode>,
 
     // Useful for arrow based navigation. When we cross the switches going up
@@ -204,27 +194,21 @@ pub struct RackState {
     // would expect.
     //
     // This is the only part of the state that is "historical", and doesn't
-    // rely on the current TabIndex/ComponentId at all times.
+    // rely on the `self.selected` at all times.
     left_column: bool,
 }
 
 #[allow(clippy::new_without_default)]
 impl RackState {
     pub fn new() -> RackState {
-        let mut state = RackState {
+        RackState {
             log: None,
-            tabbed: ComponentId::Sled(0),
-            tab_index: TabIndex::new(MAX_TAB_INDEX, 0),
-            tab_index_by_component_id: BTreeMap::new(),
-            component_id_by_tab_index: BTreeMap::new(),
+            selected: ComponentId::Sled(0),
             knight_rider_mode: None,
 
             // Default to the left column, where sled 0 lives
             left_column: true,
-        };
-
-        state.init_tab_index();
-        state
+        }
     }
 
     pub fn toggle_knight_rider_mode(&mut self) {
@@ -236,97 +220,64 @@ impl RackState {
     }
 
     pub fn up(&mut self) {
-        self.set_column();
-
-        match self.get_current_component_id() {
-            // Up the left side
-            ComponentId::Switch(1) if self.left_column => self.inc_tab_index(),
-
-            // Up the middle (right side if sled 15)
-            ComponentId::Sled(15)
-            | ComponentId::Psc(_)
-            | ComponentId::Switch(0) => {
-                self.inc_tab_index();
+        self.selected = match self.selected {
+            ComponentId::Sled(i) if i == 14 || i == 15 => {
+                ComponentId::Switch(0)
             }
-
-            // Up the current side (always right side if switch 1)
-            ComponentId::Sled(_) | ComponentId::Switch(_) => {
-                self.inc_tab_index();
-                self.inc_tab_index();
+            ComponentId::Sled(i) => ComponentId::Sled((i + 2) % 32),
+            ComponentId::Switch(0) => ComponentId::Psc(0),
+            ComponentId::Switch(1) => {
+                if self.left_column {
+                    ComponentId::Sled(16)
+                } else {
+                    ComponentId::Sled(17)
+                }
             }
-        }
+            ComponentId::Switch(_) => unreachable!(),
+            ComponentId::Psc(0) => ComponentId::Psc(1),
+            ComponentId::Psc(1) => ComponentId::Switch(1),
+            ComponentId::Psc(_) => unreachable!(),
+        };
     }
 
     pub fn down(&mut self) {
-        self.set_column();
-
-        match self.get_current_component_id() {
-            // Down the left side
-            ComponentId::Switch(0) if !self.left_column => self.dec_tab_index(),
-
-            // Down the middle (right side if sled 16)
-            ComponentId::Sled(16)
-            | ComponentId::Psc(_)
-            | ComponentId::Switch(1) => {
-                self.dec_tab_index();
+        self.selected = match self.selected {
+            ComponentId::Sled(i) if i == 16 || i == 17 => {
+                ComponentId::Switch(1)
             }
-
-            // Up the current side (always right side if switch 0)
-            ComponentId::Sled(_) | ComponentId::Switch(_) => {
-                self.dec_tab_index();
-                self.dec_tab_index();
+            ComponentId::Sled(i) => ComponentId::Sled((30 + i) % 32),
+            ComponentId::Switch(1) => ComponentId::Psc(1),
+            ComponentId::Switch(0) => {
+                if self.left_column {
+                    ComponentId::Sled(14)
+                } else {
+                    ComponentId::Sled(15)
+                }
             }
-        }
+            ComponentId::Switch(_) => unreachable!(),
+            ComponentId::Psc(0) => ComponentId::Switch(0),
+            ComponentId::Psc(1) => ComponentId::Psc(0),
+            ComponentId::Psc(_) => unreachable!(),
+        };
     }
 
     pub fn left_or_right(&mut self) {
-        self.set_column();
-
-        match self.get_current_component_id() {
-            ComponentId::Sled(_) => {
+        match self.selected {
+            ComponentId::Sled(i) => {
                 if self.left_column {
-                    self.inc_tab_index();
+                    self.left_column = false;
+                    self.selected = ComponentId::Sled(i + 1);
                 } else {
-                    self.dec_tab_index();
+                    self.left_column = true;
+                    self.selected = ComponentId::Sled(i - 1);
                 }
             }
             _ => (),
         }
     }
 
-    fn set_column(&mut self) {
-        match self.tabbed {
-            ComponentId::Sled(i) => self.left_column = i % 2 == 0,
-            _ => (),
-        }
-    }
-
-    pub fn inc_tab_index(&mut self) {
-        self.tab_index.inc();
-        self.tabbed = self.get_current_component_id();
-    }
-
-    pub fn dec_tab_index(&mut self) {
-        self.tab_index.dec();
-        self.tabbed = self.get_current_component_id();
-    }
-
     pub fn set_logger(&mut self, log: Logger) {
         self.log = Some(log);
-    }
-
-    pub fn get_current_component_id(&self) -> ComponentId {
-        *self.component_id_by_tab_index.get(&self.tab_index).unwrap()
-    }
-
-    pub fn get_next_component_id(&self) -> ComponentId {
-        let next = self.tab_index.next();
-        *self.component_id_by_tab_index.get(&next).unwrap()
-    }
-
-    pub fn get_prev_component_id(&self) -> ComponentId {
-        let prev = self.tab_index.prev();
-        *self.component_id_by_tab_index.get(&prev).unwrap()
     }
 
     // We need to size the rack for large and small terminals
@@ -500,34 +451,6 @@ impl RackState {
 
         let sled_rect = Rect { x, y, width: sled_width, height };
         rects_map.insert(ComponentId::Sled(sled_index), sled_rect);
-    }
-
-    // We tab bottom-to-top, left-to-right, same as component numbering
-    fn init_tab_index(&mut self) {
-        for i in 0..=MAX_TAB_INDEX as u8 {
-            let tab_index = TabIndex::new(MAX_TAB_INDEX, i as u16);
-            let component_id = if i < 16 {
-                ComponentId::Sled(i)
-            } else if i > 19 {
-                ComponentId::Sled(i - 4)
-            } else if i == 16 {
-                // Switches
-                ComponentId::Switch(0)
-            } else if i == 19 {
-                ComponentId::Switch(1)
-            } else if i == 17 || i == 18 {
-                // Power Shelves
-                // We actually want to return the active component here, so
-                // we name it "psc X"
-                ComponentId::Psc(i - 17)
-            } else {
-                // If we add more items to tab through this will change
-                unreachable!();
-            };
-
-            self.component_id_by_tab_index.insert(tab_index, component_id);
-            self.tab_index_by_component_id.insert(component_id, tab_index);
-        }
     }
 }
 
