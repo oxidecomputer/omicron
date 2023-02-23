@@ -194,7 +194,7 @@ async fn sim_instance_migrate(
     }
     let source_nat = SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
-    // The TODOs below are tracked in
+    // The TODO items below are tracked in
     //   https://github.com/oxidecomputer/omicron/issues/1783
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),

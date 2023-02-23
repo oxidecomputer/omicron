@@ -15,7 +15,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::{context::ServerContext, ReportEventStatus};
+use crate::{context::ServerContext, ProgressReportStatus};
 
 type ArtifactServerApiDesc = ApiDescription<ServerContext>;
 
@@ -108,8 +108,8 @@ async fn report_progress(
         .report_progress(update_id, event.into_inner())
         .await?
     {
-        ReportEventStatus::Processed => Ok(HttpResponseUpdatedNoContent()),
-        ReportEventStatus::UnrecognizedUpdateId => {
+        ProgressReportStatus::Processed => Ok(HttpResponseUpdatedNoContent()),
+        ProgressReportStatus::UnrecognizedUpdateId => {
             Err(HttpError::for_client_error(
                 None,
                 StatusCode::UNPROCESSABLE_ENTITY,

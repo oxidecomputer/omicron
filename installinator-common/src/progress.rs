@@ -40,8 +40,8 @@ pub struct ProgressReport {
 pub struct CompletionEvent {
     /// When this event was generated, in duration since the start of the program.
     ///
-    /// This can be compared against [`Report::total_elapsed`] to figure out how
-    /// old the event was.
+    /// This can be compared against [`ProgressReport::total_elapsed`] to figure
+    /// out how old the event was.
     pub total_elapsed: Duration,
 
     /// The kind of event this is.
@@ -185,8 +185,8 @@ impl CompletionEventKind {
 pub struct ProgressEvent {
     /// When this event was generated, in duration since the start of the program.
     ///
-    /// This can be compared against [`Report::total_elapsed`] to figure out how
-    /// old the event was.
+    /// This can be compared against [`ProgressReport::total_elapsed`] to figure
+    /// out how old the event was.
     pub total_elapsed: Duration,
 
     /// The kind of event this is.

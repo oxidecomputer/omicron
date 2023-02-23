@@ -28,11 +28,11 @@ pub trait ArtifactGetter: fmt::Debug + Send + Sync + 'static {
         &self,
         update_id: Uuid,
         report: ProgressReport,
-    ) -> Result<ReportEventStatus, HttpError>;
+    ) -> Result<ProgressReportStatus, HttpError>;
 }
 
-/// The status returned by [`ArtifactGetter::report_event`].
-pub enum ReportEventStatus {
+/// The status returned by [`ArtifactGetter::report_progress`].
+pub enum ProgressReportStatus {
     /// This event was processed by the server.
     Processed,
 
@@ -75,7 +75,7 @@ impl ArtifactStore {
         &self,
         update_id: Uuid,
         event: ProgressReport,
-    ) -> Result<ReportEventStatus, HttpError> {
+    ) -> Result<ProgressReportStatus, HttpError> {
         slog::debug!(self.log, "Report event for {update_id}: {event:?}");
         self.getter.report_progress(update_id, event).await
     }

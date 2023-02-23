@@ -480,9 +480,6 @@ impl JsonSchema for RoleName {
 /// can fail (if the value is larger than i64::MAX).  We provide all of these for
 /// consumers' convenience.
 // TODO-cleanup This could benefit from a more complete implementation.
-// TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
-// need to write a validator for that.
-// /
 //
 // The maximum byte count of i64::MAX comes from the fact that this is stored in
 // the database as an i64.  Constraining it here ensures that we can't fail to
