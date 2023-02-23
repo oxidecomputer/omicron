@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod main;
+mod overview_pane;
 mod splash;
 
 use crate::{
@@ -15,21 +16,60 @@ use tui::layout::Rect;
 use main::MainScreen;
 use splash::SplashScreen;
 
-/// A specific functionality such as `Update` or `Recovery` that is selectable
+pub(crate) use overview_pane::OverviewPane;
+
+/// A specific functionality such as `Update` or `Help` that is selectable
 /// from the [`MainScreen`] navbar on the left.
-///
-/// Individual [`View`]s representing a subset of functionlity can be selected
-/// indside a pane using the navbar at the top of the pane.
-pub struct Pane {
-    name: &'static str,
+pub trait Pane: Control {
+    /// Return the tab names to be shown in the top bar of [`MainScreen`]
+    fn tabs(&self) -> &[&'static str];
+
+    /// Return the index of the selected tab
+    fn selected_tab(&self) -> usize;
 }
 
-/// The viewing area of a specific [`Screen`], where functionally specific
-/// widgets are rendered. [`View`]s contain [`Control`]s that represent the pre-
-/// rendered state of a widget. Controls may be focused and "stacked", such
-/// that the user can contextually deal with a single control at a time.
-pub struct View {
-    selected: ControlId,
+/// A placeholder pane used for development purposes
+pub struct NullPane {
+    control_id: ControlId,
+}
+
+impl NullPane {
+    pub fn new() -> NullPane {
+        NullPane { control_id: get_control_id() }
+    }
+}
+
+impl Pane for NullPane {
+    fn tabs(&self) -> &[&'static str] {
+        &["NULL"]
+    }
+
+    fn selected_tab(&self) -> usize {
+        // There's only one tab
+        0
+    }
+}
+
+impl Control for NullPane {
+    fn control_id(&self) -> ControlId {
+        self.control_id
+    }
+
+    fn on(
+        &mut self,
+        state: &mut crate::State,
+        event: crate::Event,
+    ) -> Option<crate::Action> {
+        None
+    }
+
+    fn draw(
+        &mut self,
+        state: &crate::State,
+        frame: &mut crate::Frame<'_>,
+        rect: tui::layout::Rect,
+    ) {
+    }
 }
 
 /// A unique id for a [`Control`]
@@ -53,12 +93,7 @@ pub fn get_control_id() -> ControlId {
 pub trait Control {
     fn control_id(&self) -> ControlId;
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action>;
-    fn draw(
-        &mut self,
-        state: &State,
-        frame: &mut Frame<'_>,
-        rect: Rect,
-    ) -> anyhow::Result<()>;
+    fn draw(&mut self, state: &State, frame: &mut Frame<'_>, rect: Rect);
 }
 
 /// The primary display representation. It's sole purpose is to dispatch events

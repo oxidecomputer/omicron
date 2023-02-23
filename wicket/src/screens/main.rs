@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{get_control_id, Control, ControlId};
+use std::collections::BTreeMap;
+
+use super::{get_control_id, Control, ControlId, NullPane, OverviewPane, Pane};
 use crate::{Action, Event, Frame, State, Term};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -26,12 +28,21 @@ use tui::widgets::{
 pub struct MainScreen {
     selected: ControlId,
     sidebar: Sidebar,
+    panes: BTreeMap<&'static str, Box<dyn Pane>>,
 }
 
 impl MainScreen {
     pub fn new() -> MainScreen {
         let sidebar = Sidebar::new();
-        MainScreen { selected: sidebar.control_id(), sidebar }
+        MainScreen {
+            selected: sidebar.control_id(),
+            sidebar,
+            panes: BTreeMap::from([
+                ("overview", Box::new(OverviewPane::new()) as Box<dyn Pane>),
+                ("update", Box::new(NullPane::new()) as Box<dyn Pane>),
+                ("help", Box::new(NullPane::new()) as Box<dyn Pane>),
+            ]),
+        }
     }
 
     /// Draw the [`MainScreen`]
@@ -63,6 +74,13 @@ impl MainScreen {
                 .split(horizontal_chunks[1]);
 
             self.sidebar.draw(state, frame, horizontal_chunks[0]);
+
+            self.draw_pane(
+                state,
+                frame,
+                vertical_chunks[0],
+                vertical_chunks[1],
+            );
         })?;
         Ok(())
     }
@@ -78,6 +96,28 @@ impl MainScreen {
             None
         }
     }
+
+    fn draw_pane(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        tabs_rect: Rect,
+        npane_rect: Rect,
+    ) {
+        let pane = self.panes.get_mut(self.sidebar.selected()).unwrap();
+        let titles = pane.tabs().iter().cloned().map(Spans::from).collect();
+        let tabs = Tabs::new(titles)
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::White))
+            .highlight_style(Style::default().fg(Color::Yellow))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .style(Style::default().fg(Color::Cyan));
+        frame.render_widget(tabs, tabs_rect);
+    }
 }
 
 /// The mechanism for selecting panes
@@ -87,14 +127,23 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
-    fn new() -> Sidebar {
+    pub fn new() -> Sidebar {
         let mut sidebar = Sidebar {
             control_id: get_control_id(),
-            panes: StatefulList::new(vec!["Overview", "Update", "Help"]),
+            // TODO: The panes here must match the keys in `MainScreen::panes`
+            // We should probably make this a touch less error prone
+            panes: StatefulList::new(vec!["overview", "update", "help"]),
         };
         // Select the first pane
         sidebar.panes.next();
         sidebar
+    }
+
+    /// Return the name of the selected Pane
+    ///
+    /// TODO: Is an `&'static str` good enough? Should we define a `PaneId`?
+    pub fn selected(&self) -> &'static str {
+        self.panes.items[self.panes.state.selected().unwrap()]
     }
 }
 
@@ -120,12 +169,7 @@ impl Control for Sidebar {
         }
     }
 
-    fn draw(
-        &mut self,
-        _state: &State,
-        frame: &mut Frame<'_>,
-        area: Rect,
-    ) -> anyhow::Result<()> {
+    fn draw(&mut self, _state: &State, frame: &mut Frame<'_>, area: Rect) {
         let items: Vec<ListItem> = self
             .panes
             .items
@@ -140,7 +184,6 @@ impl Control for Sidebar {
         let tabs = List::new(items)
             .block(
                 Block::default()
-                    .title("TABS <CTRL>")
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             )
@@ -152,7 +195,6 @@ impl Control for Sidebar {
             );
 
         frame.render_stateful_widget(tabs, area, &mut self.panes.state);
-        Ok(())
     }
 }
 
