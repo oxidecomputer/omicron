@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod controls;
 mod main;
-mod overview_pane;
+mod panes;
 mod splash;
 
 use crate::{
@@ -16,85 +17,8 @@ use tui::layout::Rect;
 use main::MainScreen;
 use splash::SplashScreen;
 
-pub(crate) use overview_pane::OverviewPane;
-
-/// A specific functionality such as `Update` or `Help` that is selectable
-/// from the [`MainScreen`] navbar on the left.
-pub trait Pane: Control {
-    /// Return the tab names to be shown in the top bar of [`MainScreen`]
-    fn tabs(&self) -> &[&'static str];
-
-    /// Return the index of the selected tab
-    fn selected_tab(&self) -> usize;
-}
-
-/// A placeholder pane used for development purposes
-pub struct NullPane {
-    control_id: ControlId,
-}
-
-impl NullPane {
-    pub fn new() -> NullPane {
-        NullPane { control_id: get_control_id() }
-    }
-}
-
-impl Pane for NullPane {
-    fn tabs(&self) -> &[&'static str] {
-        &["NULL"]
-    }
-
-    fn selected_tab(&self) -> usize {
-        // There's only one tab
-        0
-    }
-}
-
-impl Control for NullPane {
-    fn control_id(&self) -> ControlId {
-        self.control_id
-    }
-
-    fn on(
-        &mut self,
-        state: &mut crate::State,
-        event: crate::Event,
-    ) -> Option<crate::Action> {
-        None
-    }
-
-    fn draw(
-        &mut self,
-        state: &crate::State,
-        frame: &mut crate::Frame<'_>,
-        rect: tui::layout::Rect,
-    ) {
-    }
-}
-
-/// A unique id for a [`Control`]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ControlId(pub usize);
-
-/// Return a unique id for a [`Control`]
-pub fn get_control_id() -> ControlId {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
-}
-
-/// A [`Control`] is the an item on a screen that can be selected and interacted with.
-/// Control's render [`tui::Widget`]s when drawn.
-///
-///
-/// Due to the rendering model of stateful widgets in `tui.rs`, `self` must
-/// be mutable when `Control::draw` is called. However, global state is never
-/// mutated when drawing, only visible state relevant to the Widget being
-/// drawn.
-pub trait Control {
-    fn control_id(&self) -> ControlId;
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action>;
-    fn draw(&mut self, state: &State, frame: &mut Frame<'_>, rect: Rect);
-}
+pub use controls::{get_control_id, Control, ControlId};
+pub use panes::{NullPane, OverviewPane, Pane};
 
 /// The primary display representation. It's sole purpose is to dispatch events
 /// to the underlying splash and main screens.
