@@ -110,19 +110,28 @@ pub struct UpdateArtifactId {
 //
 // 1. Add it here.
 //
-// 2. Add it by hand to <repo root>/openapi/{nexus-internal.json,sled_agent.json}
-//    (search for `"KnownArtifactKind"` with double-quotes).
+// 2. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
+//    The mapping from `UpdateArtifactKind::*` to `types::UpdateArtifactKind::*`
+//    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
+//    be updated with the new variant until step 5 below.
 //
-//    TODO: is there a better way to do this? Rain couldn't figure out how to run
-//    the command to regenerate the API: the nexus build kept failing. There
-//    might be a circular dependency here, which is worrisome.
-//
-// 3. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
-//
-// 4. Add it to <repo root>/common/src/sql/dbinit.sql under (CREATE TYPE
+// 3. Add it to <repo root>/common/src/sql/dbinit.sql under (CREATE TYPE
 //    omicron.public.update_artifact_kind).
 //
 //    TODO: After omicron ships this would likely involve a DB migration.
+//
+// 4. Add the new kind and the mapping to its `update_artifact_kind` to
+//    <repo root>/nexus/db-model/src/update_artifact.rs
+//
+// 5. Regenerate the OpenAPI specs for nexus and sled-agent:
+//
+//    ```
+//    EXPECTORATE=overwrite cargo test -p omicron-nexus -p omicron-sled-agent openapi
+//    ```
+//
+// 6. Return to <repo root>/{nexus-client,sled-agent-client}/lib.rs from step 2
+//    and replace the `todo!()`s with the new `types::UpdateArtifactKind::*`
+//    variant.
 //
 // See https://github.com/oxidecomputer/omicron/pull/2300 as an example.
 //
