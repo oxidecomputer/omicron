@@ -355,9 +355,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(update_deployment_view)?;
 
         api.register(user_list)?;
+        api.register(user_list_v1)?;
         api.register(silo_users_list)?;
         api.register(silo_user_view)?;
         api.register(group_list)?;
+        api.register(group_list_v1)?;
 
         // Console API operations
         api.register(console_api::login_begin)?;
@@ -7356,12 +7358,45 @@ async fn saga_view(
 // Silo users
 
 /// List users
+/// Use `GET /v1/users` instead
 #[endpoint {
     method = GET,
     path = "/users",
     tags = ["silos"],
+    deprecated = true,
 }]
 async fn user_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let users = nexus
+            .silo_users_list_current(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            users,
+            &|_, user: &User| user.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List users
+#[endpoint {
+    method = GET,
+    path = "/v1/users",
+    tags = ["silos"],
+}]
+async fn user_list_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
@@ -7389,12 +7424,45 @@ async fn user_list(
 // Silo groups
 
 /// List groups
+/// Use `GET /v1/groups` instead
 #[endpoint {
     method = GET,
     path = "/groups",
     tags = ["silos"],
+    deprecated = true,
 }]
 async fn group_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let groups = nexus
+            .silo_groups_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            groups,
+            &|_, group: &Group| group.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List groups
+#[endpoint {
+    method = GET,
+    path = "/v1/groups",
+    tags = ["silos"],
+}]
+async fn group_list_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
