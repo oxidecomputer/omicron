@@ -5,8 +5,12 @@
 mod main;
 mod splash;
 
-use crate::wizard::{Action, Event, State, Term};
+use crate::{
+    wizard::{Action, Event, State, Term},
+    Frame,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tui::layout::Rect;
 
 use main::MainScreen;
 use splash::SplashScreen;
@@ -16,7 +20,9 @@ use splash::SplashScreen;
 ///
 /// Individual [`View`]s representing a subset of functionlity can be selected
 /// indside a pane using the navbar at the top of the pane.
-pub struct Pane {}
+pub struct Pane {
+    name: &'static str,
+}
 
 /// The viewing area of a specific [`Screen`], where functionally specific
 /// widgets are rendered. [`View`]s contain [`Control`]s that represent the pre-
@@ -34,6 +40,25 @@ pub struct ControlId(pub usize);
 pub fn get_control_id() -> ControlId {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+/// A [`Control`] is the an item on a screen that can be selected and interacted with.
+/// Control's render [`tui::Widget`]s when drawn.
+///
+///
+/// Due to the rendering model of stateful widgets in `tui.rs`, `self` must
+/// be mutable when `Control::draw` is called. However, global state is never
+/// mutated when drawing, only visible state relevant to the Widget being
+/// drawn.
+pub trait Control {
+    fn control_id(&self) -> ControlId;
+    fn on(&mut self, state: &mut State, event: Event) -> Option<Action>;
+    fn draw(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        rect: Rect,
+    ) -> anyhow::Result<()>;
 }
 
 /// The primary display representation. It's sole purpose is to dispatch events
@@ -65,7 +90,7 @@ impl Screen {
     }
 
     pub fn draw(
-        &self,
+        &mut self,
         state: &State,
         terminal: &mut Term,
     ) -> anyhow::Result<()> {
