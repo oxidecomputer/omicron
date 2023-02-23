@@ -10,7 +10,7 @@ mod server;
 mod store;
 
 pub use server::ArtifactServer;
-pub use store::ArtifactGetter;
+pub use store::{ArtifactGetter, ReportEventStatus};
 
 use anyhow::Result;
 

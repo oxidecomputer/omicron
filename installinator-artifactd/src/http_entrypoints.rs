@@ -5,12 +5,17 @@
 // Copyright 2022 Oxide Computer Company
 
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
-    RequestContext,
+    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
+use hyper::StatusCode;
+use installinator_common::ProgressReport;
 use omicron_common::update::{ArtifactHashId, ArtifactId};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use uuid::Uuid;
 
-use crate::context::ServerContext;
+use crate::{context::ServerContext, ReportEventStatus};
 
 type ArtifactServerApiDesc = ApiDescription<ServerContext>;
 
@@ -21,6 +26,7 @@ pub fn api() -> ArtifactServerApiDesc {
     ) -> Result<(), String> {
         api.register(get_artifact_by_id)?;
         api.register(get_artifact_by_hash)?;
+        api.register(report_progress)?;
         Ok(())
     }
 
@@ -70,6 +76,45 @@ async fn get_artifact_by_hash(
         Some(body) => Ok(HttpResponseOk(body.into())),
         None => {
             Err(HttpError::for_not_found(None, "Artifact not found".into()))
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ReportQuery {
+    /// A unique identifier for the update.
+    pub(crate) update_id: Uuid,
+}
+
+/// Report progress and completion to the server.
+///
+/// This method requires an `update_id` path parameter. This update ID is
+/// matched against the server currently performing an update. If the server
+/// is unaware of the update ID, it will return an HTTP 422 Unprocessable Entity
+/// code.
+#[endpoint {
+    method = POST,
+    path = "/report-progress/{update_id}",
+}]
+async fn report_progress(
+    rqctx: RequestContext<ServerContext>,
+    path: Path<ReportQuery>,
+    event: TypedBody<ProgressReport>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let update_id = path.into_inner().update_id;
+    match rqctx
+        .context()
+        .artifact_store
+        .report_progress(update_id, event.into_inner())
+        .await?
+    {
+        ReportEventStatus::Processed => Ok(HttpResponseUpdatedNoContent()),
+        ReportEventStatus::UnrecognizedUpdateId => {
+            Err(HttpError::for_client_error(
+                None,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("update ID {update_id} unrecognized by this server"),
+            ))
         }
     }
 }

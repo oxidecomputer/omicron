@@ -8,16 +8,21 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use installinator_artifact_client::ClientError;
+use installinator_common::{ProgressReport, ReportEventKind};
 use itertools::Itertools;
 use omicron_common::update::ArtifactHashId;
+use reqwest::StatusCode;
 use tokio::{sync::mpsc, time::Instant};
+use uuid::Uuid;
 
 use crate::{
+    artifact::ArtifactClient,
     ddm_admin_client::DdmAdminClient,
     errors::{ArtifactFetchError, DiscoverPeersError},
 };
@@ -111,6 +116,7 @@ impl FetchedArtifact {
         log: &slog::Logger,
         mut discover_fn: F,
         artifact_hash_id: &ArtifactHashId,
+        event_sender: &mpsc::Sender<ReportEventKind>,
     ) -> Result<Self>
     where
         F: FnMut() -> Fut,
@@ -142,7 +148,10 @@ impl FetchedArtifact {
                 peers.peer_count(),
                 peers.display(),
             );
-            match peers.fetch_artifact(artifact_hash_id).await {
+            match peers
+                .fetch_artifact(attempt, artifact_hash_id, event_sender)
+                .await
+            {
                 Some((addr, artifact)) => {
                     return Ok(Self { attempt, addr, artifact })
                 }
@@ -195,7 +204,9 @@ impl Peers {
 
     pub(crate) async fn fetch_artifact(
         &self,
+        attempt: usize,
         artifact_hash_id: &ArtifactHashId,
+        event_sender: &mpsc::Sender<ReportEventKind>,
     ) -> Option<(SocketAddrV6, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
@@ -217,7 +228,16 @@ impl Peers {
 
             // Attempt to download data from this peer.
             let start = Instant::now();
-            match self.fetch_from_peer(peer, artifact_hash_id).await {
+            match self
+                .fetch_from_peer(
+                    attempt,
+                    peer,
+                    artifact_hash_id,
+                    event_sender,
+                    start,
+                )
+                .await
+            {
                 Ok(artifact_bytes) => {
                     let elapsed = start.elapsed();
                     slog::info!(
@@ -255,8 +275,11 @@ impl Peers {
 
     async fn fetch_from_peer(
         &self,
+        attempt: usize,
         peer: SocketAddrV6,
         artifact_hash_id: &ArtifactHashId,
+        event_sender: &mpsc::Sender<ReportEventKind>,
+        start: Instant,
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
         let (sender, mut receiver) = mpsc::channel(8);
@@ -270,6 +293,7 @@ impl Peers {
         tokio::spawn(fetch);
 
         let mut artifact_bytes = BufList::new();
+        let mut downloaded_bytes = 0u64;
 
         loop {
             match tokio::time::timeout(self.timeout, receiver.recv()).await {
@@ -279,7 +303,17 @@ impl Peers {
                         "received chunk of {} bytes from peer",
                         bytes.len()
                     );
+                    downloaded_bytes += bytes.len() as u64;
                     artifact_bytes.push_chunk(bytes);
+                    _ = event_sender
+                        .send(ReportEventKind::DownloadProgress {
+                            attempt,
+                            kind: artifact_hash_id.kind.clone(),
+                            peer,
+                            downloaded_bytes,
+                            elapsed: start.elapsed(),
+                        })
+                        .await;
                 }
                 Ok(Some(Err(error))) => {
                     slog::debug!(
@@ -287,14 +321,46 @@ impl Peers {
                         "received error from peer, sending cancellation: {}",
                         DisplayErrorChain::new(&error),
                     );
+                    _ = event_sender
+                        .send(ReportEventKind::DownloadFailed {
+                            attempt,
+                            kind: artifact_hash_id.kind.clone(),
+                            peer,
+                            downloaded_bytes,
+                            elapsed: start.elapsed(),
+                            message: DisplayErrorChain::new(&error).to_string(),
+                        })
+                        .await;
                     return Err(ArtifactFetchError::HttpError { peer, error });
                 }
                 Ok(None) => {
                     // The entire artifact has been downloaded.
+                    _ = event_sender
+                        .send(ReportEventKind::DownloadCompleted {
+                            attempt,
+                            kind: artifact_hash_id.kind.clone(),
+                            peer,
+                            artifact_size: downloaded_bytes,
+                            elapsed: start.elapsed(),
+                        })
+                        .await;
                     return Ok(artifact_bytes);
                 }
                 Err(_) => {
                     // The operation timed out.
+                    _ = event_sender
+                        .send(ReportEventKind::DownloadFailed {
+                            attempt,
+                            kind: artifact_hash_id.kind.clone(),
+                            peer,
+                            downloaded_bytes,
+                            elapsed: start.elapsed(),
+                            message: format!(
+                                "operation timed out ({:?})",
+                                self.timeout
+                            ),
+                        })
+                        .await;
                     return Err(ArtifactFetchError::Timeout {
                         peer,
                         timeout: self.timeout,
@@ -304,18 +370,60 @@ impl Peers {
             }
         }
     }
+
+    pub(crate) fn broadcast_report<'a>(
+        &'a self,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> impl Stream<Item = Result<(), ClientError>> + Send + 'a {
+        futures::stream::iter(self.peers())
+            .map(move |peer| {
+                let log = self.log.new(slog::o!("peer" => peer.to_string()));
+                let report = report.clone();
+                async move {
+                    // For each peer, report it to the network.
+                    match self.imp
+                        .report_progress_impl(peer, update_id, report)
+                        .await
+                    {
+                        Ok(()) => Ok(()),
+                        Err(err) => {
+                            // Error 422 means that the server didn't accept the update ID.
+                            if err.status() == Some(StatusCode::UNPROCESSABLE_ENTITY) {
+                                slog::debug!(log, "returned HTTP 422 for update ID {update_id}");
+                            } else {
+                                slog::debug!(log, "failed for update ID {update_id}");
+                            }
+                            Err(err)
+                        }
+                    }
+                }
+            })
+            .buffer_unordered(8)
+    }
 }
 
+#[async_trait]
 pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_>;
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_>;
     fn peer_count(&self) -> usize;
 
+    // This method doesn't use async-trait because it must return a future
+    // that's 'static, which async-trait doesn't support. See
+    // https://github.com/dtolnay/async-trait/issues/37.
     fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
         artifact_hash_id: ArtifactHashId,
         sender: FetchSender,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+
+    async fn report_progress_impl(
+        &self,
+        peer: SocketAddrV6,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> Result<(), ClientError>;
 }
 
 /// The send side of the channel over which data is sent.
@@ -335,8 +443,9 @@ impl HttpPeers {
     }
 }
 
+#[async_trait]
 impl PeersImpl for HttpPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_> {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_> {
         Box::new(self.peers.iter().copied())
     }
 
@@ -356,57 +465,14 @@ impl PeersImpl for HttpPeers {
             artifact_client.fetch(artifact_hash_id, sender).await
         })
     }
-}
 
-#[derive(Debug)]
-struct ArtifactClient {
-    log: slog::Logger,
-    client: installinator_artifact_client::Client,
-}
-
-impl ArtifactClient {
-    fn new(addr: SocketAddrV6, log: &slog::Logger) -> Self {
-        let endpoint = format!("http://[{}]:{}", addr.ip(), addr.port());
-        let log = log.new(
-            slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
-        );
-        let client =
-            installinator_artifact_client::Client::new(&endpoint, log.clone());
-        Self { log, client }
-    }
-
-    async fn fetch(
+    async fn report_progress_impl(
         &self,
-        artifact_hash_id: ArtifactHashId,
-        sender: FetchSender,
-    ) {
-        let artifact_bytes = match self
-            .client
-            .get_artifact_by_hash(
-                artifact_hash_id.kind.as_str(),
-                &artifact_hash_id.hash.to_string(),
-            )
-            .await
-        {
-            Ok(artifact_bytes) => artifact_bytes,
-            Err(error) => {
-                _ = sender.send(Err(error)).await;
-                return;
-            }
-        };
-
-        slog::debug!(
-            &self.log,
-            "preparing to receive {:?} bytes from artifact",
-            artifact_bytes.content_length(),
-        );
-
-        let mut bytes = artifact_bytes.into_inner_stream();
-        while let Some(item) = bytes.next().await {
-            if let Err(_) = sender.send(item.map_err(Into::into)).await {
-                // The sender was dropped, which indicates that the job was cancelled.
-                return;
-            }
-        }
+        peer: SocketAddrV6,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> Result<(), ClientError> {
+        let artifact_client = ArtifactClient::new(peer, &self.log);
+        artifact_client.report_progress(update_id, report).await
     }
 }

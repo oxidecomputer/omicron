@@ -2770,6 +2770,7 @@ name = "installinator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "buf-list",
  "bytes",
  "camino",
@@ -2780,6 +2781,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "installinator-artifact-client",
+ "installinator-common",
  "ipcc-key-value",
  "itertools",
  "omicron-common",
@@ -2797,17 +2799,20 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.2",
+ "uuid",
 ]
 
 [[package]]
 name = "installinator-artifact-client"
 version = "0.1.0"
 dependencies = [
+ "installinator-common",
  "progenitor",
  "reqwest",
  "schemars",
  "serde",
  "slog",
+ "uuid",
 ]
 
 [[package]]
@@ -2816,10 +2821,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "camino",
  "clap 4.1.6",
  "dropshot",
  "expectorate",
  "hyper",
+ "installinator-common",
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
@@ -2830,6 +2837,17 @@ dependencies = [
  "slog",
  "subprocess",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "installinator-common"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "omicron-common",
+ "schemars",
+ "serde",
 ]
 
 [[package]]

@@ -103,6 +103,46 @@
           }
         }
       }
+    },
+    "/report-progress/{update_id}": {
+      "post": {
+        "summary": "Report progress and completion to the server.",
+        "description": "This method requires an `update_id` path parameter. This update ID is matched against the server currently performing an update. If the server is unaware of the update ID, it will return an HTTP 422 Unprocessable Entity code.",
+        "operationId": "report_progress",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "update_id",
+            "description": "A unique identifier for the update.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -119,6 +159,25 @@
       }
     },
     "schemas": {
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -136,6 +195,376 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "ProgressReport": {
+        "description": "A report, consisting of a list of events and some more metadata.",
+        "type": "object",
+        "properties": {
+          "events": {
+            "description": "A list of events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportEvent"
+            }
+          },
+          "total_elapsed": {
+            "description": "How long it's been since the installinator started running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "events",
+          "total_elapsed"
+        ]
+      },
+      "ReportEvent": {
+        "description": "An individual event.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReportEventKind"
+              }
+            ]
+          },
+          "total_elapsed": {
+            "description": "When this event was generated, in duration since the start of the program.\n\nThis can be compared against [`Report::total_elapsed`] to figure out how old the event was.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "total_elapsed"
+        ]
+      },
+      "ReportEventKind": {
+        "oneOf": [
+          {
+            "description": "An artifact is being downloaded.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The download attempt currently occurring.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "downloaded_bytes": {
+                "description": "The number of bytes downloaded so far.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long it's been since the download started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being downloaded.",
+                "type": "string"
+              },
+              "peer": {
+                "description": "The peer from which the artifact is being downloaded.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "download_progress"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "downloaded_bytes",
+              "elapsed",
+              "kind",
+              "peer",
+              "reason"
+            ]
+          },
+          {
+            "description": "The download of an artifact failed.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The download attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "downloaded_bytes": {
+                "description": "The number of bytes downloaded before failure.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the download took before failing.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being downloaded.",
+                "type": "string"
+              },
+              "message": {
+                "description": "A message indicating the reason for failure.",
+                "type": "string"
+              },
+              "peer": {
+                "description": "The peer the artifact was being downloaded from, if any.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "download_failed"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "downloaded_bytes",
+              "elapsed",
+              "kind",
+              "message",
+              "peer",
+              "reason"
+            ]
+          },
+          {
+            "description": "An artifact download was completed.",
+            "type": "object",
+            "properties": {
+              "artifact_size": {
+                "description": "The number of bytes downloaded.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "attempt": {
+                "description": "The download attempt that completed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the download took.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The artifact downloaded.",
+                "type": "string"
+              },
+              "peer": {
+                "description": "The peer the artifact was downloaded from.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "download_completed"
+                ]
+              }
+            },
+            "required": [
+              "artifact_size",
+              "attempt",
+              "elapsed",
+              "kind",
+              "peer",
+              "reason"
+            ]
+          },
+          {
+            "description": "An artifact is being written out.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The write attempt currently occurring.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "destination": {
+                "description": "The destination the artifact is being written out to.",
+                "type": "string",
+                "format": "path"
+              },
+              "elapsed": {
+                "description": "How long it's been since the write started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being written out.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "write_progress"
+                ]
+              },
+              "total_bytes": {
+                "description": "The total number of bytes to write out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "written_bytes": {
+                "description": "The number of bytes written out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "attempt",
+              "destination",
+              "elapsed",
+              "kind",
+              "reason",
+              "total_bytes",
+              "written_bytes"
+            ]
+          },
+          {
+            "description": "Failed to write an artifact.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The write attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "destination": {
+                "description": "The destination the artifact is being written out to.",
+                "type": "string",
+                "format": "path"
+              },
+              "elapsed": {
+                "description": "How long the write took before it failed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being written out.",
+                "type": "string"
+              },
+              "message": {
+                "description": "A message indicating why the write failed.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "write_failed"
+                ]
+              },
+              "total_bytes": {
+                "description": "The total number of bytes that should have been written out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "written_bytes": {
+                "description": "The number of bytes written out before failure.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "attempt",
+              "destination",
+              "elapsed",
+              "kind",
+              "message",
+              "reason",
+              "total_bytes",
+              "written_bytes"
+            ]
+          },
+          {
+            "description": "Completed writing an artifact.",
+            "type": "object",
+            "properties": {
+              "artifact_size": {
+                "description": "The number of bytes written out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "attempt": {
+                "description": "The write attempt that completed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "destination": {
+                "description": "The destination for the artifact.",
+                "type": "string",
+                "format": "path"
+              },
+              "elapsed": {
+                "description": "How long the write took to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact that was written out.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "write_completed"
+                ]
+              }
+            },
+            "required": [
+              "artifact_size",
+              "attempt",
+              "destination",
+              "elapsed",
+              "kind",
+              "reason"
+            ]
+          }
         ]
       }
     }

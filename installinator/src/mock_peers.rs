@@ -7,13 +7,16 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_artifact_client::ClientError;
+use installinator_common::ProgressReport;
 use omicron_common::update::ArtifactHashId;
 use progenitor_client::ResponseValue;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
+use uuid::Uuid;
 
 use crate::peers::{FetchSender, PeersImpl};
 
@@ -210,8 +213,9 @@ impl MockPeers {
     }
 }
 
+#[async_trait]
 impl PeersImpl for MockPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_> {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_> {
         Box::new(self.selected_peers.keys().copied())
     }
 
@@ -231,6 +235,15 @@ impl PeersImpl for MockPeers {
             .unwrap_or_else(|| panic!("peer {peer} not found in selection"))
             .clone();
         Box::pin(async move { peer_data.send_response(sender).await })
+    }
+
+    async fn report_progress_impl(
+        &self,
+        peer: SocketAddrV6,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> Result<(), ClientError> {
+        todo!()
     }
 }
 

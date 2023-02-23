@@ -12,6 +12,7 @@ members = [
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
+    "installinator-common",
     "internal-dns",
     "internal-dns-client",
     "ipcc-key-value",
@@ -57,6 +58,7 @@ default-members = [
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
+    "installinator-common",
     "internal-dns",
     "internal-dns-client",
     "ipcc-key-value",
@@ -143,6 +145,7 @@ hyper = "0.14"
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
+installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 internal-dns-client = { path = "internal-dns-client" }
 ipcc-key-value = { path = "ipcc-key-value" }

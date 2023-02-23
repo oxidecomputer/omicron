@@ -18,12 +18,13 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
-use installinator_artifactd::ArtifactGetter;
+use installinator_artifactd::{ArtifactGetter, ReportEvent, ReportEventStatus};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{ArtifactHash, ArtifactHashId, ArtifactId};
 use thiserror::Error;
 use tough::TargetName;
 use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
+use uuid::Uuid;
 
 // A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug, Default)]
@@ -127,6 +128,14 @@ impl ArtifactGetter for WicketdArtifactStore {
         Some(Body::wrap_stream(stream::iter(
             buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
         )))
+    }
+
+    async fn report_event(
+        &self,
+        update_id: Uuid,
+        event: ReportEvent,
+    ) -> Result<ReportEventStatus, HttpError> {
+        todo!()
     }
 }
 
