@@ -770,7 +770,7 @@ pub struct NetworkInterfaceUpdate {
     /// Note that this can only be used to select a new primary interface for an
     /// instance. Requests to change the primary interface into a secondary will
     /// return an error.
-    // TODO-completeness TODO-docs: When we get there, this should note that a
+    // TODO-completeness TODO-doc When we get there, this should note that a
     // change in the primary interface will result in changes to the DNS records
     // for the instance, though not the name.
     #[serde(default)]
