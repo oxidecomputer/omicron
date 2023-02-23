@@ -27,36 +27,35 @@ impl From<installinator_common::ProgressReport> for types::ProgressReport {
     fn from(value: installinator_common::ProgressReport) -> Self {
         Self {
             total_elapsed: value.total_elapsed.into(),
-            events: value.events.into_iter().map(Into::into).collect(),
+            completion_events: value
+                .completion_events
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            progress_events: value
+                .progress_events
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }
 
-impl From<installinator_common::ReportEvent> for types::ReportEvent {
-    fn from(value: installinator_common::ReportEvent) -> Self {
+impl From<installinator_common::CompletionEvent> for types::CompletionEvent {
+    fn from(value: installinator_common::CompletionEvent) -> Self {
         Self {
             total_elapsed: value.total_elapsed.into(),
             kind: value.kind.into(),
         }
     }
 }
-impl From<installinator_common::ReportEventKind> for types::ReportEventKind {
-    fn from(value: installinator_common::ReportEventKind) -> Self {
+
+impl From<installinator_common::CompletionEventKind>
+    for types::CompletionEventKind
+{
+    fn from(value: installinator_common::CompletionEventKind) -> Self {
         match value {
-            installinator_common::ReportEventKind::DownloadProgress {
-                attempt,
-                kind,
-                peer,
-                downloaded_bytes,
-                elapsed,
-            } => Self::DownloadProgress {
-                attempt: attempt as u32,
-                kind: kind.to_string(),
-                peer: peer.to_string(),
-                downloaded_bytes,
-                elapsed: elapsed.into(),
-            },
-            installinator_common::ReportEventKind::DownloadFailed {
+            installinator_common::CompletionEventKind::DownloadFailed {
                 attempt,
                 kind,
                 peer,
@@ -71,7 +70,7 @@ impl From<installinator_common::ReportEventKind> for types::ReportEventKind {
                 elapsed: elapsed.into(),
                 message,
             },
-            installinator_common::ReportEventKind::DownloadCompleted {
+            installinator_common::CompletionEventKind::DownloadCompleted {
                 attempt,
                 kind,
                 peer,
@@ -84,22 +83,7 @@ impl From<installinator_common::ReportEventKind> for types::ReportEventKind {
                 artifact_size,
                 elapsed: elapsed.into(),
             },
-            installinator_common::ReportEventKind::WriteProgress {
-                attempt,
-                kind,
-                destination,
-                written_bytes,
-                total_bytes,
-                elapsed,
-            } => Self::WriteProgress {
-                attempt: attempt as u32,
-                kind: kind.to_string(),
-                destination: destination.into_string(),
-                written_bytes,
-                total_bytes,
-                elapsed: elapsed.into(),
-            },
-            installinator_common::ReportEventKind::WriteFailed {
+            installinator_common::CompletionEventKind::WriteFailed {
                 attempt,
                 kind,
                 destination,
@@ -116,7 +100,7 @@ impl From<installinator_common::ReportEventKind> for types::ReportEventKind {
                 elapsed: elapsed.into(),
                 message,
             },
-            installinator_common::ReportEventKind::WriteCompleted {
+            installinator_common::CompletionEventKind::WriteCompleted {
                 attempt,
                 kind,
                 destination,
@@ -127,6 +111,55 @@ impl From<installinator_common::ReportEventKind> for types::ReportEventKind {
                 kind: kind.to_string(),
                 destination: destination.into_string(),
                 artifact_size,
+                elapsed: elapsed.into(),
+            },
+            installinator_common::CompletionEventKind::Completed => {
+                Self::Completed
+            }
+        }
+    }
+}
+
+impl From<installinator_common::ProgressEvent> for types::ProgressEvent {
+    fn from(value: installinator_common::ProgressEvent) -> Self {
+        Self {
+            total_elapsed: value.total_elapsed.into(),
+            kind: value.kind.into(),
+        }
+    }
+}
+
+impl From<installinator_common::ProgressEventKind>
+    for types::ProgressEventKind
+{
+    fn from(value: installinator_common::ProgressEventKind) -> Self {
+        match value {
+            installinator_common::ProgressEventKind::DownloadProgress {
+                attempt,
+                kind,
+                peer,
+                downloaded_bytes,
+                elapsed,
+            } => Self::DownloadProgress {
+                attempt: attempt as u32,
+                kind: kind.to_string(),
+                peer: peer.to_string(),
+                downloaded_bytes,
+                elapsed: elapsed.into(),
+            },
+            installinator_common::ProgressEventKind::WriteProgress {
+                attempt,
+                kind,
+                destination,
+                written_bytes,
+                total_bytes,
+                elapsed,
+            } => Self::WriteProgress {
+                attempt: attempt as u32,
+                kind: kind.to_string(),
+                destination: destination.into_string(),
+                written_bytes,
+                total_bytes,
                 elapsed: elapsed.into(),
             },
         }

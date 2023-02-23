@@ -18,7 +18,8 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
-use installinator_artifactd::{ArtifactGetter, ReportEvent, ReportEventStatus};
+use installinator_artifactd::{ArtifactGetter, ReportEventStatus};
+use installinator_common::ProgressReport;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{ArtifactHash, ArtifactHashId, ArtifactId};
 use thiserror::Error;
@@ -130,12 +131,12 @@ impl ArtifactGetter for WicketdArtifactStore {
         )))
     }
 
-    async fn report_event(
+    async fn report_progress(
         &self,
-        update_id: Uuid,
-        event: ReportEvent,
+        _update_id: Uuid,
+        _report: ProgressReport,
     ) -> Result<ReportEventStatus, HttpError> {
-        todo!()
+        todo!("implement server-side support for events")
     }
 }
 

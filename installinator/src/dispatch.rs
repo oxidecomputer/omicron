@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
-use installinator_common::ReportEventKind;
+use installinator_common::CompletionEventKind;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
@@ -19,7 +19,7 @@ use tokio::{io::AsyncWriteExt, sync::mpsc};
 use crate::{
     artifact::ArtifactIdOpts,
     peers::{DiscoveryMechanism, FetchedArtifact, Peers},
-    reporter::EventReporter,
+    reporter::{ProgressReporter, ReportEvent},
 };
 
 /// Installinator app.
@@ -126,8 +126,8 @@ impl InstallOpts {
 
         let discovery = self.discover_opts.mechanism.clone();
         let discovery_log = log.clone();
-        let (event_reporter, event_sender) =
-            EventReporter::new(&log, image_id.update_id, move || {
+        let (progress_reporter, event_sender) =
+            ProgressReporter::new(&log, image_id.update_id, move || {
                 let log = discovery_log.clone();
                 let discovery = discovery.clone();
                 async move {
@@ -138,7 +138,7 @@ impl InstallOpts {
                     ))
                 }
             });
-        let event_handle = event_reporter.start();
+        let progress_handle = progress_reporter.start();
 
         let host_phase_2_artifact = fetch_artifact(
             &host_phase_2_id,
@@ -163,7 +163,8 @@ impl InstallOpts {
 
         // TODO: figure out the actual destination.
 
-        // TODO: add retries to this process?
+        // TODO: add retries to this process
+        // TODO: publish write events.
         std::fs::create_dir_all(&self.destination).with_context(|| {
             format!("error creating directories at {}", self.destination)
         })?;
@@ -182,10 +183,14 @@ impl InstallOpts {
         )
         .await?;
 
-        // Wait for all events to be sent.
-        event_handle
-            .await
-            .context("progress reporting task failed to complete")?;
+        // Drop the event sender: this signals completion.
+        _ = event_sender
+            .send(ReportEvent::Completion(CompletionEventKind::Completed))
+            .await;
+        std::mem::drop(event_sender);
+
+        // Wait for all progress reports to be sent.
+        progress_handle.await.context("progress reporter to complete")?;
 
         Ok(())
     }
@@ -195,7 +200,7 @@ async fn fetch_artifact(
     id: &ArtifactHashId,
     discovery: &DiscoveryMechanism,
     log: &slog::Logger,
-    event_sender: &mpsc::Sender<ReportEventKind>,
+    event_sender: &mpsc::Sender<ReportEvent>,
 ) -> Result<FetchedArtifact> {
     // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
     // out at some point.

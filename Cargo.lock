@@ -2798,6 +2798,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "toml 0.7.2",
  "uuid",
 ]
@@ -7821,6 +7822,7 @@ dependencies = [
  "http",
  "hyper",
  "installinator-artifactd",
+ "installinator-common",
  "omicron-common",
  "omicron-test-utils",
  "openapi-lint",

@@ -14,7 +14,9 @@ use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use futures::{Stream, StreamExt};
 use installinator_artifact_client::ClientError;
-use installinator_common::{ProgressReport, ReportEventKind};
+use installinator_common::{
+    CompletionEventKind, ProgressEventKind, ProgressReport,
+};
 use itertools::Itertools;
 use omicron_common::update::ArtifactHashId;
 use reqwest::StatusCode;
@@ -25,6 +27,7 @@ use crate::{
     artifact::ArtifactClient,
     ddm_admin_client::DdmAdminClient,
     errors::{ArtifactFetchError, DiscoverPeersError},
+    reporter::ReportEvent,
 };
 
 /// A chosen discovery mechanism for peers, passed in over the command line.
@@ -116,7 +119,7 @@ impl FetchedArtifact {
         log: &slog::Logger,
         mut discover_fn: F,
         artifact_hash_id: &ArtifactHashId,
-        event_sender: &mpsc::Sender<ReportEventKind>,
+        event_sender: &mpsc::Sender<ReportEvent>,
     ) -> Result<Self>
     where
         F: FnMut() -> Fut,
@@ -206,7 +209,7 @@ impl Peers {
         &self,
         attempt: usize,
         artifact_hash_id: &ArtifactHashId,
-        event_sender: &mpsc::Sender<ReportEventKind>,
+        event_sender: &mpsc::Sender<ReportEvent>,
     ) -> Option<(SocketAddrV6, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
@@ -278,7 +281,7 @@ impl Peers {
         attempt: usize,
         peer: SocketAddrV6,
         artifact_hash_id: &ArtifactHashId,
-        event_sender: &mpsc::Sender<ReportEventKind>,
+        event_sender: &mpsc::Sender<ReportEvent>,
         start: Instant,
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
@@ -306,13 +309,15 @@ impl Peers {
                     downloaded_bytes += bytes.len() as u64;
                     artifact_bytes.push_chunk(bytes);
                     _ = event_sender
-                        .send(ReportEventKind::DownloadProgress {
-                            attempt,
-                            kind: artifact_hash_id.kind.clone(),
-                            peer,
-                            downloaded_bytes,
-                            elapsed: start.elapsed(),
-                        })
+                        .send(ReportEvent::Progress(
+                            ProgressEventKind::DownloadProgress {
+                                attempt,
+                                kind: artifact_hash_id.kind.clone(),
+                                peer,
+                                downloaded_bytes,
+                                elapsed: start.elapsed(),
+                            },
+                        ))
                         .await;
                 }
                 Ok(Some(Err(error))) => {
@@ -322,44 +327,51 @@ impl Peers {
                         DisplayErrorChain::new(&error),
                     );
                     _ = event_sender
-                        .send(ReportEventKind::DownloadFailed {
-                            attempt,
-                            kind: artifact_hash_id.kind.clone(),
-                            peer,
-                            downloaded_bytes,
-                            elapsed: start.elapsed(),
-                            message: DisplayErrorChain::new(&error).to_string(),
-                        })
+                        .send(ReportEvent::Completion(
+                            CompletionEventKind::DownloadFailed {
+                                attempt,
+                                kind: artifact_hash_id.kind.clone(),
+                                peer,
+                                downloaded_bytes,
+                                elapsed: start.elapsed(),
+                                message: DisplayErrorChain::new(&error)
+                                    .to_string(),
+                            },
+                        ))
                         .await;
                     return Err(ArtifactFetchError::HttpError { peer, error });
                 }
                 Ok(None) => {
                     // The entire artifact has been downloaded.
                     _ = event_sender
-                        .send(ReportEventKind::DownloadCompleted {
-                            attempt,
-                            kind: artifact_hash_id.kind.clone(),
-                            peer,
-                            artifact_size: downloaded_bytes,
-                            elapsed: start.elapsed(),
-                        })
+                        .send(ReportEvent::Completion(
+                            CompletionEventKind::DownloadCompleted {
+                                attempt,
+                                kind: artifact_hash_id.kind.clone(),
+                                peer,
+                                artifact_size: downloaded_bytes,
+                                elapsed: start.elapsed(),
+                            },
+                        ))
                         .await;
                     return Ok(artifact_bytes);
                 }
                 Err(_) => {
                     // The operation timed out.
                     _ = event_sender
-                        .send(ReportEventKind::DownloadFailed {
-                            attempt,
-                            kind: artifact_hash_id.kind.clone(),
-                            peer,
-                            downloaded_bytes,
-                            elapsed: start.elapsed(),
-                            message: format!(
-                                "operation timed out ({:?})",
-                                self.timeout
-                            ),
-                        })
+                        .send(ReportEvent::Completion(
+                            CompletionEventKind::DownloadFailed {
+                                attempt,
+                                kind: artifact_hash_id.kind.clone(),
+                                peer,
+                                downloaded_bytes,
+                                elapsed: start.elapsed(),
+                                message: format!(
+                                    "operation timed out ({:?})",
+                                    self.timeout
+                                ),
+                            },
+                        ))
                         .await;
                     return Err(ArtifactFetchError::Timeout {
                         peer,
@@ -371,11 +383,11 @@ impl Peers {
         }
     }
 
-    pub(crate) fn broadcast_report<'a>(
-        &'a self,
+    pub(crate) fn broadcast_report(
+        &self,
         update_id: Uuid,
         report: ProgressReport,
-    ) -> impl Stream<Item = Result<(), ClientError>> + Send + 'a {
+    ) -> impl Stream<Item = Result<(), ClientError>> + Send + '_ {
         futures::stream::iter(self.peers())
             .map(move |peer| {
                 let log = self.log.new(slog::o!("peer" => peer.to_string()));

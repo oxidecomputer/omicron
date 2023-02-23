@@ -159,78 +159,15 @@
       }
     },
     "schemas": {
-      "Duration": {
-        "type": "object",
-        "properties": {
-          "nanos": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "secs": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "nanos",
-          "secs"
-        ]
-      },
-      "Error": {
-        "description": "Error information from a response.",
-        "type": "object",
-        "properties": {
-          "error_code": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "request_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message",
-          "request_id"
-        ]
-      },
-      "ProgressReport": {
-        "description": "A report, consisting of a list of events and some more metadata.",
-        "type": "object",
-        "properties": {
-          "events": {
-            "description": "A list of events.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReportEvent"
-            }
-          },
-          "total_elapsed": {
-            "description": "How long it's been since the installinator started running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "events",
-          "total_elapsed"
-        ]
-      },
-      "ReportEvent": {
-        "description": "An individual event.",
+      "CompletionEvent": {
+        "description": "An individual completion event.\n\nForms part of [`ProgressReport`].",
         "type": "object",
         "properties": {
           "kind": {
             "description": "The kind of event this is.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ReportEventKind"
+                "$ref": "#/components/schemas/CompletionEventKind"
               }
             ]
           },
@@ -248,56 +185,9 @@
           "total_elapsed"
         ]
       },
-      "ReportEventKind": {
+      "CompletionEventKind": {
+        "description": "An individual kind of completion event.\n\nForms part of [`CompletionEvent`].",
         "oneOf": [
-          {
-            "description": "An artifact is being downloaded.",
-            "type": "object",
-            "properties": {
-              "attempt": {
-                "description": "The download attempt currently occurring.",
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "downloaded_bytes": {
-                "description": "The number of bytes downloaded so far.",
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "elapsed": {
-                "description": "How long it's been since the download started.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/Duration"
-                  }
-                ]
-              },
-              "kind": {
-                "description": "The kind of artifact being downloaded.",
-                "type": "string"
-              },
-              "peer": {
-                "description": "The peer from which the artifact is being downloaded.",
-                "type": "string"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "download_progress"
-                ]
-              }
-            },
-            "required": [
-              "attempt",
-              "downloaded_bytes",
-              "elapsed",
-              "kind",
-              "peer",
-              "reason"
-            ]
-          },
           {
             "description": "The download of an artifact failed.",
             "type": "object",
@@ -397,62 +287,6 @@
               "kind",
               "peer",
               "reason"
-            ]
-          },
-          {
-            "description": "An artifact is being written out.",
-            "type": "object",
-            "properties": {
-              "attempt": {
-                "description": "The write attempt currently occurring.",
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "destination": {
-                "description": "The destination the artifact is being written out to.",
-                "type": "string",
-                "format": "path"
-              },
-              "elapsed": {
-                "description": "How long it's been since the write started.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/Duration"
-                  }
-                ]
-              },
-              "kind": {
-                "description": "The kind of artifact being written out.",
-                "type": "string"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "write_progress"
-                ]
-              },
-              "total_bytes": {
-                "description": "The total number of bytes to write out.",
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "written_bytes": {
-                "description": "The number of bytes written out.",
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              }
-            },
-            "required": [
-              "attempt",
-              "destination",
-              "elapsed",
-              "kind",
-              "reason",
-              "total_bytes",
-              "written_bytes"
             ]
           },
           {
@@ -564,7 +398,228 @@
               "kind",
               "reason"
             ]
+          },
+          {
+            "description": "Completed the entire operation.",
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
           }
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "ProgressEvent": {
+        "description": "An individual progress event.\n\nForms part of [`ProgressReport`].",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKind"
+              }
+            ]
+          },
+          "total_elapsed": {
+            "description": "When this event was generated, in duration since the start of the program.\n\nThis can be compared against [`Report::total_elapsed`] to figure out how old the event was.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventKind": {
+        "description": "An individual kind of progress event.\n\nForms part of [`ProgressEvent`].",
+        "oneOf": [
+          {
+            "description": "An artifact is being downloaded.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The download attempt currently occurring.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "downloaded_bytes": {
+                "description": "The number of bytes downloaded so far.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long it's been since the download started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being downloaded.",
+                "type": "string"
+              },
+              "peer": {
+                "description": "The peer from which the artifact is being downloaded.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "download_progress"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "downloaded_bytes",
+              "elapsed",
+              "kind",
+              "peer",
+              "reason"
+            ]
+          },
+          {
+            "description": "An artifact is being written out.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The write attempt currently occurring.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "destination": {
+                "description": "The destination the artifact is being written out to.",
+                "type": "string",
+                "format": "path"
+              },
+              "elapsed": {
+                "description": "How long it's been since the write started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being written out.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "write_progress"
+                ]
+              },
+              "total_bytes": {
+                "description": "The total number of bytes to write out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "written_bytes": {
+                "description": "The number of bytes written out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "attempt",
+              "destination",
+              "elapsed",
+              "kind",
+              "reason",
+              "total_bytes",
+              "written_bytes"
+            ]
+          }
+        ]
+      },
+      "ProgressReport": {
+        "description": "A report, consisting of a list of events and some more metadata.",
+        "type": "object",
+        "properties": {
+          "completion_events": {
+            "description": "A list of completion events.\n\nCompletion events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionEvent"
+            }
+          },
+          "progress_events": {
+            "description": "A list of progress events.\n\nFor now, this is zero or one events since the installinator performs its actions serially.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEvent"
+            }
+          },
+          "total_elapsed": {
+            "description": "How long it's been since the installinator started running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "completion_events",
+          "progress_events",
+          "total_elapsed"
         ]
       }
     }

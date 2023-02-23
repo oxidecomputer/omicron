@@ -20,14 +20,24 @@ pub struct ProgressReport {
     /// How long it's been since the installinator started running.
     pub total_elapsed: Duration,
 
-    /// A list of events.
-    pub events: Vec<ReportEvent>,
+    /// A list of completion events.
+    ///
+    /// Completion events include success and failure events.
+    pub completion_events: Vec<CompletionEvent>,
+
+    /// A list of progress events.
+    ///
+    /// For now, this is zero or one events since the installinator performs its
+    /// actions serially.
+    pub progress_events: Vec<ProgressEvent>,
 }
 
-/// An individual progress report event.
+/// An individual completion event.
+///
+/// Forms part of [`ProgressReport`].
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
-pub struct ReportEvent {
+pub struct CompletionEvent {
     /// When this event was generated, in duration since the start of the program.
     ///
     /// This can be compared against [`Report::total_elapsed`] to figure out how
@@ -35,30 +45,15 @@ pub struct ReportEvent {
     pub total_elapsed: Duration,
 
     /// The kind of event this is.
-    pub kind: ReportEventKind,
+    pub kind: CompletionEventKind,
 }
 
+/// An individual kind of completion event.
+///
+/// Forms part of [`CompletionEvent`].
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
-pub enum ReportEventKind {
-    /// An artifact is being downloaded.
-    DownloadProgress {
-        /// The download attempt currently occurring.
-        attempt: usize,
-
-        /// The kind of artifact being downloaded.
-        kind: ArtifactKind,
-
-        /// The peer from which the artifact is being downloaded.
-        peer: SocketAddrV6,
-
-        /// The number of bytes downloaded so far.
-        downloaded_bytes: u64,
-
-        /// How long it's been since the download started.
-        elapsed: Duration,
-    },
-
+pub enum CompletionEventKind {
     /// The download of an artifact failed.
     DownloadFailed {
         /// The download attempt that failed.
@@ -95,28 +90,6 @@ pub enum ReportEventKind {
         artifact_size: u64,
 
         /// How long the download took.
-        elapsed: Duration,
-    },
-
-    /// An artifact is being written out.
-    WriteProgress {
-        /// The write attempt currently occurring.
-        attempt: usize,
-
-        /// The kind of artifact being written out.
-        kind: ArtifactKind,
-
-        /// The destination the artifact is being written out to.
-        #[schemars(schema_with = "path_schema")]
-        destination: Utf8PathBuf,
-
-        /// The number of bytes written out.
-        written_bytes: u64,
-
-        /// The total number of bytes to write out.
-        total_bytes: u64,
-
-        /// How long it's been since the write started.
         elapsed: Duration,
     },
 
@@ -163,23 +136,112 @@ pub enum ReportEventKind {
         /// How long the write took to complete.
         elapsed: Duration,
     },
+
+    /// Completed the entire operation.
+    Completed,
 }
 
-impl ReportEventKind {
-    /// Returns true if this is an event that marks the completion of an attempt.
-    pub fn is_completion_event(&self) -> bool {
+impl CompletionEventKind {
+    /// Returns the attempt number for this event.
+    pub fn attempt(&self) -> Option<usize> {
         match self {
-            Self::DownloadFailed { .. }
-            | Self::DownloadCompleted { .. }
+            Self::DownloadCompleted { attempt, .. }
+            | Self::DownloadFailed { attempt, .. }
+            | Self::WriteCompleted { attempt, .. }
+            | Self::WriteFailed { attempt, .. } => Some(*attempt),
+            Self::Completed => None,
+        }
+    }
+
+    /// Returns true if the event is a success.
+    pub fn is_success(&self) -> bool {
+        match self {
+            Self::DownloadCompleted { .. }
+            | Self::WriteCompleted { .. }
+            | Self::Completed => true,
+            Self::DownloadFailed { .. } | Self::WriteFailed { .. } => false,
+        }
+    }
+
+    /// Returns the peer corresponding to this event.
+    ///
+    /// Returns None if this is not a download event.
+    pub fn peer(&self) -> Option<SocketAddrV6> {
+        match self {
+            Self::DownloadCompleted { peer, .. }
+            | Self::DownloadFailed { peer, .. } => Some(*peer),
+            Self::WriteCompleted { .. }
             | Self::WriteFailed { .. }
-            | Self::WriteCompleted { .. } => true,
-            Self::DownloadProgress { .. } | Self::WriteProgress { .. } => false,
+            | Self::Completed => None,
         }
     }
 }
 
+/// An individual progress event.
+///
+/// Forms part of [`ProgressReport`].
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "reason")]
+pub struct ProgressEvent {
+    /// When this event was generated, in duration since the start of the program.
+    ///
+    /// This can be compared against [`Report::total_elapsed`] to figure out how
+    /// old the event was.
+    pub total_elapsed: Duration,
+
+    /// The kind of event this is.
+    pub kind: ProgressEventKind,
+}
+
+/// An individual kind of progress event.
+///
+/// Forms part of [`ProgressEvent`].
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "reason")]
+pub enum ProgressEventKind {
+    /// An artifact is being downloaded.
+    DownloadProgress {
+        /// The download attempt currently occurring.
+        attempt: usize,
+
+        /// The kind of artifact being downloaded.
+        kind: ArtifactKind,
+
+        /// The peer from which the artifact is being downloaded.
+        peer: SocketAddrV6,
+
+        /// The number of bytes downloaded so far.
+        downloaded_bytes: u64,
+
+        /// How long it's been since the download started.
+        elapsed: Duration,
+    },
+
+    /// An artifact is being written out.
+    WriteProgress {
+        /// The write attempt currently occurring.
+        attempt: usize,
+
+        /// The kind of artifact being written out.
+        kind: ArtifactKind,
+
+        /// The destination the artifact is being written out to.
+        #[schemars(schema_with = "path_schema")]
+        destination: Utf8PathBuf,
+
+        /// The number of bytes written out.
+        written_bytes: u64,
+
+        /// The total number of bytes to write out.
+        total_bytes: u64,
+
+        /// How long it's been since the write started.
+        elapsed: Duration,
+    },
+}
+
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
-    schema.format = Some(format!("path"));
+    schema.format = Some("UTF-8 path".to_owned());
     schema.into()
 }
