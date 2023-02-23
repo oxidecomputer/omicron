@@ -13,7 +13,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-      exec='ctrun -l child -o noorphan,regent /opt/oxide/dns-server/bin/dns-server --config-file /var/svc/manifest/site/dns-server/config.toml --server-address %{config/server_address} --dns-address %{config/dns_address} --dns-zone %{config/dns_zone} &amp;'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/dns-server/bin/dns-server --config-file /var/svc/manifest/site/external_dns/config.toml --server-address %{config/server_address} --dns-address %{config/dns_address} --dns-zone %{config/dns_zone} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
