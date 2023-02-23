@@ -16,6 +16,9 @@ use tui::widgets::{
     Table, Tabs,
 };
 
+use crate::defaults::colors::*;
+use crate::defaults::style;
+
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
 /// entire terminal window/buffer and is visible for all interactions except
 /// the initial splash screen animation.
@@ -102,7 +105,7 @@ impl MainScreen {
         state: &State,
         frame: &mut Frame<'_>,
         tabs_rect: Rect,
-        npane_rect: Rect,
+        pane_rect: Rect,
     ) {
         let pane = self.panes.get_mut(self.sidebar.selected()).unwrap();
         let titles = pane.tabs().iter().cloned().map(Spans::from).collect();
@@ -117,6 +120,7 @@ impl MainScreen {
             )
             .style(Style::default().fg(Color::Cyan));
         frame.render_widget(tabs, tabs_rect);
+        pane.draw(state, frame, pane_rect);
     }
 }
 
