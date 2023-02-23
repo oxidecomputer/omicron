@@ -130,8 +130,9 @@ fatfs = "0.3.6"
 fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
+# TODO convert back to a revision on `main` before merging
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], branch = "host-phase2-progress" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", branch = "host-phase2-progress" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
