@@ -1788,7 +1788,6 @@ CREATE TABLE omicron.public.device_auth_request (
 );
 
 -- Access tokens granted in response to successful device authorization flows.
--- TODO-security: expire tokens.
 CREATE TABLE omicron.public.device_access_token (
     token STRING(40) PRIMARY KEY,
     client_id UUID NOT NULL,

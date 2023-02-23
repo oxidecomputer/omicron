@@ -517,7 +517,7 @@ impl super::Nexus {
         // silo_user_password_verify().
         // TODO-security There may still be some vulnerability to timing attack
         // here, in that we'll do one fewer database lookup if a user does not
-        // exist.
+        // exist.  Rate limiting might help.  See omicron#2184.
         let fetch_user = self
             .datastore()
             .silo_user_fetch_by_external_id(

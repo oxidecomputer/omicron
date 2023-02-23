@@ -409,7 +409,7 @@ impl TryFrom<String> for Password {
             .map_err(|e| format!("unsupported password: {:#}", e))?;
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
-        // OpenAPI schema below.
+        // OpenAPI schema below.  See omicron#2307.
         Ok(Password(value, inner))
     }
 }
@@ -437,7 +437,7 @@ impl JsonSchema for Password {
                     "A password used to authenticate a user".to_string(),
                 ),
                 // TODO-doc If we apply password strength rules, they should
-                // presumably be documented here.
+                // presumably be documented here.  See omicron#2307.
                 description: Some(
                     "Passwords may be subject to additional constraints."
                         .to_string(),
