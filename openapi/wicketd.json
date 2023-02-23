@@ -1217,6 +1217,32 @@
               "data",
               "state"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "power_state": {
+                    "$ref": "#/components/schemas/PowerState"
+                  }
+                },
+                "required": [
+                  "power_state"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "setting_host_power_state"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
           }
         ]
       }
