@@ -8,6 +8,7 @@
 
 use crate::defaults::colors::*;
 use crate::defaults::dimensions::RectExt;
+use crate::defaults::style;
 use crate::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 use crate::{Event, Frame, Term};
 use crossterm::event::Event as TermEvent;
@@ -31,8 +32,7 @@ impl SplashScreen {
     }
 
     fn draw_background(&self, f: &mut Frame) {
-        let style = Style::default().bg(Color::Black);
-        let block = Block::default().style(style);
+        let block = Block::default().style(style::background());
         f.render_widget(block, f.size());
     }
 

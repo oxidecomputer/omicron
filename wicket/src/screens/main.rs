@@ -4,20 +4,20 @@
 
 use std::collections::BTreeMap;
 
-use super::{get_control_id, Control, ControlId, NullPane, OverviewPane, Pane};
+use super::{
+    get_control_id, Control, ControlId, NullPane, OverviewPane, Pane,
+    StatefulList,
+};
+use crate::defaults::style;
 use crate::{Action, Event, Frame, State, Term};
 use crossterm::event::Event as TermEvent;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyCode;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
 use tui::text::{Span, Spans};
 use tui::widgets::{
-    Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Row,
-    Table, Tabs,
+    Block, BorderType, Borders, List, ListItem, Paragraph, Tabs,
 };
-
-use crate::defaults::colors::*;
-use crate::defaults::style;
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
 /// entire terminal window/buffer and is visible for all interactions except
@@ -29,7 +29,6 @@ use crate::defaults::style;
 /// Specific functionality is put inside [`Pane`]s, which can be customized
 /// as needed.
 pub struct MainScreen {
-    sidebar_selected: bool,
     sidebar: Sidebar,
     panes: BTreeMap<&'static str, Box<dyn Pane>>,
 }
@@ -37,7 +36,6 @@ pub struct MainScreen {
 impl MainScreen {
     pub fn new() -> MainScreen {
         MainScreen {
-            sidebar_selected: true,
             sidebar: Sidebar::new(),
             panes: BTreeMap::from([
                 ("overview", Box::new(OverviewPane::new()) as Box<dyn Pane>),
@@ -55,6 +53,7 @@ impl MainScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|frame| {
             let mut rect = frame.size();
+
             rect.height -= 1;
             let statusbar_rect = Rect {
                 y: rect.height - 1,
@@ -77,6 +76,10 @@ impl MainScreen {
                 .constraints([Constraint::Length(3), Constraint::Max(1000)])
                 .split(horizontal_chunks[1]);
 
+            // Draw all the components, starting with the background
+            let background = Block::default().style(style::background());
+            frame.render_widget(background, frame.size());
+
             self.sidebar.draw(state, frame, horizontal_chunks[0]);
 
             self.draw_pane(
@@ -97,16 +100,16 @@ impl MainScreen {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
                 KeyCode::Esc => {
-                    if self.sidebar_selected {
+                    if self.sidebar.selected {
                         None
                     } else {
-                        self.sidebar_selected = true;
+                        self.sidebar.selected = true;
                         Some(Action::Redraw)
                     }
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Right => {
-                    if self.sidebar_selected {
-                        self.sidebar_selected = false;
+                    if self.sidebar.selected {
+                        self.sidebar.selected = false;
                         Some(Action::Redraw)
                     } else {
                         self.current_pane()
@@ -115,7 +118,7 @@ impl MainScreen {
                 }
                 _ => {
                     let event = Event::Term(TermEvent::Key(e));
-                    if self.sidebar_selected {
+                    if self.sidebar.selected {
                         self.sidebar.on(state, event)
                     } else {
                         self.current_pane()
@@ -124,7 +127,7 @@ impl MainScreen {
                 }
             },
             e => {
-                if self.sidebar_selected {
+                if self.sidebar.selected {
                     self.sidebar.on(state, e)
                 } else {
                     self.current_pane().on(state, e)
@@ -144,6 +147,12 @@ impl MainScreen {
         tabs_rect: Rect,
         pane_rect: Rect,
     ) {
+        let border_style = if self.sidebar.selected {
+            style::deselected()
+        } else {
+            style::selected()
+        };
+
         let pane = self.current_pane();
 
         // Draw the Top bar (tabs)
@@ -156,13 +165,14 @@ impl MainScreen {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             )
-            .style(Style::default().fg(Color::Cyan));
+            .style(border_style);
         frame.render_widget(tabs, tabs_rect);
 
         // Draw the pane border
         let border = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded);
+            .border_type(BorderType::Rounded)
+            .style(border_style);
         let inner = border.inner(pane_rect);
         frame.render_widget(border, pane_rect);
 
@@ -200,6 +210,8 @@ impl MainScreen {
 pub struct Sidebar {
     control_id: ControlId,
     panes: StatefulList<&'static str>,
+    // Whether the sidebar is selected currently.
+    selected: bool,
 }
 
 impl Sidebar {
@@ -209,6 +221,7 @@ impl Sidebar {
             // TODO: The panes here must match the keys in `MainScreen::panes`
             // We should probably make this a touch less error prone
             panes: StatefulList::new(vec!["overview", "update", "help"]),
+            selected: true,
         };
         // Select the first pane
         sidebar.panes.next();
@@ -228,7 +241,7 @@ impl Control for Sidebar {
         self.control_id
     }
 
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+    fn on(&mut self, _: &mut State, event: Event) -> Option<Action> {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
                 KeyCode::Up => {
@@ -253,63 +266,23 @@ impl Control for Sidebar {
             .map(|t| {
                 let text = *t;
                 return ListItem::new(text.to_ascii_uppercase())
-                    .style(Style::default().fg(Color::Cyan));
+                    .style(style::deselected());
             })
             .collect();
+
+        let border_style =
+            if self.selected { style::selected() } else { style::deselected() };
 
         let tabs = List::new(items)
             .block(
                 Block::default()
                     .title("<ESC>")
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
+                    .border_type(BorderType::Rounded)
+                    .style(border_style),
             )
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(Color::Black)
-                    .bg(Color::White),
-            );
+            .highlight_style(style::selected().add_modifier(Modifier::BOLD));
 
         frame.render_stateful_widget(tabs, area, &mut self.panes.state);
-    }
-}
-
-pub struct StatefulList<T> {
-    pub state: ListState,
-    pub items: Vec<T>,
-}
-
-impl<T> StatefulList<T> {
-    pub fn new(items: Vec<T>) -> StatefulList<T> {
-        StatefulList { state: ListState::default(), items }
-    }
-
-    pub fn next(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.items.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-    }
-
-    pub fn previous(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.items.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
     }
 }

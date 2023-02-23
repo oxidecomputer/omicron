@@ -46,17 +46,17 @@ impl Control for NullPane {
 
     fn on(
         &mut self,
-        state: &mut crate::State,
-        event: crate::Event,
+        _: &mut crate::State,
+        _: crate::Event,
     ) -> Option<crate::Action> {
         None
     }
 
     fn draw(
         &mut self,
-        state: &crate::State,
-        frame: &mut crate::Frame<'_>,
-        rect: tui::layout::Rect,
+        _: &crate::State,
+        _: &mut crate::Frame<'_>,
+        _: tui::layout::Rect,
     ) {
     }
 }

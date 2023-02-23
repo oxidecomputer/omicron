@@ -19,3 +19,4 @@ pub const OX_GRAY_DARK: Color = Color::Rgb(0x62, 0x66, 0x68);
 pub const OX_WHITE: Color = Color::Rgb(0xE7, 0xE7, 0xE8);
 pub const OX_PINK: Color = Color::Rgb(0xE6, 0x68, 0x86);
 pub const OX_YELLOW_DIM: Color = Color::Rgb(0xAE, 0x96, 0x4E);
+pub const OX_BLACK: Color = Color::Rgb(30, 30, 34);

@@ -36,3 +36,15 @@ pub fn menu_bar_selected() -> Style {
 pub fn screen_background() -> Style {
     Style::default().fg(OX_GREEN_DARK).bg(Color::Black)
 }
+
+pub fn selected() -> Style {
+    Style::default().fg(OX_GREEN_LIGHT)
+}
+
+pub fn deselected() -> Style {
+    Style::default().fg(OX_GRAY)
+}
+
+pub fn background() -> Style {
+    Style::default().bg(OX_BLACK)
+}
