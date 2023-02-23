@@ -538,7 +538,6 @@ mod tests {
 
     use bytes::Buf;
     use futures::{future, StreamExt};
-    use installinator_common::CompletionEvent;
     use omicron_common::{
         api::internal::nexus::KnownArtifactKind, update::ArtifactHash,
     };
@@ -726,19 +725,20 @@ mod tests {
             }
         }
 
-        fn all_completion_events(
-            reports: &[ProgressReport],
-        ) -> impl Iterator<Item = &CompletionEvent> + DoubleEndedIterator
-        {
-            reports.iter().flat_map(|report| &report.completion_events)
-        }
+        let all_completion_events: Vec<_> = reports
+            .iter()
+            .flat_map(|report| &report.completion_events)
+            .collect();
 
         // Assert that we received failure events for all prior attempts and
         // a success event for the current attempt.
         if let Some((attempt, expected_addr)) = expected_success {
-            for event in all_completion_events(reports) {
+            let mut saw_success = false;
+
+            for event in all_completion_events {
                 match (event.kind.is_success(), event.kind.peer()) {
                     (true, Some(peer)) => {
+                        saw_success = true;
                         assert_eq!(
                             peer, expected_addr,
                             "successful peer should match address"
@@ -771,8 +771,14 @@ mod tests {
                     }
                 }
             }
+
+            assert!(saw_success, "successful event must have been produced");
+            // It's hard to say anything about failing events for now because
+            // it's possible we didn't have any peers. In the future we can look
+            // at the MockPeersUniverse to ensure that we receive failing
+            // events from every peer that should have failed.
         } else {
-            for event in all_completion_events(reports) {
+            for event in all_completion_events {
                 assert!(
                     !event.kind.is_success(),
                     "for failed attempts, all events must be failures"
