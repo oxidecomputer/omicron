@@ -4,6 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::PowerState;
 use gateway_client::types::UpdatePreparationProgress;
 use omicron_common::update::ArtifactId;
@@ -41,6 +42,10 @@ pub enum UpdateStateKind {
     },
     SettingInstallinatorOptions,
     SettingHostStartupOptions,
+    WaitingForTrampolineImageDelivery {
+        artifact: ArtifactId,
+        progress: HostPhase2Progress,
+    },
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
