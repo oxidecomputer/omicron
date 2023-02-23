@@ -10,7 +10,7 @@ use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::NexusClient;
 use crucible_agent_client::types::State as RegionState;
-use dns_service_client::names::{ServiceName, AAAA, SRV};
+use internal_dns_names::{ServiceName, AAAA, SRV};
 use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,

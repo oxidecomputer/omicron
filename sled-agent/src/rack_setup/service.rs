@@ -70,7 +70,7 @@ use crate::rack_setup::plan::sled::{
 use dns_service_client::multiclient::{
     DnsError, Resolver as DnsResolver, Updater as DnsUpdater,
 };
-use dns_service_client::names::{ServiceName, SRV};
+use internal_dns_names::{ServiceName, SRV};
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };

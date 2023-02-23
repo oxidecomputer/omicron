@@ -18,4 +18,3 @@ progenitor::generate_api!(
 );
 
 pub mod multiclient;
-pub mod names;

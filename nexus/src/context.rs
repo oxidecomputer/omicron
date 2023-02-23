@@ -19,7 +19,7 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
-use dns_service_client::names::{ServiceName, SRV};
+use internal_dns_names::{ServiceName, SRV};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;

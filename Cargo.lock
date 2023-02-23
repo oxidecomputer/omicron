@@ -1646,6 +1646,7 @@ dependencies = [
  "dns-server",
  "dropshot",
  "futures",
+ "internal-dns-names",
  "omicron-common",
  "omicron-test-utils",
  "progenitor",
@@ -2896,6 +2897,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "internal-dns-names"
+version = "0.1.0"
+dependencies = [
+ "uuid",
+]
+
+[[package]]
 name = "io-lifetimes"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3429,8 +3437,8 @@ dependencies = [
  "chrono",
  "db-macros",
  "diesel",
- "dns-service-client",
  "hex",
+ "internal-dns-names",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -3848,6 +3856,7 @@ dependencies = [
  "httptest",
  "hyper",
  "hyper-rustls",
+ "internal-dns-names",
  "ipnetwork",
  "itertools",
  "lazy_static",
@@ -3971,6 +3980,7 @@ dependencies = [
  "futures",
  "http",
  "illumos-devinfo",
+ "internal-dns-names",
  "ipnetwork",
  "libc",
  "libefi-illumos",
@@ -4288,6 +4298,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "internal-dns-names",
  "nexus-client",
  "omicron-common",
  "omicron-test-utils",
