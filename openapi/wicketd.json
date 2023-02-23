@@ -1243,6 +1243,34 @@
               "data",
               "state"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "setting_installinator_options"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "setting_host_startup_options"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
           }
         ]
       }
