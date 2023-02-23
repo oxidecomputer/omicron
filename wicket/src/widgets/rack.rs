@@ -364,7 +364,8 @@ impl RackState {
                 )))
                 .alignment(Alignment::Center);
                 // Center vertically.
-                let text_rect = Rect { y: max_height / 2, height: 1, ..rect };
+                let text_rect =
+                    Rect { y: rect.y + max_height / 2, height: 1, ..rect };
                 return ComponentRects::WindowTooShort { text, text_rect };
             } else if max_height < 37 {
                 (20, 1, 1)
@@ -391,7 +392,7 @@ impl RackState {
 
         // Scale proportionally and center the rack horizontally
         rack_rect.width = make_even(rack_height * 2 / 3);
-        rack_rect.x = rect.width / 2 - rack_rect.width / 2;
+        rack_rect.x += rect.width / 2 - rack_rect.width / 2;
 
         let sled_width = rack_rect.width / 2;
 

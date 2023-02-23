@@ -51,9 +51,15 @@ impl Control for OverviewPane {
                     state.rack_state.down();
                     Some(Action::Redraw)
                 }
+                KeyCode::Char('k') => {
+                    state.rack_state.toggle_knight_rider_mode();
+                    Some(Action::Redraw)
+                }
                 _ => None,
             },
             Event::Tick => {
+                // TODO: This only animates when the pane is active. Should we move the
+                // tick into the wizard instead?
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
                     k.step();
                     Some(Action::Redraw)

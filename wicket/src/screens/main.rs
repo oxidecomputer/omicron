@@ -29,17 +29,16 @@ use crate::defaults::style;
 /// Specific functionality is put inside [`Pane`]s, which can be customized
 /// as needed.
 pub struct MainScreen {
-    selected: ControlId,
+    sidebar_selected: bool,
     sidebar: Sidebar,
     panes: BTreeMap<&'static str, Box<dyn Pane>>,
 }
 
 impl MainScreen {
     pub fn new() -> MainScreen {
-        let sidebar = Sidebar::new();
         MainScreen {
-            selected: sidebar.control_id(),
-            sidebar,
+            sidebar_selected: true,
+            sidebar: Sidebar::new(),
             panes: BTreeMap::from([
                 ("overview", Box::new(OverviewPane::new()) as Box<dyn Pane>),
                 ("update", Box::new(NullPane::new()) as Box<dyn Pane>),
@@ -57,6 +56,12 @@ impl MainScreen {
         terminal.draw(|frame| {
             let mut rect = frame.size();
             rect.height -= 1;
+            let statusbar_rect = Rect {
+                y: rect.height - 1,
+                height: 1,
+                x: 2,
+                width: rect.width - 3,
+            };
 
             // Size the individual components of the screen
             let horizontal_chunks = Layout::default()
@@ -69,11 +74,7 @@ impl MainScreen {
 
             let vertical_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Max(1000),
-                    Constraint::Length(3),
-                ])
+                .constraints([Constraint::Length(3), Constraint::Max(1000)])
                 .split(horizontal_chunks[1]);
 
             self.sidebar.draw(state, frame, horizontal_chunks[0]);
@@ -84,6 +85,8 @@ impl MainScreen {
                 vertical_chunks[0],
                 vertical_chunks[1],
             );
+
+            self.draw_statusbar(state, frame, statusbar_rect);
         })?;
         Ok(())
     }
@@ -91,13 +94,47 @@ impl MainScreen {
     /// Handle an [`Event`] to update state and output any necessary actions for the
     /// system to take.
     pub fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        // TODO: Do we need ControlIds at all? Can we keep all the Controls in an array tha allows
-        // us to tab through them?
-        if self.selected == self.sidebar.control_id() {
-            self.sidebar.on(state, event)
-        } else {
-            None
+        match event {
+            Event::Term(TermEvent::Key(e)) => match e.code {
+                KeyCode::Esc => {
+                    if self.sidebar_selected {
+                        None
+                    } else {
+                        self.sidebar_selected = true;
+                        Some(Action::Redraw)
+                    }
+                }
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Right => {
+                    if self.sidebar_selected {
+                        self.sidebar_selected = false;
+                        Some(Action::Redraw)
+                    } else {
+                        self.current_pane()
+                            .on(state, Event::Term(TermEvent::Key(e)))
+                    }
+                }
+                _ => {
+                    let event = Event::Term(TermEvent::Key(e));
+                    if self.sidebar_selected {
+                        self.sidebar.on(state, event)
+                    } else {
+                        self.current_pane()
+                            .on(state, Event::Term(TermEvent::Key(e)))
+                    }
+                }
+            },
+            e => {
+                if self.sidebar_selected {
+                    self.sidebar.on(state, e)
+                } else {
+                    self.current_pane().on(state, e)
+                }
+            }
         }
+    }
+
+    fn current_pane(&mut self) -> &mut Box<dyn Pane> {
+        self.panes.get_mut(self.sidebar.selected()).unwrap()
     }
 
     fn draw_pane(
@@ -107,10 +144,11 @@ impl MainScreen {
         tabs_rect: Rect,
         pane_rect: Rect,
     ) {
-        let pane = self.panes.get_mut(self.sidebar.selected()).unwrap();
+        let pane = self.current_pane();
+
+        // Draw the Top bar (tabs)
         let titles = pane.tabs().iter().cloned().map(Spans::from).collect();
         let tabs = Tabs::new(titles)
-            .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(Color::White))
             .highlight_style(Style::default().fg(Color::Yellow))
             .block(
@@ -120,7 +158,41 @@ impl MainScreen {
             )
             .style(Style::default().fg(Color::Cyan));
         frame.render_widget(tabs, tabs_rect);
-        pane.draw(state, frame, pane_rect);
+
+        // Draw the pane border
+        let border = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded);
+        let inner = border.inner(pane_rect);
+        frame.render_widget(border, pane_rect);
+
+        // Draw the pane
+        pane.draw(state, frame, inner);
+    }
+
+    // TODO: Use the real status and version
+    fn draw_statusbar(
+        &mut self,
+        _state: &State,
+        frame: &mut Frame<'_>,
+        rect: Rect,
+    ) {
+        let main = Paragraph::new(Spans::from(vec![
+            Span::styled("WICKETD: ", Style::default().fg(Color::Cyan)),
+            Span::styled("CONNECTED", Style::default().fg(Color::Blue)),
+            Span::styled(" | ", Style::default().fg(Color::Cyan)),
+            Span::styled("MGS: ", Style::default().fg(Color::Cyan)),
+            Span::styled("NO RESPONSE", Style::default().fg(Color::Blue)),
+        ]))
+        .style(Style::default().fg(Color::Cyan));
+        frame.render_widget(main, rect);
+
+        let test = Paragraph::new(Spans::from(vec![
+            Span::styled("VERSION: ", Style::default().fg(Color::Cyan)),
+            Span::styled("v0.0.1", Style::default().fg(Color::Blue)),
+        ]))
+        .alignment(Alignment::Right);
+        frame.render_widget(test, rect);
     }
 }
 
@@ -188,6 +260,7 @@ impl Control for Sidebar {
         let tabs = List::new(items)
             .block(
                 Block::default()
+                    .title("<ESC>")
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             )
