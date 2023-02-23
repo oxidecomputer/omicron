@@ -426,8 +426,8 @@ impl UpdateDriver {
             UpdateStateKind::SettingInstallinatorOptions,
         );
         let installinator_image_id = InstallinatorImageId {
-            control_plane: plan.control_plane_hash.0.to_vec(),
-            host_phase_2: plan.host_phase_2_hash.0.to_vec(),
+            control_plane: plan.control_plane_hash.to_string(),
+            host_phase_2: plan.host_phase_2_hash.to_string(),
             update_id,
         };
         self.mgs_client
