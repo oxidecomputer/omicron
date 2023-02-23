@@ -61,12 +61,13 @@ impl<'a> Rack<'a> {
                     if let Some(KnightRiderMode { count }) =
                         self.state.knight_rider_mode
                     {
-                        let go_right = (count / inner.width) % 2 == 0;
+                        let width = inner.width as usize;
+                        let go_right = (count / width) % 2 == 0;
                         let offset = if go_right {
-                            count % inner.width
+                            count % width
                         } else {
-                            inner.width - (count % inner.width)
-                        };
+                            width - (count % width)
+                        } as u16;
                         if x == (inner.left() + offset) {
                             cell.set_bg(Color::Red);
                         }
@@ -178,7 +179,7 @@ const MAX_TAB_INDEX: u16 = 35;
 // Easter egg alert: Support for Knight Rider mode
 #[derive(Debug, Default)]
 pub struct KnightRiderMode {
-    count: u16,
+    count: usize,
 }
 
 impl KnightRiderMode {
@@ -278,7 +279,7 @@ impl RackState {
         }
     }
 
-    pub fn left_or_right_arrow(&mut self) {
+    pub fn left_or_right(&mut self) {
         self.set_column();
 
         match self.get_current_component_id() {

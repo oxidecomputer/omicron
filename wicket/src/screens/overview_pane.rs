@@ -55,6 +55,10 @@ impl Control for OverviewPane {
                     state.rack_state.toggle_knight_rider_mode();
                     Some(Action::Redraw)
                 }
+                KeyCode::Left | KeyCode::Right => {
+                    state.rack_state.left_or_right();
+                    Some(Action::Redraw)
+                }
                 _ => None,
             },
             Event::Tick => {
