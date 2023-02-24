@@ -11,6 +11,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use anyhow::Context;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -59,7 +60,8 @@ impl super::Nexus {
     // Silo users
 
     /// List users in the current Silo
-    pub async fn silo_users_list_current(
+    /// Legacy, to be deleted with the non-v1 users endpoint
+    pub async fn silo_users_list_current_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -71,6 +73,22 @@ impl super::Nexus {
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         self.db_datastore
             .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
+            .await
+    }
+
+    /// List users in the current Silo
+    pub async fn silo_users_list_current(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::SiloUser> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing current silo's users")?;
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+        self.db_datastore
+            .silo_users_list(opctx, &authz_silo_user_list, pagparams)
             .await
     }
 

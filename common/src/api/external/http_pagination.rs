@@ -328,7 +328,7 @@ where
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ScanByNameOrId<Selector> {
     #[serde(default = "default_nameid_sort_mode")]
-    sort_by: NameOrIdSortMode,
+    pub sort_by: NameOrIdSortMode,
 
     #[serde(flatten)]
     pub selector: Selector,

@@ -1307,6 +1307,19 @@ pub struct SnapshotCreate {
     pub disk: Name,
 }
 
+// USERS AND GROUPS
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GroupSelector {
+    pub group: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalGroupSelector {
+    #[serde(flatten)]
+    pub group_selector: Option<GroupSelector>,
+}
+
 // BUILT-IN USERS
 //
 // These cannot be created via the external API, but we use the same interfaces
