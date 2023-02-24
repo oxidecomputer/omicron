@@ -143,7 +143,7 @@ async fn post_start_update(
 
     // Generate an ID for this update; the update tracker will send it to the
     // sled as part of the InstallinatorImageId, and installinator will send it
-    // back to our artifact server with its progress and completion requests.
+    // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
     match rqctx.update_tracker.start(target.into_inner(), plan, update_id).await

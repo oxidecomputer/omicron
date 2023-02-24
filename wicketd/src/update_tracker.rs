@@ -6,6 +6,8 @@
 
 use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
+use crate::installinator_progress::IprStartReceiver;
+use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
 use crate::update_events::UpdateEventFailureKind;
 use crate::update_events::UpdateEventKind;
@@ -28,6 +30,7 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
+use installinator_common::ProgressReport;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
 use slog::error;
@@ -43,6 +46,7 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -136,10 +140,15 @@ pub(crate) struct UpdateTracker {
         Mutex<Option<UploadTrampolinePhase2ToMgs>>,
 
     log: Logger,
+    ipr_update_tracker: IprUpdateTracker,
 }
 
 impl UpdateTracker {
-    pub(crate) fn new(mgs_addr: SocketAddrV6, log: &Logger) -> Self {
+    pub(crate) fn new(
+        mgs_addr: SocketAddrV6,
+        log: &Logger,
+        ipr_update_tracker: IprUpdateTracker,
+    ) -> Self {
         let log = log.new(o!("component" => "wicketd update planner"));
         let sp_update_data = Mutex::default();
         let mgs_client = make_mgs_client(log.clone(), mgs_addr);
@@ -150,6 +159,7 @@ impl UpdateTracker {
             sp_update_data,
             log,
             upload_trampoline_phase_2_to_mgs,
+            ipr_update_tracker,
         }
     }
 
@@ -197,6 +207,8 @@ impl UpdateTracker {
 
         let spawn_update_driver = || async {
             let update_log = Arc::default();
+            let ipr_start_receiver =
+                self.ipr_update_tracker.register(update_id).await;
 
             let update_driver = UpdateDriver {
                 update_id,
@@ -210,7 +222,8 @@ impl UpdateTracker {
                 )),
             };
 
-            let task = tokio::spawn(update_driver.run(plan));
+            let task =
+                tokio::spawn(update_driver.run(plan, ipr_start_receiver));
 
             SpUpdateData { task, update_log }
         };
@@ -303,8 +316,12 @@ struct UpdateDriver {
 }
 
 impl UpdateDriver {
-    async fn run(mut self, plan: UpdatePlan) {
-        if let Err(err) = self.run_impl(plan).await {
+    async fn run(
+        mut self,
+        plan: UpdatePlan,
+        ipr_start_receiver: IprStartReceiver,
+    ) {
+        if let Err(err) = self.run_impl(plan, ipr_start_receiver).await {
             error!(self.log, "update failed"; "err" => ?err);
             self.push_update_failure(err);
         }
@@ -340,11 +357,12 @@ impl UpdateDriver {
     async fn run_impl(
         &mut self,
         plan: UpdatePlan,
+        ipr_start_receiver: IprStartReceiver,
     ) -> Result<(), UpdateEventFailureKind> {
         // TODO-correctness Is the general order here correct? Host then SP then
         // RoT, then reboot the SP/RoT?
         if self.sp.type_ == SpType::Sled {
-            self.run_sled(&plan).await?;
+            self.run_sled(&plan, ipr_start_receiver).await?;
         }
 
         let sp_artifact = match self.sp.type_ {
@@ -379,6 +397,7 @@ impl UpdateDriver {
     async fn run_sled(
         &mut self,
         plan: &UpdatePlan,
+        ipr_start_receiver: IprStartReceiver,
     ) -> Result<(), UpdateEventFailureKind> {
         info!(self.log, "starting host recovery via trampoline image");
 
@@ -392,22 +411,27 @@ impl UpdateDriver {
                 }
             })?;
 
-        self.wait_for_first_installinator_progress(
-            plan,
-            uploaded_trampoline_phase2_id,
-        )
-        .await
-        .map_err(|err| {
-            UpdateEventFailureKind::ArtifactUpdateFailed {
-                // `trampoline_phase_1` and `trampoline_phase_2` have the
-                // same artifact ID, so the choice here is arbitrary.
-                artifact: plan.trampoline_phase_1.id.clone(),
-                reason: format!("{err:#}"),
-            }
-        })?;
+        let mut ipr_receiver = self
+            .wait_for_first_installinator_progress(
+                plan,
+                ipr_start_receiver,
+                uploaded_trampoline_phase2_id,
+            )
+            .await
+            .map_err(|err| {
+                UpdateEventFailureKind::ArtifactUpdateFailed {
+                    // `trampoline_phase_1` and `trampoline_phase_2` have the
+                    // same artifact ID, so the choice here is arbitrary.
+                    artifact: plan.trampoline_phase_1.id.clone(),
+                    reason: format!("{err:#}"),
+                }
+            })?;
 
-        // TODO wait for installinator completion, ideally with progress along
-        // the way.
+        while let Some(report) = ipr_receiver.recv().await {
+            // TODO: process progress reports, not just completion.
+        }
+
+        // The receiver being closed means that the installinator has completed.
 
         // TODO power down host and deliver matching host phase 1
         _ = plan.host_phase_1;
@@ -418,8 +442,9 @@ impl UpdateDriver {
     async fn wait_for_first_installinator_progress(
         &self,
         plan: &UpdatePlan,
+        mut ipr_start_receiver: IprStartReceiver,
         uploaded_trampoline_phase2_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<mpsc::Receiver<ProgressReport>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
@@ -459,72 +484,84 @@ impl UpdateDriver {
             );
         }
 
-        // TODO replace this with whatever we're doing for installinator
-        // reporting progress to us through our artifact server; for now, this
-        // function will never return. We will probably restructure this loop
-        // too (e.g., if we have a future we can await).
-        let got_first_installinator_progress = |_update_id| false;
-
         self.set_current_update_state(
             UpdateStateKind::WaitingForTrampolineImageDelivery {
                 artifact: plan.trampoline_phase_1.id.clone(),
                 progress: HostPhase2Progress::None,
             },
         );
-        while !got_first_installinator_progress(self.update_id) {
-            match self
-                .mgs_client
-                .sp_host_phase2_progress_get(self.sp.type_, self.sp.slot)
-                .await
-                .map(|response| response.into_inner())
-            {
-                Ok(HostPhase2Progress::Available {
-                    age,
-                    image_id,
-                    offset,
-                    total_size,
-                }) => {
-                    // Does this image ID match the one we uploaded? If so,
-                    // record our current progress; if not, this is probably
-                    // stale data from a past update, and we have no progress
-                    // information.
-                    let progress = if image_id == uploaded_trampoline_phase2_id
-                    {
-                        HostPhase2Progress::Available {
-                            age,
-                            image_id,
-                            offset,
-                            total_size,
-                        }
-                    } else {
-                        HostPhase2Progress::None
-                    };
-                    self.set_current_update_state(
-                        UpdateStateKind::WaitingForTrampolineImageDelivery {
-                            artifact: plan.trampoline_phase_1.id.clone(),
-                            progress,
-                        },
-                    );
+
+        let mut interval = tokio::time::interval(MGS_PROGRESS_POLL_INTERVAL);
+        interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.tick().await;
+
+        loop {
+            tokio::select! {
+                receiver = &mut ipr_start_receiver => {
+                    // Received the first progress from the installinator.
+                    break receiver.context("start sender died");
                 }
-                Ok(HostPhase2Progress::None) => {
-                    self.set_current_update_state(
-                        UpdateStateKind::WaitingForTrampolineImageDelivery {
-                            artifact: plan.trampoline_phase_1.id.clone(),
-                            progress: HostPhase2Progress::None,
-                        },
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        self.log, "failed to get SP host phase2 progress";
-                        "err" => %err,
-                    );
+                _ = interval.tick() => {
+                    self.poll_host_phase2_progress(plan, &uploaded_trampoline_phase2_id).await;
                 }
             }
-            tokio::time::sleep(MGS_PROGRESS_POLL_INTERVAL).await;
         }
+    }
 
-        Ok(())
+    async fn poll_host_phase2_progress(
+        &self,
+        plan: &UpdatePlan,
+        uploaded_trampoline_phase2_id: &HostPhase2RecoveryImageId,
+    ) {
+        match self
+            .mgs_client
+            .sp_host_phase2_progress_get(self.sp.type_, self.sp.slot)
+            .await
+            .map(|response| response.into_inner())
+        {
+            Ok(HostPhase2Progress::Available {
+                age,
+                image_id,
+                offset,
+                total_size,
+            }) => {
+                // Does this image ID match the one we uploaded? If so,
+                // record our current progress; if not, this is probably
+                // stale data from a past update, and we have no progress
+                // information.
+                let progress = if &image_id == uploaded_trampoline_phase2_id {
+                    HostPhase2Progress::Available {
+                        age,
+                        image_id,
+                        offset,
+                        total_size,
+                    }
+                } else {
+                    HostPhase2Progress::None
+                };
+                self.set_current_update_state(
+                    UpdateStateKind::WaitingForTrampolineImageDelivery {
+                        artifact: plan.trampoline_phase_1.id.clone(),
+                        progress,
+                    },
+                );
+            }
+            Ok(HostPhase2Progress::None) => {
+                self.set_current_update_state(
+                    UpdateStateKind::WaitingForTrampolineImageDelivery {
+                        artifact: plan.trampoline_phase_1.id.clone(),
+                        progress: HostPhase2Progress::None,
+                    },
+                );
+            }
+            Err(err) => {
+                warn!(
+                    self.log, "failed to get SP host phase2 progress";
+                    "err" => %err,
+                );
+            }
+        }
     }
 
     // Installs the installinator phase 1 and configures the host to fetch phase

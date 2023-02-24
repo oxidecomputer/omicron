@@ -6,12 +6,13 @@ mod artifacts;
 mod config;
 mod context;
 mod http_entrypoints;
+mod installinator_progress;
 mod inventory;
 mod mgs;
 mod update_events;
 mod update_tracker;
 
-use artifacts::WicketdArtifactStore;
+use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use inventory::{RackV1Inventory, SpInventory};
@@ -74,8 +75,13 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         mgs_manager.run().await;
     });
 
+    let (it, ipr_artifact, ipr_update_tracker) =
+        crate::installinator_progress::new(&log);
+    tokio::spawn(async move { it.run().await });
+
     let store = WicketdArtifactStore::new(&log);
-    let update_tracker = UpdateTracker::new(args.mgs_address, &log);
+    let update_tracker =
+        UpdateTracker::new(args.mgs_address, &log, ipr_update_tracker);
 
     let wicketd_server_fut = {
         let log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -95,8 +101,9 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         .start()
     };
 
+    let server = WicketdArtifactServer::new(&log, store, ipr_artifact);
     let artifact_server_fut = installinator_artifactd::ArtifactServer::new(
-        store,
+        server,
         args.artifact_address,
         &log,
     )
