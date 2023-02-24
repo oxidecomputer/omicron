@@ -26,7 +26,7 @@ impl OverviewPane {
 
 impl Pane for OverviewPane {
     fn tabs(&self) -> &[&'static str] {
-        &["Oxide Rack"]
+        &["OXIDE RACK"]
     }
 
     fn selected_tab(&self) -> usize {

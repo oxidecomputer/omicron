@@ -19,4 +19,10 @@ pub const OX_GRAY_DARK: Color = Color::Rgb(0x62, 0x66, 0x68);
 pub const OX_WHITE: Color = Color::Rgb(0xE7, 0xE7, 0xE8);
 pub const OX_PINK: Color = Color::Rgb(0xE6, 0x68, 0x86);
 pub const OX_YELLOW_DIM: Color = Color::Rgb(0xAE, 0x96, 0x4E);
-pub const OX_BLACK: Color = Color::Rgb(30, 30, 34);
+
+pub const TUI_BLACK: Color = Color::Rgb(0x1E, 0x1E, 0x22);
+pub const TUI_YELLOW: Color = Color::Rgb(0xF1, 0xD7, 0x8F);
+pub const TUI_GREEN: Color = Color::Rgb(0x8F, 0xEF, 0xBF);
+pub const TUI_GREEN_DARK: Color = Color::Rgb(0x2E, 0x81, 0x60);
+pub const TUI_GREY: Color = Color::Rgb(0x78, 0x78, 0x7A);
+pub const TUI_PURPLE: Color = Color::Rgb(0xBE, 0x95, 0xEB);
