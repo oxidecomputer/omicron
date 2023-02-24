@@ -61,7 +61,7 @@ impl steno::SecStore for CockroachDbSecStore {
         let our_event = db::saga_types::SagaNodeEvent::new(event, self.sec_id);
 
         // TODO-robustness This should be wrapped with a retry loop rather than
-        // unwrapping the result.
+        // unwrapping the result.  See omicron#2416.
         self.datastore.saga_create_event(&our_event).await.unwrap();
     }
 
@@ -75,7 +75,7 @@ impl steno::SecStore for CockroachDbSecStore {
         );
 
         // TODO-robustness This should be wrapped with a retry loop rather than
-        // unwrapping the result.
+        // unwrapping the result.  See omicron#2416.
         self.datastore
             .saga_update_state(id, update, self.sec_id, Generation::new())
             .await

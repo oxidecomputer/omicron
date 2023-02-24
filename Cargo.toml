@@ -12,6 +12,7 @@ members = [
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
+    "installinator-common",
     "internal-dns",
     "internal-dns-client",
     "ipcc-key-value",
@@ -57,6 +58,7 @@ default-members = [
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
+    "installinator-common",
     "internal-dns",
     "internal-dns-client",
     "ipcc-key-value",
@@ -130,11 +132,12 @@ fatfs = "0.3.6"
 fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "f896b7cf0fe7e72641b33060185b71e5d3562b12" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f896b7cf0fe7e72641b33060185b71e5d3562b12" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
+hex-literal = "0.3.4"
 http = "0.2.7"
 httptest = "0.15.4"
 hyper-rustls = "0.23.2"
@@ -142,6 +145,7 @@ hyper = "0.14"
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
+installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 internal-dns-client = { path = "internal-dns-client" }
 ipcc-key-value = { path = "ipcc-key-value" }
@@ -169,7 +173,7 @@ omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.5.1"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "6be54acd2438f0864a68bca44d7511f2ee50d761", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37", features = [ "api", "std" ] }
 once_cell = "1.17.1"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
@@ -177,7 +181,7 @@ openapiv3 = "1.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.2"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "6be54acd2438f0864a68bca44d7511f2ee50d761" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37" }
 oso = "0.26"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "oximeter-client" }
@@ -216,11 +220,13 @@ schemars = "0.8.10"
 semver = { version = "1.0.16", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
+serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
 serde_json = "1.0.93"
 serde_tokenstream = "0.1"
 serde_urlencoded = "0.7.1"
 serde_with = "2.2.0"
 serial_test = "0.10"
+sha2 = "0.10.6"
 sha3 = "0.10.6"
 shell-words = "1.1.0"
 signal-hook = "0.3"

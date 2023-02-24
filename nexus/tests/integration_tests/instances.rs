@@ -1094,7 +1094,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     .await
     .expect("Failed to create custom VPC Subnet");
 
-    // TODO-testing: We'd like to assert things about this VPC Subnet we just
+    // TODO-coverage: We'd like to assert things about this VPC Subnet we just
     // created, but the `vpc_subnets_post` endpoint in Nexus currently returns
     // the "private" `omicron_nexus::db::model::VpcSubnet` type. That should be
     // converted to return the public `omicron_common::external` type, which is
@@ -1192,7 +1192,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     );
     let if1 = &interfaces1.all_items[0];
 
-    // TODO-testing: Add this test once the `VpcSubnet` type can be
+    // TODO-coverage: Add this test once the `VpcSubnet` type can be
     // deserialized.
     // assert_eq!(if1.subnet_id, non_default_vpc_subnet.id);
 

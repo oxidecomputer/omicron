@@ -243,7 +243,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 
         // If the object came to rest destroyed, complete any async cleanup
         // needed now.
-        // TODO-debug It would be nice to have visibility into objects that
+        // TODO-debugging It would be nice to have visibility into objects that
         // are cleaning up in case we have to debug resource leaks here.
         // TODO-correctness Is it a problem that nobody waits on the background
         // task?  If we did it here, we'd deadlock, since we're invoked from the

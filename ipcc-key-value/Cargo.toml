@@ -6,9 +6,13 @@ license = "MPL-2.0"
 
 [dependencies]
 ciborium.workspace = true
+libc.workspace = true
+omicron-common.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+omicron-common = { workspace = true, features = ["testing"] }
 proptest.workspace = true
 test-strategy.workspace = true

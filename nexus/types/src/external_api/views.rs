@@ -416,7 +416,6 @@ pub struct DeviceAuthResponse {
 }
 
 /// Successful access token grant. See RFC 6749 §5.1.
-/// TODO-security: `expires_in`, `refresh_token`, etc.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAccessTokenGrant {
     /// The access token issued to the client.

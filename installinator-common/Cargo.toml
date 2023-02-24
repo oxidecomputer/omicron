@@ -1,0 +1,11 @@
+[package]
+name = "installinator-common"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+camino.workspace = true
+omicron-common.workspace = true
+schemars.workspace = true
+serde.workspace = true

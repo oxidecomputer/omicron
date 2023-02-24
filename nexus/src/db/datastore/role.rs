@@ -236,8 +236,6 @@ impl DataStore {
     where
         T: authz::ApiResourceWithRolesType + AuthorizedResource + Clone,
     {
-        // TODO-security We should carefully review what permissions are
-        // required for modifying the policy of a resource.
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
 
         let authz_resource = authz_resource.clone();

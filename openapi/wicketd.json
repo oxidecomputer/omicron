@@ -334,6 +334,70 @@
           }
         ]
       },
+      "HostPhase2Progress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "age": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "image_id": {
+                "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
+              },
+              "offset": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "total_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "age",
+              "image_id",
+              "offset",
+              "progress",
+              "total_size"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "progress"
+            ]
+          }
+        ]
+      },
+      "HostPhase2RecoveryImageId": {
+        "description": "Identity of a host phase2 recovery image.",
+        "type": "object",
+        "properties": {
+          "sha256_hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256_hash"
+        ]
+      },
       "ImageVersion": {
         "type": "object",
         "properties": {
@@ -1210,6 +1274,90 @@
                 "type": "string",
                 "enum": [
                   "waiting_for_status"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "power_state": {
+                    "$ref": "#/components/schemas/PowerState"
+                  }
+                },
+                "required": [
+                  "power_state"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "setting_host_power_state"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "setting_installinator_options"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "setting_host_startup_options"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "$ref": "#/components/schemas/ArtifactId"
+                  },
+                  "progress": {
+                    "$ref": "#/components/schemas/HostPhase2Progress"
+                  }
+                },
+                "required": [
+                  "artifact",
+                  "progress"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_trampoline_image_delivery"
                 ]
               }
             },

@@ -181,8 +181,8 @@ impl PortManager {
         external_ips: Option<Vec<IpAddr>>,
         firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
-        // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
-        // IPv6 networks.
+        // TODO-completeness: Remove IPv4 restrictions once OPTE supports
+        // virtual IPv6 networks.
         let private_ip = match nic.ip {
             IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
             IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
@@ -267,7 +267,7 @@ impl PortManager {
         // The Port object's drop implementation will clean up both of those, if
         // any of the remaining fallible operations fail.
         let port_name = self.inner.next_port_name();
-        let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
 
         // TODO-completeness: Add support for IPv6.
         let vpc_cfg = VpcCfg {
@@ -480,7 +480,7 @@ impl PortManager {
         &self,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
-        let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
             let port_name = port_name.clone();
