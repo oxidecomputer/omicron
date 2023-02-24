@@ -2177,7 +2177,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=host-phase2-progress#e775162f8594d306292b8f0634f5cd40a9ced616"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=f896b7cf0fe7e72641b33060185b71e5d3562b12#f896b7cf0fe7e72641b33060185b71e5d3562b12"
 dependencies = [
  "bitflags",
  "hubpack 0.1.1",
@@ -2192,7 +2192,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=host-phase2-progress#e775162f8594d306292b8f0634f5cd40a9ced616"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=f896b7cf0fe7e72641b33060185b71e5d3562b12#f896b7cf0fe7e72641b33060185b71e5d3562b12"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2205,7 +2205,7 @@ dependencies = [
  "nix",
  "once_cell",
  "serde",
- "serde-big-array 0.4.1",
+ "serde-big-array 0.5.0",
  "slog",
  "socket2",
  "string_cache",
@@ -2214,6 +2214,7 @@ dependencies = [
  "tokio",
  "usdt",
  "uuid",
+ "version_check",
  "zip",
 ]
 
@@ -5847,6 +5848,15 @@ name = "serde-big-array"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3323f09a748af288c3dc2474ea6803ee81f118321775bffa3ac8f7e65c5e90e7"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "serde-big-array"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1bb66e1af4481c21cbc943cabb68b98aabb4d7f935e47d1b4de722ca09da0b4"
 dependencies = [
  "serde",
 ]
