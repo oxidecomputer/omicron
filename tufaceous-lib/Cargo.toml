@@ -16,7 +16,7 @@ omicron-common.workspace = true
 rand.workspace = true
 ring = { workspace = true, features = ["std"] }
 serde_json.workspace = true
-sha2 = "0.10.6"
+sha2.workspace = true
 tempfile.workspace = true
 tough.workspace = true
 url = "2.3.1"

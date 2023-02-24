@@ -18,7 +18,10 @@ use anyhow::Context;
 use buf_list::BufList;
 use bytes::Bytes;
 use futures::TryStream;
+use gateway_client::types::HostStartupOptions;
+use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
+use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
@@ -152,6 +155,7 @@ impl UpdateTracker {
         &self,
         sp: SpIdentifier,
         plan: UpdatePlan,
+        update_id: Uuid,
     ) -> Result<(), StartUpdateError> {
         // Do we need to upload this plan's trampoline phase 2 to MGS?
         let upload_trampoline_phase_2_to_mgs = {
@@ -193,11 +197,15 @@ impl UpdateTracker {
             let update_log = Arc::default();
 
             let update_driver = UpdateDriver {
+                update_id,
                 sp,
                 mgs_client: self.mgs_client.clone(),
                 upload_trampoline_phase_2_to_mgs,
                 update_log: Arc::clone(&update_log),
-                log: self.log.new(o!("sp" => format!("{sp:?}"))),
+                log: self.log.new(o!(
+                    "sp" => format!("{sp:?}"),
+                    "update_id" => update_id.to_string(),
+                )),
             };
 
             let task = tokio::spawn(update_driver.run(plan));
@@ -283,6 +291,7 @@ pub(crate) enum StartUpdateError {
 
 #[derive(Debug)]
 struct UpdateDriver {
+    update_id: Uuid,
     sp: SpIdentifier,
     mgs_client: gateway_client::Client,
     upload_trampoline_phase_2_to_mgs:
@@ -371,6 +380,31 @@ impl UpdateDriver {
     ) -> Result<(), UpdateEventFailureKind> {
         info!(self.log, "starting host recovery via trampoline image");
 
+        self.install_trampoline_image(plan).await.map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                // `trampoline_phase_1` and `trampoline_phase_2` have the same
+                // artifact ID, so the choice here is arbitrary.
+                artifact: plan.trampoline_phase_1.id.clone(),
+                reason: format!("{err:#}"),
+            }
+        })?;
+
+        // TODO wait for installinator completion, ideally with progress for
+        // both:
+        //
+        // a) fetching the the installinator image from MGS
+        // b) installinator progress
+
+        // TODO power down host and deliver matching host phase 1
+        _ = plan.host_phase_1;
+
+        Ok(())
+    }
+
+    async fn install_trampoline_image(
+        &mut self,
+        plan: &UpdatePlan,
+    ) -> anyhow::Result<()> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
         // slot 0.
         let trampoline_phase_1_boot_slot = 0;
@@ -378,35 +412,66 @@ impl UpdateDriver {
             &plan.trampoline_phase_1,
             trampoline_phase_1_boot_slot,
         )
-        .await
-        .map_err(|err| {
-            UpdateEventFailureKind::ArtifactUpdateFailed {
-                artifact: plan.trampoline_phase_1.id.clone(),
-                reason: format!("{err:#}"),
-            }
-        })?;
+        .await?;
 
         // Wait (if necessary) for the trampoline phase 2 upload to MGS to
         // complete. We started a task to do this the first time a sled update
         // was started with this plan.
-        self.wait_for_upload_tramponline_to_mgs(plan).await.map_err(|err| {
-            UpdateEventFailureKind::ArtifactUpdateFailed {
-                artifact: plan.trampoline_phase_2.id.clone(),
-                reason: err.to_string(),
-            }
-        })?;
+        self.wait_for_upload_tramponline_to_mgs(plan).await?;
 
-        // TODO set installinator image ID
-        _ = plan.host_phase_2;
-        _ = plan.control_plane;
+        // Set the installinator image ID.
+        self.set_current_update_state(
+            UpdateStateKind::SettingInstallinatorOptions,
+        );
+        let installinator_image_id = InstallinatorImageId {
+            control_plane: plan.control_plane_hash.to_string(),
+            host_phase_2: plan.host_phase_2_hash.to_string(),
+            update_id: self.update_id,
+        };
+        self.mgs_client
+            .sp_installinator_image_id_set(
+                self.sp.type_,
+                self.sp.slot,
+                &installinator_image_id,
+            )
+            .await
+            .context("failed to set installinator image ID")?;
 
-        // TODO boot host, wait for trampoline phase 2 delivery over the
-        // management network
+        // Ensure we've selected the correct slot from which to boot, and set
+        // the host startup option to fetch the trampoline phase 2 from MGS.
+        self.set_current_update_state(
+            UpdateStateKind::SettingHostStartupOptions,
+        );
+        self.mgs_client
+            .sp_component_active_slot_set(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                &SpComponentFirmwareSlot { slot: trampoline_phase_1_boot_slot },
+            )
+            .await
+            .context("failed to set host boot flash slot")?;
+        self.mgs_client
+            .sp_startup_options_set(
+                self.sp.type_,
+                self.sp.slot,
+                &HostStartupOptions {
+                    boot_net: false,
+                    boot_ramdisk: false,
+                    bootrd: false,
+                    kbm: false,
+                    kmdb: false,
+                    kmdb_boot: false,
+                    phase2_recovery_mode: true,
+                    prom: false,
+                    verbose: false,
+                },
+            )
+            .await
+            .context("failed to set host startup options")?;
 
-        // TODO wait for installinator completion
-
-        // TODO deliver matching host phase 1
-        _ = plan.host_phase_1;
+        // All set - boot the host and let installinator do its thing!
+        self.set_host_power_state(PowerState::A0).await?;
 
         Ok(())
     }
