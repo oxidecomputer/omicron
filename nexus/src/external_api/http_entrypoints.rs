@@ -7401,16 +7401,13 @@ async fn user_list_v1(
     query_params: Query<PaginatedById<params::OptionalGroupSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-
-    let pag_params = data_page_params_for(&rqctx, &query)?;
-    // let scan_params = ScanById::from_query(&query)?;
-
     let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .silo_users_list_current(&opctx, &pag_params)
+            .silo_users_list_current(&opctx, &pagparams)
             .await?
             .into_iter()
             .map(|i| i.into())

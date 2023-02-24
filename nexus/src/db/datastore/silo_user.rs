@@ -192,7 +192,7 @@ impl DataStore {
             }))
     }
 
-    pub async fn silo_users_list_by_id(
+    pub async fn silo_users_list(
         &self,
         opctx: &OpContext,
         authz_silo_user_list: &authz::SiloUserList,

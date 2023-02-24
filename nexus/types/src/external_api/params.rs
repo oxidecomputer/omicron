@@ -1311,7 +1311,7 @@ pub struct SnapshotCreate {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GroupSelector {
-    pub group: NameOrId,
+    pub group: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
