@@ -59,7 +59,6 @@ impl super::Nexus {
     // Silo users
 
     /// List users in the current Silo
-    /// Legacy, to be deleted with the non-v1 users endpoint
     pub async fn silo_users_list_current(
         &self,
         opctx: &OpContext,
