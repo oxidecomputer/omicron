@@ -2138,6 +2138,7 @@ mod test {
 
         // Success cases
         let valid_names: Vec<&str> = vec![
+            "a",
             "abc",
             "abc-123",
             "a123",
