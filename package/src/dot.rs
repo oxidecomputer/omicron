@@ -14,8 +14,8 @@ use std::path::Path;
 /// A node in our visual representation of the package manifest
 ///
 /// Note that this graph is not the same as the package graph.  It has extra
-/// nodes to illustrate things like S3 blobs, Buildomat outputs, and Rust crates
-/// that are part of the build (but are not themselves packages).
+/// nodes to illustrate things like S3 blobs, Buildomat outputs, and Rust
+/// packages that are part of the build (but are not themselves packages).
 enum GraphNode {
     /// singleton node at the root of the graph
     TopLevel,
@@ -32,7 +32,7 @@ enum GraphNode {
     Paths { paths: Vec<(String, String)> },
     /// output of a buildomat job that's copied into a package
     BuildomatOutput { repo: String },
-    /// Rust crate in the Omicron repo that's built and then copied into a
+    /// Rust package in the Omicron repo that's built and then copied into a
     /// package
     OmicronRustCrate { name: String },
     /// artifact that's directly copied into a package
@@ -58,7 +58,7 @@ impl std::fmt::Display for GraphNode {
                 write!(f, "buildomat output: job {:?}", repo)
             }
             GraphNode::OmicronRustCrate { name } => {
-                write!(f, "local Rust crate:\n{:?}", name)
+                write!(f, "local Rust package:\n{:?}", name)
             }
             GraphNode::Manual => write!(f, "manually-built artifact"),
             GraphNode::Package { name, source_type } => {
@@ -141,7 +141,7 @@ pub fn do_dot(package_config: &Config) -> anyhow::Result<String> {
         .collect::<BTreeMap<_, _>>();
 
     // Now, iterate the packages again and create additional nodes to illustrate
-    // S3 dependencies, buildomat job outputs, local builds (of Rust crates
+    // S3 dependencies, buildomat job outputs, local builds (of Rust packages
     // inside Omicron), etc.  Attach edges to these nodes identifying
     // dependencies.
     for (pkgname, pkg) in packages {
@@ -182,8 +182,8 @@ pub fn do_dot(package_config: &Config) -> anyhow::Result<String> {
 
             PackageSource::Local { blobs, rust, paths } => {
                 // Regardless of the type of local package (e.g., files-only or
-                // Rust crate or whatever), create nodes showing any S3 blobs on
-                // which it depends.
+                // Rust package or whatever), create nodes showing any S3 blobs
+                // on which it depends.
                 if let Some(blobs) = blobs {
                     for b in blobs {
                         let s3_node = graph.add_node(GraphNode::Blob {
@@ -210,12 +210,13 @@ pub fn do_dot(package_config: &Config) -> anyhow::Result<String> {
                     graph.add_edge(*pkg_node, path_node, "include");
                 }
 
-                // If this package represents a corresponding Rust crate in the
-                // Omicron workspace, create a separate node describing that.
-                // (omicron-package generally treats these as the same thing,
-                // but it can be helpful (if pedantic?) to illustrate that, say,
-                // the "omicron-nexus" *package* depends on the "omicron-nexus"
-                // Rust crate, particularly since that's not always the case!)
+                // If this package represents a corresponding Rust package in
+                // the Omicron workspace, create a separate node describing
+                // that.  (omicron-package generally treats these as the same
+                // thing, but it can be helpful (if pedantic?) to illustrate
+                // that, say, the "omicron-nexus" *package* depends on the
+                // "omicron-nexus" Rust package, particularly since that's not
+                // always the case!)
                 if rust.is_some() {
                     let rust_node =
                         graph.add_node(GraphNode::OmicronRustCrate {
