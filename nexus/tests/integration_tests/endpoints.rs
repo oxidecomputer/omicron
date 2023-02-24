@@ -133,7 +133,7 @@ lazy_static! {
     pub static ref DEMO_VPC_URL: String =
         format!("/v1/vpcs/{}?organization={}&project={}", *DEMO_VPC_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_VPC_URL_FIREWALL_RULES: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}/firewall/rules", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-firewall-rules?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_ROUTERS: String =
         format!("/v1/vpc-routers?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_SUBNETS: String =
