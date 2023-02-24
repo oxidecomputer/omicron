@@ -35,7 +35,7 @@ impl<'a> Rack<'a> {
     fn draw_sled(&self, buf: &mut Buffer, sled: Rect, i: u8) {
         let component_id = ComponentId::Sled(i);
         let mut block = Block::default()
-            .title(format!("sled {}", i))
+            .title(format!("SLD{}", i))
             .borders(borders(sled.height));
         if self.state.selected == component_id {
             block = block
@@ -82,7 +82,7 @@ impl<'a> Rack<'a> {
     fn draw_switch(&self, buf: &mut Buffer, switch: Rect, i: u8) {
         let component_id = ComponentId::Switch(i);
         let mut block = Block::default()
-            .title(format!("switch {}", i))
+            .title(format!("SW{}", i))
             .borders(borders(switch.height));
         if self.state.selected == component_id {
             block = block
@@ -106,7 +106,7 @@ impl<'a> Rack<'a> {
     fn draw_power_shelf(&self, buf: &mut Buffer, power_shelf: Rect, i: u8) {
         let component_id = ComponentId::Psc(i);
         let mut block = Block::default()
-            .title(format!("power {}", i))
+            .title(format!("PWR{}", i))
             .borders(borders(power_shelf.height));
         if self.state.selected == component_id {
             block = block

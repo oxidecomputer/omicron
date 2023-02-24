@@ -38,13 +38,17 @@ pub fn screen_background() -> Style {
 }
 
 pub fn selected() -> Style {
-    Style::default().fg(OX_GREEN_LIGHT)
+    Style::default().fg(TUI_GREEN)
+}
+
+pub fn selected_line() -> Style {
+    Style::default().fg(TUI_GREEN_DARK)
 }
 
 pub fn deselected() -> Style {
-    Style::default().fg(OX_GRAY)
+    Style::default().fg(TUI_GREY)
 }
 
 pub fn background() -> Style {
-    Style::default().bg(OX_BLACK)
+    Style::default().bg(TUI_BLACK)
 }

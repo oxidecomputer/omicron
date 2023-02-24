@@ -5,6 +5,8 @@
 use std::collections::BTreeMap;
 
 use super::{Control, NullPane, OverviewPane, Pane, StatefulList};
+use crate::defaults::colors::*;
+
 use crate::defaults::style;
 use crate::{Action, Event, Frame, State, Term};
 use crossterm::event::Event as TermEvent;
@@ -147,7 +149,7 @@ impl MainScreen {
         let border_style = if self.sidebar.selected {
             style::deselected()
         } else {
-            style::selected()
+            style::selected_line()
         };
 
         let pane = self.current_pane();
@@ -156,7 +158,7 @@ impl MainScreen {
         let titles = pane.tabs().iter().cloned().map(Spans::from).collect();
         let tabs = Tabs::new(titles)
             .style(Style::default().fg(Color::White))
-            .highlight_style(Style::default().fg(Color::Yellow))
+            .highlight_style(Style::default().fg(TUI_GREEN))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -185,18 +187,18 @@ impl MainScreen {
         rect: Rect,
     ) {
         let main = Paragraph::new(Spans::from(vec![
-            Span::styled("WICKETD: ", Style::default().fg(Color::Cyan)),
-            Span::styled("CONNECTED", Style::default().fg(Color::Blue)),
-            Span::styled(" | ", Style::default().fg(Color::Cyan)),
-            Span::styled("MGS: ", Style::default().fg(Color::Cyan)),
-            Span::styled("NO RESPONSE", Style::default().fg(Color::Blue)),
+            Span::styled("WICKETD: ", Style::default().fg(TUI_GREEN_DARK)),
+            Span::styled("CONNECTED", Style::default().fg(TUI_GREEN)),
+            Span::styled(" | ", Style::default().fg(TUI_GREY)),
+            Span::styled("MGS: ", Style::default().fg(TUI_GREEN_DARK)),
+            Span::styled("NO RESPONSE", Style::default().fg(TUI_GREEN)),
         ]))
-        .style(Style::default().fg(Color::Cyan));
+        .style(Style::default().fg(TUI_GREEN_DARK));
         frame.render_widget(main, rect);
 
         let test = Paragraph::new(Spans::from(vec![
-            Span::styled("VERSION: ", Style::default().fg(Color::Cyan)),
-            Span::styled("v0.0.1", Style::default().fg(Color::Blue)),
+            Span::styled("VERSION: ", Style::default().fg(TUI_GREEN_DARK)),
+            Span::styled("v0.0.1", Style::default().fg(TUI_GREEN)),
         ]))
         .alignment(Alignment::Right);
         frame.render_widget(test, rect);
@@ -261,8 +263,11 @@ impl Control for Sidebar {
             })
             .collect();
 
-        let border_style =
-            if self.selected { style::selected() } else { style::deselected() };
+        let border_style = if self.selected {
+            style::selected_line()
+        } else {
+            style::deselected()
+        };
 
         let tabs = List::new(items)
             .block(
