@@ -35,6 +35,7 @@ uuid.workspace = true
 
 gateway-client.workspace = true
 installinator-artifactd.workspace = true
+installinator-common.workspace = true
 omicron-common.workspace = true
 tufaceous-lib.workspace = true
 
