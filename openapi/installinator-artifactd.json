@@ -172,7 +172,7 @@
             ]
           },
           "total_elapsed": {
-            "description": "When this event was generated, in duration since the start of the program.\n\nThis can be compared against [`Report::total_elapsed`] to figure out how old the event was.",
+            "description": "When this event was generated, in duration since the start of the program.\n\nThis can be compared against [`ProgressReport::total_elapsed`] to figure out how old the event was.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Duration"
@@ -302,7 +302,7 @@
               "destination": {
                 "description": "The destination the artifact is being written out to.",
                 "type": "string",
-                "format": "path"
+                "format": "UTF-8 path"
               },
               "elapsed": {
                 "description": "How long the write took before it failed.",
@@ -369,7 +369,7 @@
               "destination": {
                 "description": "The destination for the artifact.",
                 "type": "string",
-                "format": "path"
+                "format": "UTF-8 path"
               },
               "elapsed": {
                 "description": "How long the write took to complete.",
@@ -467,7 +467,7 @@
             ]
           },
           "total_elapsed": {
-            "description": "When this event was generated, in duration since the start of the program.\n\nThis can be compared against [`Report::total_elapsed`] to figure out how old the event was.",
+            "description": "When this event was generated, in duration since the start of the program.\n\nThis can be compared against [`ProgressReport::total_elapsed`] to figure out how old the event was.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Duration"
@@ -544,7 +544,7 @@
               "destination": {
                 "description": "The destination the artifact is being written out to.",
                 "type": "string",
-                "format": "path"
+                "format": "UTF-8 path"
               },
               "elapsed": {
                 "description": "How long it's been since the write started.",
