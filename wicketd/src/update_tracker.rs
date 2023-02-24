@@ -18,6 +18,8 @@ use anyhow::Context;
 use buf_list::BufList;
 use bytes::Bytes;
 use futures::TryStream;
+use gateway_client::types::HostPhase2Progress;
+use gateway_client::types::HostPhase2RecoveryImageId;
 use gateway_client::types::HostStartupOptions;
 use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
@@ -102,9 +104,9 @@ struct SpUpdateData {
 struct UploadTrampolinePhase2ToMgsStatus {
     id: ArtifactId,
     // The upload task retries forever until it succeeds, so we don't need to
-    // keep a "tried but failed" variant here; we just need to know if the
-    // upload has completed.
-    complete: bool,
+    // keep a "tried but failed" variant here; we just need to know the ID of
+    // the uploaded image once it's done.
+    uploaded_image_id: Option<HostPhase2RecoveryImageId>,
 }
 
 #[derive(Debug)]
@@ -242,7 +244,7 @@ impl UpdateTracker {
         let (status_tx, status_rx) =
             watch::channel(UploadTrampolinePhase2ToMgsStatus {
                 id: artifact.id.clone(),
-                complete: false,
+                uploaded_image_id: None,
             });
         let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
             self.mgs_client.clone(),
@@ -380,20 +382,32 @@ impl UpdateDriver {
     ) -> Result<(), UpdateEventFailureKind> {
         info!(self.log, "starting host recovery via trampoline image");
 
-        self.install_trampoline_image(plan).await.map_err(|err| {
+        let uploaded_trampoline_phase2_id =
+            self.install_trampoline_image(plan).await.map_err(|err| {
+                UpdateEventFailureKind::ArtifactUpdateFailed {
+                    // `trampoline_phase_1` and `trampoline_phase_2` have the same
+                    // artifact ID, so the choice here is arbitrary.
+                    artifact: plan.trampoline_phase_1.id.clone(),
+                    reason: format!("{err:#}"),
+                }
+            })?;
+
+        self.wait_for_first_installinator_progress(
+            plan,
+            uploaded_trampoline_phase2_id,
+        )
+        .await
+        .map_err(|err| {
             UpdateEventFailureKind::ArtifactUpdateFailed {
-                // `trampoline_phase_1` and `trampoline_phase_2` have the same
-                // artifact ID, so the choice here is arbitrary.
+                // `trampoline_phase_1` and `trampoline_phase_2` have the
+                // same artifact ID, so the choice here is arbitrary.
                 artifact: plan.trampoline_phase_1.id.clone(),
                 reason: format!("{err:#}"),
             }
         })?;
 
-        // TODO wait for installinator completion, ideally with progress for
-        // both:
-        //
-        // a) fetching the the installinator image from MGS
-        // b) installinator progress
+        // TODO wait for installinator completion, ideally with progress along
+        // the way.
 
         // TODO power down host and deliver matching host phase 1
         _ = plan.host_phase_1;
@@ -401,10 +415,125 @@ impl UpdateDriver {
         Ok(())
     }
 
+    async fn wait_for_first_installinator_progress(
+        &self,
+        plan: &UpdatePlan,
+        uploaded_trampoline_phase2_id: HostPhase2RecoveryImageId,
+    ) -> anyhow::Result<()> {
+        const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
+
+        // Waiting for the installinator to start is a little strange. It can't
+        // start until the host boots, which requires all the normal boot things
+        // (DRAM training, etc.), but also fetching the trampoline phase 2 image
+        // over the management network -> SP -> uart path, which runs at about
+        // 167 KiB/sec. This is a _long_ time to wait with no visible progress,
+        // so we'll query MGS for progress of that phase 2 trampoline delivery.
+        // However, this query is "best effort" - MGS is observing progress
+        // indirectly (i.e., "what was the last request for a phase 2 image I
+        // got from this SP"), and it isn't definitive. We'll still report it as
+        // long as it matches the trampoline image we're expecting the SP to be
+        // pulling, but it's possible we could be seeing stale status from a
+        // previous update attempt with the same image.
+        //
+        // To start, _clear out_ the most recent status that MGS may have
+        // cached, so we don't see any stale progress from a previous update
+        // through this SP. If somehow we've lost the race and our SP is already
+        // actively requesting host blocks, this will discard a real progress
+        // message, but that's fine - in that case we expect to see another real
+        // one imminently. It's possible (but hopefully unlikely?) that the SP
+        // is getting its phase two image from the _other_ scrimlet's MGS
+        // instance, in which case we will get no progress info at all until
+        // installinator starts reporting in.
+        //
+        // Throughout this function, we do not fail if a request to MGS fails -
+        // these are all "best effort" progress; our real failure mode is if
+        // installinator tells us it has failed.
+        if let Err(err) = self
+            .mgs_client
+            .sp_host_phase2_progress_delete(self.sp.type_, self.sp.slot)
+            .await
+        {
+            warn!(
+                self.log, "failed to clear SP host phase2 progress";
+                "err" => %err,
+            );
+        }
+
+        // TODO replace this with whatever we're doing for installinator
+        // reporting progress to us through our artifact server; for now, this
+        // function will never return. We will probably restructure this loop
+        // too (e.g., if we have a future we can await).
+        let got_first_installinator_progress = |_update_id| false;
+
+        self.set_current_update_state(
+            UpdateStateKind::WaitingForTrampolineImageDelivery {
+                artifact: plan.trampoline_phase_1.id.clone(),
+                progress: HostPhase2Progress::None,
+            },
+        );
+        while !got_first_installinator_progress(self.update_id) {
+            match self
+                .mgs_client
+                .sp_host_phase2_progress_get(self.sp.type_, self.sp.slot)
+                .await
+                .map(|response| response.into_inner())
+            {
+                Ok(HostPhase2Progress::Available {
+                    age,
+                    image_id,
+                    offset,
+                    total_size,
+                }) => {
+                    // Does this image ID match the one we uploaded? If so,
+                    // record our current progress; if not, this is probably
+                    // stale data from a past update, and we have no progress
+                    // information.
+                    let progress = if image_id == uploaded_trampoline_phase2_id
+                    {
+                        HostPhase2Progress::Available {
+                            age,
+                            image_id,
+                            offset,
+                            total_size,
+                        }
+                    } else {
+                        HostPhase2Progress::None
+                    };
+                    self.set_current_update_state(
+                        UpdateStateKind::WaitingForTrampolineImageDelivery {
+                            artifact: plan.trampoline_phase_1.id.clone(),
+                            progress,
+                        },
+                    );
+                }
+                Ok(HostPhase2Progress::None) => {
+                    self.set_current_update_state(
+                        UpdateStateKind::WaitingForTrampolineImageDelivery {
+                            artifact: plan.trampoline_phase_1.id.clone(),
+                            progress: HostPhase2Progress::None,
+                        },
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        self.log, "failed to get SP host phase2 progress";
+                        "err" => %err,
+                    );
+                }
+            }
+            tokio::time::sleep(MGS_PROGRESS_POLL_INTERVAL).await;
+        }
+
+        Ok(())
+    }
+
+    // Installs the installinator phase 1 and configures the host to fetch phase
+    // 2 from MGS on boot, returning the image ID of that phase 2 image for use
+    // when querying MGS for progress on its delivery to the SP.
     async fn install_trampoline_image(
         &mut self,
         plan: &UpdatePlan,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<HostPhase2RecoveryImageId> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
         // slot 0.
         let trampoline_phase_1_boot_slot = 0;
@@ -417,7 +546,8 @@ impl UpdateDriver {
         // Wait (if necessary) for the trampoline phase 2 upload to MGS to
         // complete. We started a task to do this the first time a sled update
         // was started with this plan.
-        self.wait_for_upload_tramponline_to_mgs(plan).await?;
+        let uploaded_trampoline_phase2_id =
+            self.wait_for_upload_tramponline_to_mgs(plan).await?;
 
         // Set the installinator image ID.
         self.set_current_update_state(
@@ -473,27 +603,37 @@ impl UpdateDriver {
         // All set - boot the host and let installinator do its thing!
         self.set_host_power_state(PowerState::A0).await?;
 
-        Ok(())
+        Ok(uploaded_trampoline_phase2_id)
     }
 
     async fn wait_for_upload_tramponline_to_mgs(
         &mut self,
         plan: &UpdatePlan,
-    ) -> anyhow::Result<()> {
-        // Did the upload already complete before we got here?
-        if self.upload_trampoline_phase_2_to_mgs.borrow().complete {
-            return Ok(());
-        }
+    ) -> anyhow::Result<HostPhase2RecoveryImageId> {
+        loop {
+            if let Some(image_id) = self
+                .upload_trampoline_phase_2_to_mgs
+                .borrow()
+                .uploaded_image_id
+                .as_ref()
+            {
+                return Ok(image_id.clone());
+            }
 
-        self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
-            artifact: plan.trampoline_phase_2.id.clone(),
-        });
+            // This looks like we might be setting our current state multiple
+            // times (since we're in a loop), but in practice we should only
+            // loop once: once `self.upload_trampoline_phase_2_to_mgs.changed()`
+            // fires, our check above should return the image ID.
+            self.set_current_update_state(
+                UpdateStateKind::SendingArtifactToMgs {
+                    artifact: plan.trampoline_phase_2.id.clone(),
+                },
+            );
 
-        while !self.upload_trampoline_phase_2_to_mgs.borrow().complete {
-            // `upload_trampoline_phase_2_to_mgs` waits for all receivers,
-            // so if `changed()` fails that means the task has either
-            // panicked or been cancelled due to a new repo upload - either
-            // way, we can't continue.
+            // `upload_trampoline_phase_2_to_mgs` waits for all
+            // receivers, so if `changed()` fails that means the task
+            // has either panicked or been cancelled due to a new repo
+            // upload - either way, we can't continue.
             self.upload_trampoline_phase_2_to_mgs.changed().await.map_err(
                 |_recv_err| {
                     anyhow!(concat!(
@@ -503,8 +643,6 @@ impl UpdateDriver {
                 },
             )?;
         }
-
-        Ok(())
     }
 
     async fn deliver_host_phase1(
@@ -715,18 +853,19 @@ async fn upload_trampoline_phase_2_to_mgs(
 
     // retry_policy_internal_service_aggressive() retries forever, so we can
     // unwrap this call to retry_notify
-    backoff::retry_notify(
+    let uploaded_image_id = backoff::retry_notify(
         backoff::retry_policy_internal_service_aggressive(),
         upload_task,
         log_failure,
     )
     .await
-    .unwrap();
+    .unwrap()
+    .into_inner();
 
     // Notify all receivers that we've uploaded the image.
     _ = status.send(UploadTrampolinePhase2ToMgsStatus {
         id: artifact.id,
-        complete: true,
+        uploaded_image_id: Some(uploaded_image_id),
     });
 
     // Wait for all receivers to be gone before we exit, so they don't get recv

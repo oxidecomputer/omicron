@@ -28,12 +28,14 @@ use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
+use gateway_sp_comms::HostPhase2Provider;
 use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_stream::StreamExt;
 use tokio_util::either::Either;
 use uuid::Uuid;
@@ -416,6 +418,18 @@ pub struct InstallinatorImageId {
     pub control_plane: ArtifactHash,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "progress", rename_all = "snake_case")]
+pub enum HostPhase2Progress {
+    Available {
+        image_id: HostPhase2RecoveryImageId,
+        offset: u64,
+        total_size: u64,
+        age: Duration,
+    },
+    None,
+}
+
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
 /// the host boot flash.
 #[derive(
@@ -428,7 +442,7 @@ pub struct SpComponentFirmwareSlot {
 /// Identity of a host phase2 recovery image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HostPhase2RecoveryImageId {
-    pub sha256_hash: String,
+    pub sha256_hash: ArtifactHash,
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -1177,6 +1191,68 @@ async fn sp_installinator_image_id_delete(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Get the most recent host phase2 request we've seen from the target SP.
+///
+/// This method can be used as an indirect progress report for how far along a
+/// host is when it is booting via the MGS -> SP -> UART recovery path. This
+/// path is used to install the trampoline image containing installinator to
+/// recover a sled.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/host-phase2-progress",
+}]
+async fn sp_host_phase2_progress_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<HostPhase2Progress>, HttpError> {
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let Some(progress) = sp.most_recent_host_phase2_request().await else {
+        return Ok(HttpResponseOk(HostPhase2Progress::None));
+    };
+
+    // Our `host_phase2_provider` is using an in-memory cache, so the only way
+    // we can fail to get the total size is if we no longer have the image that
+    // this SP most recently requested. We'll treat that as "no progress
+    // information", since it almost certainly means our progress info on this
+    // SP is very stale.
+    let Ok(total_size) = apictx
+        .host_phase2_provider
+        .total_size(progress.hash)
+        .await
+    else {
+        return Ok(HttpResponseOk(HostPhase2Progress::None));
+    };
+
+    let image_id =
+        HostPhase2RecoveryImageId { sha256_hash: ArtifactHash(progress.hash) };
+
+    Ok(HttpResponseOk(HostPhase2Progress::Available {
+        image_id,
+        offset: progress.offset,
+        total_size,
+        age: progress.received.elapsed(),
+    }))
+}
+
+/// Clear the most recent host phase2 request we've seen from the target SP.
+#[endpoint {
+    method = DELETE,
+    path = "/sp/{type}/{slot}/host-phase2-progress",
+}]
+async fn sp_host_phase2_progress_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    sp.clear_most_recent_host_phase2_request().await;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// Upload a host phase2 image that can be served to recovering hosts via the
 /// host/SP control uart.
 ///
@@ -1197,7 +1273,7 @@ async fn recovery_host_phase2_upload(
     // if it's malformed.
     let image = body.as_bytes().to_vec();
 
-    let sha2 =
+    let sha256_hash =
         apictx.host_phase2_provider.insert(image).await.map_err(|err| {
             // Any cache-insertion failure indicates a malformed image; map them
             // to bad requests.
@@ -1206,10 +1282,9 @@ async fn recovery_host_phase2_upload(
                 err.to_string(),
             )
         })?;
+    let sha256_hash = ArtifactHash(sha256_hash);
 
-    Ok(HttpResponseOk(HostPhase2RecoveryImageId {
-        sha256_hash: hex::encode(&sha2),
-    }))
+    Ok(HttpResponseOk(HostPhase2RecoveryImageId { sha256_hash }))
 }
 
 // TODO
@@ -1249,6 +1324,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_update)?;
         api.register(sp_component_update_status)?;
         api.register(sp_component_update_abort)?;
+        api.register(sp_host_phase2_progress_get)?;
+        api.register(sp_host_phase2_progress_delete)?;
         api.register(ignition_list)?;
         api.register(ignition_get)?;
         api.register(ignition_command)?;

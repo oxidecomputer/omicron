@@ -2177,7 +2177,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e35df234f9db57b1b7fc0a8ca279fb2774ff1046#e35df234f9db57b1b7fc0a8ca279fb2774ff1046"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=f896b7cf0fe7e72641b33060185b71e5d3562b12#f896b7cf0fe7e72641b33060185b71e5d3562b12"
 dependencies = [
  "bitflags",
  "hubpack 0.1.1",
@@ -2192,7 +2192,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e35df234f9db57b1b7fc0a8ca279fb2774ff1046#e35df234f9db57b1b7fc0a8ca279fb2774ff1046"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=f896b7cf0fe7e72641b33060185b71e5d3562b12#f896b7cf0fe7e72641b33060185b71e5d3562b12"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2205,7 +2205,7 @@ dependencies = [
  "nix",
  "once_cell",
  "serde",
- "serde-big-array 0.4.1",
+ "serde-big-array 0.5.0",
  "slog",
  "socket2",
  "string_cache",
@@ -3820,6 +3820,7 @@ dependencies = [
  "openapiv3",
  "schemars",
  "serde",
+ "serde_human_bytes",
  "serde_json",
  "signal-hook",
  "signal-hook-tokio",
@@ -5871,6 +5872,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-big-array"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1bb66e1af4481c21cbc943cabb68b98aabb4d7f935e47d1b4de722ca09da0b4"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_cbor"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6882,8 +6892,8 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tlvc"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tlvc.git#2643765eb7775d1f5e8ec56910f1ab15e9c75170"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/tlvc.git#533f0bf26b0a8f32d287af4f2ea09320bc05c2cd"
 dependencies = [
  "byteorder",
  "crc",
