@@ -4,10 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{
-    get_control_id, Control, ControlId, NullPane, OverviewPane, Pane,
-    StatefulList,
-};
+use super::{Control, NullPane, OverviewPane, Pane, StatefulList};
 use crate::defaults::style;
 use crate::{Action, Event, Frame, State, Term};
 use crossterm::event::Event as TermEvent;
@@ -208,7 +205,6 @@ impl MainScreen {
 
 /// The mechanism for selecting panes
 pub struct Sidebar {
-    control_id: ControlId,
     panes: StatefulList<&'static str>,
     // Whether the sidebar is selected currently.
     selected: bool,
@@ -217,7 +213,6 @@ pub struct Sidebar {
 impl Sidebar {
     pub fn new() -> Sidebar {
         let mut sidebar = Sidebar {
-            control_id: get_control_id(),
             // TODO: The panes here must match the keys in `MainScreen::panes`
             // We should probably make this a touch less error prone
             panes: StatefulList::new(vec!["overview", "update", "help"]),
@@ -237,10 +232,6 @@ impl Sidebar {
 }
 
 impl Control for Sidebar {
-    fn control_id(&self) -> ControlId {
-        self.control_id
-    }
-
     fn on(&mut self, _: &mut State, event: Event) -> Option<Action> {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {

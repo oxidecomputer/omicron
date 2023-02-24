@@ -7,18 +7,13 @@ mod main;
 mod panes;
 mod splash;
 
-use crate::{
-    wizard::{Action, Event, State, Term},
-    Frame,
-};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tui::layout::Rect;
+use crate::wizard::{Action, Event, State, Term};
 use tui::widgets::ListState;
 
 use main::MainScreen;
 use splash::SplashScreen;
 
-pub use controls::{get_control_id, Control, ControlId};
+pub use controls::Control;
 pub use panes::{NullPane, OverviewPane, Pane};
 
 /// The primary display representation. It's sole purpose is to dispatch events

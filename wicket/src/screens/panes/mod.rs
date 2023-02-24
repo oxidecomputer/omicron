@@ -4,7 +4,7 @@
 
 mod overview_pane;
 
-pub use super::{get_control_id, Control, ControlId};
+pub use super::Control;
 pub use overview_pane::OverviewPane;
 
 /// A specific functionality such as `Update` or `Help` that is selectable
@@ -18,13 +18,12 @@ pub trait Pane: Control {
 }
 
 /// A placeholder pane used for development purposes
-pub struct NullPane {
-    control_id: ControlId,
-}
+#[derive(Default)]
+pub struct NullPane {}
 
 impl NullPane {
     pub fn new() -> NullPane {
-        NullPane { control_id: get_control_id() }
+        NullPane::default()
     }
 }
 
@@ -40,10 +39,6 @@ impl Pane for NullPane {
 }
 
 impl Control for NullPane {
-    fn control_id(&self) -> ControlId {
-        self.control_id
-    }
-
     fn on(
         &mut self,
         _: &mut crate::State,
@@ -59,4 +54,9 @@ impl Control for NullPane {
         _: tui::layout::Rect,
     ) {
     }
+}
+
+// A pane can contain many tabs
+pub trait Tab: Control {
+    fn name(&self) -> &'static str;
 }

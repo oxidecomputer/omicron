@@ -3,21 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    wizard::{Action, Event, State, Term},
+    wizard::{Action, Event, State},
     Frame,
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tui::layout::Rect;
-
-/// A unique id for a [`Control`]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ControlId(pub usize);
-
-/// Return a unique id for a [`Control`]
-pub fn get_control_id() -> ControlId {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
-}
 
 /// A [`Control`] is the an item on a screen that can be selected and interacted with.
 /// Control's render [`tui::Widget`]s when drawn.
@@ -28,7 +17,6 @@ pub fn get_control_id() -> ControlId {
 /// mutated when drawing, only visible state relevant to the Widget being
 /// drawn.
 pub trait Control {
-    fn control_id(&self) -> ControlId;
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action>;
     fn draw(&mut self, state: &State, frame: &mut Frame<'_>, rect: Rect);
 }

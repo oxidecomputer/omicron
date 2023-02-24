@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{get_control_id, Control, ControlId, Pane};
+use super::{Control, Pane, Tab};
 use crate::defaults::colors::*;
 use crate::defaults::style;
 use crate::widgets::{Rack, RackState};
@@ -14,19 +14,18 @@ use tui::style::{Color, Modifier, Style};
 /// The OverviewPane shows a rendering of the rack.
 ///
 /// This is useful for getting a quick view of the state of the rack.
-pub struct OverviewPane {
-    control_id: ControlId,
-}
+#[derive(Default)]
+pub struct OverviewPane {}
 
 impl OverviewPane {
     pub fn new() -> OverviewPane {
-        OverviewPane { control_id: get_control_id() }
+        OverviewPane::default()
     }
 }
 
 impl Pane for OverviewPane {
     fn tabs(&self) -> &[&'static str] {
-        &["Oxide Rack"]
+        &["Oxide Rack", "Inventory"]
     }
 
     fn selected_tab(&self) -> usize {
@@ -36,10 +35,6 @@ impl Pane for OverviewPane {
 }
 
 impl Control for OverviewPane {
-    fn control_id(&self) -> ControlId {
-        self.control_id
-    }
-
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
@@ -100,5 +95,33 @@ impl Control for OverviewPane {
         };
 
         frame.render_widget(rack, rect);
+    }
+}
+
+pub struct RackTab {
+    name: &'static str,
+}
+
+impl Tab for RackTab {
+    fn name(&self) -> &'static str {
+        "rack"
+    }
+}
+
+impl Control for RackTab {
+    fn on(
+        &mut self,
+        _: &mut crate::State,
+        _: crate::Event,
+    ) -> Option<crate::Action> {
+        None
+    }
+
+    fn draw(
+        &mut self,
+        _: &crate::State,
+        _: &mut crate::Frame<'_>,
+        _: tui::layout::Rect,
+    ) {
     }
 }
