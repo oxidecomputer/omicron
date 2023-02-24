@@ -484,6 +484,10 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     ssh_exec(&builder, &cmd, SshStrategy::NoForward)
 }
 
+fn do_dot(_config: &Config) -> Result<()> {
+    anyhow::bail!("\"dot\" command is not supported for thing-flinger");
+}
+
 fn do_check(config: &Config) -> Result<()> {
     let builder = &config.servers[&config.builder.server];
 
@@ -985,6 +989,9 @@ fn main() -> Result<()> {
             do_package(&config, artifact_dir)?;
         }
         SubCommand::Builder(BuildCommand::Check) => do_check(&config)?,
+        SubCommand::Builder(BuildCommand::Dot) => {
+            do_dot(&config)?;
+        }
         SubCommand::Deploy(DeployCommand::Install {
             artifact_dir,
             install_dir,

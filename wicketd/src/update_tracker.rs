@@ -512,7 +512,6 @@ impl UpdateDriver {
         let mut interval = tokio::time::interval(MGS_PROGRESS_POLL_INTERVAL);
         interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        interval.tick().await;
 
         loop {
             tokio::select! {
