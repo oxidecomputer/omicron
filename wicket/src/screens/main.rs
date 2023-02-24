@@ -155,7 +155,8 @@ impl MainScreen {
         let pane = self.current_pane();
 
         // Draw the Top bar (tabs)
-        let titles = pane.tabs().iter().cloned().map(Spans::from).collect();
+        let titles =
+            pane.tab_titles().iter().cloned().map(Spans::from).collect();
         let tabs = Tabs::new(titles)
             .style(Style::default().fg(Color::White))
             .highlight_style(Style::default().fg(TUI_GREEN))

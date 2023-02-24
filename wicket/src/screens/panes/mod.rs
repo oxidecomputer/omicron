@@ -7,11 +7,16 @@ mod overview_pane;
 pub use super::Control;
 pub use overview_pane::OverviewPane;
 
+pub struct Tab {
+    pub title: &'static str,
+    pub control: Box<dyn Control>,
+}
+
 /// A specific functionality such as `Update` or `Help` that is selectable
 /// from the [`MainScreen`] navbar on the left.
 pub trait Pane: Control {
     /// Return the tab names to be shown in the top bar of [`MainScreen`]
-    fn tabs(&self) -> &[&'static str];
+    fn tab_titles(&self) -> Vec<&'static str>;
 
     /// Return the index of the selected tab
     fn selected_tab(&self) -> usize;
@@ -28,8 +33,8 @@ impl NullPane {
 }
 
 impl Pane for NullPane {
-    fn tabs(&self) -> &[&'static str] {
-        &["NULL"]
+    fn tab_titles(&self) -> Vec<&'static str> {
+        vec!["NULL"]
     }
 
     fn selected_tab(&self) -> usize {
@@ -54,9 +59,4 @@ impl Control for NullPane {
         _: tui::layout::Rect,
     ) {
     }
-}
-
-// A pane can contain many tabs
-pub trait Tab: Control {
-    fn name(&self) -> &'static str;
 }

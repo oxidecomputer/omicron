@@ -14,18 +14,27 @@ use tui::style::{Color, Modifier, Style};
 /// The OverviewPane shows a rendering of the rack.
 ///
 /// This is useful for getting a quick view of the state of the rack.
-#[derive(Default)]
-pub struct OverviewPane {}
+pub struct OverviewPane {
+    // We want the controls in a specific order accessible by index
+    tabs: Vec<Tab>,
+    selected: usize,
+}
 
 impl OverviewPane {
     pub fn new() -> OverviewPane {
-        OverviewPane::default()
+        OverviewPane {
+            tabs: vec![Tab {
+                title: "OXIDE RACK",
+                control: Box::new(RackTab {}),
+            }],
+            selected: 0,
+        }
     }
 }
 
 impl Pane for OverviewPane {
-    fn tabs(&self) -> &[&'static str] {
-        &["Oxide Rack", "Inventory"]
+    fn tab_titles(&self) -> Vec<&'static str> {
+        self.tabs.iter().map(|t| t.title).collect()
     }
 
     fn selected_tab(&self) -> usize {
@@ -35,6 +44,32 @@ impl Pane for OverviewPane {
 }
 
 impl Control for OverviewPane {
+    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+        match event {
+            Event::Term(TermEvent::Key(e)) => match e.code {
+                KeyCode::Tab => {
+                    self.selected = (self.selected + 1) % self.tabs.len();
+                    Some(Action::Redraw)
+                }
+                _ => self.tabs[self.selected].control.on(state, event),
+            },
+            _ => self.tabs[self.selected].control.on(state, event),
+        }
+    }
+
+    fn draw(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        rect: tui::layout::Rect,
+    ) {
+        self.tabs[self.selected].control.draw(state, frame, rect)
+    }
+}
+
+pub struct RackTab {}
+
+impl Control for RackTab {
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
@@ -95,33 +130,5 @@ impl Control for OverviewPane {
         };
 
         frame.render_widget(rack, rect);
-    }
-}
-
-pub struct RackTab {
-    name: &'static str,
-}
-
-impl Tab for RackTab {
-    fn name(&self) -> &'static str {
-        "rack"
-    }
-}
-
-impl Control for RackTab {
-    fn on(
-        &mut self,
-        _: &mut crate::State,
-        _: crate::Event,
-    ) -> Option<crate::Action> {
-        None
-    }
-
-    fn draw(
-        &mut self,
-        _: &crate::State,
-        _: &mut crate::Frame<'_>,
-        _: tui::layout::Rect,
-    ) {
     }
 }
