@@ -11063,6 +11063,13 @@
         "parameters": [
           {
             "in": "query",
+            "name": "group",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {

@@ -40,6 +40,7 @@ use dropshot::{
 };
 use ipnetwork::IpNetwork;
 use nexus_types::identity::AssetIdentityMetadata;
+use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -51,9 +52,6 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::http_pagination::{
-    data_page_params_for, NameOrIdSortMode,
-};
 use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
@@ -7378,7 +7376,7 @@ async fn user_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .silo_users_list_current_by_id(&opctx, &pagparams)
+            .silo_users_list_current(&opctx, &pagparams)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -7400,37 +7398,27 @@ async fn user_list(
 }]
 async fn user_list_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::OptionalGroupSelector>>,
+    query_params: Query<PaginatedById<params::OptionalGroupSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
 
     let pag_params = data_page_params_for(&rqctx, &query)?;
-    let scan_params = ScanByNameOrId::from_query(&query)?;
-    let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+    // let scan_params = ScanById::from_query(&query)?;
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .silo_users_list_current(&opctx, &paginated_by)
+            .silo_users_list_current(&opctx, &pag_params)
             .await?
             .into_iter()
             .map(|i| i.into())
             .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+        Ok(HttpResponseOk(ScanById::results_page(
             &query,
             users,
-            // can't use marker_for_name_or_id because user doesn't impl ObjectIdentity
-            &|scan, user: &User| match scan.sort_by {
-                NameOrIdSortMode::NameAscending => {
-                    user.display_name.clone().into()
-                }
-                NameOrIdSortMode::NameDescending => {
-                    user.display_name.clone().into()
-                }
-                NameOrIdSortMode::IdAscending => user.id.into(),
-            },
+            &|_, user: &User| user.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

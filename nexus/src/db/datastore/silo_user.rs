@@ -28,7 +28,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -39,7 +38,6 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -192,35 +190,6 @@ impl DataStore {
                 );
                 (authz_silo_user, db_silo_user)
             }))
-    }
-
-    pub async fn silo_users_list(
-        &self,
-        opctx: &OpContext,
-        authz_silo_user_list: &authz::SiloUserList,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<SiloUser> {
-        use db::schema::silo_user::dsl;
-
-        opctx
-            .authorize(authz::Action::ListChildren, authz_silo_user_list)
-            .await?;
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::silo_user, dsl::id, pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::silo_user,
-                dsl::external_id,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .filter(dsl::silo_id.eq(authz_silo_user_list.silo().id()))
-        .filter(dsl::time_deleted.is_null())
-        .select(SiloUser::as_select())
-        .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn silo_users_list_by_id(

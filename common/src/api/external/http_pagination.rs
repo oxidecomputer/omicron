@@ -254,14 +254,18 @@ impl ScanParams for ScanByName {
 // Pagination by id in ascending order only (for some anonymous resources today)
 
 /// Query parameters for pagination by id only
-pub type PaginatedById = PaginationParams<ScanById, PageSelectorById>;
+pub type PaginatedById<Selector = ()> =
+    PaginationParams<ScanById<Selector>, PageSelectorById<Selector>>;
 /// Page selector for pagination by name only
-pub type PageSelectorById = PageSelector<ScanById, Uuid>;
+pub type PageSelectorById<Selector = ()> =
+    PageSelector<ScanById<Selector>, Uuid>;
 /// Scan parameters for resources that support scanning by id only
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-pub struct ScanById {
+pub struct ScanById<Selector = ()> {
     #[serde(default = "default_id_sort_mode")]
     sort_by: IdSortMode,
+    #[serde(flatten)]
+    pub selector: Selector,
 }
 
 /// Supported set of sort modes for scanning by id only.
@@ -278,12 +282,15 @@ fn default_id_sort_mode() -> IdSortMode {
     IdSortMode::IdAscending
 }
 
-impl ScanParams for ScanById {
+impl<
+        T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+    > ScanParams for ScanById<T>
+{
     type MarkerValue = Uuid;
     fn direction(&self) -> PaginationOrder {
         PaginationOrder::Ascending
     }
-    fn from_query(p: &PaginatedById) -> Result<&Self, HttpError> {
+    fn from_query(p: &PaginatedById<T>) -> Result<&Self, HttpError> {
         Ok(match p.page {
             WhichPage::First(ref scan_params) => scan_params,
             WhichPage::Next(PageSelector { ref scan, .. }) => scan,
@@ -484,7 +491,8 @@ mod test {
     // parameters and page selectors here.
     #[test]
     fn test_pagination_examples() {
-        let scan_by_id = ScanById { sort_by: IdSortMode::IdAscending };
+        let scan_by_id =
+            ScanById { sort_by: IdSortMode::IdAscending, selector: () };
         let scan_by_name = ScanByName { sort_by: NameSortMode::NameAscending };
         let scan_by_nameid_name = ScanByNameOrId::<()> {
             sort_by: NameOrIdSortMode::NameAscending,
@@ -691,7 +699,7 @@ mod test {
     #[test]
     fn test_scan_by_id() {
         // Start with the common battery of tests.
-        let scan = ScanById { sort_by: IdSortMode::IdAscending };
+        let scan = ScanById { sort_by: IdSortMode::IdAscending, selector: () };
 
         let list = list_of_things();
         let (p0, p1) = test_scan_param_common(
