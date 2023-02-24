@@ -123,7 +123,7 @@ where
             // it has a larger log that requires more queries).  To avoid one
             // bad saga ruining the rest, we should try to recover the rest
             // before we go back to one that's failed.
-            // TODO-debug want visibility into "abandoned" sagas
+            // TODO-debugging want visibility into "abandoned" sagas
             let saga_id: steno::SagaId = saga.id.into();
             recover_saga(
                 &opctx,

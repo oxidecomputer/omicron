@@ -118,7 +118,6 @@ impl super::Nexus {
                 message: "device authorization request expired".to_string(),
             })
         } else {
-            // TODO-security: set an expiration time for the valid token.
             self.db_datastore
                 .device_access_token_create(
                     opctx,

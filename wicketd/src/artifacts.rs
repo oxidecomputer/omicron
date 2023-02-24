@@ -18,12 +18,18 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
-use installinator_artifactd::ArtifactGetter;
+use installinator_artifactd::{ArtifactGetter, ProgressReportStatus};
+use installinator_common::ProgressReport;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use omicron_common::update::{ArtifactHash, ArtifactHashId, ArtifactId};
+use omicron_common::update::{
+    ArtifactHash, ArtifactHashId, ArtifactId, ArtifactKind,
+};
+use sha2::{Digest, Sha256};
+use slog::{warn, Logger};
 use thiserror::Error;
 use tough::TargetName;
 use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
+use uuid::Uuid;
 
 // A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug, Default)]
@@ -39,14 +45,14 @@ struct ArtifactsWithPlan {
 /// upload artifacts and the parts that fetch them.
 #[derive(Clone, Debug)]
 pub(crate) struct WicketdArtifactStore {
-    log: slog::Logger,
+    log: Logger,
     // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex` because the critical
     // sections are extremely small.
     artifacts_with_plan: Arc<Mutex<ArtifactsWithPlan>>,
 }
 
 impl WicketdArtifactStore {
-    pub(crate) fn new(log: &slog::Logger) -> Self {
+    pub(crate) fn new(log: &Logger) -> Self {
         let log = log.new(slog::o!("component" => "wicketd artifact store"));
         Self { log, artifacts_with_plan: Default::default() }
     }
@@ -54,7 +60,7 @@ impl WicketdArtifactStore {
     pub(crate) fn put_repository(&self, bytes: &[u8]) -> Result<(), HttpError> {
         slog::debug!(self.log, "adding repository"; "size" => bytes.len());
 
-        let new_artifacts = ArtifactsWithPlan::from_zip(&bytes, &self.log)
+        let new_artifacts = ArtifactsWithPlan::from_zip(bytes, &self.log)
             .map_err(|error| error.to_http_error())?;
         self.replace(new_artifacts);
         Ok(())
@@ -128,12 +134,20 @@ impl ArtifactGetter for WicketdArtifactStore {
             buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
         )))
     }
+
+    async fn report_progress(
+        &self,
+        _update_id: Uuid,
+        _report: ProgressReport,
+    ) -> Result<ProgressReportStatus, HttpError> {
+        todo!("implement server-side support for events")
+    }
 }
 
 impl ArtifactsWithPlan {
     fn from_zip(
         zip_bytes: &[u8],
-        log: &slog::Logger,
+        log: &Logger,
     ) -> Result<Self, RepositoryError> {
         let mut extractor = ArchiveExtractor::from_borrowed_bytes(zip_bytes)
             .map_err(RepositoryError::OpenArchive)?;
@@ -277,7 +291,7 @@ impl ArtifactsWithPlan {
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = UpdatePlan::new(&by_id)?;
+        let plan = UpdatePlan::new(&by_id, &mut by_hash, log)?;
 
         Ok(Self {
             by_id: by_id.into(),
@@ -408,11 +422,34 @@ pub(crate) struct UpdatePlan {
     pub(crate) gimlet_sp: ArtifactIdData,
     pub(crate) psc_sp: ArtifactIdData,
     pub(crate) sidecar_sp: ArtifactIdData,
+
+    // Note: The Trampoline image is broken into phase1/phase2 as part of our
+    // update plan (because they go to different destinations), but the two
+    // phases will have the _same_ `ArtifactId` (i.e., the ID of the Host
+    // artifact from the TUF repository.
+    //
+    // The same would apply to the host phase1/phase2, but we don't actually
+    // need the `host_phase_2` data as part of this plan (we serve it from the
+    // artifact server instead).
+    pub(crate) host_phase_1: ArtifactIdData,
+    pub(crate) trampoline_phase_1: ArtifactIdData,
+    pub(crate) trampoline_phase_2: ArtifactIdData,
+
+    // We need to send installinator the hash of the host_phase_2 data it should
+    // fetch from us; we compute it while generating the plan.
+    pub(crate) host_phase_2_hash: ArtifactHash,
+
+    // We also need to send installinator the hash of the control_plane image it
+    // should fetch from us. This is already present in the TUF repository, but
+    // we record it here for use by the update process.
+    pub(crate) control_plane_hash: ArtifactHash,
 }
 
 impl UpdatePlan {
     fn new(
-        artifacts: &HashMap<ArtifactId, BufList>,
+        by_id: &HashMap<ArtifactId, BufList>,
+        by_hash: &mut HashMap<ArtifactHashId, BufList>,
+        log: &Logger,
     ) -> Result<Self, RepositoryError> {
         // We expect exactly one of each of these kinds to be present in the
         // snapshot. Scan the snapshot and record the first of each we find,
@@ -420,6 +457,10 @@ impl UpdatePlan {
         let mut gimlet_sp = None;
         let mut psc_sp = None;
         let mut sidecar_sp = None;
+        let mut host_phase_1 = None;
+        let mut host_phase_2 = None;
+        let mut trampoline_phase_1 = None;
+        let mut trampoline_phase_2 = None;
 
         let artifact_found =
             |out: &mut Option<ArtifactIdData>, id, data: &BufList| {
@@ -434,7 +475,7 @@ impl UpdatePlan {
                 }
             };
 
-        for (artifact_id, data) in artifacts.iter() {
+        for (artifact_id, data) in by_id.iter() {
             // In generating an update plan, skip any artifact kinds that are
             // unknown to us (we wouldn't know how to incorporate them into our
             // plan).
@@ -451,7 +492,77 @@ impl UpdatePlan {
                 KnownArtifactKind::SwitchSp => {
                     artifact_found(&mut sidecar_sp, artifact_id, data)?
                 }
+                KnownArtifactKind::Host => {
+                    let (phase1, phase2) = unpack_host_artifact(data, log)?;
+                    artifact_found(
+                        &mut host_phase_1,
+                        artifact_id.clone(),
+                        &phase1,
+                    )?;
+                    artifact_found(&mut host_phase_2, artifact_id, &phase2)?;
+                }
+                KnownArtifactKind::Trampoline => {
+                    let (phase1, phase2) = unpack_host_artifact(data, log)?;
+                    artifact_found(
+                        &mut trampoline_phase_1,
+                        artifact_id.clone(),
+                        &phase1,
+                    )?;
+                    artifact_found(
+                        &mut trampoline_phase_2,
+                        artifact_id,
+                        &phase2,
+                    )?;
+                }
                 _ => continue,
+            }
+        }
+
+        // Find the TUF hash of the control plane artifact. This is a little
+        // hokey: scan through `by_hash` looking for the right artifact kind.
+        let control_plane_hash = by_hash
+            .keys()
+            .find_map(|hash_id| {
+                if hash_id.kind.to_known()
+                    == Some(KnownArtifactKind::ControlPlane)
+                {
+                    Some(hash_id.hash)
+                } else {
+                    None
+                }
+            })
+            .ok_or(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::ControlPlane,
+            ))?;
+
+        // Ensure we found a Host artifact.
+        let host_phase_2 = host_phase_2.ok_or(
+            RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
+        )?;
+
+        // Compute the SHA-256 of the extracted host phase 2 data.
+        let mut host_phase_2_hash = Sha256::new();
+        for chunk in host_phase_2.data.iter() {
+            host_phase_2_hash.update(chunk);
+        }
+        let host_phase_2_hash =
+            ArtifactHash(host_phase_2_hash.finalize().into());
+
+        // Add the host phase 2 image to the set of artifacts we're willing to
+        // serve by hash; that's how installinator will be requesting it.
+        let host_phase_2_hash_id = ArtifactHashId {
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: host_phase_2_hash,
+        };
+        match by_hash.entry(host_phase_2_hash_id.clone()) {
+            Entry::Occupied(_) => {
+                // We got two entries for an artifact?
+                return Err(RepositoryError::DuplicateHashEntry(
+                    host_phase_2_hash_id,
+                ));
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(host_phase_2.data.0.clone());
             }
         }
 
@@ -469,6 +580,32 @@ impl UpdatePlan {
                     KnownArtifactKind::SwitchSp,
                 ),
             )?,
+            host_phase_1: host_phase_1.ok_or(
+                RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
+            )?,
+            trampoline_phase_1: trampoline_phase_1.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::Trampoline,
+                ),
+            )?,
+            trampoline_phase_2: trampoline_phase_2.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::Trampoline,
+                ),
+            )?,
+            host_phase_2_hash,
+            control_plane_hash,
         })
     }
+}
+
+fn unpack_host_artifact(
+    data: &BufList,
+    log: &Logger,
+) -> Result<(BufList, BufList), RepositoryError> {
+    // TODO What do host artifacts look like? Probably a tarball? We need to
+    // unpack it here and find the phase1/phase2. For now, just return the
+    // incoming data as phase1 and an empty buflist as phase 2.
+    warn!(log, "FIXME FIXME FIXME PLACEHOLDER UNPACKING HOST ARTIFACT");
+    Ok((data.clone(), BufList::new()))
 }

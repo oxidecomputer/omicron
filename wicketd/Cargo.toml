@@ -22,6 +22,7 @@ hyper.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
+sha2.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 tempfile.workspace = true
@@ -34,6 +35,7 @@ uuid.workspace = true
 
 gateway-client.workspace = true
 installinator-artifactd.workspace = true
+installinator-common.workspace = true
 omicron-common.workspace = true
 tufaceous-lib.workspace = true
 

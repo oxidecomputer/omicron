@@ -5,13 +5,10 @@
 //! Executable program to run Nexus, the heart of the control plane
 
 // TODO
-// - TCP and HTTP KeepAlive parameters
 // - Server hostname
 // - Disable signals?
-// - Analogs for actix client_timeout (request timeout), client_shutdown (client
-//   shutdown timeout), server backlog, number of workers, max connections per
-//   worker, max connect-in-progress sockets, shutdown_timeout (server shutdown
-//   timeout)
+// - General networking and runtime tuning for availability and security: see
+//   omicron#2184, omicron#2414.
 
 use clap::Parser;
 use omicron_common::cmd::fatal;

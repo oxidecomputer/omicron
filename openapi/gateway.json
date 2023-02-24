@@ -783,6 +783,86 @@
         }
       }
     },
+    "/sp/{type}/{slot}/host-phase2-progress": {
+      "get": {
+        "summary": "Get the most recent host phase2 request we've seen from the target SP.",
+        "description": "This method can be used as an indirect progress report for how far along a host is when it is booting via the MGS -> SP -> UART recovery path. This path is used to install the trampoline image containing installinator to recover a sled.",
+        "operationId": "sp_host_phase2_progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPhase2Progress"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear the most recent host phase2 request we've seen from the target SP.",
+        "operationId": "sp_host_phase2_progress_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/ipcc/installinator-image-id": {
       "put": {
         "summary": "Set the installinator image ID the sled should use for recovery.",
@@ -1100,6 +1180,25 @@
       }
     },
     "schemas": {
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -1119,12 +1218,65 @@
           "request_id"
         ]
       },
+      "HostPhase2Progress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "age": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "image_id": {
+                "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
+              },
+              "offset": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "total_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "age",
+              "image_id",
+              "offset",
+              "progress",
+              "total_size"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "progress"
+            ]
+          }
+        ]
+      },
       "HostPhase2RecoveryImageId": {
         "description": "Identity of a host phase2 recovery image.",
         "type": "object",
         "properties": {
           "sha256_hash": {
-            "type": "string"
+            "type": "string",
+            "format": "hex string (32 bytes)"
           }
         },
         "required": [

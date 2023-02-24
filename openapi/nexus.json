@@ -3772,6 +3772,7 @@
           "vpcs"
         ],
         "summary": "List firewall rules",
+        "description": "Use `GET /v1/vpc-firewall-rules` instead",
         "operationId": "vpc_firewall_rules_view",
         "parameters": [
           {
@@ -3816,13 +3817,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "vpcs"
         ],
         "summary": "Replace firewall rules",
+        "description": "Use `PUT /v1/vpc-firewall-rules` instead",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
@@ -3877,7 +3880,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers": {
@@ -10979,6 +10983,116 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SystemVersion"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-firewall-rules": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List firewall rules",
+        "operationId": "vpc_firewall_rules_view_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcFirewallRules"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Replace firewall rules",
+        "operationId": "vpc_firewall_rules_update_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcFirewallRuleUpdateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcFirewallRules"
                 }
               }
             }

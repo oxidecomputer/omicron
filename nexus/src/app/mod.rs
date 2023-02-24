@@ -63,7 +63,7 @@ pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
 
 pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
-// TODO-completness: Support multiple external IPs
+// TODO-completeness: Support multiple external IPs
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
 
 pub(crate) struct ExternalServers {

@@ -8,16 +8,18 @@ use anyhow::{Context, Result};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
+use installinator_common::CompletionEventKind;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
 use slog::Drain;
-use tokio::io::AsyncWriteExt;
+use tokio::{io::AsyncWriteExt, sync::mpsc};
 
 use crate::{
-    artifact::ArtifactIdsOpt,
+    artifact::ArtifactIdOpts,
     peers::{DiscoveryMechanism, FetchedArtifact, Peers},
+    reporter::{ProgressReporter, ReportEvent},
 };
 
 /// Installinator app.
@@ -100,8 +102,9 @@ struct InstallOpts {
     #[command(flatten)]
     discover_opts: DiscoverOpts,
 
-    /// Artifact ID ["from-ipcc" or "host_phase_2:<sha256>,control_plane:<sha256>"]
-    artifact_ids: ArtifactIdsOpt,
+    /// Artifact ID options
+    #[command(flatten)]
+    artifact_ids: ArtifactIdOpts,
 
     // TODO: checksum?
 
@@ -111,38 +114,57 @@ struct InstallOpts {
 
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        let artifact_hashes = self.artifact_ids.resolve()?;
+        let image_id = self.artifact_ids.resolve()?;
 
         let host_phase_2_id = ArtifactHashId {
             // TODO: currently we're assuming that wicket will unpack the host
             // phase 2 image. We may instead have the installinator do it.
             // kind: KnownArtifactKind::Host.into(),
             kind: ArtifactKind::HOST_PHASE_2,
-            hash: artifact_hashes.host_phase_2,
+            hash: image_id.host_phase_2,
         };
+
+        let discovery = self.discover_opts.mechanism.clone();
+        let discovery_log = log.clone();
+        let (progress_reporter, event_sender) =
+            ProgressReporter::new(&log, image_id.update_id, move || {
+                let log = discovery_log.clone();
+                let discovery = discovery.clone();
+                async move {
+                    Ok(Peers::new(
+                        &log,
+                        discovery.discover_peers(&log).await?,
+                        Duration::from_secs(10),
+                    ))
+                }
+            });
+        let progress_handle = progress_reporter.start();
 
         let host_phase_2_artifact = fetch_artifact(
             &host_phase_2_id,
             &self.discover_opts.mechanism,
             &log,
+            &event_sender,
         )
         .await?;
 
         let control_plane_id = ArtifactHashId {
             kind: KnownArtifactKind::ControlPlane.into(),
-            hash: artifact_hashes.control_plane,
+            hash: image_id.control_plane,
         };
 
         let control_plane_artifact = fetch_artifact(
             &control_plane_id,
             &self.discover_opts.mechanism,
             &log,
+            &event_sender,
         )
         .await?;
 
         // TODO: figure out the actual destination.
 
-        // TODO: add retries to this process?
+        // TODO: add retries to this process
+        // TODO: publish write events.
         std::fs::create_dir_all(&self.destination).with_context(|| {
             format!("error creating directories at {}", self.destination)
         })?;
@@ -161,6 +183,15 @@ impl InstallOpts {
         )
         .await?;
 
+        // Drop the event sender: this signals completion.
+        _ = event_sender
+            .send(ReportEvent::Completion(CompletionEventKind::Completed))
+            .await;
+        std::mem::drop(event_sender);
+
+        // Wait for all progress reports to be sent.
+        progress_handle.await.context("progress reporter to complete")?;
+
         Ok(())
     }
 }
@@ -169,23 +200,22 @@ async fn fetch_artifact(
     id: &ArtifactHashId,
     discovery: &DiscoveryMechanism,
     log: &slog::Logger,
+    event_sender: &mpsc::Sender<ReportEvent>,
 ) -> Result<FetchedArtifact> {
     // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
     // out at some point.
     let log = log.new(slog::o!("artifact" => format!("{id:?}")));
     let artifact = FetchedArtifact::loop_fetch_from_peers(
         &log,
-        || {
-            // TODO: discover nodes via the bootstrap network
-            async {
-                Ok(Peers::new(
-                    &log,
-                    discovery.discover_peers(&log).await?,
-                    Duration::from_secs(10),
-                ))
-            }
+        || async {
+            Ok(Peers::new(
+                &log,
+                discovery.discover_peers(&log).await?,
+                Duration::from_secs(10),
+            ))
         },
         id,
+        event_sender,
     )
     .await
     .with_context(|| format!("error fetching image with id {id:?}"))?;
