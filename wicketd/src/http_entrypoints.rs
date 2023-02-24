@@ -6,7 +6,6 @@
 
 use crate::mgs::GetInventoryResponse;
 use crate::update_events::UpdateLog;
-use crate::update_tracker::StartUpdateError;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -149,11 +148,7 @@ async fn post_start_update(
     match rqctx.update_tracker.start(target.into_inner(), plan, update_id).await
     {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
-        Err(err) => match err {
-            StartUpdateError::UpdateInProgress(_) => {
-                Err(HttpError::for_bad_request(None, err.to_string()))
-            }
-        },
+        Err(err) => Err(err.to_http_error()),
     }
 }
 

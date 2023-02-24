@@ -33,6 +33,7 @@ pub trait ArtifactGetter: fmt::Debug + Send + Sync + 'static {
 
 /// The status returned by [`ArtifactGetter::report_progress`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[must_use]
 pub enum ProgressReportStatus {
     /// This event was processed by the server.
     Processed,

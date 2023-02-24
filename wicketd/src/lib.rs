@@ -75,9 +75,9 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
         mgs_manager.run().await;
     });
 
-    let (it, ipr_artifact, ipr_update_tracker) =
+    let (ipr_manager, ipr_artifact, ipr_update_tracker) =
         crate::installinator_progress::new(&log);
-    tokio::spawn(async move { it.run().await });
+    tokio::spawn(ipr_manager.run());
 
     let store = WicketdArtifactStore::new(&log);
     let update_tracker =

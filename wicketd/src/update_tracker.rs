@@ -6,6 +6,7 @@
 
 use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
+use crate::installinator_progress::IprError;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -19,6 +20,8 @@ use anyhow::ensure;
 use anyhow::Context;
 use buf_list::BufList;
 use bytes::Bytes;
+use display_error_chain::DisplayErrorChain;
+use dropshot::HttpError;
 use futures::TryStream;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
@@ -208,7 +211,7 @@ impl UpdateTracker {
         let spawn_update_driver = || async {
             let update_log = Arc::default();
             let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id).await;
+                self.ipr_update_tracker.register(update_id).await?;
 
             let update_driver = UpdateDriver {
                 update_id,
@@ -225,7 +228,7 @@ impl UpdateTracker {
             let task =
                 tokio::spawn(update_driver.run(plan, ipr_start_receiver));
 
-            SpUpdateData { task, update_log }
+            Ok::<_, StartUpdateError>(SpUpdateData { task, update_log })
         };
 
         let mut sp_update_data = self.sp_update_data.lock().await;
@@ -233,14 +236,14 @@ impl UpdateTracker {
             // Vacant: this is the first time we've started an update to this
             // sp.
             Entry::Vacant(slot) => {
-                slot.insert(spawn_update_driver().await);
+                slot.insert(spawn_update_driver().await?);
                 Ok(())
             }
             // Occupied: we've previously started an update to this sp; only
             // allow this one if that update is no longer running.
             Entry::Occupied(mut slot) => {
                 if slot.get().task.is_finished() {
-                    slot.insert(spawn_update_driver().await);
+                    slot.insert(spawn_update_driver().await?);
                     Ok(())
                 } else {
                     Err(StartUpdateError::UpdateInProgress(sp))
@@ -302,6 +305,21 @@ impl UpdateTracker {
 pub(crate) enum StartUpdateError {
     #[error("target is already being updated: {0:?}")]
     UpdateInProgress(SpIdentifier),
+    #[error("error communicating with installinator progress manager")]
+    Ipr(#[from] IprError),
+}
+
+impl StartUpdateError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        let message = DisplayErrorChain::new(self).to_string();
+
+        match self {
+            StartUpdateError::UpdateInProgress(_) => {
+                HttpError::for_bad_request(None, message)
+            }
+            StartUpdateError::Ipr(_) => HttpError::for_unavail(None, message),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -427,7 +445,7 @@ impl UpdateDriver {
                 }
             })?;
 
-        while let Some(report) = ipr_receiver.recv().await {
+        while let Some(_report) = ipr_receiver.recv().await {
             // TODO: process progress reports, not just completion.
         }
 
