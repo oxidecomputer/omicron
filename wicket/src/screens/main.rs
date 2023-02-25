@@ -158,7 +158,6 @@ impl MainScreen {
         let titles =
             pane.tab_titles().iter().cloned().map(Spans::from).collect();
         let tabs = Tabs::new(titles)
-            .style(Style::default().fg(Color::White))
             .highlight_style(Style::default().fg(TUI_GREEN))
             .block(
                 Block::default()

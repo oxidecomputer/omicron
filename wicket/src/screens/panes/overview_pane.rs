@@ -10,6 +10,8 @@ use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 use tui::style::{Color, Modifier, Style};
+use tui::text::{Span, Spans, Text};
+use tui::widgets::{Block, Paragraph};
 
 /// The OverviewPane shows a rendering of the rack.
 ///
@@ -141,6 +143,24 @@ impl Control for InventoryTab {
         frame: &mut Frame<'_>,
         rect: tui::layout::Rect,
     ) {
+        // Draw the header
+        let inventory_style = Style::default().fg(OX_YELLOW_DIM);
+
+        let mut header_style = style::menu_bar_selected();
+        header_style =
+            header_style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+
+        // Draw the contents
+        let text =
+            match state.inventory.get_inventory(&state.rack_state.selected) {
+                Some(inventory) => {
+                    Text::styled(format!("{:#?}", inventory), inventory_style)
+                }
+                None => Text::styled("UNKNOWN", inventory_style),
+            };
+
+        let inventory = Paragraph::new(text);
+        frame.render_widget(inventory, rect);
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
