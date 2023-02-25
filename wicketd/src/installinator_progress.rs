@@ -20,13 +20,16 @@ pub(crate) fn new(log: &slog::Logger) -> (IprArtifactServer, IprUpdateTracker) {
 
     let ipr_artifact = IprArtifactServer {
         log: log.new(
-            slog::o!("component" => "installinator progress report, artifact server"),
+            slog::o!("component" => "installinator progress reports, artifact server"),
         ),
         running_updates: running_updates.clone(),
     };
-    let ipr_update_tracker = IprUpdateTracker { log: log.new(
-        slog::o!("component" => "installinator progress report, update tracker"),
-    ), running_updates };
+    let ipr_update_tracker = IprUpdateTracker { 
+        log: log.new(
+            slog::o!("component" => "installinator progress reports, update tracker"),
+        ),
+        running_updates,
+    };
 
     (ipr_artifact, ipr_update_tracker)
 }
