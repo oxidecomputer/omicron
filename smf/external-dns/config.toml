@@ -1,0 +1,13 @@
+[dropshot]
+request_body_max_bytes = 1048576
+
+[log]
+# Show log messages of this level and more severe
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"
+
+[data]
+nmax_messages = 16
+storage_path = "/var/oxide/dns"

@@ -18,7 +18,7 @@ use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = crate::Error<crate::types::Error>;
 
-pub type AAAARecord = (crate::names::AAAA, SocketAddrV6);
+pub type AAAARecord = (internal_dns_names::AAAA, SocketAddrV6);
 
 /// Describes how to find the DNS servers.
 ///
@@ -98,7 +98,7 @@ impl Updater {
     /// Each SRV record should have one or more AAAA records.
     pub async fn insert_dns_records(
         &self,
-        records: &HashMap<crate::names::SRV, Vec<AAAARecord>>,
+        records: &HashMap<internal_dns_names::SRV, Vec<AAAARecord>>,
     ) -> Result<(), DnsError> {
         for (srv, aaaa) in records.iter() {
             info!(self.log, "Inserting DNS record: {:?}", srv);
@@ -114,7 +114,7 @@ impl Updater {
     async fn insert_dns_records_internal(
         &self,
         aaaa: &Vec<AAAARecord>,
-        srv_key: &crate::names::SRV,
+        srv_key: &internal_dns_names::SRV,
     ) -> Result<(), DnsError> {
         let mut records = Vec::with_capacity(aaaa.len() + 1);
 
@@ -185,7 +185,7 @@ pub enum ResolveError {
     Resolve(#[from] trust_dns_resolver::error::ResolveError),
 
     #[error("Record not found for SRV key: {0}")]
-    NotFound(crate::names::SRV),
+    NotFound(internal_dns_names::SRV),
 
     #[error("Record not found for {0}")]
     NotFoundByString(String),
@@ -242,7 +242,7 @@ impl Resolver {
     // API that can be improved upon later.
     pub async fn lookup_ipv6(
         &self,
-        srv: crate::names::SRV,
+        srv: internal_dns_names::SRV,
     ) -> Result<Ipv6Addr, ResolveError> {
         let response = self.inner.ipv6_lookup(&srv.to_string()).await?;
         let address = response
@@ -256,7 +256,7 @@ impl Resolver {
     /// Returns an error if the record does not exist.
     pub async fn lookup_socket_v6(
         &self,
-        srv: crate::names::SRV,
+        srv: internal_dns_names::SRV,
     ) -> Result<SocketAddrV6, ResolveError> {
         let response =
             self.inner.lookup(&srv.to_string(), RecordType::SRV).await?;
@@ -289,7 +289,7 @@ impl Resolver {
 
     pub async fn lookup_ip(
         &self,
-        srv: crate::names::SRV,
+        srv: internal_dns_names::SRV,
     ) -> Result<IpAddr, ResolveError> {
         let response = self.inner.lookup_ip(&srv.to_string()).await?;
         let address = response
@@ -303,7 +303,7 @@ impl Resolver {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::names::{BackendName, ServiceName, AAAA, SRV};
+    use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
     use omicron_test_utils::dev::test_setup_log;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -312,9 +312,9 @@ mod test {
 
     struct DnsServer {
         _storage: TempDir,
-        dns_server: internal_dns::dns_server::Server,
+        dns_server: dns_server::dns_server::Server,
         dropshot_server:
-            dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+            dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
     }
 
     impl DnsServer {
@@ -327,17 +327,15 @@ mod test {
             let dns_server = {
                 let db = db.clone();
                 let log = log.clone();
-                let dns_config = internal_dns::dns_server::Config {
+                let dns_config = dns_server::dns_server::Config {
                     bind_address: "[::1]:0".to_string(),
-                    zone: crate::names::DNS_ZONE.into(),
+                    zone: internal_dns_names::DNS_ZONE.into(),
                 };
 
-                internal_dns::dns_server::run(log, db, dns_config)
-                    .await
-                    .unwrap()
+                dns_server::dns_server::run(log, db, dns_config).await.unwrap()
             };
 
-            let config = internal_dns::Config {
+            let config = dns_server::Config {
                 log: dropshot::ConfigLogging::StderrTerminal {
                     level: dropshot::ConfigLoggingLevel::Info,
                 },
@@ -346,14 +344,14 @@ mod test {
                     request_body_max_bytes: 1024,
                     ..Default::default()
                 },
-                data: internal_dns::dns_data::Config {
+                data: dns_server::dns_data::Config {
                     nmax_messages: 16,
                     storage_path: storage.path().to_string_lossy().into(),
                 },
             };
 
             let dropshot_server =
-                internal_dns::start_dropshot_server(config, log.clone(), db)
+                dns_server::start_dropshot_server(config, log.clone(), db)
                     .await
                     .unwrap();
 

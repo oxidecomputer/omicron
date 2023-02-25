@@ -13,7 +13,7 @@ use subprocess::Exec;
 const CMD_API_GEN: &str = env!("CARGO_BIN_EXE_apigen");
 
 #[test]
-fn test_internal_dns_openapi() {
+fn test_dns_server_openapi() {
     let exec = Exec::cmd(path_to_executable(CMD_API_GEN));
     let (exit_status, stdout, stderr) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr);
@@ -23,5 +23,5 @@ fn test_internal_dns_openapi() {
     let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
-    assert_contents("../openapi/internal-dns.json", &stdout);
+    assert_contents("../openapi/dns-server.json", &stdout);
 }
