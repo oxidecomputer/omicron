@@ -23,10 +23,10 @@ pub struct OverviewPane {
 impl OverviewPane {
     pub fn new() -> OverviewPane {
         OverviewPane {
-            tabs: vec![Tab {
-                title: "OXIDE RACK",
-                control: Box::new(RackTab {}),
-            }],
+            tabs: vec![
+                Tab { title: "OXIDE RACK", control: Box::new(RackTab {}) },
+                Tab { title: "INVENTORY", control: Box::new(InventoryTab {}) },
+            ],
             selected: 0,
         }
     }
@@ -38,8 +38,7 @@ impl Pane for OverviewPane {
     }
 
     fn selected_tab(&self) -> usize {
-        // There's only one tab
-        0
+        self.selected
     }
 }
 
@@ -130,5 +129,21 @@ impl Control for RackTab {
         };
 
         frame.render_widget(rack, rect);
+    }
+}
+
+pub struct InventoryTab {}
+
+impl Control for InventoryTab {
+    fn draw(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        rect: tui::layout::Rect,
+    ) {
+    }
+
+    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+        None
     }
 }

@@ -165,7 +165,8 @@ impl MainScreen {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             )
-            .style(border_style);
+            .style(border_style)
+            .select(pane.selected_tab());
         frame.render_widget(tabs, tabs_rect);
 
         // Draw the pane border
