@@ -12,7 +12,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
 use tui::text::{Span, Spans, Text};
-use tui::widgets::{Block, BorderType, Borders, Paragraph};
+use tui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
 
 /// The OverviewPane shows a rendering of the rack.
 ///
@@ -161,7 +161,14 @@ impl Control for InventoryTab {
     ) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .constraints(
+                [
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                    Constraint::Length(3),
+                ]
+                .as_ref(),
+            )
             .split(rect);
 
         let (border_style, component_style) = if active {
@@ -170,29 +177,27 @@ impl Control for InventoryTab {
             (style::deselected(), style::deselected())
         };
 
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(border_style);
+
         // Draw the current component
+        // Make the borders touch (no gaps)
         let component = Paragraph::new(Text::from(format!(
             "{}",
             state.rack_state.selected
         )))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .style(border_style),
-        )
+        .block(block.clone())
         .style(component_style)
         .alignment(Alignment::Center);
         frame.render_widget(component, chunks[0]);
 
-        // Draw the header
-        let inventory_style = Style::default().fg(OX_YELLOW_DIM);
-
-        let mut header_style = style::menu_bar_selected();
-        header_style =
-            header_style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
-
         // Draw the contents
+        let contents_block =
+            block.clone().borders(Borders::LEFT | Borders::RIGHT);
+        let mut rect = chunks[1];
+        let inventory_style = Style::default().fg(OX_YELLOW_DIM);
         let text =
             match state.inventory.get_inventory(&state.rack_state.selected) {
                 Some(inventory) => {
@@ -201,16 +206,32 @@ impl Control for InventoryTab {
                 None => Text::styled("Inventory Unavailable", inventory_style),
             };
 
-        let inventory = Paragraph::new(text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .style(border_style),
-        );
-        frame.render_widget(inventory, chunks[1]);
+        let inventory = Paragraph::new(text).block(contents_block.clone());
+        frame.render_widget(inventory, rect);
+
+        // Draw the help bar
+        let help = Paragraph::new("some help here | more help | yet more help")
+            .block(block.clone());
+        frame.render_widget(help, chunks[2]);
+
+        // Make sure the top and bottom bars connect
+        frame.render_widget(BoxConnector {}, chunks[1]);
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
         None
+    }
+}
+
+// Connect the top and bottom borders of contents in between two bars
+struct BoxConnector {}
+
+impl Widget for BoxConnector {
+    fn render(self, rect: Rect, buf: &mut tui::buffer::Buffer) {
+        buf.get_mut(rect.x, rect.y - 1).set_symbol("├");
+        buf.get_mut(rect.x + rect.width - 1, rect.y - 1).set_symbol("┤");
+        buf.get_mut(rect.x, rect.y + rect.height).set_symbol("├");
+        buf.get_mut(rect.x + rect.width - 1, rect.y + rect.height)
+            .set_symbol("┤");
     }
 }
