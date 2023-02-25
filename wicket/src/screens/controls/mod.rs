@@ -16,7 +16,16 @@ use tui::layout::Rect;
 /// be mutable when `Control::draw` is called. However, global state is never
 /// mutated when drawing, only visible state relevant to the Widget being
 /// drawn.
+///
+/// To allow for distinctive styling on active/selected widgets we allow the
+/// caller to indicate this via the `active` parameter.
 pub trait Control {
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action>;
-    fn draw(&mut self, state: &State, frame: &mut Frame<'_>, rect: Rect);
+    fn draw(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        rect: Rect,
+        active: bool,
+    );
 }

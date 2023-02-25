@@ -57,6 +57,7 @@ impl Control for NullPane {
         _: &crate::State,
         _: &mut crate::Frame<'_>,
         _: tui::layout::Rect,
+        _active: bool,
     ) {
     }
 }

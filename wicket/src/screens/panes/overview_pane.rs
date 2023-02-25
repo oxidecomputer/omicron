@@ -9,9 +9,10 @@ use crate::widgets::{Rack, RackState};
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{KeyCode, KeyEvent};
+use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
 use tui::text::{Span, Spans, Text};
-use tui::widgets::{Block, Paragraph};
+use tui::widgets::{Block, BorderType, Borders, Paragraph};
 
 /// The OverviewPane shows a rendering of the rack.
 ///
@@ -63,8 +64,9 @@ impl Control for OverviewPane {
         state: &State,
         frame: &mut Frame<'_>,
         rect: tui::layout::Rect,
+        active: bool,
     ) {
-        self.tabs[self.selected].control.draw(state, frame, rect)
+        self.tabs[self.selected].control.draw(state, frame, rect, active)
     }
 }
 
@@ -111,7 +113,20 @@ impl Control for RackTab {
         state: &State,
         frame: &mut Frame<'_>,
         rect: tui::layout::Rect,
+        active: bool,
     ) {
+        let border_style =
+            if active { style::selected_line() } else { style::deselected() };
+
+        // Draw the pane border
+        let border = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(border_style);
+        let inner = border.inner(rect);
+        frame.render_widget(border, rect);
+
+        // Draw the rack
         let rack = Rack {
             state: &state.rack_state,
             switch_style: Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE),
@@ -130,7 +145,7 @@ impl Control for RackTab {
             power_shelf_selected_style: Style::default().bg(OX_GRAY),
         };
 
-        frame.render_widget(rack, rect);
+        frame.render_widget(rack, inner);
     }
 }
 
@@ -142,7 +157,34 @@ impl Control for InventoryTab {
         state: &State,
         frame: &mut Frame<'_>,
         rect: tui::layout::Rect,
+        active: bool,
     ) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .split(rect);
+
+        let (border_style, component_style) = if active {
+            (style::selected_line(), style::selected())
+        } else {
+            (style::deselected(), style::deselected())
+        };
+
+        // Draw the current component
+        let component = Paragraph::new(Text::from(format!(
+            "{}",
+            state.rack_state.selected
+        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .style(border_style),
+        )
+        .style(component_style)
+        .alignment(Alignment::Center);
+        frame.render_widget(component, chunks[0]);
+
         // Draw the header
         let inventory_style = Style::default().fg(OX_YELLOW_DIM);
 
@@ -156,11 +198,16 @@ impl Control for InventoryTab {
                 Some(inventory) => {
                     Text::styled(format!("{:#?}", inventory), inventory_style)
                 }
-                None => Text::styled("UNKNOWN", inventory_style),
+                None => Text::styled("Inventory Unavailable", inventory_style),
             };
 
-        let inventory = Paragraph::new(text);
-        frame.render_widget(inventory, rect);
+        let inventory = Paragraph::new(text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .style(border_style),
+        );
+        frame.render_widget(inventory, chunks[1]);
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {

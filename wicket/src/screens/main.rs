@@ -79,7 +79,12 @@ impl MainScreen {
             let background = Block::default().style(style::background());
             frame.render_widget(background, frame.size());
 
-            self.sidebar.draw(state, frame, horizontal_chunks[0]);
+            self.sidebar.draw(
+                state,
+                frame,
+                horizontal_chunks[0],
+                self.sidebar.selected,
+            );
 
             self.draw_pane(
                 state,
@@ -146,10 +151,14 @@ impl MainScreen {
         tabs_rect: Rect,
         pane_rect: Rect,
     ) {
-        let border_style = if self.sidebar.selected {
-            style::deselected()
+        let (border_style, active, highlight_style) = if self.sidebar.selected {
+            (
+                style::deselected(),
+                false,
+                style::deselected().add_modifier(Modifier::BOLD),
+            )
         } else {
-            style::selected_line()
+            (style::selected_line(), true, style::selected())
         };
 
         let pane = self.current_pane();
@@ -158,7 +167,7 @@ impl MainScreen {
         let titles =
             pane.tab_titles().iter().cloned().map(Spans::from).collect();
         let tabs = Tabs::new(titles)
-            .highlight_style(Style::default().fg(TUI_GREEN))
+            .highlight_style(highlight_style)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -168,16 +177,8 @@ impl MainScreen {
             .select(pane.selected_tab());
         frame.render_widget(tabs, tabs_rect);
 
-        // Draw the pane border
-        let border = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .style(border_style);
-        let inner = border.inner(pane_rect);
-        frame.render_widget(border, pane_rect);
-
         // Draw the pane
-        pane.draw(state, frame, inner);
+        pane.draw(state, frame, pane_rect, active)
     }
 
     // TODO: Use the real status and version
@@ -252,7 +253,13 @@ impl Control for Sidebar {
         }
     }
 
-    fn draw(&mut self, _state: &State, frame: &mut Frame<'_>, area: Rect) {
+    fn draw(
+        &mut self,
+        _state: &State,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        _active: bool,
+    ) {
         let items: Vec<ListItem> = self
             .panes
             .items
