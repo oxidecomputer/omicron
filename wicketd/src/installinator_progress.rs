@@ -257,7 +257,7 @@ struct ReportProgressReq {
 #[derive(Debug)]
 struct RegisterReq {
     update_id: Uuid,
-    resp: oneshot::Sender<oneshot::Receiver<mpsc::Receiver<ProgressReport>>>,
+    resp: oneshot::Sender<IprStartReceiver>,
 }
 
 #[derive(Debug, Clone, Error)]
