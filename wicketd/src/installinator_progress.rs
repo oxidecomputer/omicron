@@ -26,7 +26,9 @@ pub(crate) fn new(
     let (report_sender, report_receiver) = mpsc::channel(16);
 
     let ipr_manager = IprManager {
-        log: log.new(slog::o!("component" => "InstallinatorTracker")),
+        log: log.new(
+            slog::o!("component" => "installinator progress report manager"),
+        ),
         running_updates,
         register_receiver,
         report_receiver,
