@@ -66,7 +66,7 @@ impl IprArtifactServer {
                     );
                     let (sender, receiver) = mpsc::channel(16);
                     _ = start_sender.send(receiver);
-                    *update = RunningUpdate::send(sender, report).await;
+                    *update = RunningUpdate::send_and_next_state(sender, report).await;
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
@@ -74,7 +74,7 @@ impl IprArtifactServer {
                         "further report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    *update = RunningUpdate::send(sender, report).await;
+                    *update = RunningUpdate::send_and_next_state(sender, report).await;
                 }
                 RunningUpdate::Closed => {
                     // The sender has been closed; ignore the report.
@@ -150,7 +150,7 @@ impl RunningUpdate {
         std::mem::replace(self, Self::Invalid)
     }
 
-    async fn send(
+    async fn send_and_next_state(
         sender: mpsc::Sender<ProgressReport>,
         report: ProgressReport,
     ) -> Self {

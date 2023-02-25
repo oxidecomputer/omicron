@@ -5,6 +5,8 @@ members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "dns-server",
+    "dns-service-client",
     "end-to-end-tests",
     "gateway",
     "gateway-cli",
@@ -13,8 +15,7 @@ members = [
     "installinator-artifact-client",
     "installinator-artifactd",
     "installinator-common",
-    "internal-dns",
-    "internal-dns-client",
+    "internal-dns-names",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -52,6 +53,8 @@ default-members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "dns-server",
+    "dns-service-client",
     "gateway",
     "gateway-cli",
     "gateway-client",
@@ -59,8 +62,7 @@ default-members = [
     "installinator-artifact-client",
     "installinator-artifactd",
     "installinator-common",
-    "internal-dns",
-    "internal-dns-client",
+    "internal-dns-names",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -126,6 +128,8 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.17"
 diesel = { version = "2.0.3" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
+dns-server = { path = "dns-server" }
+dns-service-client = { path = "dns-service-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 expectorate = "1.0.6"
 fatfs = "0.3.6"
@@ -146,8 +150,7 @@ indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
 installinator-common = { path = "installinator-common" }
-internal-dns = { path = "internal-dns" }
-internal-dns-client = { path = "internal-dns-client" }
+internal-dns-names = { path = "internal-dns-names" }
 ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = "0.20"
 itertools = "0.10.5"

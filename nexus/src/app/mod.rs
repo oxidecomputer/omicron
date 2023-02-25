@@ -163,7 +163,7 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
-    resolver: Arc<Mutex<internal_dns_client::multiclient::Resolver>>,
+    resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -179,7 +179,7 @@ impl Nexus {
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: Arc<Mutex<internal_dns_client::multiclient::Resolver>>,
+        resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &config::Config,
@@ -606,12 +606,12 @@ impl Nexus {
 
     pub async fn set_resolver(
         &self,
-        resolver: internal_dns_client::multiclient::Resolver,
+        resolver: dns_service_client::multiclient::Resolver,
     ) {
         *self.resolver.lock().await = resolver;
     }
 
-    pub async fn resolver(&self) -> internal_dns_client::multiclient::Resolver {
+    pub async fn resolver(&self) -> dns_service_client::multiclient::Resolver {
         let resolver = self.resolver.lock().await;
         resolver.clone()
     }
