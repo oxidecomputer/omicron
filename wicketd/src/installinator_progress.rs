@@ -24,7 +24,7 @@ pub(crate) fn new(log: &slog::Logger) -> (IprArtifactServer, IprUpdateTracker) {
         ),
         running_updates: running_updates.clone(),
     };
-    let ipr_update_tracker = IprUpdateTracker { 
+    let ipr_update_tracker = IprUpdateTracker {
         log: log.new(
             slog::o!("component" => "installinator progress reports, update tracker"),
         ),
@@ -66,7 +66,9 @@ impl IprArtifactServer {
                     );
                     let (sender, receiver) = mpsc::channel(16);
                     _ = start_sender.send(receiver);
-                    *update = RunningUpdate::send_and_next_state(sender, report).await;
+                    *update =
+                        RunningUpdate::send_and_next_state(sender, report)
+                            .await;
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
@@ -74,7 +76,9 @@ impl IprArtifactServer {
                         "further report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    *update = RunningUpdate::send_and_next_state(sender, report).await;
+                    *update =
+                        RunningUpdate::send_and_next_state(sender, report)
+                            .await;
                 }
                 RunningUpdate::Closed => {
                     // The sender has been closed; ignore the report.
