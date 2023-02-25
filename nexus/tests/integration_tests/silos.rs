@@ -844,7 +844,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let initial_silo_users: Vec<views::User> =
-        NexusRequest::iter_collection_authn(client, "/users", "", None)
+        NexusRequest::iter_collection_authn(client, "/v1/users", "", None)
             .await
             .expect("failed to list silo users (1)")
             .all_items;
@@ -880,7 +880,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     .id;
 
     let mut silo_users: Vec<views::User> =
-        NexusRequest::iter_collection_authn(client, "/users", "", Some(1))
+        NexusRequest::iter_collection_authn(client, "/v1/users", "", Some(1))
             .await
             .expect("failed to list silo users (2)")
             .all_items;
@@ -932,7 +932,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     let silo2_users: dropshot::ResultsPage<views::User> =
-        NexusRequest::object_get(client, "/users")
+        NexusRequest::object_get(client, "/v1/users")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -951,7 +951,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     // The "test-privileged" user also shouldn't see the user in this other
     // Silo.
     let mut new_silo_users: Vec<views::User> =
-        NexusRequest::iter_collection_authn(client, "/users", "", Some(1))
+        NexusRequest::iter_collection_authn(client, "/v1/users", "", Some(1))
             .await
             .expect("failed to list silo users (2)")
             .all_items;

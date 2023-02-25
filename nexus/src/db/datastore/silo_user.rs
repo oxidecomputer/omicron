@@ -198,14 +198,41 @@ impl DataStore {
         authz_silo_user_list: &authz::SiloUserList,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloUser> {
-        use db::schema::silo_user::dsl;
+        use db::schema::silo_user::dsl::*;
 
         opctx
             .authorize(authz::Action::ListChildren, authz_silo_user_list)
             .await?;
-        paginated(dsl::silo_user, dsl::id, pagparams)
-            .filter(dsl::silo_id.eq(authz_silo_user_list.silo().id()))
-            .filter(dsl::time_deleted.is_null())
+
+        paginated(silo_user, id, pagparams)
+            .filter(silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silo_group_users_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo_user_list: &authz::SiloUserList,
+        pagparams: &DataPageParams<'_, Uuid>,
+        // TODO: this should be an authz::SiloGroup probably
+        authz_silo_group: &authz::SiloGroup,
+    ) -> ListResultVec<SiloUser> {
+        use db::schema::silo_group_membership as sgm;
+        use db::schema::silo_user as su;
+
+        opctx
+            .authorize(authz::Action::ListChildren, authz_silo_user_list)
+            .await?;
+
+        paginated(su::table, su::id, pagparams)
+            .filter(su::silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(su::time_deleted.is_null())
+            .inner_join(sgm::table.on(sgm::silo_user_id.eq(su::id)))
+            .filter(sgm::silo_group_id.eq(authz_silo_group.id()))
             .select(SiloUser::as_select())
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await

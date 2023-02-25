@@ -7376,7 +7376,7 @@ async fn user_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .silo_users_list_current(&opctx, &pagparams)
+            .silo_users_list_current(&opctx, &pagparams, &None)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -7406,8 +7406,11 @@ async fn user_list_v1(
         let query = query_params.into_inner();
         let pagparams = data_page_params_for(&rqctx, &query)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let scan_params = ScanById::from_query(&query)?;
+        let group_id =
+            scan_params.selector.group_selector.as_ref().map(|g| g.group);
         let users = nexus
-            .silo_users_list_current(&opctx, &pagparams)
+            .silo_users_list_current(&opctx, &pagparams, &group_id)
             .await?
             .into_iter()
             .map(|i| i.into())

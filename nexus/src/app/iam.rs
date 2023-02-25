@@ -63,15 +63,34 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
+        group_id: &Option<Uuid>,
     ) -> ListResultVec<db::model::SiloUser> {
         let authz_silo = opctx
             .authn
             .silo_required()
             .internal_context("listing current silo's users")?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
-        self.db_datastore
-            .silo_users_list(opctx, &authz_silo_user_list, pagparams)
-            .await
+
+        if let &Some(gid) = group_id {
+            let (.., authz_group, _db_group) =
+                LookupPath::new(opctx, &self.db_datastore)
+                    .silo_group_id(gid)
+                    .fetch()
+                    .await?;
+
+            self.db_datastore
+                .silo_group_users_list(
+                    opctx,
+                    &authz_silo_user_list,
+                    pagparams,
+                    &authz_group,
+                )
+                .await
+        } else {
+            self.db_datastore
+                .silo_users_list(opctx, &authz_silo_user_list, pagparams)
+                .await
+        }
     }
 
     /// Fetch the currently-authenticated Silo user

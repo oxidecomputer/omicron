@@ -11065,7 +11065,8 @@
             "in": "query",
             "name": "group",
             "schema": {
-              "$ref": "#/components/schemas/NameOrId"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {

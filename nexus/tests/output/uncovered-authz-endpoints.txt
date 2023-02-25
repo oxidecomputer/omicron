@@ -54,6 +54,7 @@ sled_physical_disk_list                  (get    "/system/hardware/sleds/{sled_i
 system_policy_view                       (get    "/system/policy")
 saga_list                                (get    "/system/sagas")
 saga_view                                (get    "/system/sagas/{saga_id}")
+user_list                                (get    "/users")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")
