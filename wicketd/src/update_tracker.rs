@@ -6,7 +6,6 @@
 
 use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
-use crate::installinator_progress::IprError;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -211,7 +210,7 @@ impl UpdateTracker {
         let spawn_update_driver = || async {
             let update_log = Arc::default();
             let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id).await?;
+                self.ipr_update_tracker.register(update_id).await;
 
             let update_driver = UpdateDriver {
                 update_id,
@@ -305,8 +304,6 @@ impl UpdateTracker {
 pub(crate) enum StartUpdateError {
     #[error("target is already being updated: {0:?}")]
     UpdateInProgress(SpIdentifier),
-    #[error("error communicating with installinator progress manager")]
-    Ipr(#[from] IprError),
 }
 
 impl StartUpdateError {
@@ -317,7 +314,6 @@ impl StartUpdateError {
             StartUpdateError::UpdateInProgress(_) => {
                 HttpError::for_bad_request(None, message)
             }
-            StartUpdateError::Ipr(_) => HttpError::for_unavail(None, message),
         }
     }
 }

@@ -7,115 +7,71 @@
 //! This connects up the wicketd artifact server, which receives reports, to the
 //! update tracker.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use display_error_chain::DisplayErrorChain;
-use dropshot::HttpError;
 use installinator_artifactd::ProgressReportStatus;
 use installinator_common::{CompletionEventKind, ProgressReport};
-use thiserror::Error;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 
 /// Creates an [`IprManager`] and the artifact server and update tracker's interfaces to it.
-pub(crate) fn new(
-    log: &slog::Logger,
-) -> (IprManager, IprArtifactServer, IprUpdateTracker) {
-    let running_updates = HashMap::new();
-    let (register_sender, register_receiver) = mpsc::channel(16);
-    let (report_sender, report_receiver) = mpsc::channel(16);
+pub(crate) fn new(log: &slog::Logger) -> (IprArtifactServer, IprUpdateTracker) {
+    let running_updates = Arc::new(Mutex::new(HashMap::new()));
 
-    let ipr_manager = IprManager {
+    let ipr_artifact = IprArtifactServer {
         log: log.new(
-            slog::o!("component" => "installinator progress report manager"),
+            slog::o!("component" => "installinator progress report, artifact server"),
         ),
-        running_updates,
-        register_receiver,
-        report_receiver,
+        running_updates: running_updates.clone(),
     };
-    let ipr_artifact = IprArtifactServer { report_sender };
-    let ipr_update_tracker = IprUpdateTracker { register_sender };
+    let ipr_update_tracker = IprUpdateTracker { log: log.new(
+        slog::o!("component" => "installinator progress report, update tracker"),
+    ), running_updates };
 
-    (ipr_manager, ipr_artifact, ipr_update_tracker)
+    (ipr_artifact, ipr_update_tracker)
 }
 
+/// The artifact server's interface to the installinator tracker.
 #[derive(Debug)]
-pub(crate) struct IprManager {
+#[must_use]
+pub(crate) struct IprArtifactServer {
     log: slog::Logger,
-    running_updates: HashMap<Uuid, RunningUpdate>,
-    register_receiver: mpsc::Receiver<RegisterReq>,
-    report_receiver: mpsc::Receiver<ReportProgressReq>,
+    running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
 }
 
-impl IprManager {
-    pub(crate) async fn run(mut self) {
-        slog::info!(self.log, "starting installinator progress report manager");
-        let mut register_done = false;
-        let mut report_done = false;
-
-        loop {
-            tokio::select! {
-                req = self.register_receiver.recv(), if !register_done => {
-                    if let Some(req) = req {
-                        self.on_register_req(req);
-                    } else {
-                        register_done = true;
-                    }
-                }
-                req = self.report_receiver.recv(), if !report_done => {
-                    if let Some(req) = req {
-                        self.on_report_req(req).await;
-                    } else {
-                        report_done = true;
-                    }
-                }
-                else => {
-                    slog::info!(
-                        self.log,
-                        "report and register senders have been closed, exiting",
-                    );
-                    break;
-                }
-            }
-        }
-    }
-
-    fn on_register_req(&mut self, req: RegisterReq) {
-        slog::debug!(self.log, "registering request"; "update_id" => %req.update_id);
-
-        let (start_sender, start_receiver) = oneshot::channel();
-        self.running_updates
-            .insert(req.update_id, RunningUpdate::Initial(start_sender));
-        _ = req.resp.send(start_receiver);
-    }
-
-    async fn on_report_req(&mut self, req: ReportProgressReq) {
-        if let Some(update) = self.running_updates.get_mut(&req.update_id) {
+impl IprArtifactServer {
+    pub(crate) async fn report_progress(
+        &self,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> ProgressReportStatus {
+        let mut running_updates = self.running_updates.lock().await;
+        if let Some(update) = running_updates.get_mut(&update_id) {
             slog::debug!(
                 self.log,
                 "progress report seen ({} completion events, {} progress events)",
-                req.report.completion_events.len(),
-                req.report.progress_events.len();
-                "update_id" => %req.update_id
+                report.completion_events.len(),
+                report.progress_events.len();
+                "update_id" => %update_id
             );
             match update.take() {
                 RunningUpdate::Initial(start_sender) => {
                     slog::debug!(
                         self.log,
                         "first report seen for this update ID";
-                        "update_id" => %req.update_id
+                        "update_id" => %update_id
                     );
                     let (sender, receiver) = mpsc::channel(16);
                     _ = start_sender.send(receiver);
-                    *update = RunningUpdate::send(sender, req.report).await;
+                    *update = RunningUpdate::send(sender, report).await;
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
                         self.log,
                         "further report seen for this update ID";
-                        "update_id" => %req.update_id
+                        "update_id" => %update_id
                     );
-                    *update = RunningUpdate::send(sender, req.report).await;
+                    *update = RunningUpdate::send(sender, report).await;
                 }
                 RunningUpdate::Closed => {
                     // The sender has been closed; ignore the report.
@@ -126,35 +82,11 @@ impl IprManager {
                 }
             }
 
-            _ = req.resp.send(ProgressReportStatus::Processed);
+            ProgressReportStatus::Processed
         } else {
-            slog::debug!(self.log, "update ID unrecognized"; "update_id" => %req.update_id);
-            _ = req.resp.send(ProgressReportStatus::UnrecognizedUpdateId);
+            slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
+            ProgressReportStatus::UnrecognizedUpdateId
         }
-    }
-}
-
-/// The artifact server's interface to the installinator tracker.
-#[derive(Debug)]
-#[must_use]
-pub(crate) struct IprArtifactServer {
-    report_sender: mpsc::Sender<ReportProgressReq>,
-}
-
-impl IprArtifactServer {
-    pub(crate) async fn report_progress(
-        &self,
-        update_id: Uuid,
-        report: ProgressReport,
-    ) -> Result<ProgressReportStatus, IprError> {
-        let (resp, recv) = oneshot::channel();
-        let req = ReportProgressReq { update_id, report, resp };
-        self.report_sender
-            .send(req)
-            .await
-            .map_err(|_| IprError::IprManagerDied)?;
-
-        recv.await.map_err(|_| IprError::ResponseChannelDied)
     }
 }
 
@@ -162,7 +94,8 @@ impl IprArtifactServer {
 #[derive(Debug)]
 #[must_use]
 pub(crate) struct IprUpdateTracker {
-    register_sender: mpsc::Sender<RegisterReq>,
+    log: slog::Logger,
+    running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
 }
 
 impl IprUpdateTracker {
@@ -170,21 +103,13 @@ impl IprUpdateTracker {
     ///
     /// Returns a oneshot receiver that resolves when the first message from the
     /// installinator has been received.
-    pub(crate) async fn register(
-        &self,
-        update_id: Uuid,
-    ) -> Result<IprStartReceiver, IprError> {
-        // It is very important that this method receives an acknowledgment from
-        // the manager that this UUID has been successfully registered,
-        // otherwise this code is susceptible to a race condition. That's why we
-        // create a oneshot channel to send the response.
-        let (resp, recv) = oneshot::channel();
-        let req = RegisterReq { update_id, resp };
-        self.register_sender
-            .send(req)
-            .await
-            .map_err(|_| IprError::IprManagerDied)?;
-        recv.await.map_err(|_| IprError::ResponseChannelDied)
+    pub(crate) async fn register(&self, update_id: Uuid) -> IprStartReceiver {
+        slog::debug!(self.log, "registering new update id"; "update_id" => %update_id);
+        let (start_sender, start_receiver) = oneshot::channel();
+
+        let mut running_updates = self.running_updates.lock().await;
+        running_updates.insert(update_id, RunningUpdate::Initial(start_sender));
+        start_receiver
     }
 }
 
@@ -246,41 +171,6 @@ impl RunningUpdate {
     }
 }
 
-/// An individual request to report progress, with a response channel.
-#[derive(Debug)]
-struct ReportProgressReq {
-    update_id: Uuid,
-    report: ProgressReport,
-    resp: oneshot::Sender<ProgressReportStatus>,
-}
-
-#[derive(Debug)]
-struct RegisterReq {
-    update_id: Uuid,
-    resp: oneshot::Sender<IprStartReceiver>,
-}
-
-#[derive(Debug, Clone, Error)]
-pub(crate) enum IprError {
-    #[error("progress report manager died")]
-    IprManagerDied,
-
-    #[error("response channel died")]
-    ResponseChannelDied,
-}
-
-impl IprError {
-    pub(crate) fn to_http_error(&self) -> HttpError {
-        let message = DisplayErrorChain::new(self).to_string();
-
-        match self {
-            IprError::IprManagerDied | IprError::ResponseChannelDied => {
-                HttpError::for_unavail(None, message)
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -294,22 +184,19 @@ mod tests {
     async fn test_states() {
         let logctx = test_setup_log("installinator_progress_test_states");
 
-        let (ipr_manager, ipr_artifact, ipr_update_tracker) = new(&logctx.log);
-        tokio::spawn(async move { ipr_manager.run().await });
+        let (ipr_artifact, ipr_update_tracker) = new(&logctx.log);
 
         let update_id = Uuid::new_v4();
 
         assert_eq!(
             ipr_artifact
                 .report_progress(Uuid::new_v4(), ProgressReport::default())
-                .await
-                .unwrap(),
+                .await,
             ProgressReportStatus::UnrecognizedUpdateId,
             "no registered UUIDs yet"
         );
 
-        let mut start_receiver =
-            ipr_update_tracker.register(update_id).await.unwrap();
+        let mut start_receiver = ipr_update_tracker.register(update_id).await;
 
         assert_eq!(
             start_receiver.try_recv().unwrap_err(),
@@ -323,10 +210,7 @@ mod tests {
         };
 
         assert_eq!(
-            ipr_artifact
-                .report_progress(update_id, first_report.clone())
-                .await
-                .unwrap(),
+            ipr_artifact.report_progress(update_id, first_report.clone()).await,
             ProgressReportStatus::Processed,
             "initial progress sent"
         );
@@ -352,8 +236,7 @@ mod tests {
         assert_eq!(
             ipr_artifact
                 .report_progress(update_id, completion_report.clone())
-                .await
-                .unwrap(),
+                .await,
             ProgressReportStatus::Processed,
             "completion report sent"
         );
@@ -377,8 +260,7 @@ mod tests {
         assert_eq!(
             ipr_artifact
                 .report_progress(update_id, completion_report.clone())
-                .await
-                .unwrap(),
+                .await,
             ProgressReportStatus::Processed,
             "completion report sent after being closed"
         );

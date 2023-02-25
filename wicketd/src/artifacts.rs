@@ -101,10 +101,7 @@ impl ArtifactGetter for WicketdArtifactServer {
         update_id: Uuid,
         report: ProgressReport,
     ) -> Result<ProgressReportStatus, HttpError> {
-        self.ipr_artifact
-            .report_progress(update_id, report)
-            .await
-            .map_err(|error| error.to_http_error())
+        Ok(self.ipr_artifact.report_progress(update_id, report).await)
     }
 }
 
