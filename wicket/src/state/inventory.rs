@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Information about all top-level Oxide components (sleds, switches, PSCs)
+//! Information about all top-level Oxide components (sleds, switches, PSCs)
 
 use anyhow::anyhow;
 use std::collections::BTreeMap;

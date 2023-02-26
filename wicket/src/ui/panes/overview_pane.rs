@@ -3,15 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Control, Pane, Tab};
-use crate::defaults::colors::*;
-use crate::defaults::style;
-use crate::widgets::{Rack, RackState};
+use crate::ui::defaults::colors::*;
+use crate::ui::defaults::style;
+use crate::ui::widgets::Rack;
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyCode;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::{Color, Modifier, Style};
-use tui::text::{Span, Spans, Text};
+use tui::style::{Color, Style};
+use tui::text::Text;
 use tui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
 
 /// The OverviewPane shows a rendering of the rack.

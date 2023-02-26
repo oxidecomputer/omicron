@@ -4,9 +4,7 @@
 
 use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crossterm::event::{MouseEvent, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
@@ -23,11 +21,11 @@ use tui::backend::CrosstermBackend;
 use tui::Terminal;
 use wicketd_client::types::RackV1Inventory;
 
-use crate::inventory::ComponentId;
-use crate::inventory::Inventory;
-use crate::screens::Screen;
+use crate::state::inventory::{ComponentId, Inventory};
+use crate::state::rack::RackState;
+use crate::state::status::StatusBar;
+use crate::ui::Screen;
 use crate::wicketd::{WicketdHandle, WicketdManager};
-use crate::widgets::{RackState, StatusBar};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -115,18 +113,10 @@ impl Wizard {
     pub fn run(&mut self) -> anyhow::Result<()> {
         self.start_tokio_runtime();
         enable_raw_mode()?;
-        execute!(
-            self.terminal.backend_mut(),
-            EnterAlternateScreen,
-            EnableMouseCapture
-        )?;
+        execute!(self.terminal.backend_mut(), EnterAlternateScreen,)?;
         self.mainloop()?;
         disable_raw_mode()?;
-        execute!(
-            self.terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        )?;
+        execute!(self.terminal.backend_mut(), LeaveAlternateScreen,)?;
         Ok(())
     }
 
@@ -281,12 +271,6 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
     });
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Point {
-    pub x: u16,
-    pub y: u16,
-}
-
 /// The data state of the Wizard
 ///
 /// Data is not tied to any specific screen and is updated upon event receipt.
@@ -295,7 +279,6 @@ pub struct State {
     pub inventory: Inventory,
     pub rack_state: RackState,
     pub status_bar: StatusBar,
-    pub mouse: Point,
 }
 
 impl Default for State {
@@ -310,7 +293,6 @@ impl State {
             inventory: Inventory::default(),
             rack_state: RackState::new(),
             status_bar: StatusBar::new(),
-            mouse: Point::default(),
         }
     }
 }

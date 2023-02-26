@@ -6,13 +6,13 @@
 //!
 //! This is the first screen the user sees
 
-use crate::defaults::colors::*;
-use crate::defaults::dimensions::RectExt;
-use crate::defaults::style;
-use crate::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
+use super::defaults::colors::*;
+use super::defaults::dimensions::RectExt;
+use super::defaults::style;
+use super::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 use crate::{Event, Frame, Term};
 use crossterm::event::Event as TermEvent;
-use tui::style::{Color, Style};
+use tui::style::Style;
 use tui::widgets::Block;
 
 const TOTAL_FRAMES: usize = 100;

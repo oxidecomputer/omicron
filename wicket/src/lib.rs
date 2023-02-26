@@ -9,13 +9,11 @@
 //! that will guide the user through the steps the need to take
 //! in an intuitive manner.
 
-pub(crate) mod defaults;
 mod dispatch;
-pub(crate) mod inventory;
-mod screens;
+mod state;
+mod ui;
 mod upload;
 mod wicketd;
-mod widgets;
 mod wizard;
 
 pub use crate::dispatch::*;

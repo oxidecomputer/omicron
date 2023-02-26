@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod controls;
+mod defaults;
 mod main;
 mod panes;
 mod splash;
+mod widgets;
 
 use crate::wizard::{Action, Event, State, Term};
 use tui::widgets::ListState;

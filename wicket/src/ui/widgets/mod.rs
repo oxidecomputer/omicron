@@ -10,15 +10,11 @@ use tui::style::Style;
 
 mod animated_logo;
 mod banner;
-mod liveness;
 mod rack;
-mod status_bar;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
-pub use liveness::{LivenessState, LivenessStyles};
-pub use rack::{KnightRiderMode, Rack, RackState};
-pub use status_bar::{StatusBar, StatusBarStyles};
+pub use rack::Rack;
 
 // Set the buf area to the bg color
 pub fn clear_buf(area: Rect, buf: &mut Buffer, style: Style) {

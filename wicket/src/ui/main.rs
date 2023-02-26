@@ -5,14 +5,13 @@
 use std::collections::BTreeMap;
 
 use super::{Control, NullPane, OverviewPane, Pane, StatefulList};
-use crate::defaults::colors::*;
-
-use crate::defaults::style;
+use crate::ui::defaults::colors::*;
+use crate::ui::defaults::style;
 use crate::{Action, Event, Frame, State, Term};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::{Color, Modifier, Style};
+use tui::style::{Modifier, Style};
 use tui::text::{Span, Spans};
 use tui::widgets::{
     Block, BorderType, Borders, List, ListItem, Paragraph, Tabs,
