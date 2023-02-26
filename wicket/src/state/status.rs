@@ -10,7 +10,7 @@
 use crate::ui::defaults::style;
 use std::time::{Duration, Instant};
 use tui::style::Style;
-use tui::text::{Span, Spans};
+use tui::text::Span;
 
 /// A status bar shown at the bottom of the screen.
 #[derive(Debug)]
