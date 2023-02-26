@@ -15,63 +15,44 @@ use slog::{error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use tokio::time::Instant;
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
-use wicketd_client::types::RackV1Inventory;
 
-use crate::state::inventory::{ComponentId, Inventory};
-use crate::state::rack::RackState;
-use crate::state::status::StatusBar;
 use crate::ui::Screen;
 use crate::wicketd::{WicketdHandle, WicketdManager};
+use crate::{Action, Event, InventoryEvent, State};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 
-/// The core type of this library is the `Wizard`.
-///
-/// A `Wizard` manages a set of screens, where each screen represents a
-/// specific step in the user process. Each screen is drawable, and the
-/// active screen is rendered on every tick. The [`Wizard`] manages which
-/// screen is active, issues the rendering operation to the terminal, and
-/// communicates with other threads and async tasks to receive user input
-/// and drive backend services.
-pub struct Wizard {
-    /// A screen that handles events and rendering
+/// The `Runner` owns the main UI thread, and starts a tokio runtime
+/// for interaction with downstream services.
+pub struct Runner {
+    /// The UI that handles input events and renders widgets to the screen
     screen: Screen,
 
-    // The [`Wizard`] is purely single threaded. Every interaction with the
-    // outside world is via channels.  All receiving from the outside world
+    // The [`Runner`]'s mainloop is purely single threaded. Every interaction
+    // with the outside world is via channels. All input from the outside world
     // comes in via an `Event` over a single channel.
-    //
-    // Doing this allows us to record and replay all received events, which
-    // will deterministically draw the output of the UI, as long as we disable
-    // any output to downstream services.
-    //
-    // This effectively acts as a way to mock real responses from servers
-    // without ever having to run those servers or even send the requests that
-    // triggered the incoming events!
-    //
-    // Note that for resize events or other terminal specific events we'll
-    // likely have to "output" them to fake the same interaction.
     events_rx: Receiver<Event>,
 
     // We save a copy here so we can hand it out to event producers
     events_tx: Sender<Event>,
 
-    // The internal state of the Wizard
-    // This contains all updatable data
+    // All global state managed by wicket.
+    //
+    // This state is updated from user input and events from downstream
+    // services.
     state: State,
 
     // A mechanism for interacting with `wicketd`
     #[allow(unused)]
     wicketd: WicketdHandle,
 
-    // When the Wizard is run, this will be extracted and moved
-    // into a tokio task.
+    // When [`Runner::run`] is called, this is extracted and moved into a tokio
+    // task.
     wicketd_manager: Option<WicketdManager>,
 
     // The terminal we are rendering to
@@ -85,8 +66,8 @@ pub struct Wizard {
 }
 
 #[allow(clippy::new_without_default)]
-impl Wizard {
-    pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Wizard {
+impl Runner {
+    pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = channel();
         let state = State::new();
         let backend = CrosstermBackend::new(stdout());
@@ -97,7 +78,7 @@ impl Wizard {
             .unwrap();
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
-        Wizard {
+        Runner {
             screen: Screen::new(),
             events_rx,
             events_tx,
@@ -173,20 +154,20 @@ impl Wizard {
                             };
 
                             self.state
-                                .status_bar
+                                .service_status
                                 .reset_wicketd(wicketd_received.elapsed());
                             self.state
-                                .status_bar
+                                .service_status
                                 .reset_mgs(mgs_received.elapsed());
                         }
                         InventoryEvent::Unavailable { wicketd_received } => {
                             self.state
-                                .status_bar
+                                .service_status
                                 .reset_wicketd(wicketd_received.elapsed());
                         }
                     }
 
-                    redraw |= self.state.status_bar.should_redraw();
+                    redraw |= self.state.service_status.should_redraw();
 
                     if redraw {
                         // Inventory or status bar changed. Redraw the screen.
@@ -269,93 +250,4 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
             }
         }
     });
-}
-
-/// The data state of the Wizard
-///
-/// Data is not tied to any specific screen and is updated upon event receipt.
-#[derive(Debug)]
-pub struct State {
-    pub inventory: Inventory,
-    pub rack_state: RackState,
-    pub status_bar: StatusBar,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl State {
-    pub fn new() -> State {
-        State {
-            inventory: Inventory::default(),
-            rack_state: RackState::new(),
-            status_bar: StatusBar::new(),
-        }
-    }
-}
-
-/// Send requests to RSS
-///
-/// Replies come in as [`Event`]s
-pub struct RssManager {}
-
-/// An event that will update state in the wizard
-///
-/// This can be a keypress, mouse event, or response from a downstream service.
-#[derive(Debug)]
-pub enum Event {
-    /// An input event from the terminal
-    Term(TermEvent),
-
-    /// An Inventory Update Event
-    Inventory(InventoryEvent),
-
-    /// The tick of a Timer
-    /// This can be used to draw a frame to the terminal
-    Tick,
-    //... TODO: Replies from MGS & RSS
-}
-
-/// Instructions for the [`Wizard`]
-///
-/// Event's fed through the [`MainScreen::on`]  method return an [`Action`]
-/// informing the wizard that it needs to do something. This allows separation
-/// of the UI from the rest of the system and makes each more testable.
-pub enum Action {
-    Redraw,
-    Update(ComponentId),
-}
-
-impl Action {
-    /// Should the action result in a redraw
-    ///
-    /// For now, all actions result in a redraw.
-    /// Some downstream operations will not trigger this in the future.
-    pub fn should_redraw(&self) -> bool {
-        true
-    }
-}
-
-/// An inventory event occurred.
-#[derive(Clone, Debug)]
-pub enum InventoryEvent {
-    /// Inventory was received.
-    Inventory {
-        /// This is Some if the inventory changed.
-        changed_inventory: Option<RackV1Inventory>,
-
-        /// The time at which at which information was received from wicketd.
-        wicketd_received: Instant,
-
-        /// The time at which information was received from MGS.
-        mgs_received: libsw::Stopwatch,
-    },
-    /// The inventory is unavailable.
-    Unavailable {
-        /// The time at which at which information was received from wicketd.
-        wicketd_received: Instant,
-    },
 }

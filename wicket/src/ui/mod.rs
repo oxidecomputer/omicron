@@ -9,7 +9,7 @@ mod panes;
 mod splash;
 mod widgets;
 
-use crate::wizard::{Action, Event, State, Term};
+use crate::{Action, Event, State, Term};
 use tui::widgets::ListState;
 
 use main::MainScreen;

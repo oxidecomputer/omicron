@@ -4,8 +4,7 @@
 
 //! A rendering of the Oxide rack
 
-use crate::state::inventory::ComponentId;
-use crate::state::rack::{KnightRiderMode, RackState};
+use crate::state::{ComponentId, KnightRiderMode, RackState};
 use std::collections::BTreeMap;
 use tui::buffer::Buffer;
 use tui::layout::Alignment;

@@ -11,13 +11,13 @@ use std::time::{Duration, Instant};
 
 /// A status bar shown at the bottom of the screen.
 #[derive(Debug)]
-pub struct StatusBar {
+pub struct ServiceStatus {
     wicketd_liveness: LivenessState,
     mgs_liveness: LivenessState,
     last_redraw_at: Option<Instant>,
 }
 
-impl StatusBar {
+impl ServiceStatus {
     pub fn new() -> Self {
         Self {
             // Wicketd is polled every 500ms by wicket. Setting a 1 second
