@@ -342,6 +342,7 @@ fn size_sled(
 #[derive(Clone, Debug)]
 enum ComponentRects {
     Displayed {
+        #[allow(unused)]
         /// The enclosing rect for the rack.
         rack_rect: Rect,
         /// The individual rects.

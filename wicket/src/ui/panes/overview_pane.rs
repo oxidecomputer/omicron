@@ -5,14 +5,14 @@
 use super::{Control, Pane, Tab};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
-use crate::ui::widgets::Rack;
+use crate::ui::widgets::{BoxConnector, Rack};
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Style};
 use tui::text::Text;
-use tui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
+use tui::widgets::{Block, BorderType, Borders, Paragraph};
 
 /// The OverviewPane shows a rendering of the rack.
 ///
@@ -63,7 +63,7 @@ impl Control for OverviewPane {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        rect: tui::layout::Rect,
+        rect: Rect,
         active: bool,
     ) {
         self.tabs[self.selected].control.draw(state, frame, rect, active)
@@ -112,7 +112,7 @@ impl Control for RackTab {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        rect: tui::layout::Rect,
+        rect: Rect,
         active: bool,
     ) {
         let border_style =
@@ -156,7 +156,7 @@ impl Control for InventoryTab {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        rect: tui::layout::Rect,
+        rect: Rect,
         active: bool,
     ) {
         let chunks = Layout::default()
@@ -196,7 +196,6 @@ impl Control for InventoryTab {
         // Draw the contents
         let contents_block =
             block.clone().borders(Borders::LEFT | Borders::RIGHT);
-        let mut rect = chunks[1];
         let inventory_style = Style::default().fg(OX_YELLOW_DIM);
         let text =
             match state.inventory.get_inventory(&state.rack_state.selected) {
@@ -207,7 +206,7 @@ impl Control for InventoryTab {
             };
 
         let inventory = Paragraph::new(text).block(contents_block.clone());
-        frame.render_widget(inventory, rect);
+        frame.render_widget(inventory, chunks[1]);
 
         // Draw the help bar
         let help = Paragraph::new("some help here | more help | yet more help")
@@ -220,18 +219,5 @@ impl Control for InventoryTab {
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
         None
-    }
-}
-
-// Connect the top and bottom borders of contents in between two bars
-struct BoxConnector {}
-
-impl Widget for BoxConnector {
-    fn render(self, rect: Rect, buf: &mut tui::buffer::Buffer) {
-        buf.get_mut(rect.x, rect.y - 1).set_symbol("├");
-        buf.get_mut(rect.x + rect.width - 1, rect.y - 1).set_symbol("┤");
-        buf.get_mut(rect.x, rect.y + rect.height).set_symbol("├");
-        buf.get_mut(rect.x + rect.width - 1, rect.y + rect.height)
-            .set_symbol("┤");
     }
 }

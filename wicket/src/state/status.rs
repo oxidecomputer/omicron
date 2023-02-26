@@ -67,6 +67,8 @@ impl ServiceStatus {
 pub struct LivenessState {
     // Some means that the stopwatch hasn't yet been initialized.
     stopwatch: Option<libsw::Stopwatch>,
+
+    #[allow(unused)]
     live_threshold: Duration,
 }
 
@@ -80,6 +82,7 @@ impl LivenessState {
         self.stopwatch = Some(libsw::Stopwatch::with_elapsed_started(elapsed));
     }
 
+    #[allow(unused)]
     /// Compute the liveness for this state.
     pub fn compute(&self) -> ComputedLiveness {
         if let Some(stopwatch) = &self.stopwatch {
