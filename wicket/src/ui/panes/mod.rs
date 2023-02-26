@@ -5,7 +5,23 @@
 mod overview_pane;
 
 pub use super::Control;
+use crate::ui::defaults::style;
 pub use overview_pane::OverviewPane;
+use tui::text::{Span, Spans};
+use tui::widgets::Paragraph;
+
+/// Generate one line of text for the help bar in panes
+pub fn help_text<'a>(data: &'a [(&'a str, &'a str)]) -> Paragraph<'a> {
+    let mut text = vec![Span::raw(" ")];
+    for (function, keys) in data {
+        text.push(Span::styled(*function, style::help_function()));
+        text.push(Span::raw(" "));
+        text.push(Span::styled(*keys, style::help_keys()));
+        text.push(Span::styled(" | ", style::divider()));
+    }
+    text.pop();
+    Paragraph::new(Spans::from(text))
+}
 
 pub struct Tab {
     pub title: &'static str,

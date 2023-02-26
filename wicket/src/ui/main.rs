@@ -167,6 +167,7 @@ impl MainScreen {
             pane.tab_titles().iter().cloned().map(Spans::from).collect();
         let tabs = Tabs::new(titles)
             .highlight_style(highlight_style)
+            .divider(Span::styled("|", style::divider()))
             .block(
                 Block::default()
                     .borders(Borders::ALL)

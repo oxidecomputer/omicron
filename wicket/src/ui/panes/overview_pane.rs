@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::help_text;
 use super::{Control, Pane, Tab};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
@@ -209,8 +210,8 @@ impl Control for InventoryTab {
         frame.render_widget(inventory, chunks[1]);
 
         // Draw the help bar
-        let help = Paragraph::new("some help here | more help | yet more help")
-            .block(block.clone());
+        let help =
+            help_text(&[("SELECT", "<LEFT/RIGHT>")]).block(block.clone());
         frame.render_widget(help, chunks[2]);
 
         // Make sure the top and bottom bars connect
