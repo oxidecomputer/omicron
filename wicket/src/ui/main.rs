@@ -181,21 +181,21 @@ impl MainScreen {
         pane.draw(state, frame, pane_rect, active)
     }
 
-    // TODO: Use the real status and version
     fn draw_statusbar(
         &mut self,
-        _state: &State,
+        state: &State,
         frame: &mut Frame<'_>,
         rect: Rect,
     ) {
-        let main = Paragraph::new(Spans::from(vec![
-            Span::styled("WICKETD: ", Style::default().fg(TUI_GREEN_DARK)),
-            Span::styled("CONNECTED", Style::default().fg(TUI_GREEN)),
-            Span::styled(" | ", Style::default().fg(TUI_GREY)),
-            Span::styled("MGS: ", Style::default().fg(TUI_GREEN_DARK)),
-            Span::styled("NO RESPONSE", Style::default().fg(TUI_GREEN)),
-        ]))
-        .style(Style::default().fg(TUI_GREEN_DARK));
+        let wicketd_spans =
+            state.service_status.wicketd_liveness.compute().to_spans();
+        let mgs_spans = state.service_status.mgs_liveness.compute().to_spans();
+        let mut spans = vec![Span::styled("WICKETD: ", style::service())];
+        spans.extend_from_slice(&wicketd_spans);
+        spans.push(Span::styled(" | ", style::divider()));
+        spans.push(Span::styled("MGS: ", style::service()));
+        spans.extend_from_slice(&mgs_spans);
+        let main = Paragraph::new(Spans::from(spans));
         frame.render_widget(main, rect);
 
         let test = Paragraph::new(Spans::from(vec![

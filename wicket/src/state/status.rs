@@ -7,13 +7,16 @@
 //! wicketd connectivity is measured directly, and MGS connectivity is proxied
 //! through wicketd.
 
+use crate::ui::defaults::style;
 use std::time::{Duration, Instant};
+use tui::style::Style;
+use tui::text::{Span, Spans};
 
 /// A status bar shown at the bottom of the screen.
 #[derive(Debug)]
 pub struct ServiceStatus {
-    wicketd_liveness: LivenessState,
-    mgs_liveness: LivenessState,
+    pub wicketd_liveness: LivenessState,
+    pub mgs_liveness: LivenessState,
     last_redraw_at: Option<Instant>,
 }
 
@@ -82,7 +85,6 @@ impl LivenessState {
         self.stopwatch = Some(libsw::Stopwatch::with_elapsed_started(elapsed));
     }
 
-    #[allow(unused)]
     /// Compute the liveness for this state.
     pub fn compute(&self) -> ComputedLiveness {
         if let Some(stopwatch) = &self.stopwatch {
@@ -108,4 +110,32 @@ pub enum ComputedLiveness {
     Delayed(u64),
 
     NoResponse,
+}
+
+impl ComputedLiveness {
+    pub fn to_spans(&self) -> Vec<Span<'static>> {
+        match self {
+            ComputedLiveness::Live(secs) => vec![
+                Span::styled("CONNECTED", style::connected()),
+                Span::raw(" "),
+                Self::secs_span(*secs, style::connected()),
+            ],
+            ComputedLiveness::Delayed(secs) => vec![
+                Span::styled("DELAYED", style::delayed()),
+                Span::raw(" "),
+                Self::secs_span(*secs, style::delayed()),
+            ],
+            ComputedLiveness::NoResponse => {
+                vec![Span::styled("NO RESPONSE", style::delayed())]
+            }
+        }
+    }
+
+    fn secs_span(secs: u64, time_style: Style) -> Span<'static> {
+        if secs < 1 {
+            Span::styled("(<1s)", time_style)
+        } else {
+            Span::styled(format!("({secs}s)"), time_style)
+        }
+    }
 }

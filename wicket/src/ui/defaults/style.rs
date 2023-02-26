@@ -36,3 +36,15 @@ pub fn help_keys() -> Style {
 pub fn divider() -> Style {
     deselected()
 }
+
+pub fn connected() -> Style {
+    selected()
+}
+
+pub fn service() -> Style {
+    selected_line()
+}
+
+pub fn delayed() -> Style {
+    Style::default().fg(OX_OFF_WHITE)
+}
