@@ -218,6 +218,29 @@ impl Control for InventoryTab {
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        None
+        match event {
+            Event::Term(TermEvent::Key(e)) => match e.code {
+                KeyCode::Left => {
+                    state.rack_state.prev();
+                    Some(Action::Redraw)
+                }
+                KeyCode::Right => {
+                    state.rack_state.next();
+                    Some(Action::Redraw)
+                }
+                _ => None,
+            },
+            Event::Tick => {
+                // TODO: This only animates when the pane is active. Should we move the
+                // tick into the wizard instead?
+                if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
+                    k.step();
+                    Some(Action::Redraw)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 }

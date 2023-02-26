@@ -116,6 +116,48 @@ impl RackState {
         }
     }
 
+    pub fn next(&mut self) {
+        self.selected = match self.selected {
+            ComponentId::Sled(i)
+                if ((0..=14).contains(&i) || (16..=31).contains(&i)) =>
+            {
+                ComponentId::Sled((i + 1) % 32)
+            }
+            ComponentId::Sled(15) => ComponentId::Switch(0),
+            ComponentId::Switch(0) => ComponentId::Psc(0),
+            ComponentId::Psc(0) => ComponentId::Psc(1),
+            ComponentId::Psc(1) => ComponentId::Switch(1),
+            ComponentId::Switch(1) => ComponentId::Sled(16),
+            _ => unreachable!(),
+        };
+        self.set_column();
+    }
+
+    pub fn prev(&mut self) {
+        self.selected = match self.selected {
+            ComponentId::Sled(i)
+                if ((1..=15).contains(&i) || (17..=31).contains(&i)) =>
+            {
+                ComponentId::Sled(i - 1)
+            }
+            ComponentId::Sled(16) => ComponentId::Switch(1),
+            ComponentId::Switch(1) => ComponentId::Psc(1),
+            ComponentId::Psc(1) => ComponentId::Psc(0),
+            ComponentId::Psc(0) => ComponentId::Switch(0),
+            ComponentId::Switch(0) => ComponentId::Sled(15),
+            ComponentId::Sled(0) => ComponentId::Sled(31),
+            _ => unreachable!(),
+        };
+        self.set_column();
+    }
+
+    fn set_column(&mut self) {
+        match self.selected {
+            ComponentId::Sled(i) => self.left_column = i % 2 == 0,
+            _ => (),
+        }
+    }
+
     pub fn set_logger(&mut self, log: Logger) {
         self.log = Some(log);
     }
