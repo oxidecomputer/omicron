@@ -27,7 +27,7 @@ use crate::inventory::ComponentId;
 use crate::inventory::Inventory;
 use crate::screens::Screen;
 use crate::wicketd::{WicketdHandle, WicketdManager};
-use crate::widgets::{RackState, StatusBar, UpdateState};
+use crate::widgets::{RackState, StatusBar};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -132,9 +132,6 @@ impl Wizard {
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
-
-        // Initialize and size the update widgets
-        self.state.updates.init(&self.state.inventory);
 
         // Draw the initial screen
         self.screen.draw(&self.state, &mut self.terminal)?;
@@ -299,7 +296,6 @@ pub struct State {
     pub rack_state: RackState,
     pub status_bar: StatusBar,
     pub mouse: Point,
-    pub updates: UpdateState,
 }
 
 impl Default for State {
@@ -315,7 +311,6 @@ impl State {
             rack_state: RackState::new(),
             status_bar: StatusBar::new(),
             mouse: Point::default(),
-            updates: UpdateState::new(),
         }
     }
 }

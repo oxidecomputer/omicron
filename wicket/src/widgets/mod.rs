@@ -4,69 +4,21 @@
 
 //! Custom tui widgets
 
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
 use tui::style::Style;
 
 mod animated_logo;
 mod banner;
-mod help_button;
-mod help_menu;
-mod list;
 mod liveness;
 mod rack;
 mod status_bar;
-mod update;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
-pub use help_button::{HelpButton, HelpButtonState};
-pub use help_menu::HelpMenu;
-pub use help_menu::HelpMenuState;
-pub use list::{Indicator, List, ListEntry, ListState};
 pub use liveness::{LivenessState, LivenessStyles};
 pub use rack::{KnightRiderMode, Rack, RackState};
 pub use status_bar::{StatusBar, StatusBarStyles};
-pub use update::{Update, UpdateState};
-
-/// A unique id for a [`Control`]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ControlId(pub usize);
-
-/// Return a unique id for a [`Control`]
-pub fn get_control_id() -> ControlId {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
-}
-
-// The result of checking for a hover intersection on a `Control`
-pub struct HoverResult {
-    pub redraw: bool,
-    pub hovered: bool,
-}
-
-/// A control is an interactive object on a [`Screen`](crate::screens::Screen).
-///
-/// `Control` instances are often the internal state of [`tui::widgets::Widget`]s
-/// and are used to manage how the Widgets are drawn.
-pub trait Control {
-    fn id(&self) -> ControlId;
-
-    /// Return the rectangle of the control to be intersected.
-    fn rect(&self) -> Rect;
-
-    /// Return true if the rect of the control intersects the rect passed in.
-    fn intersects(&self, rect: Rect) -> bool {
-        self.rect().intersects(rect)
-    }
-
-    /// Return true if the control intersects with the given point
-    fn intersects_point(&self, x: u16, y: u16) -> bool {
-        self.rect().intersects(Rect { x, y, width: 1, height: 1 })
-    }
-}
 
 // Set the buf area to the bg color
 pub fn clear_buf(area: Rect, buf: &mut Buffer, style: Style) {
