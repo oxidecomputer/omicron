@@ -31,12 +31,78 @@ use tough::TargetName;
 use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
 use uuid::Uuid;
 
+use crate::installinator_progress::IprArtifactServer;
+
 // A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug, Default)]
 struct ArtifactsWithPlan {
     by_id: DebugIgnore<HashMap<ArtifactId, BufList>>,
     by_hash: DebugIgnore<HashMap<ArtifactHashId, BufList>>,
     plan: Option<UpdatePlan>,
+}
+
+/// The artifact server interface for wicketd.
+#[derive(Debug)]
+pub(crate) struct WicketdArtifactServer {
+    log: Logger,
+    store: WicketdArtifactStore,
+    ipr_artifact: IprArtifactServer,
+}
+
+impl WicketdArtifactServer {
+    pub(crate) fn new(
+        log: &Logger,
+        store: WicketdArtifactStore,
+        ipr_artifact: IprArtifactServer,
+    ) -> Self {
+        let log = log.new(slog::o!("component" => "wicketd artifact server"));
+        Self { log, store, ipr_artifact }
+    }
+}
+
+#[async_trait]
+impl ArtifactGetter for WicketdArtifactServer {
+    async fn get(&self, id: &ArtifactId) -> Option<Body> {
+        // This is a test artifact name used by the installinator.
+        if id.name == "__installinator-test" {
+            // For testing, the version is the size of the artifact.
+            let size: usize = id
+                        .version
+                        .parse()
+                        .map_err(|err| {
+                            slog::warn!(
+                                self.log,
+                                "for installinator-test, version should be a usize indicating the size but found {}: {err}",
+                                id.version
+                            );
+                        })
+                        .ok()?;
+            let mut bytes = BytesMut::with_capacity(size);
+            bytes.put_bytes(0, size);
+            return Some(Body::from(bytes.freeze()));
+        }
+
+        let buf_list = self.store.get(id)?;
+        // Return the list as a stream of bytes.
+        Some(Body::wrap_stream(stream::iter(
+            buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
+        )))
+    }
+
+    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<Body> {
+        let buf_list = self.store.get_by_hash(id)?;
+        Some(Body::wrap_stream(stream::iter(
+            buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
+        )))
+    }
+
+    async fn report_progress(
+        &self,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> Result<ProgressReportStatus, HttpError> {
+        Ok(self.ipr_artifact.report_progress(update_id, report).await)
+    }
 }
 
 /// The artifact store for wicketd.
@@ -96,51 +162,6 @@ impl WicketdArtifactStore {
     fn replace(&self, new_artifacts: ArtifactsWithPlan) -> ArtifactsWithPlan {
         let mut artifacts = self.artifacts_with_plan.lock().unwrap();
         std::mem::replace(&mut *artifacts, new_artifacts)
-    }
-}
-
-#[async_trait]
-impl ArtifactGetter for WicketdArtifactStore {
-    async fn get(&self, id: &ArtifactId) -> Option<Body> {
-        // This is a test artifact name used by the installinator.
-        if id.name == "__installinator-test" {
-            // For testing, the version is the size of the artifact.
-            let size: usize = id
-                        .version
-                        .parse()
-                        .map_err(|err| {
-                            slog::warn!(
-                                self.log,
-                                "for installinator-test, version should be a usize indicating the size but found {}: {err}",
-                                id.version
-                            );
-                        })
-                        .ok()?;
-            let mut bytes = BytesMut::with_capacity(size);
-            bytes.put_bytes(0, size);
-            return Some(Body::from(bytes.freeze()));
-        }
-
-        let buf_list = self.get(id)?;
-        // Return the list as a stream of bytes.
-        Some(Body::wrap_stream(stream::iter(
-            buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
-        )))
-    }
-
-    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<Body> {
-        let buf_list = self.get_by_hash(id)?;
-        Some(Body::wrap_stream(stream::iter(
-            buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
-        )))
-    }
-
-    async fn report_progress(
-        &self,
-        _update_id: Uuid,
-        _report: ProgressReport,
-    ) -> Result<ProgressReportStatus, HttpError> {
-        todo!("implement server-side support for events")
     }
 }
 
