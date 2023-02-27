@@ -6,30 +6,49 @@
 
 use crate::authz::ApiResource;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::SshKey;
+use crate::db::{self, lookup};
 use crate::external_api::params;
 use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
+use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::bail_unless;
+use ref_cast::RefCast;
 use std::str::FromStr;
 use uuid::Uuid;
 
 impl super::Nexus {
     // Silos
+    pub fn silo_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        silo: &'a NameOrId,
+    ) -> LookupResult<lookup::Silo<'a>> {
+        match silo {
+            NameOrId::Id(id) => {
+                let silo =
+                    LookupPath::new(opctx, &self.db_datastore).silo_id(*id);
+                Ok(silo)
+            }
+            NameOrId::Name(name) => {
+                let silo = LookupPath::new(opctx, &self.db_datastore)
+                    .silo_name(Name::ref_cast(name));
+                Ok(silo)
+            }
+        }
+    }
 
     pub async fn silo_create(
         &self,
@@ -54,40 +73,13 @@ impl super::Nexus {
         self.db_datastore.silos_list(opctx, pagparams).await
     }
 
-    pub async fn silo_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<db::model::Silo> {
-        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(name)
-            .fetch()
-            .await?;
-        Ok(db_silo)
-    }
-
-    pub async fn silo_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        silo_id: &Uuid,
-    ) -> LookupResult<db::model::Silo> {
-        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_id(*silo_id)
-            .fetch()
-            .await?;
-        Ok(db_silo)
-    }
-
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
     ) -> DeleteResult {
         let (.., authz_silo, db_silo) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .silo_name(name)
-                .fetch_for(authz::Action::Delete)
-                .await?;
+            silo_lookup.fetch_for(authz::Action::Delete).await?;
         self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
     }
 
@@ -96,7 +88,7 @@ impl super::Nexus {
     pub async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
-        silo_lookup: db::lookup::Silo<'_>,
+        silo_lookup: &lookup::Silo<'_>,
     ) -> LookupResult<shared::Policy<authz::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
@@ -114,7 +106,7 @@ impl super::Nexus {
     pub async fn silo_update_policy(
         &self,
         opctx: &OpContext,
-        silo_lookup: db::lookup::Silo<'_>,
+        silo_lookup: &lookup::Silo<'_>,
         policy: &shared::Policy<authz::SiloRole>,
     ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
         let (.., authz_silo) =
@@ -640,16 +632,22 @@ impl super::Nexus {
 
     // identity providers
 
+    pub fn identity_provider_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        idp_id: Uuid,
+    ) -> LookupResult<lookup::IdentityProvider<'a>> {
+        LookupPath::new(opctx, self).identity_provider_id(idp_id)
+    }
+
     pub async fn identity_provider_list(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::IdentityProvider> {
-        let (authz_silo, ..) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::ListChildren).await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
         self.db_datastore
             .identity_provider_list(opctx, &authz_idp_list, pagparams)
@@ -661,13 +659,11 @@ impl super::Nexus {
     pub async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         params: params::SamlIdentityProviderCreate,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
+        let (authz_silo, db_silo) =
+            silo_lookup.fetch_for(authz::Action::CreateChild).await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
 
         if db_silo.user_provision_type != UserProvisionType::Jit {
@@ -790,20 +786,5 @@ impl super::Nexus {
         self.db_datastore
             .saml_identity_provider_create(opctx, &authz_idp_list, provider)
             .await
-    }
-
-    pub async fn saml_identity_provider_fetch(
-        &self,
-        opctx: &OpContext,
-        silo_name: &Name,
-        provider_name: &Name,
-    ) -> LookupResult<db::model::SamlIdentityProvider> {
-        let (.., saml_identity_provider) =
-            LookupPath::new(opctx, &self.datastore())
-                .silo_name(silo_name)
-                .saml_identity_provider_name(provider_name)
-                .fetch()
-                .await?;
-        Ok(saml_identity_provider)
     }
 }

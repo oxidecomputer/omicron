@@ -71,6 +71,39 @@ pub struct SnapshotPath {
     pub snapshot: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SiloPath {
+    pub silo: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SiloSelector {
+    pub silo: NameOrId,
+}
+
+impl From<Name> for SiloSelector {
+    fn from(name: Name) -> Self {
+        SiloSelector { silo: name.into() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct IdentityProviderSelector {
+    #[serde(flatten)]
+    pub silo_selector: Option<SiloSelector>,
+    pub identity_provider: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl IdentityProviderSelector {
+    pub fn new(silo: Option<NameOrId>, identity_provider: NameOrId) -> Self {
+        IdentityProviderSelector {
+            silo_selector: silo.map(|s| SiloSelector { silo: s }),
+            identity_provider,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,

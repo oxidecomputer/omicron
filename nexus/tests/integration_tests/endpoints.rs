@@ -53,9 +53,9 @@ lazy_static! {
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
     pub static ref DEMO_SILO_URL: String =
-        format!("/system/silos/{}", *DEMO_SILO_NAME);
+        format!("/v1/system/silos/{}", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_POLICY_URL: String =
-        format!("/system/silos/{}/policy", *DEMO_SILO_NAME);
+        format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -68,23 +68,23 @@ lazy_static! {
         };
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
-        "/system/silos/{}/identity-providers/local/users",
+        "/v1/system/silos/{}/identity-providers/local/users",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USERS_LIST_URL: String = format!(
-        "/system/silos/{}/users/all",
+        "/v1/system/silos/{}/users/all",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_GET_URL: String = format!(
-        "/system/silos/{}/users/id/{{id}}",
+        "/v1/system/silos/{}/users/id/{{id}}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_DELETE_URL: String = format!(
-        "/system/silos/{}/identity-providers/local/users/{{id}}",
+        "/v1/system/silos/{}/identity-providers/local/users/{{id}}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_SET_PASSWORD_URL: String = format!(
-        "/system/silos/{}/identity-providers/local/users/{{id}}/set-password",
+        "/v1/system/silos/{}/identity-providers/local/users/{{id}}/set-password",
         DEFAULT_SILO.identity().name,
     );
 
@@ -427,8 +427,8 @@ lazy_static! {
 
 lazy_static! {
     // Identity providers
-    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/system/silos/demo-silo/identity-providers");
-    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/system/silos/demo-silo/identity-providers/saml");
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/v1/system/silos/demo-silo/identity-providers");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/v1/system/silos/demo-silo/identity-providers/saml");
 
     pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
     pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
@@ -733,7 +733,7 @@ lazy_static! {
 
         /* Silos */
         VerifyEndpoint {
-            url: "/system/silos",
+            url: "/v1/system/silos",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -741,14 +741,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
                 )
-            ],
-        },
-        VerifyEndpoint {
-            url: "/system/by-id/silos/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
         VerifyEndpoint {

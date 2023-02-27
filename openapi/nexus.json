@@ -5495,6 +5495,7 @@
           "system"
         ],
         "summary": "Fetch a silo by id",
+        "description": "Use `GET /v1/system/silos/{id}` instead.",
         "operationId": "silo_view_by_id",
         "parameters": [
           {
@@ -5524,7 +5525,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/certificates": {
@@ -7023,7 +7025,7 @@
           "system"
         ],
         "summary": "Fetch a silo",
-        "description": "Fetch a silo by name.",
+        "description": "Fetch a silo by name. Use `GET /v1/system/silos/{silo}` instead.",
         "operationId": "silo_view",
         "parameters": [
           {
@@ -7053,14 +7055,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "system"
         ],
         "summary": "Delete a silo",
-        "description": "Delete a silo by name.",
+        "description": "Delete a silo by name. Use `DELETE /v1/system/silos/{silo}` instead.",
         "operationId": "silo_delete",
         "parameters": [
           {
@@ -7083,7 +7086,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/identity-providers": {
@@ -7092,6 +7096,7 @@
           "system"
         ],
         "summary": "List a silo's IDPs",
+        "description": "Use `/v1/system/silos/{silo}/identity-providers` instead.",
         "operationId": "silo_identity_provider_list",
         "parameters": [
           {
@@ -7149,6 +7154,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -7395,6 +7401,7 @@
           "system"
         ],
         "summary": "Fetch a silo's IAM policy",
+        "description": "Use `GET /v1/system/silos/{silo}/policy` instead.",
         "operationId": "silo_policy_view",
         "parameters": [
           {
@@ -7424,7 +7431,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
@@ -10595,6 +10603,313 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Saga"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/silos": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List silos",
+        "description": "Lists silos that are discoverable based on the current permissions.",
+        "operationId": "silo_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a silo",
+        "operationId": "silo_create_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Silo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/silos/{silo}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a silo",
+        "description": "Fetch a silo by name.",
+        "operationId": "silo_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Silo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete a silo",
+        "description": "Delete a silo by name.",
+        "operationId": "silo_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/silos/{silo}/identity-providers": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List a silo's IDPs_name",
+        "operationId": "silo_identity_provider_list_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityProviderResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/silos/{silo}/policy": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a silo's IAM policy",
+        "operationId": "silo_policy_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Update a silo's IAM policy",
+        "operationId": "silo_policy_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
