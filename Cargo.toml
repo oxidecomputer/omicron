@@ -257,7 +257,7 @@ libsw = "2.2.0"
 syn = { version = "1.0" }
 tar = "0.4"
 tempdir = "0.3"
-tempfile = "3.3"
+tempfile = "3.4"
 term = "0.7"
 termios = "0.3"
 test-strategy = "0.2.1"
