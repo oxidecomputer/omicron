@@ -201,12 +201,9 @@ impl super::Nexus {
     async fn local_idp_fetch_silo(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
     ) -> LookupResult<(authz::Silo, db::model::Silo)> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
+        let (authz_silo, db_silo) = silo_lookup.fetch().await?;
         if db_silo.user_provision_type != UserProvisionType::ApiOnly {
             return Err(Error::not_found_by_name(
                 ResourceType::IdentityProvider,
@@ -221,11 +218,11 @@ impl super::Nexus {
     pub async fn local_idp_create_user(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         new_user_params: params::UserCreate,
     ) -> CreateResult<db::model::SiloUser> {
         let (authz_silo, db_silo) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+            self.local_idp_fetch_silo(opctx, silo_lookup).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         // TODO-cleanup This authz check belongs in silo_user_create().
         opctx
@@ -632,12 +629,35 @@ impl super::Nexus {
 
     // identity providers
 
-    pub fn identity_provider_lookup<'a>(
+    pub fn saml_identity_provider_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        idp_id: Uuid,
+        saml_identity_provider_selector: &'a params::SamlIdentityProviderSelector,
     ) -> LookupResult<lookup::IdentityProvider<'a>> {
-        LookupPath::new(opctx, self).identity_provider_id(idp_id)
+        match saml_identity_provider_selector {
+            params::SamlIdentityProviderSelector {
+                saml_identity_provider: NameOrId::Id(id),
+                silo_selector: None,
+            } => {
+                let saml_provider = LookupPath::new(opctx, &self.db_datastore)
+                    .saml_identity_provider_id(*id);
+                Ok(saml_provider)
+            }
+            params::SamlIdentityProviderSelector {
+                saml_identity_provider: NameOrId::Name(name),
+                silo_selector: Some(silo_selector),
+            } => {
+                let saml_provider = self
+                    .silo_lookup(opctx, &silo_selector.silo)?
+                    .saml_identity_provider_name(name);
+                Ok(saml_provider)
+            }
+            params::SamlIdentityProviderSelector {
+                saml_identity_provider: NameOrId::Id(_),
+                silo_selector: Some(_),
+            } => Err(Error::invalid_request("when providing provider as an ID, silo should not be specified")),
+            _ => Err(Error::invalid_request("provider should either be a UUID or silo should be specified"))
+        }
     }
 
     pub async fn identity_provider_list(

@@ -76,6 +76,11 @@ pub struct SiloPath {
     pub silo: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProviderPath {
+    pub provider: NameOrId,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
     pub silo: NameOrId,
@@ -88,18 +93,21 @@ impl From<Name> for SiloSelector {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct IdentityProviderSelector {
+pub struct SamlIdentityProviderSelector {
     #[serde(flatten)]
     pub silo_selector: Option<SiloSelector>,
-    pub identity_provider: NameOrId,
+    pub saml_identity_provider: NameOrId,
 }
 
 // TODO-v1: delete this post migration
-impl IdentityProviderSelector {
-    pub fn new(silo: Option<NameOrId>, identity_provider: NameOrId) -> Self {
-        IdentityProviderSelector {
+impl SamlIdentityProviderSelector {
+    pub fn new(
+        silo: Option<NameOrId>,
+        saml_identity_provider: NameOrId,
+    ) -> Self {
+        SamlIdentityProviderSelector {
             silo_selector: silo.map(|s| SiloSelector { silo: s }),
-            identity_provider,
+            saml_identity_provider,
         }
     }
 }

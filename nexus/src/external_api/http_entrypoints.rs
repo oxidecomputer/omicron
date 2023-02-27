@@ -1229,12 +1229,12 @@ async fn saml_identity_provider_create(
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
-    path = "/v1/system/identity-providers/saml/{provider_name}",
+    path = "/v1/system/identity-providers/saml/{provider}",
     tags = ["system"],
 }]
 async fn saml_identity_provider_view_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloSamlPathParam>,
+    path_params: Path<params::ProviderPath>,
     query_params: Query<params::SiloSelector>,
 ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
@@ -1243,17 +1243,18 @@ async fn saml_identity_provider_view_v1(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let silo_lookup = nexus
-            .silo_lookup(&opctx, &query.silo)?
-            .saml_identity_provider_name(&path.name);
-        let provider = nexus
-            .saml_identity_provider_fetch(
+        let saml_identity_provider_selector =
+            params::SamlIdentityProviderSelector::new(
+                Some(query.silo),
+                path.provider,
+            );
+        let (.., provider) = nexus
+            .saml_identity_provider_lookup(
                 &opctx,
-                &path_params.silo_name,
-                &path_params.provider_name,
-            )
+                &saml_identity_provider_selector,
+            )?
+            .fetch()
             .await?;
-
         Ok(HttpResponseOk(provider.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1281,20 +1282,18 @@ async fn saml_identity_provider_view(
     path_params: Path<SiloSamlPathParam>,
 ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-
-    let path_params = path_params.into_inner();
-
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let provider = nexus
-            .saml_identity_provider_fetch(
-                &opctx,
-                &path_params.silo_name,
-                &path_params.provider_name,
-            )
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+        let provider_selector = params::SamlIdentityProviderSelector::new(
+            Some(path_params.silo_name.into()),
+            path_params.provider_name.into(),
+        );
+        let (.., provider) = nexus
+            .saml_identity_provider_lookup(&opctx, &provider_selector)?
+            .fetch()
             .await?;
-
         Ok(HttpResponseOk(provider.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1303,6 +1302,39 @@ async fn saml_identity_provider_view(
 // TODO: no DELETE for identity providers?
 
 // "Local" Identity Provider
+
+/// Create a user
+///
+/// Users can only be created in Silos with `provision_type` == `Fixed`.
+/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
+/// logs in using an external Identity Provider.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/identity-providers/local/users",
+    tags = ["system"],
+}]
+async fn local_idp_user_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::SiloSelector>,
+    new_user_params: TypedBody<params::UserCreate>,
+) -> Result<HttpResponseCreated<User>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
+        let user = nexus
+            .local_idp_create_user(
+                &opctx,
+                &silo_lookup,
+                new_user_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 
 /// Create a user
 ///
@@ -1339,8 +1371,37 @@ async fn local_idp_user_create(
 /// Delete a user
 #[endpoint {
     method = DELETE,
+    path = "/v1/system/identity-providers/local/users/{user_id}",
+    tags = ["system"],
+}]
+async fn local_idp_user_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UserPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+        nexus
+            .local_idp_delete_user(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a user
+/// Use `DELETE /v1/system/identity-providers/local/users/{user_id}` instead
+#[endpoint {
+    method = DELETE,
     path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",
     tags = ["system"],
+    deprecated = true
 }]
 async fn local_idp_user_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
