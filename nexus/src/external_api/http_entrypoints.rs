@@ -281,6 +281,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_firewall_rules_view)?;
         api.register(vpc_firewall_rules_update)?;
 
+        api.register(vpc_firewall_rules_view_v1)?;
+        api.register(vpc_firewall_rules_update_v1)?;
+
         api.register(rack_list)?;
         api.register(rack_view)?;
         api.register(sled_list)?;
@@ -5842,8 +5845,37 @@ async fn vpc_subnet_list_network_interfaces(
 /// List firewall rules
 #[endpoint {
     method = GET,
+    path = "/v1/vpc-firewall-rules",
+    tags = ["vpcs"],
+}]
+async fn vpc_firewall_rules_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::VpcSelector>,
+) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    // Without this check, if firewall rules change while someone is listing
+    // the rules, they will see a mix of the old and new rules.
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &query)?;
+        let rules = nexus.vpc_list_firewall_rules(&opctx, &vpc_lookup).await?;
+        Ok(HttpResponseOk(VpcFirewallRules {
+            rules: rules.into_iter().map(|rule| rule.into()).collect(),
+        }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List firewall rules
+/// Use `GET /v1/vpc-firewall-rules` instead
+#[endpoint {
+    method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_firewall_rules_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5853,18 +5885,17 @@ async fn vpc_firewall_rules_view(
     // Without this check, if firewall rules change while someone is listing
     // the rules, they will see a mix of the old and new rules.
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let rules = nexus
-            .vpc_list_firewall_rules(
-                &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
+        let rules = nexus.vpc_list_firewall_rules(&opctx, &vpc_lookup).await?;
         Ok(HttpResponseOk(VpcFirewallRules {
             rules: rules.into_iter().map(|rule| rule.into()).collect(),
         }))
@@ -5875,8 +5906,40 @@ async fn vpc_firewall_rules_view(
 /// Replace firewall rules
 #[endpoint {
     method = PUT,
+    path = "/v1/vpc-firewall-rules",
+    tags = ["vpcs"],
+}]
+async fn vpc_firewall_rules_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::VpcSelector>,
+    router_params: TypedBody<VpcFirewallRuleUpdateParams>,
+) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
+    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
+    // TODO: limit size of the ruleset because the GET endpoint is not paginated
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let router_params = router_params.into_inner();
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &query)?;
+        let rules = nexus
+            .vpc_update_firewall_rules(&opctx, &vpc_lookup, &router_params)
+            .await?;
+        Ok(HttpResponseOk(VpcFirewallRules {
+            rules: rules.into_iter().map(|rule| rule.into()).collect(),
+        }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Replace firewall rules
+/// Use `PUT /v1/vpc-firewall-rules` instead
+#[endpoint {
+    method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
     tags = ["vpcs"],
+    deprecated = true
 }]
 async fn vpc_firewall_rules_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -5886,16 +5949,20 @@ async fn vpc_firewall_rules_update(
     // TODO: Check If-Match and fail if the ETag doesn't match anymore.
     // TODO: limit size of the ruleset because the GET endpoint is not paginated
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let vpc_selector = params::VpcSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.vpc_name.into(),
+        );
+        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         let rules = nexus
             .vpc_update_firewall_rules(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
+                &vpc_lookup,
                 &router_params.into_inner(),
             )
             .await?;

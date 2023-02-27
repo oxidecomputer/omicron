@@ -54,5 +54,6 @@ progenitor::generate_api!(
         RotImageDetails = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        HostPhase2RecoveryImageId = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
     },
 );

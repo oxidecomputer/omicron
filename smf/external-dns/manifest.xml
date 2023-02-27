@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='external_dns'>
+
+  <service name='system/illumos/external_dns' type='service' version='1'>
+  <create_default_instance enabled='false' />
+  <single_instance />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/dns-server/bin/dns-server --config-file /var/svc/manifest/site/external_dns/config.toml --server-address %{config/server_address} --dns-address %{config/dns_address} --dns-zone %{config/dns_zone} &amp;'
+    timeout_seconds='0' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <!-- TODO-completeness This all needs to be run-time-configurable -->
+  <property_group name='config' type='application'>
+    <propval name='server_address' type='astring' value='unknown' />
+    <propval name='dns_address' type='astring' value='unknown' />
+    <propval name='dns_zone' type='astring' value='oxide.example' />
+  </property_group>
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>External DNS</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Oxide's External DNS Service</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

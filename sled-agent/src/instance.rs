@@ -90,7 +90,7 @@ pub enum Error {
     Serial(#[from] crate::serial::Error),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
+    ResolveError(#[from] dns_service_client::multiclient::ResolveError),
 
     #[error("Instance {0} not running!")]
     InstanceNotRunning(Uuid),

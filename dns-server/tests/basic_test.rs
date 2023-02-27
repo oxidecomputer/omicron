@@ -6,11 +6,11 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use dropshot::test_util::LogContext;
-use internal_dns_client::{
+use dns_service_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
+use dropshot::test_util::LogContext;
 use omicron_test_utils::dev::test_setup_log;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
@@ -291,9 +291,9 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
 struct TestContext {
     client: Client,
     resolver: TokioAsyncResolver,
-    dns_server: internal_dns::dns_server::Server,
+    dns_server: dns_server::dns_server::Server,
     dropshot_server:
-        dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+        dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
     tmp: tempdir::TempDir,
     logctx: LogContext,
 }
@@ -323,12 +323,12 @@ async fn init_client_server(
     let dns_server = {
         let db = db.clone();
         let log = log.clone();
-        let dns_config = internal_dns::dns_server::Config {
+        let dns_config = dns_server::dns_server::Config {
             bind_address: "[::1]:0".into(),
             zone,
         };
 
-        internal_dns::dns_server::run(log, db, dns_config).await?
+        dns_server::dns_server::run(log, db, dns_config).await?
     };
 
     let mut rc = ResolverConfig::new();
@@ -345,7 +345,7 @@ async fn init_client_server(
 
     // launch a dropshot server
     let dropshot_server =
-        internal_dns::start_dropshot_server(config, log.clone(), db).await?;
+        dns_server::start_dropshot_server(config, log.clone(), db).await?;
 
     // wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
@@ -365,15 +365,14 @@ async fn init_client_server(
 
 fn test_config(
     test_name: &str,
-) -> Result<(tempdir::TempDir, internal_dns::Config, LogContext), anyhow::Error>
-{
+) -> Result<(tempdir::TempDir, dns_server::Config, LogContext), anyhow::Error> {
     let logctx = test_setup_log(test_name);
-    let tmp_dir = tempdir::TempDir::new("internal-dns-test")?;
+    let tmp_dir = tempdir::TempDir::new("dns-server-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
     let storage_path = storage_path.to_str().unwrap().into();
 
-    let config = internal_dns::Config {
+    let config = dns_server::Config {
         log: dropshot::ConfigLogging::StderrTerminal {
             level: dropshot::ConfigLoggingLevel::Info,
         },
@@ -382,10 +381,7 @@ fn test_config(
             request_body_max_bytes: 1024,
             ..Default::default()
         },
-        data: internal_dns::dns_data::Config {
-            nmax_messages: 16,
-            storage_path,
-        },
+        data: dns_server::dns_data::Config { nmax_messages: 16, storage_path },
     };
 
     Ok((tmp_dir, config, logctx))

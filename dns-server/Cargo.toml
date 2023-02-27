@@ -1,5 +1,5 @@
 [package]
-name = "internal-dns"
+name = "dns-server"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-internal-dns-client.workspace = true
+dns-service-client.workspace = true
 dropshot.workspace = true
 pretty-hex.workspace = true
 schemars.workspace = true

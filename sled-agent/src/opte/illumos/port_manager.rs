@@ -181,8 +181,8 @@ impl PortManager {
         external_ips: Option<Vec<IpAddr>>,
         firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
-        // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
-        // IPv6 networks.
+        // TODO-completeness: Remove IPv4 restrictions once OPTE supports
+        // virtual IPv6 networks.
         let private_ip = match nic.ip {
             IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
             IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(

@@ -13,7 +13,7 @@ lazy_static! {
     /// local development
     // TODO-security Once we have a way to bootstrap the initial Silo with the
     // initial privileged user, this user should be created in the test suite,
-    // not automatically at Nexus startup.
+    // not automatically at Nexus startup.  See omicron#2305.
     pub static ref USER_TEST_PRIVILEGED: db::model::SiloUser =
         db::model::SiloUser::new(
             *db::fixed_data::silo::SILO_ID,
@@ -47,7 +47,7 @@ lazy_static! {
     /// Test user that's granted no privileges, used for automated testing
     // TODO-security Once we have a way to bootstrap the initial Silo with the
     // initial privileged user, this user should be created in the test suite,
-    // not automatically at Nexus startup.
+    // not automatically at Nexus startup.  See omicron#2305.
     pub static ref USER_TEST_UNPRIVILEGED: db::model::SiloUser =
         db::model::SiloUser::new(
             *db::fixed_data::silo::SILO_ID,

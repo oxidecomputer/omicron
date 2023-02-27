@@ -174,16 +174,10 @@ impl super::Nexus {
     pub async fn vpc_list_firewall_rules(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::Read)
-            .await?;
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::Read).await?;
         let rules = self
             .db_datastore
             .vpc_list_firewall_rules(&opctx, &authz_vpc)
@@ -194,18 +188,11 @@ impl super::Nexus {
     pub async fn vpc_update_firewall_rules(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
         params: &VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
         let (.., authz_vpc, db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .fetch_for(authz::Action::Modify)
-                .await?;
+            vpc_lookup.fetch_for(authz::Action::Modify).await?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
             params.clone(),
