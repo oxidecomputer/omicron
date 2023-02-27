@@ -448,7 +448,7 @@ impl UpdateDriver {
         // The receiver being closed means that the installinator has completed.
 
         // Installinator is done: install the host phase 1 that matches the host
-        // phase 1 it installed, and boot our newly-recovered sled.
+        // phase 2 it installed, and boot our newly-recovered sled.
         self.install_host_phase_1_and_boot(plan).await.map_err(|err| {
             UpdateEventFailureKind::ArtifactUpdateFailed {
                 artifact: plan.host_phase_1.id.clone(),
