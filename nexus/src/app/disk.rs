@@ -362,9 +362,9 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         let authz_disk: authz::Disk;
 
-        (_, _, _, authz_disk, _) = self
+        (_, _, _, authz_disk) = self
             .disk_lookup(&opctx, &disk_selector)?
-            .fetch_for(authz::Action::Modify)
+            .lookup_for(authz::Action::Modify)
             .await?;
 
         let saga_params = sagas::import_blocks_from_url::Params {
