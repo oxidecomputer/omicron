@@ -1,6 +1,7 @@
 #
 # Oxide API: example configuration file
 #
+host_phase2_recovery_image_cache_max_images=1
 
 [dropshot]
 # We want to allow uploads of host phase 2 recovery images, which may be

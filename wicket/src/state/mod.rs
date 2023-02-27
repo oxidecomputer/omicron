@@ -8,7 +8,9 @@ mod inventory;
 mod rack;
 mod status;
 
-pub use inventory::{Component, ComponentId, Inventory, PowerState, Sp};
+pub use inventory::{
+    Component, ComponentId, Inventory, PowerState, Sp, ALL_COMPONENT_IDS,
+};
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
 

@@ -5,12 +5,22 @@
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
 use anyhow::anyhow;
+use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
 use wicketd_client::types::{
     RackV1Inventory, SpComponentInfo, SpIgnition, SpState, SpType,
 };
+
+lazy_static! {
+    /// All possible component ids in a rack
+    pub static ref ALL_COMPONENT_IDS: Vec<ComponentId> = (0..=31u8)
+        .map(|i| ComponentId::Sled(i))
+        .chain((0..=1u8).map(|i| ComponentId::Switch(i)))
+        .chain((0..=1u8).map(|i| ComponentId::Psc(i)))
+        .collect();
+}
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.

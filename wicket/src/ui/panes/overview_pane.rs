@@ -2,8 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
+
 use super::help_text;
 use super::{Control, Pane, Tab};
+use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, Rack};
@@ -29,7 +32,10 @@ impl OverviewPane {
         OverviewPane {
             tabs: vec![
                 Tab { title: "OXIDE RACK", control: Box::new(RackTab {}) },
-                Tab { title: "INVENTORY", control: Box::new(InventoryTab {}) },
+                Tab {
+                    title: "INVENTORY",
+                    control: Box::new(InventoryTab::new()),
+                },
             ],
             selected: 0,
         }
@@ -150,7 +156,23 @@ impl Control for RackTab {
     }
 }
 
-pub struct InventoryTab {}
+pub struct InventoryTab {
+    help: Vec<(&'static str, &'static str)>,
+    // Vertical offset used for scrolling
+    scroll_offsets: BTreeMap<ComponentId, usize>,
+}
+
+impl InventoryTab {
+    pub fn new() -> InventoryTab {
+        InventoryTab {
+            help: vec![("SELECT", "<LEFT/RIGHT>"), ("SCROLL", "<UP/DOWN>")],
+            scroll_offsets: ALL_COMPONENT_IDS
+                .iter()
+                .map(|id| (*id, 0))
+                .collect(),
+        }
+    }
+}
 
 impl Control for InventoryTab {
     fn draw(
@@ -197,21 +219,53 @@ impl Control for InventoryTab {
         // Draw the contents
         let contents_block =
             block.clone().borders(Borders::LEFT | Borders::RIGHT);
-        let inventory_style = Style::default().fg(OX_YELLOW_DIM);
-        let text =
-            match state.inventory.get_inventory(&state.rack_state.selected) {
-                Some(inventory) => {
-                    Text::styled(format!("{:#?}", inventory), inventory_style)
-                }
-                None => Text::styled("Inventory Unavailable", inventory_style),
-            };
+        let inventory_style = Style::default().fg(OX_OFF_WHITE);
+        let component_id = state.rack_state.selected;
+        let text = match state.inventory.get_inventory(&component_id) {
+            Some(inventory) => {
+                Text::styled(format!("{:#?}", inventory), inventory_style)
+            }
+            None => Text::styled("Inventory Unavailable", inventory_style),
+        };
 
-        let inventory = Paragraph::new(text).block(contents_block.clone());
+        // Scroll offset is in terms of lines of text.
+        // We must compute it to be in terms of the number of terminal rows.
+        //
+        // XXX: This whole paragraph scroll only allows length of less than
+        // 64k rows even though it shouldn't be limited. We can do our own
+        // scrolling instead to obviate this limit. we may want to anyway, as
+        // it's less data to be formatted for the Paragraph.
+        let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
+
+        // Note that this check doesn't actually work with line wraps.
+        // See https://github.com/tui-rs-revival/ratatui/pull/7
+        if *scroll_offset > text.height() {
+            *scroll_offset = text.height();
+        }
+
+        let num_lines = chunks[1].height as usize;
+        if text.height() <= num_lines {
+            *scroll_offset = 0;
+        } else {
+            if text.height() - *scroll_offset < num_lines {
+                // Don't allow scrolling past bottom of content
+                //
+                // Reset the scroll_offset, so that an up arrow
+                // will scroll up on the next try.
+                *scroll_offset = text.height() - num_lines;
+            }
+        }
+        // This doesn't allow data more than 64k rows. We shouldn't need
+        // more than that for wicket, but who knows!
+        let y_offset = u16::try_from(*scroll_offset).unwrap();
+
+        let inventory = Paragraph::new(text)
+            .block(contents_block.clone())
+            .scroll((y_offset, 0));
         frame.render_widget(inventory, chunks[1]);
 
         // Draw the help bar
-        let help =
-            help_text(&[("SELECT", "<LEFT/RIGHT>")]).block(block.clone());
+        let help = help_text(&self.help).block(block.clone());
         frame.render_widget(help, chunks[2]);
 
         // Make sure the top and bottom bars connect
@@ -227,6 +281,30 @@ impl Control for InventoryTab {
                 }
                 KeyCode::Right => {
                     state.rack_state.next();
+                    Some(Action::Redraw)
+                }
+                KeyCode::Down => {
+                    let component_id = state.rack_state.selected;
+
+                    // We currently debug print inventory on each call to
+                    // `draw`, so we don't know  how many lines the total text is.
+                    // We also don't know the Rect containing this Control, since
+                    // we don't keep track of them anymore, and only know during
+                    // rendering. Therefore, we just increment and correct
+                    // for more incrments than lines exist during render, since
+                    // `self` is passed mutably.
+                    //
+                    // It's also worth noting that the inventory may update
+                    // before rendering, and so this is a somewhat sensible
+                    // strategy.
+                    *self.scroll_offsets.get_mut(&component_id).unwrap() += 1;
+                    Some(Action::Redraw)
+                }
+                KeyCode::Up => {
+                    let component_id = state.rack_state.selected;
+                    let offset =
+                        self.scroll_offsets.get_mut(&component_id).unwrap();
+                    *offset = offset.saturating_sub(1);
                     Some(Action::Redraw)
                 }
                 _ => None,
