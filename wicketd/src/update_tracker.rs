@@ -447,8 +447,14 @@ impl UpdateDriver {
 
         // The receiver being closed means that the installinator has completed.
 
-        // TODO power down host and deliver matching host phase 1
-        _ = plan.host_phase_1;
+        // Installinator is done: install the host phase 1 that matches the host
+        // phase 2 it installed, and boot our newly-recovered sled.
+        self.install_host_phase_1_and_boot(plan).await.map_err(|err| {
+            UpdateEventFailureKind::ArtifactUpdateFailed {
+                artifact: plan.host_phase_1.id.clone(),
+                reason: format!("{err:#}"),
+            }
+        })?;
 
         Ok(())
     }
@@ -648,12 +654,73 @@ impl UpdateDriver {
                 },
             )
             .await
-            .context("failed to set host startup options")?;
+            .context("failed to set host startup options for recovery mode")?;
 
         // All set - boot the host and let installinator do its thing!
         self.set_host_power_state(PowerState::A0).await?;
 
         Ok(uploaded_trampoline_phase2_id)
+    }
+
+    async fn install_host_phase_1_and_boot(
+        &self,
+        plan: &UpdatePlan,
+    ) -> anyhow::Result<()> {
+        // Installinator is done - set the stage for the real host to boot.
+
+        // Deliver the real host phase 1 image.
+        //
+        // TODO-correctness This choice of boot slot MUST match installinator.
+        // We could install it into both slots (and maybe we should!), but we
+        // still need to know which M.2 installinator copied the OS onto so we
+        // can set the correct boot device. Thinking out loud: Even if it
+        // doesn't do it today, installinator probably wants to _dynamically_
+        // choose an M.2 to account for missing or failed drives. Maybe its
+        // final completion message should tell us which slot (or both!) it
+        // wrote to, and then we echo that choice here?
+        let host_phase_1_boot_slot = 0;
+        self.deliver_host_phase1(&plan.host_phase_1, host_phase_1_boot_slot)
+            .await?;
+
+        // Clear the installinator image ID; failing to do this is _not_ fatal,
+        // because any future update will set its own installinator ID anyway;
+        // this is for cleanliness more than anything.
+        if let Err(err) = self
+            .mgs_client
+            .sp_installinator_image_id_delete(self.sp.type_, self.sp.slot)
+            .await
+        {
+            warn!(
+                self.log,
+                "failed to clear installinator image ID (proceeding anyway)";
+                "err" => %err,
+            );
+        }
+
+        // Set the startup options for a standard boot (i.e., no options).
+        self.mgs_client
+            .sp_startup_options_set(
+                self.sp.type_,
+                self.sp.slot,
+                &HostStartupOptions {
+                    boot_net: false,
+                    boot_ramdisk: false,
+                    bootrd: false,
+                    kbm: false,
+                    kmdb: false,
+                    kmdb_boot: false,
+                    phase2_recovery_mode: false,
+                    prom: false,
+                    verbose: false,
+                },
+            )
+            .await
+            .context("failed to set host startup options for standard boot")?;
+
+        // Boot the host.
+        self.set_host_power_state(PowerState::A0).await?;
+
+        Ok(())
     }
 
     async fn wait_for_upload_tramponline_to_mgs(
@@ -709,8 +776,12 @@ impl UpdateDriver {
         self.set_host_power_state(PowerState::A2).await?;
 
         // Start delivering image.
-        info!(self.log, "sending trampoline phase 1");
         let update_id = Uuid::new_v4();
+        info!(
+            self.log, "sending phase 1 host image";
+            "artifact_id" => ?artifact.id,
+            "update_id" => %update_id,
+        );
         self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
             artifact: artifact.id.clone(),
         });
@@ -724,10 +795,16 @@ impl UpdateDriver {
                 reqwest::Body::wrap_stream(phase1_image),
             )
             .await
-            .context("failed to write host boot flash slot A")?;
+            .with_context(|| {
+                format!("failed to write host boot flash slot {boot_slot}")
+            })?;
 
         // Wait for image delivery to complete.
-        info!(self.log, "waiting for trampoline phase 1 deliver to complete");
+        info!(
+            self.log, "waiting for phase 1 delivery to complete";
+            "artifact_id" => ?artifact.id,
+            "update_id" => %update_id,
+        );
         self.set_current_update_state(UpdateStateKind::WaitingForStatus {
             artifact: artifact.id.clone(),
         });
