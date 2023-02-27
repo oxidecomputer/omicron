@@ -692,7 +692,7 @@ impl UpdateDriver {
         {
             warn!(
                 self.log,
-                "failed to clear installinator image ID (proceeding anyway";
+                "failed to clear installinator image ID (proceeding anyway)";
                 "err" => %err,
             );
         }
