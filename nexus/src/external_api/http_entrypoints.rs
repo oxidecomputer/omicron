@@ -1210,14 +1210,16 @@ async fn saml_identity_provider_create(
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
 ) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let silo = path.silo_name.into();
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         let provider = nexus
             .saml_identity_provider_create(
                 &opctx,
-                &path_params.into_inner().silo_name,
+                &silo_lookup,
                 new_provider.into_inner(),
             )
             .await?;
@@ -1352,14 +1354,15 @@ async fn local_idp_user_create(
     new_user_params: TypedBody<params::UserCreate>,
 ) -> Result<HttpResponseCreated<User>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let silo_name = path_params.into_inner().silo_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let silo = path_params.into_inner().silo_name.into();
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         let user = nexus
             .local_idp_create_user(
                 &opctx,
-                &silo_name,
+                &silo_lookup,
                 new_user_params.into_inner(),
             )
             .await?;
@@ -1430,8 +1433,42 @@ async fn local_idp_user_delete(
 /// `LocalOnly`.
 #[endpoint {
     method = POST,
+    path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
+    tags = ["system"],
+}]
+async fn local_idp_user_set_password_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UserPathParam>,
+    update: TypedBody<params::UserPassword>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .local_idp_user_set_password(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+                update.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set or invalidate a user's password
+///
+/// Passwords can only be updated for users in Silos with identity mode
+/// `LocalOnly`.
+/// Use `POST /v1/system/identity-providers/local/users/{user_id}/set-password` instead
+#[endpoint {
+    method = POST,
     path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
     tags = ["system"],
+    deprecated = true
 }]
 async fn local_idp_user_set_password(
     rqctx: RequestContext<Arc<ServerContext>>,

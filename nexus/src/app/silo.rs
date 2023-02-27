@@ -633,7 +633,7 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         saml_identity_provider_selector: &'a params::SamlIdentityProviderSelector,
-    ) -> LookupResult<lookup::IdentityProvider<'a>> {
+    ) -> LookupResult<lookup::SamlIdentityProvider<'a>> {
         match saml_identity_provider_selector {
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(id),
