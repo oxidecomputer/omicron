@@ -409,7 +409,7 @@ impl TryFrom<String> for Password {
             .map_err(|e| format!("unsupported password: {:#}", e))?;
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
-        // OpenAPI schema below.
+        // OpenAPI schema below.  See omicron#2307.
         Ok(Password(value, inner))
     }
 }
@@ -437,7 +437,7 @@ impl JsonSchema for Password {
                     "A password used to authenticate a user".to_string(),
                 ),
                 // TODO-doc If we apply password strength rules, they should
-                // presumably be documented here.
+                // presumably be documented here.  See omicron#2307.
                 description: Some(
                     "Passwords may be subject to additional constraints."
                         .to_string(),
@@ -770,7 +770,7 @@ pub struct NetworkInterfaceUpdate {
     /// Note that this can only be used to select a new primary interface for an
     /// instance. Requests to change the primary interface into a secondary will
     /// return an error.
-    // TODO-completeness TODO-docs: When we get there, this should note that a
+    // TODO-completeness TODO-doc When we get there, this should note that a
     // change in the primary interface will result in changes to the DNS records
     // for the instance, though not the name.
     #[serde(default)]

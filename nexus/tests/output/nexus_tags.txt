@@ -239,7 +239,9 @@ vpc_create_v1                            /v1/vpcs
 vpc_delete                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 vpc_delete_v1                            /v1/vpcs/{vpc}
 vpc_firewall_rules_update                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_update_v1             /v1/vpc-firewall-rules
 vpc_firewall_rules_view                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_view_v1               /v1/vpc-firewall-rules
 vpc_list                                 /organizations/{organization_name}/projects/{project_name}/vpcs
 vpc_list_v1                              /v1/vpcs
 vpc_router_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers

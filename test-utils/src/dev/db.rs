@@ -438,7 +438,7 @@ impl CockroachStarter {
                 // the user can debug if they want.  We'll skip cleanup of the
                 // temporary directory for the same reason and also so that
                 // CockroachDB doesn't trip over its files being gone.
-                self.temp_dir.into_path();
+                let _preserve_directory = self.temp_dir.into_path();
 
                 Err(match poll_error {
                     poll::Error::PermanentError(e) => e,

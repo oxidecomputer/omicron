@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use internal_dns_client::{
+use dns_service_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };

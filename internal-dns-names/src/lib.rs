@@ -7,7 +7,7 @@
 use std::fmt;
 use uuid::Uuid;
 
-pub(crate) const DNS_ZONE: &str = "control-plane.oxide.internal";
+pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 
 /// Names for services where backends are interchangeable.
 #[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd)]

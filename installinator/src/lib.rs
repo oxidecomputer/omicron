@@ -9,5 +9,6 @@ mod errors;
 #[cfg(test)]
 mod mock_peers;
 mod peers;
+mod reporter;
 
 pub use dispatch::*;

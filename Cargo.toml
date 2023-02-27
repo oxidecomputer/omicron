@@ -5,6 +5,8 @@ members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "dns-server",
+    "dns-service-client",
     "end-to-end-tests",
     "gateway",
     "gateway-cli",
@@ -12,8 +14,8 @@ members = [
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
-    "internal-dns",
-    "internal-dns-client",
+    "installinator-common",
+    "internal-dns-names",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -51,14 +53,16 @@ default-members = [
     "common",
     "ddm-admin-client",
     "deploy",
+    "dns-server",
+    "dns-service-client",
     "gateway",
     "gateway-cli",
     "gateway-client",
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
-    "internal-dns",
-    "internal-dns-client",
+    "installinator-common",
+    "internal-dns-names",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -124,14 +128,16 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.17"
 diesel = { version = "2.0.3" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
+dns-server = { path = "dns-server" }
+dns-service-client = { path = "dns-service-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 expectorate = "1.0.6"
 fatfs = "0.3.6"
 fs-err = "2.9.0"
 futures = "0.3.25"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "e35df234f9db57b1b7fc0a8ca279fb2774ff1046" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "f896b7cf0fe7e72641b33060185b71e5d3562b12" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f896b7cf0fe7e72641b33060185b71e5d3562b12" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -143,8 +149,8 @@ hyper = "0.14"
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
-internal-dns = { path = "internal-dns" }
-internal-dns-client = { path = "internal-dns-client" }
+installinator-common = { path = "installinator-common" }
+internal-dns-names = { path = "internal-dns-names" }
 ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = "0.20"
 itertools = "0.10.5"
@@ -213,7 +219,7 @@ ring = "0.16"
 rustfmt-wrapper = "0.2"
 rustls = "0.20.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
-schemars = "0.8.10"
+schemars = "0.8.12"
 semver = { version = "1.0.16", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
@@ -223,6 +229,7 @@ serde_tokenstream = "0.1"
 serde_urlencoded = "0.7.1"
 serde_with = "2.2.0"
 serial_test = "0.10"
+sha2 = "0.10.6"
 sha3 = "0.10.6"
 shell-words = "1.1.0"
 signal-hook = "0.3"
@@ -250,7 +257,7 @@ libsw = "2.2.0"
 syn = { version = "1.0" }
 tar = "0.4"
 tempdir = "0.3"
-tempfile = "3.3"
+tempfile = "3.4"
 term = "0.7"
 termios = "0.3"
 test-strategy = "0.2.1"
@@ -258,7 +265,7 @@ thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.25"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
-tokio-stream = "0.1.11"
+tokio-stream = "0.1.12"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.7"
 toml = "0.7.2"

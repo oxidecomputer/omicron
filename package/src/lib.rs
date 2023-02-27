@@ -6,6 +6,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
 
+pub mod dot;
+
 /// Errors which may be returned when parsing the server configuration.
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -30,6 +32,8 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
 /// Commands which should execute on a host building packages.
 #[derive(Debug, Subcommand)]
 pub enum BuildCommand {
+    /// Make a `dot` graph to visualize the package tree
+    Dot,
     /// Builds the packages specified in a manifest, and places them into an
     /// 'out' directory.
     Package {

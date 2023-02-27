@@ -1023,7 +1023,7 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool("default", range).await;
 
-        // TODO-completess: Implementing Iterator for IpRange would be nice.
+        // TODO-completeness: Implementing Iterator for IpRange would be nice.
         let addresses = [
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 2),

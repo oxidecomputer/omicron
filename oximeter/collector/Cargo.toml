@@ -7,9 +7,10 @@ license = "MPL-2.0"
 
 [dependencies]
 clap.workspace = true
+dns-service-client.workspace = true
 dropshot.workspace = true
-internal-dns-client.workspace = true
 futures.workspace = true
+internal-dns-names.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
 oximeter.workspace = true

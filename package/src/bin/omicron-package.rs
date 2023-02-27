@@ -161,6 +161,11 @@ async fn do_build(config: &Config) -> Result<()> {
     do_for_all_rust_packages(config, "build").await
 }
 
+async fn do_dot(config: &Config) -> Result<()> {
+    println!("{}", omicron_package::dot::do_dot(&config.package_config)?);
+    Ok(())
+}
+
 // Calculates the SHA256 digest for a file.
 async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
     let mut reader = BufReader::new(
@@ -718,6 +723,9 @@ async fn main() -> Result<()> {
     }
 
     match &args.subcommand {
+        SubCommand::Build(BuildCommand::Dot) => {
+            do_dot(&config).await?;
+        }
         SubCommand::Build(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, &artifact_dir).await?;
         }

@@ -115,7 +115,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // TODO-coverage, TODO-security: Add test for Silo-local session
+    // TODO-coverage  TODO-security Add test for Silo-local session
     // when we can use users in another Silo.
 
     let authn_opctx = nexus.opctx_external_authn();
