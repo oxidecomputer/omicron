@@ -16,6 +16,7 @@ instance_network_interface_view_by_id    (get    "/by-id/network-interfaces/{id}
 organization_view_by_id                  (get    "/by-id/organizations/{id}")
 project_view_by_id                       (get    "/by-id/projects/{id}")
 snapshot_view_by_id                      (get    "/by-id/snapshots/{id}")
+group_list                               (get    "/groups")
 login_saml_begin                         (get    "/login/{silo_name}/saml/{provider_name}")
 organization_list                        (get    "/organizations")
 organization_view                        (get    "/organizations/{organization_name}")
