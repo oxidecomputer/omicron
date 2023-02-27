@@ -126,9 +126,9 @@ impl ComponentId {
 impl Display for ComponentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComponentId::Sled(i) => write!(f, "sled {}", i),
-            ComponentId::Switch(i) => write!(f, "switch {}", i),
-            ComponentId::Psc(i) => write!(f, "psc {}", i),
+            ComponentId::Sled(i) => write!(f, "SLED {}", i),
+            ComponentId::Switch(i) => write!(f, "SWITCH {}", i),
+            ComponentId::Psc(i) => write!(f, "PSC {}", i),
         }
     }
 }
