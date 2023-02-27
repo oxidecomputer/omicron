@@ -859,7 +859,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/groups",
+            url: "/v1/groups",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![

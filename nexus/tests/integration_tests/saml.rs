@@ -1026,7 +1026,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         result.headers["Set-Cookie"].to_str().unwrap().to_string();
 
     let groups: ResultsPage<views::Group> = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/groups")
+        RequestBuilder::new(client, Method::GET, "/v1/groups")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
     )

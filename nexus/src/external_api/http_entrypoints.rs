@@ -7407,6 +7407,9 @@ async fn user_list_v1(
         let pagparams = data_page_params_for(&rqctx, &query)?;
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let scan_params = ScanById::from_query(&query)?;
+        // TODO: a valid UUID gets parsed here and will 404 if it doesn't exist
+        // (as expected) but a non-UUID string just gets let through as None
+        // (i.e., ignored) instead of 400ing
         let group_id =
             scan_params.selector.group_selector.as_ref().map(|g| g.group);
         let users = nexus
