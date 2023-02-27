@@ -14,7 +14,8 @@ use installinator_common::{CompletionEventKind, ProgressReport};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 
-/// Creates an [`IprManager`] and the artifact server and update tracker's interfaces to it.
+/// Creates the artifact server and update tracker's interfaces to the
+/// installinator progress tracker.
 pub(crate) fn new(log: &slog::Logger) -> (IprArtifactServer, IprUpdateTracker) {
     let running_updates = Arc::new(Mutex::new(HashMap::new()));
 
@@ -144,15 +145,19 @@ enum RunningUpdate {
     /// idempotency to ensure that the installinator doesn't fail for that
     /// reason: rather than removing the UUID from self.running_updates once
     /// it's done, we move to this state while keeping the UUID in the map.
+    ///
+    /// This does cause a memory leak since nothing comes along and cleans up
+    /// entries in the Closed state yet, but we don't expect that to be a real
+    /// issue, in part because it's very minor but also because an update will
+    /// almost always cause a wicketd restart.
     Closed,
 
-    /// Temporary state used for on_report. Invalid outside on_report.
+    /// Temporary state used to grab ownership of a running update.
     Invalid,
 }
 
 impl RunningUpdate {
     fn take(&mut self) -> Self {
-        // Temporarily move to this state
         std::mem::replace(self, Self::Invalid)
     }
 
