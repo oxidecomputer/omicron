@@ -1310,14 +1310,8 @@ pub struct SnapshotCreate {
 // USERS AND GROUPS
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct GroupSelector {
-    pub group: Uuid,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalGroupSelector {
-    #[serde(flatten)]
-    pub group_selector: Option<GroupSelector>,
+    pub group: Option<Uuid>,
 }
 
 // BUILT-IN USERS

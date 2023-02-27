@@ -110,14 +110,12 @@ async fn test_silo_group_users_bad_group_id(
 ) {
     let client = &cptestctx.external_client;
 
-    let uuid = Uuid::new_v4();
-
     // expect 404 on valid UUID that doesn't exist
     NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        &format!("/v1/users?group={}", uuid.to_string()),
+        &format!("/v1/users?group={}", Uuid::new_v4()),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -132,6 +130,17 @@ async fn test_silo_group_users_bad_group_id(
         StatusCode::BAD_REQUEST,
         Method::GET,
         &"/v1/users?group=abc",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Expected 404");
+
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::GET,
+        &"/v1/users?group=",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

@@ -7,9 +7,9 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::lookup::{self, LookupPath};
+use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
-use crate::external_api::{params, shared};
+use crate::external_api::shared;
 use anyhow::Context;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -63,7 +63,6 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-        group_id: &Option<Uuid>,
     ) -> ListResultVec<db::model::SiloUser> {
         let authz_silo = opctx
             .authn
@@ -71,26 +70,38 @@ impl super::Nexus {
             .internal_context("listing current silo's users")?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
 
-        if let &Some(gid) = group_id {
-            let (.., authz_group, _db_group) =
-                LookupPath::new(opctx, &self.db_datastore)
-                    .silo_group_id(gid)
-                    .fetch()
-                    .await?;
+        self.db_datastore
+            .silo_users_list(opctx, &authz_silo_user_list, pagparams)
+            .await
+    }
 
-            self.db_datastore
-                .silo_group_users_list(
-                    opctx,
-                    &authz_silo_user_list,
-                    pagparams,
-                    &authz_group,
-                )
-                .await
-        } else {
-            self.db_datastore
-                .silo_users_list(opctx, &authz_silo_user_list, pagparams)
-                .await
-        }
+    /// List users in the current Silo, filtered by group ID
+    pub async fn current_silo_group_users_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+        group_id: &Uuid,
+    ) -> ListResultVec<db::model::SiloUser> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing current silo's users")?;
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+
+        let (.., authz_group, _db_group) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_group_id(*group_id)
+                .fetch()
+                .await?;
+
+        self.db_datastore
+            .silo_group_users_list(
+                opctx,
+                &authz_silo_user_list,
+                pagparams,
+                &authz_group,
+            )
+            .await
     }
 
     /// Fetch the currently-authenticated Silo user
@@ -175,14 +186,5 @@ impl super::Nexus {
             .fetch()
             .await?;
         Ok(db_role_builtin)
-    }
-
-    pub fn silo_group_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-        group_selector: &'a params::GroupSelector,
-    ) -> LookupResult<lookup::SiloGroup<'a>> {
-        Ok(LookupPath::new(opctx, &self.db_datastore)
-            .silo_group_id(group_selector.group))
     }
 }
