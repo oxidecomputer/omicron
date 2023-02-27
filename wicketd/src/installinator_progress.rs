@@ -57,6 +57,8 @@ impl IprArtifactServer {
                 report.progress_events.len();
                 "update_id" => %update_id
             );
+            // Note that take() leaves update in the Invalid state. Each branch
+            // must restore *update to a valid state.
             match update.take() {
                 RunningUpdate::Initial(start_sender) => {
                     slog::debug!(
@@ -168,13 +170,8 @@ impl RunningUpdate {
     }
 
     fn is_completed(report: &ProgressReport) -> bool {
-        report
-            .completion_events
-            .iter()
-            // Scan in reverse order since the completion message is very likely
-            // to be the last one.
-            .rev()
-            .any(|event| matches!(event.kind, CompletionEventKind::Completed))
+        report.completion_events.last().map(|e| &e.kind)
+            == Some(&CompletionEventKind::Completed)
     }
 }
 

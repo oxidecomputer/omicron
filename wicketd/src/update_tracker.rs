@@ -227,7 +227,7 @@ impl UpdateTracker {
             let task =
                 tokio::spawn(update_driver.run(plan, ipr_start_receiver));
 
-            Ok::<_, StartUpdateError>(SpUpdateData { task, update_log })
+            SpUpdateData { task, update_log }
         };
 
         let mut sp_update_data = self.sp_update_data.lock().await;
@@ -235,14 +235,14 @@ impl UpdateTracker {
             // Vacant: this is the first time we've started an update to this
             // sp.
             Entry::Vacant(slot) => {
-                slot.insert(spawn_update_driver().await?);
+                slot.insert(spawn_update_driver().await);
                 Ok(())
             }
             // Occupied: we've previously started an update to this sp; only
             // allow this one if that update is no longer running.
             Entry::Occupied(mut slot) => {
                 if slot.get().task.is_finished() {
-                    slot.insert(spawn_update_driver().await?);
+                    slot.insert(spawn_update_driver().await);
                     Ok(())
                 } else {
                     Err(StartUpdateError::UpdateInProgress(sp))
