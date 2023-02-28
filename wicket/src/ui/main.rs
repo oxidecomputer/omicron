@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{Control, NullControl, OverviewPane, StatefulList};
+use super::{Control, OverviewPane, StatefulList};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::{Action, Event, Frame, State, Term};
@@ -31,13 +31,18 @@ pub struct MainScreen {
 
 impl MainScreen {
     pub fn new() -> MainScreen {
+        // We want the sidebar ordered in this specific manner
+        let sidebar_ordered_panes = vec![(
+            "overview",
+            Box::new(OverviewPane::new()) as Box<dyn Control>,
+        )];
+        let sidebar_keys: Vec<_> = sidebar_ordered_panes
+            .iter()
+            .map(|(title, _)| title.clone())
+            .collect();
         MainScreen {
-            sidebar: Sidebar::new(),
-            panes: BTreeMap::from([
-                ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
-                ("update", Box::new(NullControl {}) as Box<dyn Control>),
-                ("help", Box::new(NullControl {}) as Box<dyn Control>),
-            ]),
+            sidebar: Sidebar::new(sidebar_keys),
+            panes: BTreeMap::from_iter(sidebar_ordered_panes),
         }
     }
 
@@ -168,13 +173,10 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
-    pub fn new() -> Sidebar {
-        let mut sidebar = Sidebar {
-            // TODO: The panes here must match the keys in `MainScreen::panes`
-            // We should probably make this a touch less error prone
-            panes: StatefulList::new(vec!["overview", "update", "help"]),
-            selected: true,
-        };
+    pub fn new(panes: Vec<&'static str>) -> Sidebar {
+        let mut sidebar =
+            Sidebar { panes: StatefulList::new(panes), selected: true };
+
         // Select the first pane
         sidebar.panes.next();
         sidebar

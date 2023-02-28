@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod overview_pane;
+mod overview;
 
 pub use super::Control;
 use crate::ui::defaults::style;
-pub use overview_pane::OverviewPane;
+pub use overview::OverviewPane;
 use tui::text::{Span, Spans};
 use tui::widgets::Paragraph;
 
