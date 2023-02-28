@@ -47,25 +47,31 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
         authz::Silo::new(authz::FLEET, *SILO_ID, LookupType::ById(*SILO_ID));
 
     // create a group
-    let group = nexus
-        .silo_group_lookup_or_create_by_name(
-            &opctx,
-            &authz_silo,
-            &"group1".to_string(),
-        )
+    let group_name = "group1".to_string();
+    nexus
+        .silo_group_lookup_or_create_by_name(&opctx, &authz_silo, &group_name)
         .await
-        .unwrap();
+        .expect("Group created");
 
     // now we have a group
     let groups =
         objects_list_page_authz::<views::User>(client, &"/v1/groups").await;
-    let group_names: Vec<&str> =
-        groups.items.iter().map(|g| g.display_name.as_str()).collect();
-    assert_same_items(group_names, vec!["group1"]);
+    assert_eq!(groups.items.len(), 1);
 
-    let group_users_url = format!("/v1/users?group={}", group.id());
+    let group = groups.items.get(0).unwrap();
+    assert_eq!(group.display_name, group_name);
 
-    // we can now fetch the group by ID and get an empty list of users
+    // we can fetch that group by ID
+    let group_url = format!("/v1/groups/{}", group.id);
+    let group = NexusRequest::object_get(&client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Group>()
+        .await;
+    assert_eq!(group.display_name, group_name);
+
+    let group_users_url = format!("/v1/users?group={}", group.id);
+
+    // we can now fetch the group's user list and get an empty list of users
     let group_users =
         objects_list_page_authz::<views::User>(client, &group_users_url).await;
 
@@ -84,7 +90,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
         .silo_group_membership_replace_for_user(
             &opctx,
             &authz_silo_user,
-            vec![group.id()],
+            vec![group.id],
         )
         .await
         .expect("Failed to set user group memberships");
