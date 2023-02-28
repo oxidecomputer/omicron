@@ -200,7 +200,6 @@ impl super::Nexus {
     /// provider.
     async fn local_idp_fetch_silo(
         &self,
-        opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> LookupResult<(authz::Silo, db::model::Silo)> {
         let (authz_silo, db_silo) = silo_lookup.fetch().await?;
@@ -222,7 +221,7 @@ impl super::Nexus {
         new_user_params: params::UserCreate,
     ) -> CreateResult<db::model::SiloUser> {
         let (authz_silo, db_silo) =
-            self.local_idp_fetch_silo(opctx, silo_lookup).await?;
+            self.local_idp_fetch_silo(silo_lookup).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         // TODO-cleanup This authz check belongs in silo_user_create().
         opctx
@@ -256,11 +255,11 @@ impl super::Nexus {
     pub async fn local_idp_delete_user(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         silo_user_id: Uuid,
     ) -> DeleteResult {
-        let (authz_silo, _) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
+
         let (authz_silo_user, _) = self
             .silo_user_lookup_by_id(
                 opctx,
@@ -383,12 +382,12 @@ impl super::Nexus {
     pub async fn local_idp_user_set_password(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         silo_user_id: Uuid,
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
         let (authz_silo, db_silo) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+            self.local_idp_fetch_silo(silo_lookup).await?;
         let (authz_silo_user, db_silo_user) = self
             .silo_user_lookup_by_id(
                 opctx,
@@ -495,11 +494,10 @@ impl super::Nexus {
     pub async fn login_local(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         credentials: params::UsernamePasswordCredentials,
     ) -> Result<Option<db::model::SiloUser>, Error> {
-        let (authz_silo, _) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
         // NOTE: It's very important that we not bail out early if we fail to
         // find a user with this external id.  See the note in
@@ -639,6 +637,7 @@ impl super::Nexus {
                 saml_identity_provider: NameOrId::Id(id),
                 silo_selector: None,
             } => {
+
                 let saml_provider = LookupPath::new(opctx, &self.db_datastore)
                     .saml_identity_provider_id(*id);
                 Ok(saml_provider)
@@ -649,7 +648,7 @@ impl super::Nexus {
             } => {
                 let saml_provider = self
                     .silo_lookup(opctx, &silo_selector.silo)?
-                    .saml_identity_provider_name(name);
+                    .saml_identity_provider_name(Name::ref_cast(name));
                 Ok(saml_provider)
             }
             params::SamlIdentityProviderSelector {

@@ -1385,14 +1385,10 @@ async fn local_idp_user_delete_v1(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
-        let path_params = path_params.into_inner();
-        nexus
-            .local_idp_delete_user(
-                &opctx,
-                &path_params.silo_name,
-                path_params.user_id,
-            )
-            .await?;
+        let path = path_params.into_inner();
+        let silo = path.silo_name.into();
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        nexus.local_idp_delete_user(&opctx, &silo_lookup, path.user_id).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1411,17 +1407,13 @@ async fn local_idp_user_delete(
     path_params: Path<UserPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path_params = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .local_idp_delete_user(
-                &opctx,
-                &path_params.silo_name,
-                path_params.user_id,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let silo = path.silo_name.into();
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        nexus.local_idp_delete_user(&opctx, &silo_lookup, path.user_id).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1442,15 +1434,17 @@ async fn local_idp_user_set_password_v1(
     update: TypedBody<params::UserPassword>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path_params = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let silo = path.silo_name.into();
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         nexus
             .local_idp_user_set_password(
                 &opctx,
-                &path_params.silo_name,
-                path_params.user_id,
+                &silo_lookup,
+                path.user_id,
                 update.into_inner(),
             )
             .await?;
@@ -1476,15 +1470,17 @@ async fn local_idp_user_set_password(
     update: TypedBody<params::UserPassword>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path_params = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let silo = path.silo_name.into();
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         nexus
             .local_idp_user_set_password(
                 &opctx,
-                &path_params.silo_name,
-                path_params.user_id,
+                &silo_lookup,
+                path.user_id,
                 update.into_inner(),
             )
             .await?;
