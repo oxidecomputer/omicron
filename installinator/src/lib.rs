@@ -10,5 +10,6 @@ mod errors;
 mod mock_peers;
 mod peers;
 mod reporter;
+mod write;
 
 pub use dispatch::*;
