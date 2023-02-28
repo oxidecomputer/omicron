@@ -6,14 +6,12 @@
 
 use anyhow::anyhow;
 use ipnetwork::IpNetwork;
-use slog::Logger;
 use slog::info;
+use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
-use crate::dladm::{
-    EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL,
-};
+use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;

@@ -4,7 +4,6 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use illumos_utils::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
 use crate::opte::Error;
 use crate::opte::Gateway;
@@ -13,6 +12,7 @@ use crate::opte::Vni;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
+use illumos_utils::dladm::PhysicalLink;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use slog::debug;

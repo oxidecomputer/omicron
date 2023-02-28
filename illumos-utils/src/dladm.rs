@@ -209,9 +209,7 @@ impl Dladm {
     }
 
     /// Delete the VNIC over the inter-zone comms etherstub.
-    pub fn delete_etherstub_vnic(
-        name: &str,
-    ) -> Result<(), ExecutionError> {
+    pub fn delete_etherstub_vnic(name: &str) -> Result<(), ExecutionError> {
         // It's not clear why, but this requires deleting the _interface_ that's
         // over the VNIC first. Other VNICs don't require this for some reason.
         if Self::get_etherstub_vnic_interface(name).is_ok() {

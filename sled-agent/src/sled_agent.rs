@@ -6,8 +6,6 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
-use illumos_utils::zone::IPADM;
-use illumos_utils::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
@@ -18,6 +16,8 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use dropshot::HttpError;
+use illumos_utils::zone::IPADM;
+use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -35,11 +35,11 @@ use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::serial::ByteOffset;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
 use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
-use crate::serial::ByteOffset;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

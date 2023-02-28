@@ -4,18 +4,18 @@
 
 //! Management of sled-local storage.
 
-use illumos_utils::dladm::Etherstub;
-use illumos_utils::link::VnicAllocator;
-use illumos_utils::running_zone::{InstalledZone, RunningZone};
-use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::ZpoolName;
-use illumos_utils::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use crate::nexus::LazyNexusClient;
 use crate::opte::Port;
 use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
+use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::zone::AddressRequest;
+use illumos_utils::zpool::ZpoolName;
+use illumos_utils::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskKind;
 use nexus_client::types::PhysicalDiskPutRequest;
@@ -487,9 +487,7 @@ async fn ensure_running_zone(
             info!(log, "Zone for {} is already running", dataset_name.full());
             return Ok(zone);
         }
-        Err(illumos_utils::running_zone::GetZoneError::NotFound {
-            ..
-        }) => {
+        Err(illumos_utils::running_zone::GetZoneError::NotFound { .. }) => {
             info!(log, "Zone for {} was not found", dataset_name.full());
 
             let installed_zone = InstalledZone::install(

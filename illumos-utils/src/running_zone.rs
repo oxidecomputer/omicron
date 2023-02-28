@@ -446,7 +446,10 @@ pub struct InstalledZone<Port> {
     link: Option<Link>,
 }
 
-impl<Port> InstalledZone<Port> where Port: OptePort {
+impl<Port> InstalledZone<Port>
+where
+    Port: OptePort,
+{
     /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///

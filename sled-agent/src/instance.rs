@@ -7,8 +7,8 @@
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
-use crate::opte::{PortManager, Port};
 use crate::opte::PortTicket;
+use crate::opte::{Port, PortManager};
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
