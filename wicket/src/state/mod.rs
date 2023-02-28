@@ -14,9 +14,10 @@ pub use inventory::{
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
 
-/// The data state of the Wizard
+/// The global state of wicket
 ///
-/// Data is not tied to any specific screen and is updated upon event receipt.
+/// [`State`] is not tied to any specific screen and is updated upon event
+/// receipt.
 #[derive(Debug)]
 pub struct State {
     pub inventory: Inventory,

@@ -61,9 +61,7 @@ impl RackState {
 
     pub fn up(&mut self) {
         self.selected = match self.selected {
-            ComponentId::Sled(i) if i == 14 || i == 15 => {
-                ComponentId::Switch(0)
-            }
+            ComponentId::Sled(14 | 15) => ComponentId::Switch(0),
             ComponentId::Sled(i) => ComponentId::Sled((i + 2) % 32),
             ComponentId::Switch(0) => ComponentId::Psc(0),
             ComponentId::Switch(1) => {
@@ -73,18 +71,15 @@ impl RackState {
                     ComponentId::Sled(17)
                 }
             }
-            ComponentId::Switch(_) => unreachable!(),
             ComponentId::Psc(0) => ComponentId::Psc(1),
             ComponentId::Psc(1) => ComponentId::Switch(1),
-            ComponentId::Psc(_) => unreachable!(),
+            _ => unreachable!(),
         };
     }
 
     pub fn down(&mut self) {
         self.selected = match self.selected {
-            ComponentId::Sled(i) if i == 16 || i == 17 => {
-                ComponentId::Switch(1)
-            }
+            ComponentId::Sled(16 | 17) => ComponentId::Switch(1),
             ComponentId::Sled(i) => ComponentId::Sled((30 + i) % 32),
             ComponentId::Switch(1) => ComponentId::Psc(1),
             ComponentId::Switch(0) => {
@@ -94,10 +89,9 @@ impl RackState {
                     ComponentId::Sled(15)
                 }
             }
-            ComponentId::Switch(_) => unreachable!(),
             ComponentId::Psc(0) => ComponentId::Switch(0),
             ComponentId::Psc(1) => ComponentId::Psc(0),
-            ComponentId::Psc(_) => unreachable!(),
+            _ => unreachable!(),
         };
     }
 
@@ -118,12 +112,8 @@ impl RackState {
 
     pub fn next(&mut self) {
         self.selected = match self.selected {
-            ComponentId::Sled(i)
-                if ((0..=14).contains(&i) || (16..=31).contains(&i)) =>
-            {
-                ComponentId::Sled((i + 1) % 32)
-            }
             ComponentId::Sled(15) => ComponentId::Switch(0),
+            ComponentId::Sled(i) => ComponentId::Sled((i + 1) % 32),
             ComponentId::Switch(0) => ComponentId::Psc(0),
             ComponentId::Psc(0) => ComponentId::Psc(1),
             ComponentId::Psc(1) => ComponentId::Switch(1),
@@ -135,17 +125,13 @@ impl RackState {
 
     pub fn prev(&mut self) {
         self.selected = match self.selected {
-            ComponentId::Sled(i)
-                if ((1..=15).contains(&i) || (17..=31).contains(&i)) =>
-            {
-                ComponentId::Sled(i - 1)
-            }
             ComponentId::Sled(16) => ComponentId::Switch(1),
+            ComponentId::Sled(0) => ComponentId::Sled(31),
+            ComponentId::Sled(i) => ComponentId::Sled(i - 1),
             ComponentId::Switch(1) => ComponentId::Psc(1),
             ComponentId::Psc(1) => ComponentId::Psc(0),
             ComponentId::Psc(0) => ComponentId::Switch(0),
             ComponentId::Switch(0) => ComponentId::Sled(15),
-            ComponentId::Sled(0) => ComponentId::Sled(31),
             _ => unreachable!(),
         };
         self.set_column();

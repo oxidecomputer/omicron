@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Default consistent styling for various widgets
-//! Screens can overried these where appropriate
 
 use super::colors::*;
 use tui::style::Color;

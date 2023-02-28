@@ -33,7 +33,7 @@ pub struct Runner {
     /// The UI that handles input events and renders widgets to the screen
     screen: Screen,
 
-    // The [`Runner`]'s mainloop is purely single threaded. Every interaction
+    // The [`Runner`]'s main_loop is purely single threaded. Every interaction
     // with the outside world is via channels. All input from the outside world
     // comes in via an `Event` over a single channel.
     events_rx: Receiver<Event>,
@@ -95,13 +95,13 @@ impl Runner {
         self.start_tokio_runtime();
         enable_raw_mode()?;
         execute!(self.terminal.backend_mut(), EnterAlternateScreen,)?;
-        self.mainloop()?;
+        self.main_loop()?;
         disable_raw_mode()?;
         execute!(self.terminal.backend_mut(), LeaveAlternateScreen,)?;
         Ok(())
     }
 
-    fn mainloop(&mut self) -> anyhow::Result<()> {
+    fn main_loop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
 
         // Draw the initial screen
@@ -130,53 +130,55 @@ impl Runner {
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Inventory(event) => {
-                    let mut redraw = false;
-
-                    match event {
-                        InventoryEvent::Inventory {
-                            changed_inventory,
-                            wicketd_received,
-                            mgs_received,
-                        } => {
-                            if let Some(inventory) = changed_inventory {
-                                if let Err(e) = self
-                                    .state
-                                    .inventory
-                                    .update_inventory(inventory)
-                                {
-                                    error!(
-                                        self.log,
-                                        "Failed to update inventory: {e}",
-                                    );
-                                } else {
-                                    redraw = true;
-                                }
-                            };
-
-                            self.state
-                                .service_status
-                                .reset_wicketd(wicketd_received.elapsed());
-                            self.state
-                                .service_status
-                                .reset_mgs(mgs_received.elapsed());
-                        }
-                        InventoryEvent::Unavailable { wicketd_received } => {
-                            self.state
-                                .service_status
-                                .reset_wicketd(wicketd_received.elapsed());
-                        }
-                    }
-
-                    redraw |= self.state.service_status.should_redraw();
-
-                    if redraw {
-                        // Inventory or status bar changed. Redraw the screen.
-                        self.screen.draw(&self.state, &mut self.terminal)?;
-                    }
+                    self.handle_inventory_event(event)?;
                 }
                 _ => info!(self.log, "{:?}", event),
             }
         }
+        Ok(())
+    }
+
+    fn handle_inventory_event(
+        &mut self,
+        event: InventoryEvent,
+    ) -> anyhow::Result<()> {
+        let mut redraw = false;
+
+        match event {
+            InventoryEvent::Inventory {
+                changed_inventory,
+                wicketd_received,
+                mgs_received,
+            } => {
+                if let Some(inventory) = changed_inventory {
+                    if let Err(e) =
+                        self.state.inventory.update_inventory(inventory)
+                    {
+                        error!(self.log, "Failed to update inventory: {e}",);
+                    } else {
+                        redraw = true;
+                    }
+                };
+
+                self.state
+                    .service_status
+                    .reset_wicketd(wicketd_received.elapsed());
+                self.state.service_status.reset_mgs(mgs_received.elapsed());
+            }
+            InventoryEvent::Unavailable { wicketd_received } => {
+                self.state
+                    .service_status
+                    .reset_wicketd(wicketd_received.elapsed());
+            }
+        }
+
+        redraw |= self.state.service_status.should_redraw();
+
+        if redraw {
+            // Inventory or status bar changed. Redraw the screen.
+            self.screen.draw(&self.state, &mut self.terminal)?;
+        }
+
         Ok(())
     }
 
@@ -221,31 +223,30 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                        if events_tx.send(Event::Tick).is_err() {
-                            info!(log, "Event listener completed");
-                            // The receiver was dropped. Program is ending.
-                            return;
-                        }
+                    if events_tx.send(Event::Tick).is_err() {
+                        info!(log, "Event listener completed");
+                        // The receiver was dropped. Program is ending.
+                        return;
                     }
+                }
                 event = events.next() => {
-                        let event = match event {
-                            None => {
-                            error!(log, "Event stream completed. Shutting down.");
-                            return;
-                           }
-                            Some(Ok(event)) => event,
-                            Some(Err(e)) => {
-                              // TODO: Issue a shutdown
-                              error!(log, "Failed to receive event: {:?}", e);
-                              return;
-                            }
-                        };
-                        if events_tx.send(Event::Term(event)).is_err() {
-                            info!(log, "Event listener completed");
-                            // The receiver was dropped. Program is ending.
-                            return;
+                    let event = match event {
+                        None => {
+                        error!(log, "Event stream completed. Shutting down.");
+                        return;
+                       }
+                        Some(Ok(event)) => event,
+                        Some(Err(e)) => {
+                          // TODO: Issue a shutdown
+                          error!(log, "Failed to receive event: {:?}", e);
+                          return;
                         }
-
+                    };
+                    if events_tx.send(Event::Term(event)).is_err() {
+                        info!(log, "Event listener completed");
+                        // The receiver was dropped. Program is ending.
+                        return;
+                    }
                 }
             }
         }

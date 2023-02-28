@@ -5,13 +5,9 @@
 //! Custom tui widgets
 
 mod animated_logo;
-
-#[allow(unused)]
-mod banner;
 mod box_connector;
 mod rack;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
-pub use banner::Banner;
 pub use box_connector::{BoxConnector, BoxConnectorKind};
 pub use rack::Rack;

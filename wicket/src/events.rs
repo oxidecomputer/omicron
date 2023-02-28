@@ -7,7 +7,7 @@ use wicketd_client::types::RackV1Inventory;
 
 use crossterm::event::Event as TermEvent;
 
-/// An event that will update state in the wizard
+/// An event that will update state
 ///
 /// This can be a keypress, mouse event, or response from a downstream service.
 #[derive(Debug)]
@@ -25,9 +25,10 @@ pub enum Event {
 
 /// Instructions for the [`Runner`]
 ///
-/// Event's fed through the [`MainScreen::on`]  method return an [`Action`]
-/// informing the wizard that it needs to do something. This allows separation
-/// of the UI from the rest of the system and makes each more testable.
+/// Event's fed through the [`MainScreen::on`] method return an [`Action`]
+/// informing the [`Runner`] that it needs to do something. This allows
+/// separation of the UI from the rest of the system and makes each more
+/// testable.
 pub enum Action {
     Redraw,
     Update(ComponentId),
@@ -39,7 +40,9 @@ impl Action {
     /// For now, all actions result in a redraw.
     /// Some downstream operations will not trigger this in the future.
     pub fn should_redraw(&self) -> bool {
-        true
+        match self {
+            Action::Redraw | Action::Update(_) => true,
+        }
     }
 }
 

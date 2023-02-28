@@ -68,7 +68,7 @@ impl ServiceStatus {
 /// Tracker used by a single instance of liveness.
 #[derive(Debug)]
 pub struct LivenessState {
-    // Some means that the stopwatch hasn't yet been initialized.
+    // None means that the stopwatch hasn't yet been initialized.
     stopwatch: Option<libsw::Stopwatch>,
 
     #[allow(unused)]

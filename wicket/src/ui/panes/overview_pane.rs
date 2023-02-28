@@ -347,7 +347,7 @@ impl Control for InventoryView {
             },
             Event::Tick => {
                 // TODO: This only animates when the pane is active. Should we move the
-                // tick into the wizard instead?
+                // tick into the [`Runner`] instead?
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
                     k.step();
                     Some(Action::Redraw)
