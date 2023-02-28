@@ -33,7 +33,7 @@ state which can be utilized by the `main_loop`. The `Runner` is in charge of:
 
 The main type of the wicket crate is the `Wizard`. The wizard is run by the `wicket` binary and is in charge of:
  * Handling user input
- * Sending requests to downstream services (wicketd + RSS (eventually))
+ * Sending requests to wicketd
  * Handling events from downstream services
  * Dispatching events to the UI `Screen`
  * Triggering terminal rendering
@@ -82,8 +82,8 @@ we have done with the `Rack` and `BoxConnector` widgets. Custom widgets can be
 found in `src/ui/widgets`.
 
 Besides the main thread, which runs `main_loop`, there is a separate tokio
-runtime which is used to drive communications with `wicketd` and `RSS`, and to manage
-inputs and timers. Requests are driven by wicketd and RSS clients and all replies
+runtime which is used to drive communications with `wicketd`, and to manage
+inputs and timers. Requests are driven by wicketd clients and all replies
 are handled by these clients in the tokio runtime. Any important information
 in these replies is forwarded as an `Event` over a channel to be received
 in `main_loop`. All `Event`s, whether respones from downstream services, user
