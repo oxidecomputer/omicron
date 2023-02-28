@@ -6,7 +6,7 @@ use crate::{Action, Event, Frame, State};
 use tui::layout::Rect;
 
 /// A [`Control`] is the an item on a screen that can be selected and interacted with.
-/// Control's render [`tui::Widget`]s when drawn.
+/// Control's render [`tui::widgets::Widget`]s when drawn.
 ///
 ///
 /// Due to the rendering model of stateful widgets in `tui.rs`, `self` must

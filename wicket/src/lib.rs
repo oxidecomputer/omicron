@@ -17,3 +17,4 @@ pub use crate::dispatch::*;
 pub use crate::runner::*;
 pub use events::{Action, Event, InventoryEvent};
 pub use state::State;
+pub use ui::Control;

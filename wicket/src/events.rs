@@ -23,10 +23,10 @@ pub enum Event {
     Tick,
 }
 
-/// Instructions for the [`Runner`]
+/// Instructions for the [`crate::Runner`]
 ///
-/// Event's fed through the [`MainScreen::on`] method return an [`Action`]
-/// informing the [`Runner`] that it needs to do something. This allows
+/// Event's fed through the [`crate::Control::on`] methods return an [`Action`]
+/// informing the [`crate::Runner`] that it needs to do something. This allows
 /// separation of the UI from the rest of the system and makes each more
 /// testable.
 pub enum Action {
