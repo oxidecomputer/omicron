@@ -139,11 +139,13 @@ session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
+group_list_v1                            /v1/groups
 policy_update                            /policy
 policy_update_v1                         /v1/policy
 policy_view                              /policy
 policy_view_v1                           /v1/policy
 user_list                                /users
+user_list_v1                             /v1/users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH

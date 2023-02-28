@@ -165,7 +165,7 @@ impl super::Nexus {
             .await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
         self.db_datastore
-            .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
+            .silo_users_list(opctx, &authz_silo_user_list, pagparams)
             .await
     }
 

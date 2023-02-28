@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt::Debug;
-
+use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils_macros::nexus_test;
@@ -1027,7 +1026,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         result.headers["Set-Cookie"].to_str().unwrap().to_string();
 
     let groups: ResultsPage<views::Group> = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/groups")
+        RequestBuilder::new(client, Method::GET, "/v1/groups")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
     )
@@ -1071,14 +1070,6 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         session_me.items.iter().map(|g| g.id).collect::<Vec<_>>();
 
     assert_same_items(session_me_group_ids, silo_group_ids);
-}
-
-/// Order-agnostic vec equality
-fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
-    assert_eq!(v1.len(), v2.len(), "{:?} and {:?} don't match", v1, v2);
-    for item in v1.iter() {
-        assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
-    }
 }
 
 // Test correct SAML response with relay state

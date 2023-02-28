@@ -6,7 +6,6 @@
 
 use crate::mgs::GetInventoryResponse;
 use crate::update_events::UpdateLog;
-use crate::update_tracker::StartUpdateError;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -143,17 +142,13 @@ async fn post_start_update(
 
     // Generate an ID for this update; the update tracker will send it to the
     // sled as part of the InstallinatorImageId, and installinator will send it
-    // back to our artifact server with its progress and completion requests.
+    // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
     match rqctx.update_tracker.start(target.into_inner(), plan, update_id).await
     {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
-        Err(err) => match err {
-            StartUpdateError::UpdateInProgress(_) => {
-                Err(HttpError::for_bad_request(None, err.to_string()))
-            }
-        },
+        Err(err) => Err(err.to_http_error()),
     }
 }
 
