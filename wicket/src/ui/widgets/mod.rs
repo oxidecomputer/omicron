@@ -13,5 +13,5 @@ mod rack;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
-pub use box_connector::BoxConnector;
+pub use box_connector::{BoxConnector, BoxConnectorKind};
 pub use rack::Rack;

@@ -5,50 +5,47 @@
 use std::collections::BTreeMap;
 
 use super::help_text;
-use super::{Control, Pane, Tab};
+use super::Control;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
-use crate::ui::widgets::{BoxConnector, Rack};
+use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::Style;
-use tui::text::Text;
+use tui::layout::{Constraint, Direction, Layout, Rect};
+use tui::style::{Color, Style};
+use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 
 /// The OverviewPane shows a rendering of the rack.
 ///
 /// This is useful for getting a quick view of the state of the rack.
 pub struct OverviewPane {
-    // We want the controls in a specific order accessible by index
-    tabs: Vec<Tab>,
-    selected: usize,
+    rack_view: RackView,
+    inventory_view: InventoryView,
+    rack_view_selected: bool,
 }
 
 impl OverviewPane {
     pub fn new() -> OverviewPane {
         OverviewPane {
-            tabs: vec![
-                Tab { title: "OXIDE RACK", control: Box::new(RackTab {}) },
-                Tab {
-                    title: "INVENTORY",
-                    control: Box::new(InventoryTab::new()),
-                },
-            ],
-            selected: 0,
+            rack_view: RackView::default(),
+            inventory_view: InventoryView::new(),
+            rack_view_selected: true,
         }
     }
-}
 
-impl Pane for OverviewPane {
-    fn tab_titles(&self) -> Vec<&'static str> {
-        self.tabs.iter().map(|t| t.title).collect()
-    }
-
-    fn selected_tab(&self) -> usize {
-        self.selected
+    pub fn dispatch(
+        &mut self,
+        state: &mut State,
+        event: Event,
+    ) -> Option<Action> {
+        if self.rack_view_selected {
+            self.rack_view.on(state, event)
+        } else {
+            self.inventory_view.on(state, event)
+        }
     }
 }
 
@@ -56,13 +53,14 @@ impl Control for OverviewPane {
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Tab => {
-                    self.selected = (self.selected + 1) % self.tabs.len();
+                KeyCode::Enter => {
+                    // Switch between rack and inventory view
+                    self.rack_view_selected = !self.rack_view_selected;
                     Some(Action::Redraw)
                 }
-                _ => self.tabs[self.selected].control.on(state, event),
+                _ => self.dispatch(state, event),
             },
-            _ => self.tabs[self.selected].control.on(state, event),
+            _ => self.dispatch(state, event),
         }
     }
 
@@ -73,13 +71,18 @@ impl Control for OverviewPane {
         rect: Rect,
         active: bool,
     ) {
-        self.tabs[self.selected].control.draw(state, frame, rect, active)
+        if self.rack_view_selected {
+            self.rack_view.draw(state, frame, rect, active);
+        } else {
+            self.inventory_view.draw(state, frame, rect, active);
+        }
     }
 }
 
-pub struct RackTab {}
+#[derive(Default)]
+pub struct RackView {}
 
-impl Control for RackTab {
+impl Control for RackView {
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
@@ -122,54 +125,75 @@ impl Control for RackTab {
         rect: Rect,
         active: bool,
     ) {
-        let border_style =
-            if active { style::selected_line() } else { style::deselected() };
+        let (border_style, component_style) = if active {
+            (style::selected_line(), style::selected())
+        } else {
+            (style::deselected(), style::deselected())
+        };
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .split(rect);
+
+        let border = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(border_style);
+
+        // Draw the sled title (subview look)
+        let title_bar = Paragraph::new(Spans::from(vec![Span::styled(
+            "OXIDE RACK",
+            component_style,
+        )]))
+        .block(border.clone().title("<ENTER>"));
+        frame.render_widget(title_bar, chunks[0]);
 
         // Draw the pane border
         let border = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .style(border_style);
-        let inner = border.inner(rect);
-        frame.render_widget(border, rect);
+        let inner = border.inner(chunks[1]);
+        frame.render_widget(border, chunks[1]);
 
         // Draw the rack
         let rack = Rack {
             state: &state.rack_state,
             switch_style: Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE),
             power_shelf_style: Style::default().bg(OX_GRAY).fg(OX_OFF_WHITE),
-            sled_style: Style::default().bg(OX_GREEN_LIGHT).fg(TUI_BLACK),
+            sled_style: Style::default().bg(OX_GREEN_LIGHT).fg(Color::Black),
             sled_selected_style: Style::default()
-                .fg(TUI_BLACK)
-                .bg(TUI_PURPLE_DIM),
+                .fg(Color::Black)
+                .bg(OX_GRAY_DARK),
 
-            border_style: Style::default().fg(OX_GRAY).bg(TUI_BLACK),
+            border_style: Style::default().fg(OX_GRAY).bg(Color::Black),
             border_selected_style: Style::default()
-                .fg(TUI_BLACK)
-                .bg(TUI_PURPLE),
+                .fg(OX_YELLOW)
+                .bg(OX_GRAY_DARK),
 
-            switch_selected_style: Style::default()
-                .bg(TUI_PURPLE_DIM)
-                .fg(TUI_PURPLE),
-            power_shelf_selected_style: Style::default()
-                .bg(TUI_PURPLE_DIM)
-                .fg(TUI_PURPLE),
+            switch_selected_style: Style::default().bg(OX_GRAY_DARK),
+            power_shelf_selected_style: Style::default().bg(OX_GRAY),
         };
 
         frame.render_widget(rack, inner);
     }
 }
 
-pub struct InventoryTab {
+pub struct InventoryView {
     help: Vec<(&'static str, &'static str)>,
     // Vertical offset used for scrolling
     scroll_offsets: BTreeMap<ComponentId, usize>,
 }
 
-impl InventoryTab {
-    pub fn new() -> InventoryTab {
-        InventoryTab {
-            help: vec![("SELECT", "<LEFT/RIGHT>"), ("SCROLL", "<UP/DOWN>")],
+impl InventoryView {
+    pub fn new() -> InventoryView {
+        InventoryView {
+            help: vec![
+                ("RACK VIEW", "<ENTER>"),
+                ("SWITCH COMPONENT", "<LEFT/RIGHT>"),
+                ("SCROLL", "<UP/DOWN>"),
+            ],
             scroll_offsets: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| (*id, 0))
@@ -178,7 +202,7 @@ impl InventoryTab {
     }
 }
 
-impl Control for InventoryTab {
+impl Control for InventoryView {
     fn draw(
         &mut self,
         state: &State,
@@ -209,20 +233,21 @@ impl Control for InventoryTab {
             .border_type(BorderType::Rounded)
             .style(border_style);
 
-        // Draw the current component
-        // Make the borders touch (no gaps)
-        let component = Paragraph::new(Text::from(format!(
-            "{}",
-            state.rack_state.selected
-        )))
-        .block(block.clone())
-        .style(component_style)
-        .alignment(Alignment::Center);
-        frame.render_widget(component, chunks[0]);
+        // Draw the sled title (subview look)
+        let title_bar = Paragraph::new(Spans::from(vec![
+            Span::styled("OXIDE RACK / ", border_style),
+            Span::styled(
+                state.rack_state.selected.to_string(),
+                component_style,
+            ),
+        ]))
+        .block(block.clone().title("<ENTER>"));
+        frame.render_widget(title_bar, chunks[0]);
 
         // Draw the contents
-        let contents_block =
-            block.clone().borders(Borders::LEFT | Borders::RIGHT);
+        let contents_block = block
+            .clone()
+            .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP);
         let inventory_style = Style::default().fg(OX_OFF_WHITE);
         let component_id = state.rack_state.selected;
         let text = match state.inventory.get_inventory(&component_id) {
@@ -273,7 +298,10 @@ impl Control for InventoryTab {
         frame.render_widget(help, chunks[2]);
 
         // Make sure the top and bottom bars connect
-        frame.render_widget(BoxConnector {}, chunks[1]);
+        frame.render_widget(
+            BoxConnector::new(BoxConnectorKind::Bottom),
+            chunks[1],
+        );
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {

@@ -26,3 +26,13 @@ pub trait Control {
         active: bool,
     );
 }
+
+// Placeholder control for use during dev.
+pub struct NullControl {}
+
+impl Control for NullControl {
+    fn on(&mut self, _: &mut State, _: Event) -> Option<Action> {
+        None
+    }
+    fn draw(&mut self, _: &State, _: &mut Frame<'_>, _: Rect, _active: bool) {}
+}

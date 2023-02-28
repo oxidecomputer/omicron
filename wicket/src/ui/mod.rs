@@ -15,8 +15,8 @@ use tui::widgets::ListState;
 use main::MainScreen;
 use splash::SplashScreen;
 
-pub use controls::Control;
-pub use panes::{NullPane, OverviewPane, Pane};
+pub use controls::{Control, NullControl};
+pub use panes::OverviewPane;
 
 /// The primary display representation. It's sole purpose is to dispatch events
 /// to the underlying splash and main screens.

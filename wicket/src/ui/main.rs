@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{Control, NullPane, OverviewPane, Pane, StatefulList};
+use super::{Control, NullControl, OverviewPane, StatefulList};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::{Action, Event, Frame, State, Term};
@@ -13,9 +13,7 @@ use crossterm::event::KeyCode;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Modifier, Style};
 use tui::text::{Span, Spans};
-use tui::widgets::{
-    Block, BorderType, Borders, List, ListItem, Paragraph, Tabs,
-};
+use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
 /// entire terminal window/buffer and is visible for all interactions except
@@ -28,7 +26,7 @@ use tui::widgets::{
 /// as needed.
 pub struct MainScreen {
     sidebar: Sidebar,
-    panes: BTreeMap<&'static str, Box<dyn Pane>>,
+    panes: BTreeMap<&'static str, Box<dyn Control>>,
 }
 
 impl MainScreen {
@@ -36,9 +34,9 @@ impl MainScreen {
         MainScreen {
             sidebar: Sidebar::new(),
             panes: BTreeMap::from([
-                ("overview", Box::new(OverviewPane::new()) as Box<dyn Pane>),
-                ("update", Box::new(NullPane::new()) as Box<dyn Pane>),
-                ("help", Box::new(NullPane::new()) as Box<dyn Pane>),
+                ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
+                ("update", Box::new(NullControl {}) as Box<dyn Control>),
+                ("help", Box::new(NullControl {}) as Box<dyn Control>),
             ]),
         }
     }
@@ -61,7 +59,7 @@ impl MainScreen {
             };
 
             // Size the individual components of the screen
-            let horizontal_chunks = Layout::default()
+            let chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .margin(1)
                 .constraints(
@@ -69,29 +67,11 @@ impl MainScreen {
                 )
                 .split(rect);
 
-            let vertical_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Max(1000)])
-                .split(horizontal_chunks[1]);
-
             // Draw all the components, starting with the background
             let background = Block::default().style(style::background());
             frame.render_widget(background, frame.size());
-
-            self.sidebar.draw(
-                state,
-                frame,
-                horizontal_chunks[0],
-                self.sidebar.selected,
-            );
-
-            self.draw_pane(
-                state,
-                frame,
-                vertical_chunks[0],
-                vertical_chunks[1],
-            );
-
+            self.sidebar.draw(state, frame, chunks[0], self.sidebar.selected);
+            self.draw_pane(state, frame, chunks[1]);
             self.draw_statusbar(state, frame, statusbar_rect);
         })?;
         Ok(())
@@ -110,7 +90,7 @@ impl MainScreen {
                         Some(Action::Redraw)
                     }
                 }
-                KeyCode::Enter | KeyCode::Tab | KeyCode::Right => {
+                KeyCode::Enter => {
                     if self.sidebar.selected {
                         self.sidebar.selected = false;
                         Some(Action::Redraw)
@@ -139,7 +119,7 @@ impl MainScreen {
         }
     }
 
-    fn current_pane(&mut self) -> &mut Box<dyn Pane> {
+    fn current_pane(&mut self) -> &mut Box<dyn Control> {
         self.panes.get_mut(self.sidebar.selected()).unwrap()
     }
 
@@ -147,37 +127,10 @@ impl MainScreen {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        tabs_rect: Rect,
         pane_rect: Rect,
     ) {
-        let (border_style, active, highlight_style) = if self.sidebar.selected {
-            (
-                style::deselected(),
-                false,
-                style::deselected().add_modifier(Modifier::BOLD),
-            )
-        } else {
-            (style::selected_line(), true, style::selected())
-        };
-
+        let active = if self.sidebar.selected { false } else { true };
         let pane = self.current_pane();
-
-        // Draw the Top bar (tabs)
-        let titles =
-            pane.tab_titles().iter().cloned().map(Spans::from).collect();
-        let tabs = Tabs::new(titles)
-            .highlight_style(highlight_style)
-            .divider(Span::styled("|", style::divider()))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
-            )
-            .style(border_style)
-            .select(pane.selected_tab());
-        frame.render_widget(tabs, tabs_rect);
-
-        // Draw the pane
         pane.draw(state, frame, pane_rect, active)
     }
 
@@ -277,7 +230,7 @@ impl Control for Sidebar {
             style::deselected()
         };
 
-        let tabs = List::new(items)
+        let panes = List::new(items)
             .block(
                 Block::default()
                     .title("<ESC>")
@@ -287,6 +240,6 @@ impl Control for Sidebar {
             )
             .highlight_style(style::selected().add_modifier(Modifier::BOLD));
 
-        frame.render_stateful_widget(tabs, area, &mut self.panes.state);
+        frame.render_stateful_widget(panes, area, &mut self.panes.state);
     }
 }
