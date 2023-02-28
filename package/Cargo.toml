@@ -18,6 +18,7 @@ petgraph.workspace = true
 rayon.workspace = true
 reqwest = { workspace = true, features = [ "rustls-tls" ] }
 ring.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
 slog.workspace = true
