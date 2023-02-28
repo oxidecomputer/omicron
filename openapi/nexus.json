@@ -545,6 +545,7 @@
           "silos"
         ],
         "summary": "List groups",
+        "description": "Use `GET /v1/groups` instead",
         "operationId": "group_list",
         "parameters": [
           {
@@ -593,6 +594,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -7738,6 +7740,7 @@
           "silos"
         ],
         "summary": "List users",
+        "description": "Use `GET /v1/users` instead",
         "operationId": "user_list",
         "parameters": [
           {
@@ -7786,6 +7789,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -8003,6 +8007,63 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/groups": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List groups",
+        "operationId": "group_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/v1/instances": {
@@ -10994,6 +11055,72 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/users": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List users",
+        "operationId": "user_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "group",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/v1/vpc-firewall-rules": {

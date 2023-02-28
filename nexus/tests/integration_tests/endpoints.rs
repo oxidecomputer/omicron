@@ -792,7 +792,16 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/users",
+            url: "/v1/users",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/groups",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
@@ -846,15 +855,6 @@ lazy_static! {
                 AllowedMethod::Post(serde_json::to_value(
                     params::UserPassword::InvalidPassword
                 ).unwrap()),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/groups",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 
