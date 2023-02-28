@@ -221,18 +221,21 @@ impl DataStore {
         // TODO: this should be an authz::SiloGroup probably
         authz_silo_group: &authz::SiloGroup,
     ) -> ListResultVec<SiloUser> {
-        use db::schema::silo_group_membership as sgm;
-        use db::schema::silo_user as su;
+        use db::schema::silo_group_membership as user_to_group;
+        use db::schema::silo_user as user;
 
         opctx
             .authorize(authz::Action::ListChildren, authz_silo_user_list)
             .await?;
 
-        paginated(su::table, su::id, pagparams)
-            .filter(su::silo_id.eq(authz_silo_user_list.silo().id()))
-            .filter(su::time_deleted.is_null())
-            .inner_join(sgm::table.on(sgm::silo_user_id.eq(su::id)))
-            .filter(sgm::silo_group_id.eq(authz_silo_group.id()))
+        paginated(user::table, user::id, pagparams)
+            .filter(user::silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(user::time_deleted.is_null())
+            .inner_join(user_to_group::table.on(
+                user_to_group::silo_user_id.eq(user::id).and(
+                    user_to_group::silo_group_id.eq(authz_silo_group.id()),
+                ),
+            ))
             .select(SiloUser::as_select())
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await
