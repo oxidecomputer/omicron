@@ -36,10 +36,8 @@ impl MainScreen {
             "overview",
             Box::new(OverviewPane::new()) as Box<dyn Control>,
         )];
-        let sidebar_keys: Vec<_> = sidebar_ordered_panes
-            .iter()
-            .map(|(title, _)| title.clone())
-            .collect();
+        let sidebar_keys: Vec<_> =
+            sidebar_ordered_panes.iter().map(|&(title, _)| title).collect();
         MainScreen {
             sidebar: Sidebar::new(sidebar_keys),
             panes: BTreeMap::from_iter(sidebar_ordered_panes),
@@ -134,7 +132,7 @@ impl MainScreen {
         frame: &mut Frame<'_>,
         pane_rect: Rect,
     ) {
-        let active = if self.sidebar.selected { false } else { true };
+        let active = !self.sidebar.selected;
         let pane = self.current_pane();
         pane.draw(state, frame, pane_rect, active)
     }

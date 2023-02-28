@@ -72,11 +72,7 @@ impl SplashScreen {
         match event {
             Event::Tick => {
                 self.state.frame += 1;
-                if self.state.frame < TOTAL_FRAMES {
-                    false
-                } else {
-                    true
-                }
+                self.state.frame >= TOTAL_FRAMES
             }
             Event::Term(TermEvent::Key(_)) => {
                 // Allow the user to skip the splash screen with any key press
