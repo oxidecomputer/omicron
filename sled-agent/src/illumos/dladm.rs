@@ -4,11 +4,11 @@
 
 //! Utilities for poking at data links.
 
-use crate::common::vlan::VlanID;
 use crate::illumos::link::{Link, LinkKind};
 use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
+use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::str::Utf8Error;

@@ -4,7 +4,6 @@
 
 //! Interfaces for working with sled agent configuration
 
-use crate::common::vlan::VlanID;
 use crate::hardware::is_gimlet;
 use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::FindPhysicalLinkError;
@@ -12,6 +11,7 @@ use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::dladm::CHELSIO_LINK_PREFIX;
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
+use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
