@@ -30,6 +30,7 @@ slog-envlogger.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tokio-util.workspace = true
 toml.workspace = true
 uuid.workspace = true
 
@@ -37,6 +38,7 @@ uuid.workspace = true
 omicron-test-utils.workspace = true
 hex-literal.workspace = true
 proptest.workspace = true
+tempfile.workspace = true
 test-strategy.workspace = true
 tokio = { workspace = true, features = [ "test-util" ] }
 tokio-stream.workspace = true

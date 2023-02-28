@@ -6,11 +6,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use buf_list::BufList;
-use bytes::Buf;
+use bytes::Bytes;
 use camino::{Utf8Path, Utf8PathBuf};
+use futures::SinkExt;
 use installinator_common::{CompletionEventKind, ProgressEventKind};
 use omicron_common::update::ArtifactHashId;
-use tokio::{io::AsyncWriteExt, sync::mpsc, time::Instant};
+use tokio::{sync::mpsc, time::Instant};
+use tokio_util::codec::{BytesCodec, FramedWrite};
 
 use crate::reporter::ReportEvent;
 
@@ -57,7 +59,15 @@ pub(crate) async fn write_artifact(
         )
         .await
         {
-            Ok(()) => break,
+            Ok(()) => {
+                slog::info!(
+                    log,
+                    "wrote artifact ({} bytes) to {destination} in {attempt} attempts",
+                    artifact.num_bytes();
+                    "artifact_id" => ?artifact_id,
+                );
+                break;
+            }
             Err(error) => {
                 slog::info!(log, "{error:?}"; "artifact_id" => ?artifact_id);
                 // Give it a short break, then keep trying.
@@ -74,7 +84,7 @@ async fn write_artifact_impl(
     destination: &Utf8Path,
     event_sender: &mpsc::Sender<ReportEvent>,
 ) -> Result<()> {
-    let mut file = tokio::fs::OpenOptions::new()
+    let file = tokio::fs::OpenOptions::new()
         // TODO: do we want create = true? Maybe only if writing to a file and not an M.2.
         .create(true)
         .write(true)
@@ -90,13 +100,15 @@ async fn write_artifact_impl(
 
     let start = Instant::now();
 
-    while artifact.has_remaining() {
-        // BufWriter shouldn't be necessary because we've downloaded, and are
-        // writing, data in typical buffer-sized chunks. Besides,
-        // tokio::fs::File already uses a buffer internally as of tokio 1.25.0.
-        match file.write(artifact.chunk()).await {
-            Ok(n) => {
-                written_bytes += n as u64;
+    // Use FramedWrite for cancel safety. (Though this isn't tested yet.)
+    let mut sink = FramedWrite::new(file, BytesCodec::new());
+    for chunk in artifact {
+        let num_bytes = chunk.len();
+        // This is a manual version of sink.send_all(stream) that also reports
+        // progress.
+        match sink.feed(chunk).await {
+            Ok(()) => {
+                written_bytes += num_bytes as u64;
                 let _ = event_sender
                     .send(ReportEvent::Progress(
                         ProgressEventKind::WriteProgress {
@@ -134,7 +146,11 @@ async fn write_artifact_impl(
         }
     }
 
-    match file.flush().await {
+    // This annoying type annotation is needed because BytesCodec impls both
+    // Encoder<Bytes> and Encoder<BytesMut>.
+    let close_ret = <_ as SinkExt<Bytes>>::close(&mut sink).await;
+
+    match close_ret {
         Ok(()) => {}
         Err(error) => {
             let _ = event_sender
@@ -170,4 +186,141 @@ async fn write_artifact_impl(
         .await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::{dummy_artifact_hash_id, with_test_runtime};
+
+    use anyhow::Result;
+    use bytes::{Buf, Bytes};
+    use camino::Utf8Path;
+    use futures::StreamExt;
+    use omicron_test_utils::dev::test_setup_log;
+    use proptest::prelude::*;
+    use tempfile::tempdir;
+    use test_strategy::proptest;
+    use tokio::io::AsyncReadExt;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    #[proptest(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+    fn proptest_write_artifact(
+        #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
+        data: Vec<Vec<u8>>,
+    ) {
+        with_test_runtime(move || async move {
+            proptest_write_artifact_impl(data).await.expect("test failed");
+        })
+    }
+
+    async fn proptest_write_artifact_impl(data: Vec<Vec<u8>>) -> Result<()> {
+        let logctx = test_setup_log("test_write_artifact");
+        let tempdir = tempdir()?;
+        let tempdir_path: &Utf8Path = tempdir.path().try_into()?;
+        let temp_destination = tempdir_path.join("test.bin");
+
+        let artifact_id = dummy_artifact_hash_id();
+        let mut artifact: BufList = data.into_iter().map(Bytes::from).collect();
+
+        let (event_sender, event_receiver) = mpsc::channel(512);
+
+        let receiver_handle = tokio::spawn(async move {
+            ReceiverStream::new(event_receiver).collect::<Vec<_>>().await
+        });
+
+        write_artifact(
+            &logctx.log,
+            &artifact_id,
+            artifact.clone(),
+            &temp_destination,
+            &event_sender,
+        )
+        .await;
+
+        std::mem::drop(event_sender);
+
+        let events = receiver_handle.await?;
+
+        let mut seen_completion = false;
+        let mut last_written_bytes = 0;
+
+        for event in events {
+            match event {
+                ReportEvent::Progress(ProgressEventKind::WriteProgress {
+                    attempt,
+                    kind,
+                    destination,
+                    written_bytes,
+                    total_bytes,
+                    ..
+                }) => {
+                    assert!(
+                        !seen_completion,
+                        "no more progress events after completion"
+                    );
+                    assert_eq!(attempt, 1);
+                    assert_eq!(kind, artifact_id.kind);
+                    assert_eq!(destination, temp_destination);
+                    assert_eq!(total_bytes, artifact.num_bytes() as u64);
+                    assert!(
+                        written_bytes > 0,
+                        "non-zero number of bytes should be written"
+                    );
+                    assert!(
+                        written_bytes > last_written_bytes,
+                        "progress made with written bytes {written_bytes} > {last_written_bytes}"
+                    );
+                    last_written_bytes = written_bytes;
+                }
+                ReportEvent::Completion(
+                    CompletionEventKind::WriteCompleted {
+                        attempt,
+                        kind,
+                        destination,
+                        artifact_size,
+                        ..
+                    },
+                ) => {
+                    assert!(
+                        !seen_completion,
+                        "only one WriteCompleted event seen"
+                    );
+                    seen_completion = true;
+                    assert_eq!(attempt, 1);
+                    assert_eq!(kind, artifact_id.kind);
+                    assert_eq!(destination, temp_destination);
+                    assert_eq!(artifact_size, artifact.num_bytes() as u64);
+                }
+                other => {
+                    panic!("unexpected event: {other:?}");
+                }
+            }
+        }
+
+        assert!(seen_completion, "seen a WriteCompleted event");
+
+        // Read the artifact from disk and ensure it is correct.
+        let mut file = tokio::fs::File::open(&temp_destination)
+            .await
+            .with_context(|| {
+                format!("failed to open {temp_destination} to verify contents")
+            })?;
+        let mut buf = Vec::with_capacity(artifact.num_bytes());
+        let read_num_bytes =
+            file.read_to_end(&mut buf).await.with_context(|| {
+                format!("failed to read {temp_destination} into memory")
+            })?;
+        assert_eq!(
+            read_num_bytes,
+            artifact.num_bytes(),
+            "read num_bytes matches"
+        );
+
+        let bytes = artifact.copy_to_bytes(artifact.num_bytes());
+        assert_eq!(buf, bytes, "bytes written to disk match");
+
+        logctx.cleanup_successful();
+        Ok(())
+    }
 }

@@ -534,18 +534,14 @@ mod tests {
         errors::DiscoverPeersError,
         peers::{FetchedArtifact, Peers},
         reporter::ProgressReporter,
+        test_helpers::{dummy_artifact_hash_id, with_test_runtime},
     };
 
     use bytes::Buf;
     use futures::{future, StreamExt};
-    use omicron_common::{
-        api::internal::nexus::KnownArtifactKind, update::ArtifactHash,
-    };
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::ReceiverStream;
-
-    use std::future::Future;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
     #[proptest]
@@ -656,28 +652,6 @@ mod tests {
 
             logctx.cleanup_successful();
         });
-    }
-
-    fn with_test_runtime<F, Fut, T>(f: F) -> T
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = T>,
-    {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .start_paused(true)
-            .build()
-            .expect("tokio Runtime built successfully");
-        runtime.block_on(f())
-    }
-
-    fn dummy_artifact_hash_id() -> ArtifactHashId {
-        ArtifactHashId {
-            kind: KnownArtifactKind::ControlPlane.into(),
-            hash: ArtifactHash(
-                hex_literal::hex!("b5bb9d8014a0f9b1d61e21e796d78dcc" "df1352f23cd32812f4850b878ae4944c"),
-            ),
-        }
     }
 
     fn assert_progress_reports(

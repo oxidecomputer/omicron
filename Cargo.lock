@@ -544,9 +544,9 @@ dependencies = [
 
 [[package]]
 name = "buf-list"
-version = "0.1.3"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deb213ab6aa87733e74428d8a33f0bb93181810b0ae09ae96b8cc1521d265283"
+checksum = "f462e45b27db47403356859af1cb4bfbbd0021cb7b7d10db6ea40958bb4e2c48"
 dependencies = [
  "bytes",
 ]
@@ -2851,10 +2851,12 @@ dependencies = [
  "slog-async",
  "slog-envlogger",
  "slog-term",
+ "tempfile",
  "test-strategy",
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml 0.7.2",
  "uuid",
 ]
