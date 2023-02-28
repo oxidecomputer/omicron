@@ -104,7 +104,7 @@ impl fmt::Display for Mountpoint {
     }
 }
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     pub fn list_datasets(name: &str) -> Result<Vec<String>, ListDatasetsError> {

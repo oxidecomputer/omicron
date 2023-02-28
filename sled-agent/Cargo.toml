@@ -79,6 +79,8 @@ subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 
+illumos-utils = { workspace = true, features = ["testing"] }
+
 #
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

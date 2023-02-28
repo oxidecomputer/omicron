@@ -19,6 +19,13 @@ tokio.workspace = true
 uuid.workspace = true
 zone.workspace = true
 
+# only enabled via the `testing` feature
+mockall = { workspace = true, optional = true }
+
 [dev-dependencies]
 mockall.workspace = true
 toml.workspace = true
+
+[features]
+# Enable to generate MockZones
+testing = ["mockall"]

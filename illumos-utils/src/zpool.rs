@@ -159,7 +159,7 @@ impl FromStr for ZpoolInfo {
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool {}
 
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
     pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);

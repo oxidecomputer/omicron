@@ -155,7 +155,7 @@ impl AddressRequest {
 /// Wraps commands for interacting with Zones.
 pub struct Zones {}
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
     ///

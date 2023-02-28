@@ -150,7 +150,7 @@ impl VnicSource for PhysicalLink {
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
     pub fn ensure_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {

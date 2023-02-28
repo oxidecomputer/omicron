@@ -14,9 +14,9 @@ use std::sync::{
     Arc,
 };
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "testing")))]
 use crate::dladm::Dladm;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use crate::dladm::MockDladm as Dladm;
 
 /// A shareable wrapper around an atomic counter.

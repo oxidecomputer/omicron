@@ -17,9 +17,9 @@ use slog::Logger;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "testing")))]
 use crate::zone::Zones;
 
 /// Trait required by the `Port` type passed to and held by [`RunningZone`] and
