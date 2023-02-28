@@ -2771,6 +2771,24 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 
 [[package]]
+name = "illumos-utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cfg-if 1.0.0",
+ "ipnetwork",
+ "macaddr",
+ "omicron-common",
+ "serde",
+ "slog",
+ "smf",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "zone",
+]
+
+[[package]]
 name = "impl-trait-for-tuples"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6223,6 +6241,20 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
+ "uuid",
+]
+
+[[package]]
+name = "sled-hardware"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cfg-if 1.0.0",
+ "illumos-utils",
+ "nexus-client",
+ "slog",
+ "thiserror",
+ "tokio",
  "uuid",
 ]
 

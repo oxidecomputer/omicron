@@ -27,6 +27,7 @@ pub mod cmd;
 pub mod nexus_config;
 pub mod postgres_config;
 pub mod update;
+pub mod vlan;
 
 #[macro_export]
 macro_rules! generate_logging_api {

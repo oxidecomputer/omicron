@@ -1,0 +1,16 @@
+[package]
+name = "sled-hardware"
+description = "Monitoring and managing sled-local hardware"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+cfg-if.workspace = true
+illumos-utils.workspace = true
+nexus-client.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
