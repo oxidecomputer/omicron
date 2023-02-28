@@ -6257,6 +6257,8 @@ dependencies = [
  "illumos-utils",
  "libefi-illumos",
  "nexus-client",
+ "omicron-test-utils",
+ "serial_test",
  "slog",
  "thiserror",
  "tofino",
