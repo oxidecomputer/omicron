@@ -5420,7 +5420,7 @@ async fn vpc_subnet_create(
 async fn vpc_subnet_view_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SubnetPath>,
-    query_params: Query<params::VpcSelector>,
+    query_params: Query<params::OptionalVpcSelector>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -5429,7 +5429,7 @@ async fn vpc_subnet_view_v1(
         let query = query_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let subnet_selector = params::SubnetSelector {
-            vpc_selector: Some(query),
+            vpc_selector: query.vpc_selector,
             subnet: path.subnet,
         };
         let (.., subnet) =

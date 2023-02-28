@@ -11934,7 +11934,6 @@
           {
             "in": "query",
             "name": "vpc",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
