@@ -14,7 +14,7 @@ use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
 use tui::layout::{Constraint, Direction, Layout, Rect};
-use tui::style::{Color, Style};
+use tui::style::Style;
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 
@@ -162,18 +162,22 @@ impl Control for RackView {
             state: &state.rack_state,
             switch_style: Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE),
             power_shelf_style: Style::default().bg(OX_GRAY).fg(OX_OFF_WHITE),
-            sled_style: Style::default().bg(OX_GREEN_LIGHT).fg(Color::Black),
+            sled_style: Style::default().bg(OX_GREEN_LIGHT).fg(TUI_BLACK),
             sled_selected_style: Style::default()
-                .fg(Color::Black)
-                .bg(OX_GRAY_DARK),
+                .fg(TUI_BLACK)
+                .bg(TUI_PURPLE_DIM),
 
-            border_style: Style::default().fg(OX_GRAY).bg(Color::Black),
+            border_style: Style::default().fg(OX_GRAY).bg(TUI_BLACK),
             border_selected_style: Style::default()
-                .fg(OX_YELLOW)
-                .bg(OX_GRAY_DARK),
+                .fg(TUI_BLACK)
+                .bg(TUI_PURPLE),
 
-            switch_selected_style: Style::default().bg(OX_GRAY_DARK),
-            power_shelf_selected_style: Style::default().bg(OX_GRAY),
+            switch_selected_style: Style::default()
+                .bg(TUI_PURPLE_DIM)
+                .fg(TUI_PURPLE),
+            power_shelf_selected_style: Style::default()
+                .bg(TUI_PURPLE_DIM)
+                .fg(TUI_PURPLE),
         };
 
         frame.render_widget(rack, inner);
