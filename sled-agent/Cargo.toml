@@ -62,8 +62,6 @@ vsss-rs.workspace = true
 zone.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", branch = "main" }
-libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", branch = "master" }
 opte-ioctl.workspace = true
 
 [dev-dependencies]

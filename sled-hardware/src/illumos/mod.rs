@@ -2,10 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::hardware::{
+use crate::{
     Baseboard, DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
 };
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::warn;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

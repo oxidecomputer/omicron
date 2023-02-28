@@ -4,17 +4,18 @@
 
 //! illumos-specific mechanisms for parsing disk info.
 
-use crate::hardware::illumos::gpt;
-use crate::hardware::{DiskError, DiskPaths, DiskVariant, Partition};
-use crate::illumos::zpool::ZpoolName;
+use crate::illumos::gpt;
+use crate::{DiskError, DiskPaths, DiskVariant, Partition};
+use illumos_utils::zpool::ZpoolName;
+use slog::info;
 use slog::Logger;
 use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::illumos::zpool::MockZpool as Zpool;
+use illumos_utils::zpool::MockZpool as Zpool;
 #[cfg(not(test))]
-use crate::illumos::zpool::Zpool;
+use illumos_utils::zpool::Zpool;
 
 // The expected layout of an M.2 device within the Oxide rack.
 //
@@ -167,8 +168,8 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::hardware::DiskPaths;
-    use crate::illumos::zpool::MockZpool;
+    use crate::DiskPaths;
+    use illumos_utils::zpool::MockZpool;
     use omicron_test_utils::dev::test_setup_log;
     use std::path::PathBuf;
 
