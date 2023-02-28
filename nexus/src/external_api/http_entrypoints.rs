@@ -1371,6 +1371,13 @@ async fn local_idp_user_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Path parameters for Silo User requests
+#[derive(Deserialize, JsonSchema)]
+struct UserParam {
+    /// The user's internal id
+    user_id: Uuid,
+}
+
 /// Delete a user
 #[endpoint {
     method = DELETE,
@@ -1379,15 +1386,16 @@ async fn local_idp_user_create(
 }]
 async fn local_idp_user_delete_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
+    path_params: Path<UserParam>,
+    query_params: Query<params::SiloSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let query = query_params.into_inner();
+        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
         nexus.local_idp_delete_user(&opctx, &silo_lookup, path.user_id).await?;
         Ok(HttpResponseDeleted())
     };
@@ -1430,7 +1438,8 @@ async fn local_idp_user_delete(
 }]
 async fn local_idp_user_set_password_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
+    path_params: Path<UserParam>,
+    query_params: Query<params::SiloPath>,
     update: TypedBody<params::UserPassword>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -1438,8 +1447,8 @@ async fn local_idp_user_set_password_v1(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let query = query_params.into_inner();
+        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
         nexus
             .local_idp_user_set_password(
                 &opctx,
