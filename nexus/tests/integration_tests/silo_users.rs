@@ -1,6 +1,12 @@
-use dropshot::ResultsPage;
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use dropshot::test_util::ClientTestContext;
 use http::{method::Method, StatusCode};
+use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
@@ -25,23 +31,16 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
         cptestctx.server.apictx().nexus.datastore().clone(),
     );
 
-    let users = NexusRequest::object_get(&client, &"/v1/users")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::User>>()
-        .await;
-
     // we start out with the two default users
-    let user_names: Vec<String> =
-        users.items.iter().map(|u| u.display_name.clone()).collect();
-    assert_eq!(users.items.len(), 2);
-    assert!(user_names.contains(&"privileged".to_string()));
-    assert!(user_names.contains(&"unprivileged".to_string()));
+    let users =
+        objects_list_page_authz::<views::User>(client, &"/v1/users").await;
+    let user_names: Vec<&str> =
+        users.items.iter().map(|u| u.display_name.as_str()).collect();
+    assert_same_items(user_names, vec!["privileged", "unprivileged"]);
 
     // no groups to start with
-    let groups = NexusRequest::object_get(&client, &"/v1/groups")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Group>>()
-        .await;
+    let groups =
+        objects_list_page_authz::<views::User>(client, &"/v1/groups").await;
     assert_eq!(groups.items.len(), 0);
 
     let authz_silo =
@@ -58,19 +57,17 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // now we have a group
-    let groups = NexusRequest::object_get(&client, &"/v1/groups")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Group>>()
-        .await;
-    assert_eq!(groups.items.len(), 1);
+    let groups =
+        objects_list_page_authz::<views::User>(client, &"/v1/groups").await;
+    let group_names: Vec<&str> =
+        groups.items.iter().map(|g| g.display_name.as_str()).collect();
+    assert_same_items(group_names, vec!["group1"]);
 
     let group_users_url = format!("/v1/users?group={}", group.id());
 
     // we can now fetch the group by ID and get an empty list of users
-    let group_users = NexusRequest::object_get(&client, &group_users_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::User>>()
-        .await;
+    let group_users =
+        objects_list_page_authz::<views::User>(client, &group_users_url).await;
 
     assert_eq!(group_users.items.len(), 0);
 
@@ -92,16 +89,11 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("Failed to set user group memberships");
 
-    let group_users = NexusRequest::object_get(&client, &group_users_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::User>>()
-        .await;
+    let group_users =
+        objects_list_page_authz::<views::User>(client, &group_users_url).await;
+    let user_ids = group_users.items.iter().map(|g| g.id).collect();
 
-    assert_eq!(group_users.items.len(), 1);
-    assert_eq!(
-        group_users.items.get(0).unwrap().id,
-        USER_TEST_UNPRIVILEGED.id()
-    );
+    assert_same_items(user_ids, vec![USER_TEST_UNPRIVILEGED.id()]);
 }
 
 #[nexus_test]
@@ -110,40 +102,26 @@ async fn test_silo_group_users_bad_group_id(
 ) {
     let client = &cptestctx.external_client;
 
-    // expect 404 on valid UUID that doesn't exist
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &format!("/v1/users?group={}", Uuid::new_v4()),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Expected 404");
+    // 404 on UUID that doesn't exist
+    let nonexistent_group = format!("/v1/users?group={}", Uuid::new_v4());
+    expect_failure(&client, &nonexistent_group, StatusCode::NOT_FOUND).await;
 
-    // supposed to 400 (or I guess we could 404) on non-UUID group identifier,
-    // but it just ignores it if it fails to parse
+    // 400 on non-UUID identifier
+    expect_failure(&client, &"/v1/users?group=abc", StatusCode::BAD_REQUEST)
+        .await;
 
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::GET,
-        &"/v1/users?group=abc",
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Expected 404");
+    // 400 on empty identifier
+    expect_failure(&client, &"/v1/users?group=", StatusCode::BAD_REQUEST).await;
+}
 
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::GET,
-        &"/v1/users?group=",
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Expected 404");
+async fn expect_failure(
+    client: &ClientTestContext,
+    url: &str,
+    status_code: StatusCode,
+) {
+    NexusRequest::expect_failure(client, status_code, Method::GET, url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected failure");
 }

@@ -19,6 +19,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
+use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
@@ -362,4 +363,12 @@ pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
     assert_eq!(ident1.description, ident2.description);
     assert_eq!(ident1.time_created, ident2.time_created);
     assert_eq!(ident1.time_modified, ident2.time_modified);
+}
+
+/// Order-agnostic vec equality
+pub fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
+    assert_eq!(v1.len(), v2.len(), "{:?} and {:?} don't match", v1, v2);
+    for item in v1.iter() {
+        assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
+    }
 }
