@@ -3972,6 +3972,7 @@ dependencies = [
  "expectorate",
  "futures",
  "hex",
+ "illumos-utils",
  "indicatif",
  "omicron-common",
  "omicron-sled-agent",

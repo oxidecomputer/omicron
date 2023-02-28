@@ -10,7 +10,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
 use omicron_sled_agent::cleanup_networking_resources;
-use omicron_sled_agent::{zfs, zone, zpool};
+use illumos_utils::{zfs, zone, zpool};
 use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
