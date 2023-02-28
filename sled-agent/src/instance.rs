@@ -5,16 +5,9 @@
 //! API for controlling a single instance.
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::VnicAllocator;
-use crate::illumos::running_zone::{
-    InstalledZone, RunCommandError, RunningZone,
-};
-use crate::illumos::svc::wait_for_service;
-use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
-use crate::opte::PortManager;
+use crate::opte::{PortManager, Port};
 use crate::opte::PortTicket;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
@@ -26,6 +19,13 @@ use crate::params::{
 use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
+use illumos_utils::running_zone::{
+    InstalledZone, RunCommandError, RunningZone,
+};
+use illumos_utils::svc::wait_for_service;
+use illumos_utils::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::InstanceState;
@@ -41,9 +41,9 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::illumos::zone::MockZones as Zones;
+use illumos_utils::zone::MockZones as Zones;
 #[cfg(not(test))]
-use crate::illumos::zone::Zones;
+use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -51,7 +51,7 @@ pub enum Error {
     Timeout(String),
 
     #[error("Failed to create VNIC: {0}")]
-    VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
+    VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
     Propolis(#[from] propolis_client::Error<propolis_client::types::Error>),
@@ -69,16 +69,16 @@ pub enum Error {
     Migration(anyhow::Error),
 
     #[error(transparent)]
-    ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
+    ZoneCommand(#[from] illumos_utils::running_zone::RunCommandError),
 
     #[error(transparent)]
-    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+    ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
-    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+    ZoneEnsureAddress(#[from] illumos_utils::running_zone::EnsureAddressError),
 
     #[error(transparent)]
-    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+    ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
     #[error("serde_json failure: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
@@ -171,7 +171,7 @@ struct RunningState {
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
-    _running_zone: RunningZone,
+    _running_zone: RunningZone<Port>,
 }
 
 impl Drop for RunningState {
@@ -199,7 +199,7 @@ impl Drop for RunningState {
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
     client: Arc<PropolisClient>,
-    running_zone: RunningZone,
+    running_zone: RunningZone<Port>,
     port_tickets: Option<Vec<PortTicket>>,
 }
 
@@ -615,7 +615,7 @@ impl Instance {
             || async {
                 running_zone
                     .run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
+                        illumos_utils::zone::SVCCFG,
                         "-s",
                         smf_service_name,
                         "add",
@@ -637,7 +637,7 @@ impl Instance {
 
         info!(inner.log, "Adding service property group 'config'");
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "addpg",
@@ -647,7 +647,7 @@ impl Instance {
 
         info!(inner.log, "Setting server address property"; "address" => &server_addr);
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "setprop",
@@ -662,7 +662,7 @@ impl Instance {
             NEXUS_INTERNAL_PORT,
         );
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "setprop",
@@ -674,7 +674,7 @@ impl Instance {
 
         info!(inner.log, "Refreshing instance");
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "refresh",
@@ -682,7 +682,7 @@ impl Instance {
 
         info!(inner.log, "Enabling instance");
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCADM,
+            illumos_utils::zone::SVCADM,
             "enable",
             "-t",
             &smf_instance_name,
@@ -869,12 +869,12 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::Etherstub;
     use crate::nexus::LazyNexusClient;
     use crate::opte::PortManager;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
     use chrono::Utc;
+    use illumos_utils::dladm::Etherstub;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,

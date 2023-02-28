@@ -4,7 +4,7 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use crate::illumos::dladm::PhysicalLink;
+use illumos_utils::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
 use crate::opte::Error;
 use crate::opte::Gateway;

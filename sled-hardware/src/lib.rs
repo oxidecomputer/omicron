@@ -13,10 +13,10 @@ use uuid::Uuid;
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
         mod illumos;
-        pub(crate) use illumos::*;
+        pub use illumos::*;
     } else {
         mod non_illumos;
-        pub(crate) use non_illumos::*;
+        pub use non_illumos::*;
     }
 }
 

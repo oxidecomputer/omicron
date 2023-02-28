@@ -17,23 +17,23 @@ use super::trust_quorum::{
 };
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
-use crate::hardware::HardwareManager;
-use crate::illumos::dladm::{self, Dladm, GetMacError, PhysicalLink};
-use crate::illumos::link::LinkKind;
-use crate::illumos::zfs::{
-    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
-};
-use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::dladm::{self, Dladm, GetMacError, PhysicalLink};
+use illumos_utils::link::LinkKind;
+use illumos_utils::zfs::{
+    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+};
+use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
+use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -78,22 +78,22 @@ pub enum BootstrapError {
     PeerAddresses(String),
 
     #[error("Failed to initialize bootstrap address: {err}")]
-    BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
+    BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
 
     #[error(transparent)]
     GetMacError(#[from] GetMacError),
 
     #[error("Failed to lookup VNICs on boot: {0}")]
-    GetVnics(#[from] crate::illumos::dladm::GetVnicError),
+    GetVnics(#[from] illumos_utils::dladm::GetVnicError),
 
     #[error("Failed to delete VNIC on boot: {0}")]
-    DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
+    DeleteVnic(#[from] illumos_utils::dladm::DeleteVnicError),
 
     #[error("Failed to ensure ZFS filesystem: {0}")]
-    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
+    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
 
     #[error("Failed to perform Zone operation: {0}")]
-    ZoneOperation(#[from] crate::illumos::zone::AdmError),
+    ZoneOperation(#[from] illumos_utils::zone::AdmError),
 
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] crate::opte::Error),
@@ -183,7 +183,7 @@ pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), BootstrapError> {
     let vnics = Dladm::get_vnics()?;
     stream::iter(vnics)
         .zip(stream::iter(std::iter::repeat(log.clone())))
-        .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
+        .map(Ok::<_, illumos_utils::dladm::DeleteVnicError>)
         .try_for_each_concurrent(None, |(vnic, log)| async {
             tokio::task::spawn_blocking(move || {
                 warn!(
@@ -220,7 +220,7 @@ async fn cleanup_all_old_global_state(
     let zones = Zones::get().await?;
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
-        .map(Ok::<_, crate::zone::AdmError>)
+        .map(Ok::<_, illumos_utils::zone::AdmError>)
         .try_for_each_concurrent(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
             Zones::halt_and_remove_logged(&log, zone.name()).await
@@ -294,7 +294,7 @@ impl Agent {
             })?;
 
         let bootstrap_etherstub = Dladm::ensure_etherstub(
-            crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME,
+            illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME,
         )
         .map_err(|e| {
             BootstrapError::SledError(format!(
@@ -342,7 +342,7 @@ impl Agent {
 
         // HardwareMonitor must be on the underlay network like all services
         let underlay_etherstub = Dladm::ensure_etherstub(
-            crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME,
+            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
         .map_err(|e| {
             BootstrapError::SledError(format!(

@@ -4,14 +4,14 @@
 
 //! Finding the underlay network physical links and address objects.
 
-use crate::hardware::is_gimlet;
-use crate::illumos::addrobj;
-use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::Dladm;
-use crate::illumos::dladm::FindPhysicalLinkError;
-use crate::illumos::dladm::PhysicalLink;
-use crate::illumos::dladm::CHELSIO_LINK_PREFIX;
-use crate::zone::Zones;
+use illumos_utils::addrobj;
+use illumos_utils::addrobj::AddrObject;
+use illumos_utils::dladm::Dladm;
+use illumos_utils::dladm::FindPhysicalLinkError;
+use illumos_utils::dladm::PhysicalLink;
+use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
+use illumos_utils::zone::Zones;
+use sled_hardware::is_gimlet;
 
 // Names of VNICs used as underlay devices for the xde driver.
 //
@@ -25,7 +25,7 @@ pub enum Error {
     #[error(
         "Failed to create an IPv6 link-local address for underlay devices: {0}"
     )]
-    UnderlayDeviceAddress(#[from] crate::illumos::ExecutionError),
+    UnderlayDeviceAddress(#[from] illumos_utils::ExecutionError),
 
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),

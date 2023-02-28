@@ -6,9 +6,8 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
-use crate::hardware::HardwareManager;
-use crate::illumos::zone::IPADM;
-use crate::illumos::{execute, PFEXEC};
+use illumos_utils::zone::IPADM;
+use illumos_utils::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
@@ -29,6 +28,7 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::process::Command;
@@ -36,9 +36,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zone::Zones};
+use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
-use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 use crate::serial::ByteOffset;
 
 #[derive(thiserror::Error, Debug)]
@@ -47,19 +47,19 @@ pub enum Error {
     Config(#[from] crate::config::ConfigError),
 
     #[error("Failed to enable routing: {0}")]
-    EnablingRouting(crate::illumos::ExecutionError),
+    EnablingRouting(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(crate::illumos::ExecutionError),
+    Etherstub(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub VNIC: {0}")]
-    EtherstubVnic(crate::illumos::dladm::CreateVnicError),
+    EtherstubVnic(illumos_utils::dladm::CreateVnicError),
 
     #[error("Bootstrap error: {0}")]
     Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
-    DeleteAddress(#[from] crate::illumos::ExecutionError),
+    DeleteAddress(#[from] illumos_utils::ExecutionError),
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] crate::common::underlay::Error),
@@ -68,7 +68,7 @@ pub enum Error {
     Services(#[from] crate::services::Error),
 
     #[error("Failed to create Sled Subnet: {err}")]
-    SledSubnet { err: crate::illumos::zone::EnsureGzAddressError },
+    SledSubnet { err: illumos_utils::zone::EnsureGzAddressError },
 
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
@@ -197,7 +197,7 @@ impl SledAgent {
         info!(&log, "created sled agent");
 
         let etherstub = Dladm::ensure_etherstub(
-            crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME,
+            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
         .map_err(|e| Error::Etherstub(e))?;
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
@@ -347,7 +347,7 @@ impl SledAgent {
 
         // Rely on monitoring for tracking all future updates.
         loop {
-            use crate::hardware::HardwareUpdate;
+            use sled_hardware::HardwareUpdate;
             use tokio::sync::broadcast::error::RecvError;
             match hardware_updates.recv().await {
                 Ok(update) => match update {
@@ -590,15 +590,15 @@ impl SledAgent {
 // for inter-zone communications.
 fn delete_etherstub_addresses(log: &Logger) -> Result<(), Error> {
     let underlay_prefix =
-        format!("{}/", crate::illumos::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME);
+        format!("{}/", illumos_utils::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME);
     let bootstrap_prefix =
-        format!("{}/", crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME);
+        format!("{}/", illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME);
     delete_addresses_matching_prefixes(log, &[underlay_prefix])?;
     delete_addresses_matching_prefixes(log, &[bootstrap_prefix])
 }
 
 fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
-    use crate::illumos::dladm::VnicSource;
+    use illumos_utils::dladm::VnicSource;
     let prefixes = crate::common::underlay::find_chelsio_links()?
         .into_iter()
         .map(|link| format!("{}/", link.name()))
@@ -641,10 +641,10 @@ fn delete_addresses_matching_prefixes(
 
 // Delete the etherstub and underlay VNIC used for interzone communication
 fn delete_etherstub(log: &Logger) -> Result<(), Error> {
-    use crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME;
-    use crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
-    use crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME;
-    use crate::illumos::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
+    use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME;
+    use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
+    use illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME;
+    use illumos_utils::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
     warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => UNDERLAY_ETHERSTUB_VNIC_NAME);
     Dladm::delete_etherstub_vnic(UNDERLAY_ETHERSTUB_VNIC_NAME)?;
     warn!(log, "Deleting Omicron underlay etherstub"; "stub_name" => UNDERLAY_ETHERSTUB_NAME);

@@ -209,7 +209,7 @@ impl Dladm {
     }
 
     /// Delete the VNIC over the inter-zone comms etherstub.
-    pub(crate) fn delete_etherstub_vnic(
+    pub fn delete_etherstub_vnic(
         name: &str,
     ) -> Result<(), ExecutionError> {
         // It's not clear why, but this requires deleting the _interface_ that's
@@ -229,7 +229,7 @@ impl Dladm {
     }
 
     /// Delete the inter-zone comms etherstub.
-    pub(crate) fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
+    pub fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
         if Self::get_etherstub(name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
             let cmd = cmd.args(&[DLADM, "delete-etherstub", name]);

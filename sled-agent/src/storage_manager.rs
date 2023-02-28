@@ -4,14 +4,14 @@
 
 //! Management of sled-local storage.
 
-use crate::hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::VnicAllocator;
-use crate::illumos::running_zone::{InstalledZone, RunningZone};
-use crate::illumos::zone::AddressRequest;
-use crate::illumos::zpool::ZpoolName;
-use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
+use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::zone::AddressRequest;
+use illumos_utils::zpool::ZpoolName;
+use illumos_utils::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use crate::nexus::LazyNexusClient;
+use crate::opte::Port;
 use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -24,6 +24,7 @@ use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
 use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -39,9 +40,9 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
+use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
-use crate::illumos::{zfs::Zfs, zpool::Zpool};
+use illumos_utils::{zfs::Zfs, zpool::Zpool};
 
 const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
 const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
@@ -55,38 +56,38 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    DiskError(#[from] crate::hardware::DiskError),
+    DiskError(#[from] sled_hardware::DiskError),
 
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]
-    ZfsListDataset(#[from] crate::illumos::zfs::ListDatasetsError),
+    ZfsListDataset(#[from] illumos_utils::zfs::ListDatasetsError),
 
     #[error(transparent)]
-    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
+    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
 
     #[error(transparent)]
-    ZfsSetValue(#[from] crate::illumos::zfs::SetValueError),
+    ZfsSetValue(#[from] illumos_utils::zfs::SetValueError),
 
     #[error(transparent)]
-    ZfsGetValue(#[from] crate::illumos::zfs::GetValueError),
+    ZfsGetValue(#[from] illumos_utils::zfs::GetValueError),
 
     #[error(transparent)]
-    GetZpoolInfo(#[from] crate::illumos::zpool::GetInfoError),
+    GetZpoolInfo(#[from] illumos_utils::zpool::GetInfoError),
 
     #[error(transparent)]
-    Fstyp(#[from] crate::illumos::fstyp::Error),
+    Fstyp(#[from] illumos_utils::fstyp::Error),
 
     #[error(transparent)]
-    ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
+    ZoneCommand(#[from] illumos_utils::running_zone::RunCommandError),
 
     #[error(transparent)]
-    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+    ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
-    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+    ZoneEnsureAddress(#[from] illumos_utils::running_zone::EnsureAddressError),
 
     #[error(transparent)]
-    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+    ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
@@ -132,7 +133,7 @@ struct Pool {
     id: Uuid,
     info: ZpoolInfo,
     // ZFS filesytem UUID -> Zone.
-    zones: HashMap<Uuid, RunningZone>,
+    zones: HashMap<Uuid, RunningZone<Port>>,
 }
 
 impl Pool {
@@ -152,12 +153,12 @@ impl Pool {
     /// Typically this is used when a dataset within the zone (identified
     /// by ID) has a running zone (e.g. Crucible, Cockroach) operating on
     /// behalf of that data.
-    fn add_zone(&mut self, id: Uuid, zone: RunningZone) {
+    fn add_zone(&mut self, id: Uuid, zone: RunningZone<Port>) {
         self.zones.insert(id, zone);
     }
 
     /// Access a zone managing data within this pool.
-    fn get_zone(&self, id: Uuid) -> Option<&RunningZone> {
+    fn get_zone(&self, id: Uuid) -> Option<&RunningZone<Port>> {
         self.zones.get(&id)
     }
 
@@ -248,7 +249,7 @@ impl DatasetInfo {
     async fn start_zone(
         &self,
         log: &Logger,
-        zone: &RunningZone,
+        zone: &RunningZone<Port>,
         address: SocketAddrV6,
         do_format: bool,
     ) -> Result<(), Error> {
@@ -257,7 +258,7 @@ impl DatasetInfo {
                 info!(log, "start_zone: Loading CRDB manifest");
                 // Load the CRDB manifest.
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/cockroachdb/manifest.xml",
                 ])?;
@@ -269,7 +270,7 @@ impl DatasetInfo {
                     address
                 );
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_SVC,
                     "setprop",
@@ -278,7 +279,7 @@ impl DatasetInfo {
 
                 info!(log, "start_zone: setting CRDB's config/store");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_SVC,
                     "setprop",
@@ -290,7 +291,7 @@ impl DatasetInfo {
                 // "start-single-node".
                 info!(log, "start_zone: setting CRDB's config/join_addrs");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_SVC,
                     "setprop",
@@ -301,7 +302,7 @@ impl DatasetInfo {
                 // so they become "effective" properties when the service is enabled.
                 info!(log, "start_zone: refreshing manifest");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_DEFAULT_SVC,
                     "refresh",
@@ -309,7 +310,7 @@ impl DatasetInfo {
 
                 info!(log, "start_zone: enabling CRDB service");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
+                    illumos_utils::zone::SVCADM,
                     "enable",
                     "-t",
                     COCKROACH_DEFAULT_SVC,
@@ -365,20 +366,20 @@ impl DatasetInfo {
             DatasetKind::Clickhouse { .. } => {
                 info!(log, "Initialiting Clickhouse");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/clickhouse/manifest.xml",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CLICKHOUSE_SVC,
                     "setprop",
                     &format!("config/listen_host={}", address.ip()),
                 ])?;
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CLICKHOUSE_SVC,
                     "setprop",
@@ -388,14 +389,14 @@ impl DatasetInfo {
                 // Refresh the manifest with the new properties we set,
                 // so they become "effective" properties when the service is enabled.
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CLICKHOUSE_DEFAULT_SVC,
                     "refresh",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
+                    illumos_utils::zone::SVCADM,
                     "enable",
                     "-t",
                     CLICKHOUSE_DEFAULT_SVC,
@@ -407,19 +408,19 @@ impl DatasetInfo {
                 info!(log, "Initializing Crucible");
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/crucible/agent.xml",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/crucible/downstairs.xml",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_SVC,
                     "setprop",
@@ -427,7 +428,7 @@ impl DatasetInfo {
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_SVC,
                     "setprop",
@@ -435,7 +436,7 @@ impl DatasetInfo {
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_SVC,
                     "setprop",
@@ -445,14 +446,14 @@ impl DatasetInfo {
                 // Refresh the manifest with the new properties we set,
                 // so they become "effective" properties when the service is enabled.
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_DEFAULT_SVC,
                     "refresh",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
+                    illumos_utils::zone::SVCADM,
                     "enable",
                     "-t",
                     CRUCIBLE_AGENT_DEFAULT_SVC,
@@ -472,7 +473,7 @@ async fn ensure_running_zone(
     dataset_name: &DatasetName,
     do_format: bool,
     underlay_address: Ipv6Addr,
-) -> Result<RunningZone, Error> {
+) -> Result<RunningZone<Port>, Error> {
     let address_request = AddressRequest::new_static(
         IpAddr::V6(*dataset_info.address.ip()),
         None,
@@ -486,7 +487,7 @@ async fn ensure_running_zone(
             info!(log, "Zone for {} is already running", dataset_name.full());
             return Ok(zone);
         }
-        Err(crate::illumos::running_zone::GetZoneError::NotFound {
+        Err(illumos_utils::running_zone::GetZoneError::NotFound {
             ..
         }) => {
             info!(log, "Zone for {} was not found", dataset_name.full());
@@ -520,7 +521,7 @@ async fn ensure_running_zone(
 
             Ok(zone)
         }
-        Err(crate::illumos::running_zone::GetZoneError::NotRunning {
+        Err(illumos_utils::running_zone::GetZoneError::NotRunning {
             name,
             state,
         }) => {
@@ -709,7 +710,7 @@ impl StorageWorker {
 
         // Ensure all disks conform to the expected partition layout.
         for disk in unparsed_disks.into_iter() {
-            match crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+            match sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
                 warn!(self.log, "Could not ensure partitions: {err}");
                 err
             }) {
@@ -794,7 +795,7 @@ impl StorageWorker {
 
         // Ensure the disk conforms to an expected partition layout.
         let disk =
-            crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+            sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
                 warn!(self.log, "Could not ensure partitions: {err}");
                 err
             })?;

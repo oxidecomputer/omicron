@@ -4,8 +4,6 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::VnicAllocator;
 use crate::nexus::LazyNexusClient;
 use crate::opte::PortManager;
 use crate::params::{
@@ -13,6 +11,8 @@ use crate::params::{
     InstanceSerialConsoleData, VpcFirewallRule,
 };
 use crate::serial::ByteOffset;
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
@@ -259,13 +259,13 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::Etherstub;
-    use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
     use chrono::Utc;
+    use illumos_utils::dladm::Etherstub;
+    use illumos_utils::{dladm::MockDladm, zone::MockZones};
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,

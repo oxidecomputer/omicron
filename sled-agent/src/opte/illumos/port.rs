@@ -4,7 +4,7 @@
 
 //! A single port on the OPTE virtual switch.
 
-use crate::illumos::dladm::Dladm;
+use illumos_utils::dladm::Dladm;
 use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::Vni;
@@ -133,10 +133,12 @@ impl Port {
         }
     }
 
+    #[allow(dead_code)]
     pub fn external_ips(&self) -> &Option<Vec<IpAddr>> {
         &self.inner.external_ips
     }
 
+    #[allow(dead_code)]
     pub fn mac(&self) -> &MacAddr6 {
         &self.inner.mac
     }
@@ -151,5 +153,11 @@ impl Port {
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
+    }
+}
+
+impl illumos_utils::running_zone::OptePort for Port {
+    fn vnic_name(&self) -> &str {
+        Port::vnic_name(self)
     }
 }
