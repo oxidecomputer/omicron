@@ -83,6 +83,26 @@ impl From<installinator_common::CompletionEventKind>
                 artifact_size,
                 elapsed: elapsed.into(),
             },
+            installinator_common::CompletionEventKind::FormatFailed {
+                attempt,
+                path,
+                elapsed,
+                message,
+            } => Self::FormatFailed {
+                attempt: attempt as u32,
+                path: path.into_string(),
+                elapsed: elapsed.into(),
+                message,
+            },
+            installinator_common::CompletionEventKind::FormatCompleted {
+                attempt,
+                path,
+                elapsed,
+            } => Self::FormatCompleted {
+                attempt: attempt as u32,
+                path: path.into_string(),
+                elapsed: elapsed.into(),
+            },
             installinator_common::CompletionEventKind::WriteFailed {
                 attempt,
                 kind,
@@ -112,6 +132,21 @@ impl From<installinator_common::CompletionEventKind>
                 destination: destination.into_string(),
                 artifact_size,
                 elapsed: elapsed.into(),
+            },
+            installinator_common::CompletionEventKind::MiscError {
+                operation,
+                attempt,
+                data,
+                elapsed,
+                message,
+                is_fatal,
+            } => Self::MiscError {
+                operation,
+                attempt: attempt as u32,
+                data,
+                elapsed: elapsed.into(),
+                message,
+                is_fatal,
             },
             installinator_common::CompletionEventKind::Completed => {
                 Self::Completed

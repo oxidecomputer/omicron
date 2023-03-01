@@ -2868,6 +2868,7 @@ dependencies = [
  "reqwest",
  "schemars",
  "serde",
+ "serde_json",
  "slog",
  "uuid",
 ]
@@ -2905,6 +2906,7 @@ dependencies = [
  "omicron-common",
  "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
