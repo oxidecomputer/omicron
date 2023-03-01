@@ -68,23 +68,23 @@ lazy_static! {
         };
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
-        "/v1/system/silos/{}/identity-providers/local/users",
+        "/v1/system/identity-providers/local/users?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USERS_LIST_URL: String = format!(
-        "/v1/system/silos/{}/users/all",
+        "/v1/system/users?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_GET_URL: String = format!(
-        "/v1/system/silos/{}/users/id/{{id}}",
+        "/v1/system/users/{{id}}?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_DELETE_URL: String = format!(
-        "/v1/system/silos/{}/identity-providers/local/users/{{id}}",
+        "/v1/system/identity-providers/local/users/{{id}}?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_SET_PASSWORD_URL: String = format!(
-        "/v1/system/silos/{}/identity-providers/local/users/{{id}}/set-password",
+        "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
         DEFAULT_SILO.identity().name,
     );
 
@@ -427,11 +427,11 @@ lazy_static! {
 
 lazy_static! {
     // Identity providers
-    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/v1/system/silos/demo-silo/identity-providers");
-    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/v1/system/silos/demo-silo/identity-providers/saml");
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/v1/system/identity-providers?silo=demo-silo");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/v1/system/identity-providers/saml?silo=demo-silo");
 
     pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
-    pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
+    pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("/v1/system/identity-providers/saml/{}?silo=demo-silo", *DEMO_SAML_IDENTITY_PROVIDER_NAME);
 
     pub static ref SAML_IDENTITY_PROVIDER: params::SamlIdentityProviderCreate =
         params::SamlIdentityProviderCreate {

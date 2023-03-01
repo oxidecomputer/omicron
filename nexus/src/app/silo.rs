@@ -156,13 +156,10 @@ impl super::Nexus {
     pub async fn silo_list_users(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SiloUser> {
-        let (authz_silo,) = LookupPath::new(opctx, self.datastore())
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::Read)
-            .await?;
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
         self.db_datastore
             .silo_users_list(opctx, &authz_silo_user_list, pagparams)
@@ -173,13 +170,10 @@ impl super::Nexus {
     pub async fn silo_user_fetch(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         silo_user_id: Uuid,
     ) -> LookupResult<db::model::SiloUser> {
-        let (authz_silo,) = LookupPath::new(opctx, self.datastore())
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::Read)
-            .await?;
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let (_, db_silo_user) = self
             .silo_user_lookup_by_id(
                 opctx,
