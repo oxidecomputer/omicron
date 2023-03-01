@@ -16,7 +16,7 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use dropshot::HttpError;
-use illumos_utils::opte::params::VpcFirewallRule;
+use crate::params::VpcFirewallRule;
 use illumos_utils::zone::IPADM;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{

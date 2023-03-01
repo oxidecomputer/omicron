@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use illumos_utils::opte::params::NetworkInterface;
-use illumos_utils::opte::params::SourceNatConfig;
-use illumos_utils::opte::params::VpcFirewallRule;
 use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
     CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
@@ -18,6 +15,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
+
+pub use illumos_utils::opte::params::NetworkInterface;
+pub use illumos_utils::opte::params::SourceNatConfig;
+pub use illumos_utils::opte::params::VpcFirewallRule;
+pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]

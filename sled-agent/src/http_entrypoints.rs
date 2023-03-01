@@ -14,7 +14,7 @@ use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
-use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+use crate::params::VpcFirewallRulesEnsureBody;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;

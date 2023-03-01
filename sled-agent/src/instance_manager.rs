@@ -12,7 +12,7 @@ use crate::params::{
 use crate::serial::ByteOffset;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::params::VpcFirewallRule;
+use crate::params::VpcFirewallRule;
 use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
