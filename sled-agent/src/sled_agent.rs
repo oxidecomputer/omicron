@@ -18,6 +18,7 @@ use crate::params::{
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
+use crate::updates::UpdateManager;
 use dropshot::HttpError;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -151,6 +152,9 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for monitoring hardware.
     hardware: HardwareManager,
 
+    // Component of Sled Agent responsible for managing updates.
+    updates: UpdateManager,
+
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
@@ -268,6 +272,8 @@ impl SledAgent {
             HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
                 .map_err(|e| Error::Hardware(e))?;
 
+        let updates = UpdateManager::new();
+
         services
             .sled_agent_started(
                 svc_config,
@@ -284,6 +290,7 @@ impl SledAgent {
                 storage,
                 instances,
                 hardware,
+                updates,
                 services,
                 lazy_nexus_client,
 
@@ -534,7 +541,7 @@ impl SledAgent {
         artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
         let nexus_client = self.inner.lazy_nexus_client.get().await?;
-        crate::updates::download_artifact(artifact, &nexus_client).await?;
+        self.inner.updates.download_artifact(artifact, &nexus_client).await?;
         Ok(())
     }
 

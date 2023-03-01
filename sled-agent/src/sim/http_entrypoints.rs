@@ -140,12 +140,13 @@ async fn update_artifact(
     rqctx: RequestContext<Arc<SledAgent>>,
     artifact: TypedBody<UpdateArtifactId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    crate::updates::download_artifact(
-        artifact.into_inner(),
-        rqctx.context().nexus_client.as_ref(),
-    )
-    .await
-    .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+    crate::updates::UpdateManager::new()
+        .download_artifact(
+            artifact.into_inner(),
+            rqctx.context().nexus_client.as_ref(),
+        )
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
