@@ -9,6 +9,8 @@ use futures::{TryFutureExt, TryStreamExt};
 use omicron_common::api::internal::nexus::{
     KnownArtifactKind, UpdateArtifactId,
 };
+use serde::Deserialize;
+use serde::Serialize;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
@@ -32,14 +34,19 @@ pub enum Error {
     Response(nexus_client::Error<nexus_client::types::Error>),
 }
 
-pub struct UpdateManager {
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigUpdates {
     // Path where zone artifacts are stored.
-    zone_artifact_path: PathBuf,
+    pub zone_artifact_path: PathBuf,
+}
+
+pub struct UpdateManager {
+    config: ConfigUpdates,
 }
 
 impl UpdateManager {
-    pub fn new() -> Self {
-        Self { zone_artifact_path: PathBuf::from("/opt/oxide") }
+    pub fn new(config: ConfigUpdates) -> Self {
+        Self { config }
     }
 
     pub async fn download_artifact(
@@ -50,7 +57,7 @@ impl UpdateManager {
         match artifact.kind {
             // TODO This is a demo for tests, for now.
             KnownArtifactKind::ControlPlane => {
-                let directory = &self.zone_artifact_path.as_path();
+                let directory = &self.config.zone_artifact_path.as_path();
                 tokio::fs::create_dir_all(&directory).await.map_err(|err| {
                     Error::Io {
                         message: format!("creating directory {directory:?}"),
@@ -164,8 +171,9 @@ mod test {
             },
         );
 
-        let updates =
-            UpdateManager { zone_artifact_path: tempdir.path().into() };
+        let config =
+            ConfigUpdates { zone_artifact_path: tempdir.path().into() };
+        let updates = UpdateManager { config };
         // This should download the file to our local filesystem.
         updates.download_artifact(artifact, &nexus_client).await.unwrap();
 
