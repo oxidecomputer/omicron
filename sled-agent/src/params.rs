@@ -89,7 +89,7 @@ pub struct InstanceMigrateParams {
 
 /// Requestable running state of an Instance.
 ///
-/// A subset of [`external::InstanceState`].
+/// A subset of [`omicron_common::api::external::InstanceState`].
 #[derive(
     Copy,
     Clone,
