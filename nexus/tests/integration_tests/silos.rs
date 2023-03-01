@@ -644,7 +644,7 @@ async fn test_saml_idp_metadata_data_invalid(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -1832,7 +1832,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .id;
     grant_iam(
         client,
-        "/system/silos/fixed",
+        "/v1/system/silos/fixed",
         SiloRole::Admin,
         new_silo_user_id,
         AuthnMode::PrivilegedUser,
@@ -1845,7 +1845,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
             client,
             StatusCode::BAD_REQUEST,
             Method::POST,
-            "/system/silos/fixed/identity-providers/saml",
+            "/v1/system/identity-providers/saml?silo=fixed",
             &params::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "some-totally-real-saml-provider"
