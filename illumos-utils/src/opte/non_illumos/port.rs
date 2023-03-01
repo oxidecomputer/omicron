@@ -4,10 +4,10 @@
 
 //! A single port on the OPTE virtual switch.
 
+use crate::opte::params::SourceNatConfig;
 use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::Vni;
-use crate::opte::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use std::net::IpAddr;

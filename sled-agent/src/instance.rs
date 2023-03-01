@@ -7,6 +7,9 @@
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
+use crate::params::NetworkInterface;
+use crate::params::SourceNatConfig;
+use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -16,9 +19,6 @@ use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use crate::params::NetworkInterface;
-use crate::params::SourceNatConfig;
-use crate::params::VpcFirewallRule;
 use illumos_utils::opte::PortManager;
 use illumos_utils::opte::PortTicket;
 use illumos_utils::running_zone::{

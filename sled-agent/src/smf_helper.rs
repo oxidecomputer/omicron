@@ -23,10 +23,7 @@ pub struct SmfHelper<'t> {
 }
 
 impl<'t> SmfHelper<'t> {
-    pub fn new(
-        running_zone: &'t RunningZone,
-        service: &ServiceType,
-    ) -> Self {
+    pub fn new(running_zone: &'t RunningZone, service: &ServiceType) -> Self {
         let service_name = service.to_string();
         let smf_name = format!("svc:/system/illumos/{}", service);
         let default_smf_name = format!("{}:default", smf_name);

@@ -8,6 +8,7 @@ use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
+use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
@@ -16,7 +17,6 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use dropshot::HttpError;
-use crate::params::VpcFirewallRule;
 use illumos_utils::zone::IPADM;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{

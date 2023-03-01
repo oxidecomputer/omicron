@@ -884,10 +884,8 @@ impl ServiceManager {
             );
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
-            let expected_zone_name = InstalledZone::get_zone_name(
-                &req.zone_type.to_string(),
-                None,
-            );
+            let expected_zone_name =
+                InstalledZone::get_zone_name(&req.zone_type.to_string(), None);
             if existing_zones.iter().any(|z| z.name() == expected_zone_name) {
                 info!(
                     self.inner.log,

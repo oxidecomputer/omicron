@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceSerialConsoleData,
     InstanceSerialConsoleRequest,
@@ -18,7 +19,6 @@ use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use crate::params::VpcFirewallRulesEnsureBody;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;

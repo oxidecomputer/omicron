@@ -6,13 +6,13 @@
 
 use crate::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
+use crate::opte::params::NetworkInterface;
+use crate::opte::params::SourceNatConfig;
+use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
-use crate::opte::params::NetworkInterface;
-use crate::opte::params::SourceNatConfig;
-use crate::opte::params::VpcFirewallRule;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use slog::debug;

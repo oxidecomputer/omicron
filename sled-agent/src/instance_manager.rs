@@ -5,6 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::nexus::LazyNexusClient;
+use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -12,7 +13,6 @@ use crate::params::{
 use crate::serial::ByteOffset;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use crate::params::VpcFirewallRule;
 use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
