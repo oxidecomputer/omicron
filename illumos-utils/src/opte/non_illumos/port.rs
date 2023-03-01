@@ -7,7 +7,7 @@
 use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::Vni;
-use crate::params::SourceNatConfig;
+use crate::opte::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
@@ -117,7 +117,7 @@ impl Port {
     }
 }
 
-impl illumos_utils::running_zone::OptePort for Port {
+impl crate::running_zone::OptePort for Port {
     fn vnic_name(&self) -> &str {
         Port::vnic_name(self)
     }

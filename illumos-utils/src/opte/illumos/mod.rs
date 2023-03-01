@@ -5,7 +5,7 @@
 //! Interactions with the Oxide Packet Transformation Engine (OPTE)
 
 use crate::common::underlay;
-use illumos_utils::dladm;
+use crate::dladm;
 use opte_ioctl::OpteHdl;
 use slog::Logger;
 use std::fs;
@@ -44,13 +44,13 @@ pub enum Error {
     IncompatibleKernel,
 
     #[error(transparent)]
-    BadAddrObj(#[from] illumos_utils::addrobj::ParseError),
+    BadAddrObj(#[from] crate::addrobj::ParseError),
 
     #[error(transparent)]
-    SetLinkpropError(#[from] illumos_utils::dladm::SetLinkpropError),
+    SetLinkpropError(#[from] crate::dladm::SetLinkpropError),
 
     #[error(transparent)]
-    ResetLinkpropError(#[from] illumos_utils::dladm::ResetLinkpropError),
+    ResetLinkpropError(#[from] crate::dladm::ResetLinkpropError),
 }
 
 /// Delete all xde devices on the system.
@@ -160,7 +160,7 @@ fn use_external_ip_workaround(log: &Logger, xde_conf: &Path) {
 
     // Ensure the driver picks up the updated configuration file, if it's been
     // loaded previously without the workaround.
-    std::process::Command::new(illumos_utils::PFEXEC)
+    std::process::Command::new(crate::PFEXEC)
         .args(&["update_drv", "xde"])
         .output()
         .expect("Failed to reload xde driver configuration file");

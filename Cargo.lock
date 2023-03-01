@@ -2780,6 +2780,8 @@ dependencies = [
  "macaddr",
  "mockall",
  "omicron-common",
+ "oxide-vpc",
+ "schemars",
  "serde",
  "slog",
  "smf",

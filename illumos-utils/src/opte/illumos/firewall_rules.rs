@@ -5,7 +5,7 @@
 //! Convert Omicron VPC firewall rules to OPTE firewall rules.
 
 use crate::opte::Vni;
-use crate::params::VpcFirewallRule;
+use crate::opte::params::VpcFirewallRule;
 use macaddr::MacAddr6;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::VpcFirewallRuleAction;
