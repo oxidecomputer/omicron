@@ -232,7 +232,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
             name: UPDATE_COMPONENT.into(),
             version: "0.0.0".into(),
             kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
-            target: format!("{UPDATE_COMPONENT}-1").into(),
+            target: format!("{UPDATE_COMPONENT}-1"),
         }],
     };
     let f = File::create(dir.path().join("artifacts.json")).unwrap();
