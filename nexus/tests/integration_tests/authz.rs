@@ -256,7 +256,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Listing users should work
     let users: ResultsPage<views::User> =
-        NexusRequest::object_get(client, &"/users")
+        NexusRequest::object_get(client, &"/v1/users")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
