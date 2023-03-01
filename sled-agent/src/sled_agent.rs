@@ -271,9 +271,8 @@ impl SledAgent {
             request.gateway.address,
         );
 
-        let hardware =
-            HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
-                .map_err(|e| Error::Hardware(e))?;
+        let hardware = HardwareManager::new(&parent_log, config.stub_scrimlet)
+            .map_err(|e| Error::Hardware(e))?;
 
         let update_config =
             ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };

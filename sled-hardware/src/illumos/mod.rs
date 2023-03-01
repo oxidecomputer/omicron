@@ -513,7 +513,7 @@ impl HardwareManager {
     /// If this argument is not supplied, we assume the device is a gimlet until
     /// device scanning informs us otherwise.
     pub fn new(
-        log: Logger,
+        log: &Logger,
         stub_scrimlet: Option<bool>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));

@@ -213,6 +213,10 @@ impl UnparsedDisk {
     pub fn devfs_path(&self) -> &PathBuf {
         &self.paths.devfs_path
     }
+
+    pub fn variant(&self) -> DiskVariant {
+        self.variant
+    }
 }
 
 /// A physical disk conforming to the expected partition layout.
@@ -298,6 +302,14 @@ impl Disk {
 
     pub fn zpool_name(&self) -> &ZpoolName {
         &self.zpool_name
+    }
+
+    pub fn boot_image_devfs_path(&self) -> Result<PathBuf, DiskError> {
+        self.paths.partition_device_path(&self.partitions, Partition::BootImage)
+    }
+
+    pub fn slot(&self) -> i64 {
+        self.slot
     }
 }
 
