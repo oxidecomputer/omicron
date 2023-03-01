@@ -1,6 +1,7 @@
 #
 # Oxide API: example configuration file
 #
+host_phase2_recovery_image_cache_max_images=1
 
 # Maximum number of host phase2 trampoline images we're willing to cache. Note
 # that this value is specified in terms of _number of images_, not bytes, and
