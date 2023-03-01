@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::opte::Port;
 use crate::params::ServiceType;
 use illumos_utils::running_zone::RunningZone;
 
@@ -17,7 +16,7 @@ pub enum Error {
 }
 
 pub struct SmfHelper<'t> {
-    running_zone: &'t RunningZone<Port>,
+    running_zone: &'t RunningZone,
     service_name: String,
     smf_name: String,
     default_smf_name: String,
@@ -25,7 +24,7 @@ pub struct SmfHelper<'t> {
 
 impl<'t> SmfHelper<'t> {
     pub fn new(
-        running_zone: &'t RunningZone<Port>,
+        running_zone: &'t RunningZone,
         service: &ServiceType,
     ) -> Self {
         let service_name = service.to_string();

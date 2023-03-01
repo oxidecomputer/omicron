@@ -7,11 +7,6 @@
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
-use crate::opte::PortTicket;
-use crate::opte::{Port, PortManager};
-use crate::params::NetworkInterface;
-use crate::params::SourceNatConfig;
-use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -21,6 +16,11 @@ use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
+use illumos_utils::opte::params::NetworkInterface;
+use illumos_utils::opte::params::SourceNatConfig;
+use illumos_utils::opte::params::VpcFirewallRule;
+use illumos_utils::opte::PortManager;
+use illumos_utils::opte::PortTicket;
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -84,7 +84,7 @@ pub enum Error {
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error(transparent)]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Serial console buffer: {0}")]
     Serial(#[from] crate::serial::Error),
@@ -171,7 +171,7 @@ struct RunningState {
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
-    _running_zone: RunningZone<Port>,
+    _running_zone: RunningZone,
 }
 
 impl Drop for RunningState {
@@ -199,7 +199,7 @@ impl Drop for RunningState {
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
     client: Arc<PropolisClient>,
-    running_zone: RunningZone<Port>,
+    running_zone: RunningZone,
     port_tickets: Option<Vec<PortTicket>>,
 }
 
@@ -870,11 +870,11 @@ impl Instance {
 mod test {
     use super::*;
     use crate::nexus::LazyNexusClient;
-    use crate::opte::PortManager;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
+    use illumos_utils::opte::PortManager;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,

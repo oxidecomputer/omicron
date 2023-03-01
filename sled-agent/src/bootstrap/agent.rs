@@ -96,7 +96,7 @@ pub enum BootstrapError {
     ZoneOperation(#[from] illumos_utils::zone::AdmError),
 
     #[error("Error managing guest networking: {0}")]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -249,7 +249,7 @@ async fn cleanup_all_old_global_state(
     //
     // This is also tracked by
     // https://github.com/oxidecomputer/omicron/issues/725.
-    crate::opte::delete_all_xde_devices(&log)?;
+    illumos_utils::opte::delete_all_xde_devices(&log)?;
 
     Ok(())
 }

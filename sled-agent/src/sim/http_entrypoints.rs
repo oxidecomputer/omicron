@@ -6,7 +6,7 @@
 
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceSerialConsoleData,
-    InstanceSerialConsoleRequest, VpcFirewallRulesEnsureBody,
+    InstanceSerialConsoleRequest,
 };
 use crate::serial::ByteOffset;
 use dropshot::endpoint;
@@ -18,6 +18,7 @@ use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;

@@ -155,9 +155,3 @@ impl Port {
         self.inner.slot
     }
 }
-
-impl crate::running_zone::OptePort for Port {
-    fn vnic_name(&self) -> &str {
-        Port::vnic_name(self)
-    }
-}
