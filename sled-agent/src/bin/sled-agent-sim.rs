@@ -13,7 +13,7 @@ use dropshot::ConfigLoggingLevel;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::{
-    run_server, Config, ConfigStorage, ConfigZpool, SimMode,
+    run_server, Config, ConfigStorage, ConfigUpdates, ConfigZpool, SimMode,
 };
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -58,6 +58,8 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
+    let tmp =
+        tempfile::tempdir().map_err(|e| CmdError::Failure(e.to_string()))?;
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
@@ -73,6 +75,7 @@ async fn do_run() -> Result<(), CmdError> {
             zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
             ip: (*args.sled_agent_addr.ip()).into(),
         },
+        updates: ConfigUpdates { zone_artifact_path: tmp.path().to_path_buf() },
     };
 
     run_server(&config).await.map_err(CmdError::Failure)
