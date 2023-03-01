@@ -13,13 +13,18 @@ pub use port::Port;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
 
+use crate::addrobj::AddrObject;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
 }
 
-pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
+pub fn initialize_xde_driver(
+    log: &Logger,
+    _underlay_nics: &[AddrObject],
+) -> Result<(), Error> {
     slog::warn!(log, "`xde` driver is a fiction on non-illumos systems");
     Ok(())
 }

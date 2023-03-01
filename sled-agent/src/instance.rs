@@ -7,8 +7,6 @@
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
-use crate::opte::PortTicket;
-use crate::opte::{Port, PortManager};
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
@@ -21,6 +19,8 @@ use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
+use illumos_utils::opte::PortManager;
+use illumos_utils::opte::PortTicket;
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -84,7 +84,7 @@ pub enum Error {
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error(transparent)]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Serial console buffer: {0}")]
     Serial(#[from] crate::serial::Error),
@@ -171,7 +171,7 @@ struct RunningState {
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
-    _running_zone: RunningZone<Port>,
+    _running_zone: RunningZone,
 }
 
 impl Drop for RunningState {
@@ -199,7 +199,7 @@ impl Drop for RunningState {
 // Named type for values returned during propolis zone creation
 struct PropolisSetup {
     client: Arc<PropolisClient>,
-    running_zone: RunningZone<Port>,
+    running_zone: RunningZone,
     port_tickets: Option<Vec<PortTicket>>,
 }
 
@@ -870,11 +870,12 @@ impl Instance {
 mod test {
     use super::*;
     use crate::nexus::LazyNexusClient;
-    use crate::opte::PortManager;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
+    use illumos_utils::dladm::PhysicalLink;
+    use illumos_utils::opte::PortManager;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
@@ -949,8 +950,9 @@ mod test {
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
         let mac = MacAddr6::from([0u8; 6]);
+        let data_link = PhysicalLink("myphylink".to_string());
         let port_manager =
-            PortManager::new(log.new(slog::o!()), underlay_ip, mac);
+            PortManager::new(log.new(slog::o!()), data_link, underlay_ip, mac);
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();

@@ -7,6 +7,7 @@
 use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
+use crate::opte::Port;
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
 use ipnetwork::IpNetwork;
@@ -21,12 +22,6 @@ use std::path::PathBuf;
 use crate::zone::MockZones as Zones;
 #[cfg(not(any(test, feature = "testing")))]
 use crate::zone::Zones;
-
-/// Trait required by the `Port` type passed to and held by [`RunningZone`] and
-/// [`InstalledZone`].
-pub trait OptePort {
-    fn vnic_name(&self) -> &str;
-}
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
@@ -118,12 +113,12 @@ pub enum GetZoneError {
 }
 
 /// Represents a running zone.
-pub struct RunningZone<Port> {
+pub struct RunningZone {
     running: bool,
-    inner: InstalledZone<Port>,
+    inner: InstalledZone,
 }
 
-impl<Port> RunningZone<Port> {
+impl RunningZone {
     pub fn name(&self) -> &str {
         &self.inner.name
     }
@@ -154,7 +149,7 @@ impl<Port> RunningZone<Port> {
     /// Boots a new zone.
     ///
     /// Note that the zone must already be configured to be booted.
-    pub async fn boot(zone: InstalledZone<Port>) -> Result<Self, BootError> {
+    pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
         info!(zone.log, "Zone booting");
 
@@ -389,7 +384,7 @@ impl<Port> RunningZone<Port> {
     }
 }
 
-impl<Port> Drop for RunningZone<Port> {
+impl Drop for RunningZone {
     fn drop(&mut self) {
         if self.running {
             let log = self.inner.log.clone();
@@ -427,7 +422,7 @@ pub enum InstallZoneError {
     },
 }
 
-pub struct InstalledZone<Port> {
+pub struct InstalledZone {
     log: Logger,
 
     // Name of the Zone.
@@ -446,10 +441,7 @@ pub struct InstalledZone<Port> {
     link: Option<Link>,
 }
 
-impl<Port> InstalledZone<Port>
-where
-    Port: OptePort,
-{
+impl InstalledZone {
     /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///
@@ -480,7 +472,7 @@ where
         bootstrap_vnic: Option<Link>,
         link: Option<Link>,
         limit_priv: Vec<String>,
-    ) -> Result<InstalledZone<Port>, InstallZoneError> {
+    ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {

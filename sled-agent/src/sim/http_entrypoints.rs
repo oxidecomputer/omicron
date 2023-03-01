@@ -4,9 +4,10 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceSerialConsoleData,
-    InstanceSerialConsoleRequest, VpcFirewallRulesEnsureBody,
+    InstanceSerialConsoleRequest,
 };
 use crate::serial::ByteOffset;
 use dropshot::endpoint;

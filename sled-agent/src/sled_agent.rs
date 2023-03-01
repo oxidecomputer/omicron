@@ -8,10 +8,11 @@ use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
+use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, VpcFirewallRule, Zpool,
+    ServiceEnsureBody, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -80,7 +81,7 @@ pub enum Error {
     Download(#[from] crate::updates::Error),
 
     #[error("Error managing guest networking: {0}")]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Error monitoring hardware: {0}")]
     Hardware(String),
@@ -218,7 +219,8 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        crate::opte::initialize_xde_driver(&log)?;
+        let underlay_nics = crate::common::underlay::find_nics()?;
+        illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
@@ -663,6 +665,6 @@ pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
     delete_underlay_addresses(log)?;
     crate::bootstrap::agent::delete_omicron_vnics(log).await?;
     delete_etherstub(log)?;
-    crate::opte::delete_all_xde_devices(log)?;
+    illumos_utils::opte::delete_all_xde_devices(log)?;
     Ok(())
 }

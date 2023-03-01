@@ -9,8 +9,11 @@ license = "MPL-2.0"
 anyhow.workspace = true
 cfg-if.workspace = true
 ipnetwork.workspace = true
+libc.workspace = true
 macaddr.workspace = true
 omicron-common.workspace = true
+oxide-vpc.workspace = true
+schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
 smf.workspace = true
@@ -21,6 +24,9 @@ zone.workspace = true
 
 # only enabled via the `testing` feature
 mockall = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+opte-ioctl.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true

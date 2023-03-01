@@ -27,7 +27,6 @@
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::common::underlay;
-use crate::opte::Port;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
@@ -224,7 +223,7 @@ enum SwitchZone {
         // The original request for the zone
         request: ServiceZoneRequest,
         // The currently running zone
-        zone: RunningZone<Port>,
+        zone: RunningZone,
     },
 }
 
@@ -234,7 +233,7 @@ pub struct ServiceManagerInner {
     switch_zone: Mutex<SwitchZone>,
     stub_scrimlet: Option<bool>,
     sidecar_revision: String,
-    zones: Mutex<Vec<RunningZone<Port>>>,
+    zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
@@ -496,7 +495,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: &ServiceZoneRequest,
-    ) -> Result<RunningZone<Port>, Error> {
+    ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(request)?;
         let bootstrap_vnic = self.bootstrap_vnic_needed(request)?;
         let link = self.link_needed(request)?;
@@ -872,7 +871,7 @@ impl ServiceManager {
     // assigns such addresses to interfaces within zones.
     async fn initialize_services_locked(
         &self,
-        existing_zones: &mut Vec<RunningZone<Port>>,
+        existing_zones: &mut Vec<RunningZone>,
         requests: &Vec<ServiceZoneRequest>,
     ) -> Result<(), Error> {
         // TODO(https://github.com/oxidecomputer/omicron/issues/726):
@@ -885,10 +884,8 @@ impl ServiceManager {
             );
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
-            let expected_zone_name = InstalledZone::<Port>::get_zone_name(
-                &req.zone_type.to_string(),
-                None,
-            );
+            let expected_zone_name =
+                InstalledZone::get_zone_name(&req.zone_type.to_string(), None);
             if existing_zones.iter().any(|z| z.name() == expected_zone_name) {
                 info!(
                     self.inner.log,

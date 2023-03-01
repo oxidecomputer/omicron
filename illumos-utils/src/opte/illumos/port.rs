@@ -4,11 +4,11 @@
 
 //! A single port on the OPTE virtual switch.
 
+use crate::dladm::Dladm;
+use crate::opte::params::SourceNatConfig;
 use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::Vni;
-use crate::params::SourceNatConfig;
-use illumos_utils::dladm::Dladm;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
@@ -153,11 +153,5 @@ impl Port {
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
-    }
-}
-
-impl illumos_utils::running_zone::OptePort for Port {
-    fn vnic_name(&self) -> &str {
-        Port::vnic_name(self)
     }
 }

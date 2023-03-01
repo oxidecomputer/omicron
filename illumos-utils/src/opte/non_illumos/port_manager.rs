@@ -4,15 +4,15 @@
 
 //! Manager for all OPTE ports on a Helios system
 
+use crate::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
+use crate::opte::params::NetworkInterface;
+use crate::opte::params::SourceNatConfig;
+use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
-use crate::params::NetworkInterface;
-use crate::params::SourceNatConfig;
-use crate::params::VpcFirewallRule;
-use illumos_utils::dladm::PhysicalLink;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use slog::debug;
@@ -82,14 +82,10 @@ impl PortManager {
     /// interfaces
     pub fn new(
         log: Logger,
+        data_link: PhysicalLink,
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> Self {
-        let data_link = crate::common::underlay::find_chelsio_links()
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
         let inner = Arc::new(PortManagerInner {
             log,
             next_port_id: AtomicU64::new(0),

@@ -5,7 +5,6 @@
 //! Management of sled-local storage.
 
 use crate::nexus::LazyNexusClient;
-use crate::opte::Port;
 use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -133,7 +132,7 @@ struct Pool {
     id: Uuid,
     info: ZpoolInfo,
     // ZFS filesytem UUID -> Zone.
-    zones: HashMap<Uuid, RunningZone<Port>>,
+    zones: HashMap<Uuid, RunningZone>,
 }
 
 impl Pool {
@@ -153,12 +152,12 @@ impl Pool {
     /// Typically this is used when a dataset within the zone (identified
     /// by ID) has a running zone (e.g. Crucible, Cockroach) operating on
     /// behalf of that data.
-    fn add_zone(&mut self, id: Uuid, zone: RunningZone<Port>) {
+    fn add_zone(&mut self, id: Uuid, zone: RunningZone) {
         self.zones.insert(id, zone);
     }
 
     /// Access a zone managing data within this pool.
-    fn get_zone(&self, id: Uuid) -> Option<&RunningZone<Port>> {
+    fn get_zone(&self, id: Uuid) -> Option<&RunningZone> {
         self.zones.get(&id)
     }
 
@@ -249,7 +248,7 @@ impl DatasetInfo {
     async fn start_zone(
         &self,
         log: &Logger,
-        zone: &RunningZone<Port>,
+        zone: &RunningZone,
         address: SocketAddrV6,
         do_format: bool,
     ) -> Result<(), Error> {
@@ -473,7 +472,7 @@ async fn ensure_running_zone(
     dataset_name: &DatasetName,
     do_format: bool,
     underlay_address: Ipv6Addr,
-) -> Result<RunningZone<Port>, Error> {
+) -> Result<RunningZone, Error> {
     let address_request = AddressRequest::new_static(
         IpAddr::V6(*dataset_info.address.ip()),
         None,
