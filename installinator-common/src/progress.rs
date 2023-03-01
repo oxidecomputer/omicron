@@ -279,6 +279,22 @@ pub enum ProgressEventKind {
         elapsed: Duration,
     },
 
+    /// A disk is being formatted.
+    FormatProgress {
+        /// The format attempt.
+        attempt: usize,
+
+        /// The path to the disk.
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+
+        /// Percentage progress.
+        percentage: usize,
+
+        /// How long it's been since the format started.
+        elapsed: Duration,
+    },
+
     /// An artifact is being written out.
     WriteProgress {
         /// The write attempt currently occurring.

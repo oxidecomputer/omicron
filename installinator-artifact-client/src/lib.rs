@@ -182,6 +182,17 @@ impl From<installinator_common::ProgressEventKind>
                 downloaded_bytes,
                 elapsed: elapsed.into(),
             },
+            installinator_common::ProgressEventKind::FormatProgress {
+                attempt,
+                path,
+                percentage,
+                elapsed,
+            } => Self::FormatProgress {
+                attempt: attempt as u32,
+                path: path.into_string(),
+                percentage: percentage as u32,
+                elapsed: elapsed.into(),
+            },
             installinator_common::ProgressEventKind::WriteProgress {
                 attempt,
                 kind,

@@ -661,6 +661,50 @@
             ]
           },
           {
+            "description": "A disk is being formatted.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The format attempt.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long it's been since the format started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "path": {
+                "description": "The path to the disk.",
+                "type": "string",
+                "format": "UTF-8 path"
+              },
+              "percentage": {
+                "description": "Percentage progress.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "format_progress"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "elapsed",
+              "path",
+              "percentage",
+              "reason"
+            ]
+          },
+          {
             "description": "An artifact is being written out.",
             "type": "object",
             "properties": {
