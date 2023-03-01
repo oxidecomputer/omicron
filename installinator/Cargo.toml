@@ -36,7 +36,9 @@ uuid.workspace = true
 [dev-dependencies]
 omicron-test-utils.workspace = true
 hex-literal.workspace = true
+partial-io.workspace = true
 proptest.workspace = true
+tempfile.workspace = true
 test-strategy.workspace = true
 tokio = { workspace = true, features = [ "test-util" ] }
 tokio-stream.workspace = true

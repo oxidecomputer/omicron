@@ -16,6 +16,7 @@ mod simulatable;
 mod sled_agent;
 mod storage;
 
+pub use crate::updates::ConfigUpdates;
 pub use config::{Config, ConfigStorage, ConfigZpool, SimMode};
 pub use server::{run_server, Server};
 pub use sled_agent::SledAgent;

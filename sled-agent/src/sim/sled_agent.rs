@@ -10,6 +10,7 @@ use crate::params::{
     InstanceSerialConsoleData,
 };
 use crate::serial::ByteOffset;
+use crate::updates::UpdateManager;
 use futures::lock::Mutex;
 use omicron_common::api::external::{Error, InstanceState, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -45,6 +46,7 @@ pub struct SledAgent {
     /// collection of simulated disks, indexed by disk uuid
     disks: Arc<SimCollection<SimDisk>>,
     storage: Mutex<Storage>,
+    updates: UpdateManager,
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
@@ -130,6 +132,7 @@ impl SledAgent {
                 config.storage.ip,
                 storage_log,
             )),
+            updates: UpdateManager::new(config.updates.clone()),
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
@@ -265,6 +268,10 @@ impl SledAgent {
         target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
         self.disks.sim_ensure(&disk_id, initial_state, target).await
+    }
+
+    pub fn updates(&self) -> &UpdateManager {
+        &self.updates
     }
 
     pub async fn instance_count(&self) -> usize {

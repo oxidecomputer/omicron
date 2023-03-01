@@ -41,6 +41,7 @@ pub struct ControlPlaneTestContext<N> {
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
+    pub sled_agent_storage: tempfile::TempDir,
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
@@ -159,6 +160,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     );
 
     // Set up a single sled agent.
+    let tempdir = tempfile::tempdir().unwrap();
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
     let sled_agent = start_sled_agent(
         logctx.log.new(o!(
@@ -167,6 +169,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         )),
         internal_server_addr,
         sa_id,
+        tempdir.path(),
     )
     .await
     .unwrap();
@@ -208,6 +211,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         internal_client: testctx_internal,
         database,
         clickhouse,
+        sled_agent_storage: tempdir,
         sled_agent,
         oximeter,
         producer,
@@ -219,6 +223,7 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
+    update_directory: &Path,
 ) -> Result<sim::Server, String> {
     let config = sim::Config {
         id,
@@ -234,6 +239,9 @@ pub async fn start_sled_agent(
         storage: sim::ConfigStorage {
             zpools: vec![],
             ip: IpAddr::from(Ipv6Addr::LOCALHOST),
+        },
+        updates: sim::ConfigUpdates {
+            zone_artifact_path: update_directory.to_path_buf(),
         },
     };
 
