@@ -5,7 +5,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::CompletionEventKind;
@@ -14,12 +13,13 @@ use omicron_common::{
     update::{ArtifactHashId, ArtifactKind},
 };
 use slog::Drain;
-use tokio::{io::AsyncWriteExt, sync::mpsc};
+use tokio::sync::mpsc;
 
 use crate::{
     artifact::ArtifactIdOpts,
     peers::{DiscoveryMechanism, FetchedArtifact, Peers},
     reporter::{ProgressReporter, ReportEvent},
+    write::{write_artifact, WriteDestination},
 };
 
 /// Installinator app.
@@ -162,26 +162,27 @@ impl InstallOpts {
         .await?;
 
         // TODO: figure out the actual destination.
-
-        // TODO: add retries to this process
-        // TODO: publish write events.
-        std::fs::create_dir_all(&self.destination).with_context(|| {
-            format!("error creating directories at {}", self.destination)
-        })?;
+        let destination = WriteDestination::in_directory(&self.destination)?;
 
         write_artifact(
+            &log,
             &host_phase_2_id,
             host_phase_2_artifact.artifact,
-            &self.destination.join("host_phase_2.bin"),
+            &destination.host_phase_2,
+            &event_sender,
         )
-        .await?;
+        .await;
 
         write_artifact(
+            &log,
             &control_plane_id,
             control_plane_artifact.artifact,
-            &self.destination.join("control_plane.bin"),
+            &destination.control_plane,
+            &event_sender,
         )
-        .await?;
+        .await;
+
+        // TODO: verify artifact was correctly written out to disk.
 
         // Drop the event sender: this signals completion.
         _ = event_sender
@@ -228,31 +229,6 @@ async fn fetch_artifact(
     );
 
     Ok(artifact)
-}
-
-async fn write_artifact(
-    artifact_id: &ArtifactHashId,
-    mut artifact: BufList,
-    destination: &Utf8Path,
-) -> Result<()> {
-    let mut file = tokio::fs::OpenOptions::new()
-        // TODO: do we want create = true? Maybe only if writing to a file and not an M.2.
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(destination)
-        .await
-        .with_context(|| {
-            format!("failed to open destination `{destination}` for writing")
-        })?;
-
-    let num_bytes = artifact.num_bytes();
-
-    file.write_all_buf(&mut artifact).await.with_context(|| {
-        format!("failed to write artifact {artifact_id:?} ({num_bytes} bytes) to destination `{destination}`")
-    })?;
-
-    Ok(())
 }
 
 pub(crate) fn stderr_env_drain(

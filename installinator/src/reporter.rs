@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::{errors::DiscoverPeersError, peers::Peers};
 
+#[derive(Debug)]
 pub(crate) enum ReportEvent {
     Completion(CompletionEventKind),
     Progress(ProgressEventKind),
