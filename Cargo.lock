@@ -4087,7 +4087,6 @@ dependencies = [
 [[package]]
 name = "omicron-zone-package"
 version = "0.7.1"
-source = "git+https://github.com/oxidecomputer/omicron-package?branch=version-stamp#1408ea505328c446cec089d70e3f5db98a53d64d"
 dependencies = [
  "anyhow",
  "async-trait",
