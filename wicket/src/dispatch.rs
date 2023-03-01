@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Code that manages command dispatch for wicket.
+//! Code that manages command dispatch from a shell for wicket.
 
 use std::net::SocketAddrV6;
 
@@ -11,7 +11,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use slog::Drain;
 
-use crate::{upload::UploadArgs, wizard::Wizard};
+use crate::{upload::UploadArgs, Runner};
 
 #[derive(Debug, Parser)]
 #[command(version, author = "Oxide Computer Company")]
@@ -65,7 +65,7 @@ impl WicketApp {
                 // Do not expose standard error since it'll be on top of the TUI.
                 let log = setup_log(&log_path()?, WithStderr::No)?;
                 // Not invoked with "-c" -- run the TUI wizard.
-                Wizard::new(log, wicketd_addr).run()
+                Runner::new(log, wicketd_addr).run()
             }
         }
     }

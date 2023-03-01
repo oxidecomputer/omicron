@@ -7804,6 +7804,7 @@ dependencies = [
  "crossterm 0.26.1",
  "futures",
  "hex",
+ "lazy_static",
  "libsw",
  "proptest",
  "reqwest",

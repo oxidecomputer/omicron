@@ -6,8 +6,6 @@
 
 use tui::layout::Rect;
 
-pub const MENUBAR_HEIGHT: u16 = 5;
-
 // Extension trait for Rects that provide centering and placement capabilities
 pub trait RectExt {
     /// Create a new `Rect` with the given width centered horizontally within
