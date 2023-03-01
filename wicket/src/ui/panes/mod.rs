@@ -3,12 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod overview;
+mod update;
 
 pub use super::Control;
 use crate::ui::defaults::style;
 pub use overview::OverviewPane;
 use tui::text::{Span, Spans};
 use tui::widgets::Paragraph;
+pub use update::UpdatePane;
 
 /// Generate one line of text for the help bar in panes
 pub fn help_text<'a>(data: &'a [(&'a str, &'a str)]) -> Paragraph<'a> {

@@ -47,3 +47,11 @@ pub fn service() -> Style {
 pub fn delayed() -> Style {
     Style::default().fg(OX_OFF_WHITE)
 }
+
+pub fn highlighted() -> Style {
+    Style::default().bg(TUI_PURPLE).fg(TUI_BLACK)
+}
+
+pub fn plain_text() -> Style {
+    Style::default().bg(TUI_BLACK).fg(OX_OFF_WHITE)
+}

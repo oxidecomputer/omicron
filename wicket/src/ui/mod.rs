@@ -17,6 +17,7 @@ use splash::SplashScreen;
 
 pub use controls::Control;
 pub use panes::OverviewPane;
+pub use panes::UpdatePane;
 
 /// The primary display representation. It's sole purpose is to dispatch events
 /// to the underlying splash and main screens.

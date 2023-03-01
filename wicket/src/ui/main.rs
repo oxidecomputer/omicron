@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{Control, OverviewPane, StatefulList};
+use super::{Control, OverviewPane, StatefulList, UpdatePane};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::{Action, Event, Frame, State, Term};
@@ -35,10 +35,10 @@ pub struct MainScreen {
 impl MainScreen {
     pub fn new() -> MainScreen {
         // We want the sidebar ordered in this specific manner
-        let sidebar_ordered_panes = vec![(
-            "overview",
-            Box::new(OverviewPane::new()) as Box<dyn Control>,
-        )];
+        let sidebar_ordered_panes = vec![
+            ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
+            ("update", Box::new(UpdatePane::new()) as Box<dyn Control>),
+        ];
         let sidebar_keys: Vec<_> =
             sidebar_ordered_panes.iter().map(|&(title, _)| title).collect();
         MainScreen {
