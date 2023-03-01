@@ -1,0 +1,56 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! HTTP entrypoint functions for the bootstrap agent's API.
+//!
+//! Note that the bootstrap agent also communicates over Sprockets,
+//! and has a separate interface for establishing the trust quorum.
+
+use crate::bootstrap::agent::Agent;
+use dropshot::{
+    endpoint, ApiDescription, HttpError, HttpResponseOk,
+    RequestContext,
+};
+use omicron_common::api::external::SemverVersion;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+type BootstrapApiDescription = ApiDescription<Arc<Agent>>;
+
+/// Returns a description of the bootstrap agent API
+pub(crate) fn api() -> BootstrapApiDescription {
+    fn register_endpoints(api: &mut BootstrapApiDescription) -> Result<(), String> {
+        api.register(components_get)?;
+        Ok(())
+    }
+
+    let mut api = BootstrapApiDescription::new();
+    if let Err(err) = register_endpoints(&mut api) {
+        panic!("failed to register entrypoints: {}", err);
+    }
+    api
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+struct Component {
+    name: String,
+    version: SemverVersion,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/components",
+}]
+async fn components_get(
+    rqctx: RequestContext<Arc<Agent>>,
+) -> Result<HttpResponseOk<Vec<Component>>, HttpError> {
+    let ba = rqctx.context();
+
+    // TODO TODO TODO
+    // ba.components_get().await.map_err(|e| Error::from(e))?;
+    let components = vec![];
+
+    Ok(HttpResponseOk(components))
+}

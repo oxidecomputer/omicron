@@ -5,7 +5,7 @@
 //! Bootstrap-related APIs.
 
 use super::client::Client as BootstrapAgentClient;
-use super::config::{Config, BOOTSTRAP_AGENT_PORT};
+use super::config::{Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT};
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
 use super::params::SledAgentRequest;
@@ -124,7 +124,9 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    address: SocketAddrV6,
+
+    /// Bootstrap network address.
+    ip: Ipv6Addr,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
@@ -170,10 +172,8 @@ fn bootstrap_ip(
 fn bootstrap_address(
     link: PhysicalLink,
     interface_id: u64,
-    port: u16,
-) -> Result<SocketAddrV6, dladm::GetMacError> {
-    let ip = bootstrap_ip(link, interface_id)?;
-    Ok(SocketAddrV6::new(ip, port, 0, 0))
+) -> Result<Ipv6Addr, dladm::GetMacError> {
+    bootstrap_ip(link, interface_id)
 }
 
 // Delete all VNICs that can be managed by the control plane.
@@ -265,7 +265,7 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
 
-        let address = bootstrap_address(link.clone(), 1, BOOTSTRAP_AGENT_PORT)?;
+        let ip = bootstrap_address(link.clone(), 1)?;
 
         // The only zone with a bootstrap ip address besides the global zone,
         // is the switch zone. We allocate this address here since we have
@@ -315,7 +315,7 @@ impl Agent {
 
         Zones::ensure_has_global_zone_v6_address(
             bootstrap_etherstub_vnic.clone(),
-            *address.ip(),
+            ip,
             "bootstrap6",
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
@@ -323,7 +323,7 @@ impl Agent {
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::new(log.clone())?;
-        ddmd_client.advertise_prefix(Ipv6Subnet::new(*address.ip()));
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -381,7 +381,7 @@ impl Agent {
         let agent = Agent {
             log: ba_log,
             parent_log: log,
-            address,
+            ip,
             share: Mutex::new(None),
             rss: Mutex::new(None),
             sled_state: Mutex::new(SledAgentState::Before(Some(
@@ -654,7 +654,7 @@ impl Agent {
                     .map(|addr| {
                         let addr = SocketAddrV6::new(
                             addr,
-                            BOOTSTRAP_AGENT_PORT,
+                            BOOTSTRAP_AGENT_SPROCKETS_PORT,
                             0,
                             0,
                         );
@@ -735,7 +735,7 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                *self.address.ip(),
+                self.ip,
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.
@@ -750,9 +750,14 @@ impl Agent {
         Ok(())
     }
 
-    /// Return the global zone address that the bootstrap agent binds to.
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
+    /// The GZ address used by the bootstrap agent for Sprockets.
+    pub fn sprockets_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0)
+    }
+
+    /// The address used by the bootstrap agent to serve a dropshot interface.
+    pub fn http_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
     }
 }
 

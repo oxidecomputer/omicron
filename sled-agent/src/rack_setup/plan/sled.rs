@@ -5,7 +5,7 @@
 //! Plan generation for "how should sleds be initialized".
 
 use crate::bootstrap::{
-    config::BOOTSTRAP_AGENT_PORT,
+    config::BOOTSTRAP_AGENT_SPROCKETS_PORT,
     params::SledAgentRequest,
     trust_quorum::{RackSecret, ShareDistribution},
 };
@@ -127,7 +127,7 @@ impl Plan {
         let allocations = bootstrap_addrs.map(|(idx, bootstrap_addr)| {
             info!(log, "Creating plan for the sled at {:?}", bootstrap_addr);
             let bootstrap_addr =
-                SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_PORT, 0, 0);
+                SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0);
             let sled_subnet_index =
                 u8::try_from(idx + 1).expect("Too many peers!");
             let subnet = config.sled_subnet(sled_subnet_index);

@@ -13,6 +13,7 @@ use super::trust_quorum::ShareDistribution;
 use super::views::Response;
 use super::views::ResponseEnvelope;
 use crate::bootstrap::maghemite;
+use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::common::underlay;
 use crate::config::Config as SledConfig;
 use crate::sp::AsyncReadWrite;
@@ -20,6 +21,7 @@ use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
 use slog::Drain;
 use slog::Logger;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
@@ -41,7 +43,8 @@ pub enum TrustQuorumMembership {
 /// via an HTTP interface.
 pub struct Server {
     bootstrap_agent: Arc<Agent>,
-    inner: JoinHandle<Result<(), String>>,
+    sprockets_server_handle: JoinHandle<Result<(), String>>,
+    _http_server: dropshot::HttpServer<Arc<Agent>>,
 }
 
 impl Server {
@@ -97,23 +100,36 @@ impl Server {
         .map_err(|e| e.to_string())?;
         let bootstrap_agent = Arc::new(bootstrap_agent);
 
-        let ba_log = log.new(o!("component" => "BootstrapAgentServer"));
-        let inner = Inner::start(
+        let mut dropshot_config = dropshot::ConfigDropshot::default();
+        dropshot_config.request_body_max_bytes = 1024 * 1024;
+        dropshot_config.bind_address = SocketAddr::V6(bootstrap_agent.http_address());
+        let dropshot_log = log.new(o!("component" => "dropshot (BootstrapAgent)"));
+        let http_server = dropshot::HttpServerStarter::new(
+            &dropshot_config,
+            http_api(),
+            bootstrap_agent.clone(),
+            &dropshot_log,
+        )
+        .map_err(|error| format!("initializing server: {}", error))?
+        .start();
+
+        let sprockets_log = log.new(o!("component" => "sprockets (BootstrapAgent)"));
+        let sprockets_server_handle = Inner::start_sprockets(
             sp.clone(),
             trust_quorum,
             Arc::clone(&bootstrap_agent),
-            ba_log,
+            sprockets_log,
         )
         .await?;
 
-        let server = Server { bootstrap_agent, inner };
+        let server = Server { bootstrap_agent, sprockets_server_handle, _http_server: http_server };
 
         // Initialize the bootstrap agent *after* the server has started.
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
         if let Err(e) = server.bootstrap_agent.start_rss(&config).await {
-            server.inner.abort();
+            server.sprockets_server_handle.abort();
             return Err(e.to_string());
         }
 
@@ -121,13 +137,13 @@ impl Server {
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        match self.inner.await {
+        match self.sprockets_server_handle.await {
             Ok(result) => result,
             Err(err) => {
                 if err.is_cancelled() {
-                    // We control cancellation of `inner`, which only happens if
-                    // we intentionally abort it in `close()`; that should not
-                    // result in an error here.
+                    // We control cancellation of `sprockets_server_handle`,
+                    // which only happens if we intentionally abort it in
+                    // `close()`; that should not result in an error here.
                     Ok(())
                 } else {
                     Err(format!("Join on server tokio task failed: {err}"))
@@ -137,7 +153,7 @@ impl Server {
     }
 
     pub async fn close(self) -> Result<(), String> {
-        self.inner.abort();
+        self.sprockets_server_handle.abort();
         self.wait_for_finish().await
     }
 }
@@ -151,7 +167,7 @@ struct Inner {
 }
 
 impl Inner {
-    async fn start(
+    async fn start_sprockets(
         // TODO-cleanup `sp` is optional because we support running without an
         // SP / any trust quorum mechanisms. Eventually it should be required.
         sp: Option<SpHandle>,
@@ -159,7 +175,7 @@ impl Inner {
         bootstrap_agent: Arc<Agent>,
         log: Logger,
     ) -> Result<JoinHandle<Result<(), String>>, String> {
-        let bind_address = bootstrap_agent.address();
+        let bind_address = bootstrap_agent.sprockets_address();
 
         let listener =
             TcpListener::bind(bind_address).await.map_err(|err| {

@@ -39,6 +39,7 @@ propolis-client.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true

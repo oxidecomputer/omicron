@@ -4036,6 +4036,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "schemars",
+ "semver 1.0.16",
  "serde",
  "serde_json",
  "serde_with",
