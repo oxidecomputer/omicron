@@ -4,9 +4,10 @@
 
 //! Interactions with the Oxide Packet Transformation Engine (OPTE)
 
-use crate::common::underlay;
+use crate::addrobj::AddrObject;
 use crate::dladm;
 use opte_ioctl::OpteHdl;
+use slog::info;
 use slog::Logger;
 use std::fs;
 use std::path::Path;
@@ -27,9 +28,6 @@ pub enum Error {
 
     #[error("Failed to wrap OPTE port in a VNIC: {0}")]
     CreateVnic(#[from] dladm::CreateVnicError),
-
-    #[error("Failed to get VNICs for xde underlay devices: {0}")]
-    GetVnic(#[from] underlay::Error),
 
     #[error(
         "No xde driver configuration file exists at '/kernel/drv/xde.conf'"
@@ -72,7 +70,10 @@ pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
 ///
 /// The xde driver needs information about the physical devices out which it can
 /// send traffic from the guests.
-pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
+pub fn initialize_xde_driver(
+    log: &Logger,
+    underlay_nics: &[AddrObject],
+) -> Result<(), Error> {
     const XDE_CONF: &str = "/kernel/drv/xde.conf";
     let xde_conf = Path::new(XDE_CONF);
     if !xde_conf.exists() {
@@ -90,7 +91,6 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
     // boundary services).
     use_external_ip_workaround(&log, &xde_conf);
 
-    let underlay_nics = underlay::find_nics()?;
     info!(log, "using '{:?}' as data links for xde driver", underlay_nics);
     if underlay_nics.len() < 2 {
         const MESSAGE: &str = concat!(

@@ -219,7 +219,8 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        illumos_utils::opte::initialize_xde_driver(&log)?;
+        let underlay_nics = crate::common::underlay::find_nics()?;
+        illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
