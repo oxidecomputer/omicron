@@ -26,8 +26,8 @@ pub fn help_text<'a>(data: &'a [(&'a str, &'a str)]) -> Paragraph<'a> {
     Paragraph::new(Spans::from(text))
 }
 
-/// Align a bunch of spans on a single line with `spaces` spaces between them,
-/// with each having `max_width` length.
+/// Align a bunch of spans on a single line with with at most `column_width`
+/// length, and being left-aligned by `left_margin`
 pub fn align_by<'a>(
     left_margin: u16,
     column_width: u16,

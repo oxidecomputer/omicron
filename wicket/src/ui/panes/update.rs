@@ -121,6 +121,7 @@ impl Control for UpdatePane {
                 Span::styled("COMPONENT", style::selected()),
                 Span::styled("VERSION", style::selected()),
                 Span::styled("TARGET", style::selected()),
+                Span::styled("STATUS", style::selected()),
             ],
         ))
         .block(block.clone());
