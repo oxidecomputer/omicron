@@ -14,10 +14,7 @@ pub use inventory::{
 };
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
-pub use update::{
-    ComponentUpdateState, RackUpdateState, SledUpdateState,
-    SwitchOrPscUpdateState, UpdateState,
-};
+pub use update::{FinalInstallArtifact, RackUpdateState, UpdateState};
 
 /// The global state of wicket
 ///
@@ -28,6 +25,7 @@ pub struct State {
     pub inventory: Inventory,
     pub rack_state: RackState,
     pub service_status: ServiceStatus,
+    pub update_state: RackUpdateState,
 }
 
 impl Default for State {
@@ -42,6 +40,7 @@ impl State {
             inventory: Inventory::default(),
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
+            update_state: RackUpdateState::new(),
         }
     }
 }

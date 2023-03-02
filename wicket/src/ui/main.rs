@@ -79,7 +79,7 @@ impl MainScreen {
             // Draw all the components, starting with the background
             let background = Block::default().style(style::background());
             frame.render_widget(background, frame.size());
-            self.sidebar.draw(state, frame, chunks[0], self.sidebar.selected);
+            self.sidebar.draw(state, frame, chunks[0], self.sidebar.active);
             self.draw_pane(state, frame, chunks[1]);
             self.draw_statusbar(state, frame, statusbar_rect);
         })?;
@@ -120,16 +120,16 @@ impl MainScreen {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
                 KeyCode::Esc => {
-                    if self.sidebar.selected {
+                    if self.sidebar.active {
                         None
                     } else {
-                        self.sidebar.selected = true;
+                        self.sidebar.active = true;
                         Some(Action::Redraw)
                     }
                 }
                 KeyCode::Enter => {
-                    if self.sidebar.selected {
-                        self.sidebar.selected = false;
+                    if self.sidebar.active {
+                        self.sidebar.active = false;
                         Some(Action::Redraw)
                     } else {
                         self.current_pane()
@@ -138,35 +138,36 @@ impl MainScreen {
                 }
                 _ => {
                     let event = Event::Term(TermEvent::Key(e));
-                    if self.sidebar.selected {
-                        self.sidebar.on(state, event)
-                    } else {
-                        self.current_pane()
-                            .on(state, Event::Term(TermEvent::Key(e)))
-                    }
+                    self.dispatch_event(state, event)
                 }
             },
-            e => {
-                let current_pane = self.sidebar.selected();
-                if self.sidebar.selected {
-                    let _ = self.sidebar.on(state, e);
-                    if self.sidebar.selected() != current_pane {
-                        // We need to inform the new pane, which may not have
-                        // ever been drawn what its Rect is.
-                        self.resize(state, self.rect.width, self.rect.height);
-                        Some(Action::Redraw)
-                    } else {
-                        None
-                    }
-                } else {
-                    self.current_pane().on(state, e)
-                }
+            e => self.dispatch_event(state, e),
+        }
+    }
+
+    fn dispatch_event(
+        &mut self,
+        state: &mut State,
+        event: Event,
+    ) -> Option<Action> {
+        let current_pane = self.sidebar.selected_pane();
+        if self.sidebar.active {
+            let _ = self.sidebar.on(state, event);
+            if self.sidebar.selected_pane() != current_pane {
+                // We need to inform the new pane, which may not have
+                // ever been drawn what its Rect is.
+                self.resize(state, self.rect.width, self.rect.height);
+                Some(Action::Redraw)
+            } else {
+                None
             }
+        } else {
+            self.current_pane().on(state, event)
         }
     }
 
     fn current_pane(&mut self) -> &mut Box<dyn Control> {
-        self.panes.get_mut(self.sidebar.selected()).unwrap()
+        self.panes.get_mut(self.sidebar.selected_pane()).unwrap()
     }
 
     fn draw_pane(
@@ -175,7 +176,7 @@ impl MainScreen {
         frame: &mut Frame<'_>,
         pane_rect: Rect,
     ) {
-        let active = !self.sidebar.selected;
+        let active = !self.sidebar.active;
         let pane = self.current_pane();
         pane.draw(state, frame, pane_rect, active)
     }
@@ -210,13 +211,13 @@ impl MainScreen {
 pub struct Sidebar {
     panes: StatefulList<&'static str>,
     // Whether the sidebar is selected currently.
-    selected: bool,
+    active: bool,
 }
 
 impl Sidebar {
     pub fn new(panes: Vec<&'static str>) -> Sidebar {
         let mut sidebar =
-            Sidebar { panes: StatefulList::new(panes), selected: true };
+            Sidebar { panes: StatefulList::new(panes), active: true };
 
         // Select the first pane
         sidebar.panes.next();
@@ -226,7 +227,7 @@ impl Sidebar {
     /// Return the name of the selected Pane
     ///
     /// TODO: Is an `&'static str` good enough? Should we define a `PaneId`?
-    pub fn selected(&self) -> &'static str {
+    pub fn selected_pane(&self) -> &'static str {
         self.panes.items[self.panes.state.selected().unwrap()]
     }
 }
@@ -267,7 +268,7 @@ impl Control for Sidebar {
             })
             .collect();
 
-        let border_style = if self.selected {
+        let border_style = if self.active {
             style::selected_line()
         } else {
             style::deselected()
