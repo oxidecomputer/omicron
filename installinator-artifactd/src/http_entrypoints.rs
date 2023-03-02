@@ -52,7 +52,7 @@ async fn get_artifact_by_id(
 ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError> {
     match rqctx.context().artifact_store.get_artifact(&path.into_inner()).await
     {
-        Some((body, size)) => Ok(body_to_artifact_response(body, size)),
+        Some((size, body)) => Ok(body_to_artifact_response(size, body)),
         None => {
             Err(HttpError::for_not_found(None, "Artifact not found".into()))
         }
@@ -74,7 +74,7 @@ async fn get_artifact_by_hash(
         .get_artifact_by_hash(&path.into_inner())
         .await
     {
-        Some((body, size)) => Ok(body_to_artifact_response(body, size)),
+        Some((size, body)) => Ok(body_to_artifact_response(size, body)),
         None => {
             Err(HttpError::for_not_found(None, "Artifact not found".into()))
         }
@@ -121,8 +121,8 @@ async fn report_progress(
 }
 
 fn body_to_artifact_response(
+    size: u64,
     body: Body,
-    size: usize,
 ) -> HttpResponseHeaders<HttpResponseOk<FreeformBody>> {
     let mut response =
         HttpResponseHeaders::new_unnamed(HttpResponseOk(body.into()));
