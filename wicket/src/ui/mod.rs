@@ -28,11 +28,29 @@ pub use panes::OverviewPane;
 pub struct Screen {
     splash: Option<SplashScreen>,
     main: MainScreen,
+    width: u16,
+    height: u16,
 }
 
 impl Screen {
     pub fn new() -> Screen {
-        Screen { splash: Some(SplashScreen::new()), main: MainScreen::new() }
+        Screen {
+            splash: Some(SplashScreen::new()),
+            main: MainScreen::new(),
+            width: 0,
+            height: 0,
+        }
+    }
+
+    /// Compute the layout of the [`MainScreen`]
+    ///
+    // A draw is issued after every resize, so no need to return an Action
+    pub fn resize(&mut self, state: &mut State, width: u16, height: u16) {
+        self.width = width;
+        self.height = height;
+
+        // Size the main screen
+        self.main.resize(state, width, height);
     }
 
     pub fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {

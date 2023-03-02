@@ -25,4 +25,23 @@ pub trait Control {
         rect: Rect,
         active: bool,
     );
+
+    /// Optional callback for [`Control`]s that must know the size and position
+    /// of their area in order to compute visuals dynamically outside the
+    /// render process. This is useful for situations when you want to size
+    /// a widget to the the screen where the content of the widget may differ
+    /// depending upon the size available, and you want to minimize the amount
+    /// of times this computation is performed by memoizing the contents of the
+    /// widget in the `Control`. It is also useful to allow mouse input event
+    /// handling via rectangle intersection.
+    ///
+    /// This is a separate callback because not all [`Control`]s need the
+    /// functionality provided.
+    ///
+    /// Additionally, the resize events from the terminal are insufficient, as
+    /// they only give the total size of the screen, not the specific area of a
+    /// `Control`. Only the parent of a [`Control`] knows the precise [`Rect`]
+    /// of the child. The parent computes its own layout during resize and
+    /// passes the appropriate `Rect` to the child.
+    fn resize(&mut self, _: &mut State, _: Rect) {}
 }
