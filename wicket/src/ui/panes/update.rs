@@ -5,12 +5,13 @@
 use std::collections::BTreeMap;
 
 use super::{align_by, help_text, Control};
-use crate::state::{ComponentId, ALL_COMPONENT_IDS};
+use crate::state::{ComponentId, RackUpdateState, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind};
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
+use omicron_common::{update::ArtifactKind, update::KnownArtifactKind};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
 use tui::text::{Span, Spans, Text};
@@ -23,25 +24,30 @@ use wicketd_client::types::UpdateLog;
 pub struct UpdatePane {
     tree_state: TreeState,
     items: Vec<TreeItem<'static>>,
-    update_logs: BTreeMap<ComponentId, UpdateLog>,
     help: Vec<(&'static str, &'static str)>,
 }
 
 impl UpdatePane {
-    pub fn new() -> UpdatePane {
+    pub fn new(rack_update_state: &RackUpdateState) -> UpdatePane {
+        let items = Self::init_tree(rack_update_state);
         UpdatePane {
             tree_state: Default::default(),
-            update_logs: BTreeMap::default(),
-            items: ALL_COMPONENT_IDS
-                .iter()
-                .map(|id| TreeItem::new(*id, vec![]))
-                .collect(),
+            items,
             help: vec![
                 ("OPEN", "<RIGHT>"),
                 ("CLOSE", "<LEFT>"),
                 ("SELECT", "<UP/DOWN>"),
             ],
         }
+    }
+
+    fn init_tree(
+        rack_update_state: &RackUpdateState,
+    ) -> Vec<TreeItem<'static>> {
+        rack_update_state
+            .iter()
+            .map(|(id, state)| TreeItem::new(*id, vec![]))
+            .collet()
     }
 }
 

@@ -7,12 +7,17 @@
 mod inventory;
 mod rack;
 mod status;
+mod update;
 
 pub use inventory::{
     Component, ComponentId, Inventory, PowerState, Sp, ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
+pub use update::{
+    ComponentUpdateState, RackUpdateState, SledUpdateState,
+    SwitchOrPscUpdateState, UpdateState,
+};
 
 /// The global state of wicket
 ///

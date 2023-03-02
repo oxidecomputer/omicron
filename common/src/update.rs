@@ -4,7 +4,8 @@
 
 use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
-use crate::api::internal::nexus::KnownArtifactKind;
+// TODO(AJS): Don't actually export this, or move it in here and out of internal.
+pub use crate::api::internal::nexus::KnownArtifactKind;
 use hex::FromHexError;
 use schemars::{
     gen::SchemaGenerator,

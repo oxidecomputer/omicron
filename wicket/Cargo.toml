@@ -14,6 +14,7 @@ crossterm = { version = "0.26.1", features = ["event-stream"] }
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
 lazy_static.workspace = true
+omicron-common.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
