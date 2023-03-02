@@ -229,7 +229,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_create_v1)?;
         api.register(vpc_subnet_delete_v1)?;
         api.register(vpc_subnet_update_v1)?;
-        // api.register(vpc_subnet_list_network_interfaces_v1)?;
+        api.register(vpc_subnet_list_network_interfaces_v1)?;
 
         api.register(instance_network_interface_create)?;
         api.register(instance_network_interface_list)?;
@@ -5640,15 +5640,17 @@ async fn vpc_subnet_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List network interfaces
+/// List network interfaces for a VPC subnet
+/// Use `/v1/vpc-subnets/{subnet}/network-interfaces` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_subnet_list_network_interfaces(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
+    query_params: Query<PaginatedByNameOrId>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
     let apictx = rqctx.context();
@@ -5657,24 +5659,76 @@ async fn vpc_subnet_list_network_interfaces(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
         let interfaces = nexus
             .subnet_list_network_interfaces(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &subnet_lookup,
+                &paginated_by,
             )
             .await?
             .into_iter()
             .map(|interfaces| interfaces.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             interfaces,
-            &marker_for_name,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List network interfaces
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_list_network_interfaces_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: scan_params.selector.vpc_selector.clone(),
+            subnet: path.subnet,
+        };
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        let interfaces = nexus
+            .subnet_list_network_interfaces(
+                &opctx,
+                &subnet_lookup,
+                &paginated_by,
+            )
+            .await?
+            .into_iter()
+            .map(|interfaces| interfaces.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            interfaces,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
