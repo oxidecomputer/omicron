@@ -26,7 +26,6 @@
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
-use crate::common::underlay;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
@@ -51,6 +50,7 @@ use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
+use sled_hardware::underlay;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;

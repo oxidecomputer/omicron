@@ -34,8 +34,6 @@ pub mod sp;
 mod storage_manager;
 mod updates;
 
-pub use sled_agent::cleanup_networking_resources;
-
 #[cfg(test)]
 mod mocks;
 

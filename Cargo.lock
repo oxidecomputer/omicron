@@ -3986,7 +3986,6 @@ dependencies = [
  "illumos-utils",
  "indicatif",
  "omicron-common",
- "omicron-sled-agent",
  "omicron-zone-package",
  "petgraph",
  "rayon",
@@ -3994,6 +3993,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_derive",
+ "sled-hardware",
  "slog",
  "slog-async",
  "slog-term",
@@ -6274,6 +6274,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
+ "futures",
  "illumos-devinfo",
  "illumos-utils",
  "libefi-illumos",
