@@ -275,6 +275,9 @@ pub enum ProgressEventKind {
         /// The number of bytes downloaded so far.
         downloaded_bytes: u64,
 
+        /// The size of the artifact, as provided in the Content-Length header.
+        total_bytes: u64,
+
         /// How long it's been since the download started.
         elapsed: Duration,
     },

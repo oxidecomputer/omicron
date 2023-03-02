@@ -5,10 +5,11 @@
 // Copyright 2022 Oxide Computer Company
 
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
+    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, RequestContext,
+    TypedBody,
 };
-use hyper::StatusCode;
+use hyper::{header, Body, StatusCode};
 use installinator_common::ProgressReport;
 use omicron_common::update::{ArtifactHashId, ArtifactId};
 use schemars::JsonSchema;
@@ -48,10 +49,10 @@ async fn get_artifact_by_id(
     // code might be dealing with an unknown artifact kind. This can happen
     // if a new artifact kind is introduced across version changes.
     path: Path<ArtifactId>,
-) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError> {
     match rqctx.context().artifact_store.get_artifact(&path.into_inner()).await
     {
-        Some(body) => Ok(HttpResponseOk(body.into())),
+        Some((size, body)) => Ok(body_to_artifact_response(size, body)),
         None => {
             Err(HttpError::for_not_found(None, "Artifact not found".into()))
         }
@@ -66,14 +67,14 @@ async fn get_artifact_by_id(
 async fn get_artifact_by_hash(
     rqctx: RequestContext<ServerContext>,
     path: Path<ArtifactHashId>,
-) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError> {
     match rqctx
         .context()
         .artifact_store
         .get_artifact_by_hash(&path.into_inner())
         .await
     {
-        Some(body) => Ok(HttpResponseOk(body.into())),
+        Some((size, body)) => Ok(body_to_artifact_response(size, body)),
         None => {
             Err(HttpError::for_not_found(None, "Artifact not found".into()))
         }
@@ -117,4 +118,15 @@ async fn report_progress(
             ))
         }
     }
+}
+
+fn body_to_artifact_response(
+    size: u64,
+    body: Body,
+) -> HttpResponseHeaders<HttpResponseOk<FreeformBody>> {
+    let mut response =
+        HttpResponseHeaders::new_unnamed(HttpResponseOk(body.into()));
+    let headers = response.headers_mut();
+    headers.append(header::CONTENT_LENGTH, size.into());
+    response
 }
