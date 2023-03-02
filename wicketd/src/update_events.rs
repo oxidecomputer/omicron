@@ -4,10 +4,15 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use camino::Utf8PathBuf;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::PowerState;
 use gateway_client::types::UpdatePreparationProgress;
 use omicron_common::update::ArtifactId;
+use omicron_common::update::ArtifactKind;
+use schemars::gen::SchemaGenerator;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::time::Duration;
@@ -30,9 +35,28 @@ pub enum UpdateStateKind {
         artifact: ArtifactId,
         progress: Option<UpdatePreparationProgress>,
     },
-    ArtifactUpdateProgress {
-        bytes_received: u64,
+    ArtifactDownloadProgress {
+        attempt: usize,
+        kind: ArtifactKind,
+        downloaded_bytes: u64,
         total_bytes: u64,
+        elapsed: Duration,
+    },
+    ArtifactWriteProgress {
+        attempt: usize,
+        kind: ArtifactKind,
+        #[schemars(schema_with = "path_schema")]
+        destination: Option<Utf8PathBuf>,
+        written_bytes: u64,
+        total_bytes: u64,
+        elapsed: Duration,
+    },
+    InstallinatorFormatProgress {
+        attempt: usize,
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+        percentage: usize,
+        elapsed: Duration,
     },
     WaitingForStatus {
         artifact: ArtifactId,
@@ -81,4 +105,10 @@ pub enum UpdateEventFailureKind {
 pub struct UpdateLog {
     pub current: Option<UpdateState>,
     pub events: Vec<UpdateEvent>,
+}
+
+fn path_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
 }

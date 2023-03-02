@@ -275,6 +275,9 @@ pub enum ProgressEventKind {
         /// The number of bytes downloaded so far.
         downloaded_bytes: u64,
 
+        /// The size of the artifact, as provided in the Content-Length header.
+        total_bytes: u64,
+
         /// How long it's been since the download started.
         elapsed: Duration,
     },
@@ -320,6 +323,6 @@ pub enum ProgressEventKind {
 
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
-    schema.format = Some("UTF-8 path".to_owned());
+    schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
