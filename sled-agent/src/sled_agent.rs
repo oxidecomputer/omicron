@@ -6,20 +6,19 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
-use crate::hardware::HardwareManager;
-use crate::illumos::zone::IPADM;
-use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
+use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, VpcFirewallRule, Zpool,
+    ServiceEnsureBody, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
+use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -30,18 +29,19 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use sled_hardware::underlay;
+use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zone::Zones};
-#[cfg(test)]
-use crate::illumos::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 use crate::serial::ByteOffset;
+#[cfg(not(test))]
+use illumos_utils::{dladm::Dladm, zone::Zones};
+#[cfg(test)]
+use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -49,28 +49,28 @@ pub enum Error {
     Config(#[from] crate::config::ConfigError),
 
     #[error("Failed to enable routing: {0}")]
-    EnablingRouting(crate::illumos::ExecutionError),
+    EnablingRouting(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(crate::illumos::ExecutionError),
+    Etherstub(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub VNIC: {0}")]
-    EtherstubVnic(crate::illumos::dladm::CreateVnicError),
+    EtherstubVnic(illumos_utils::dladm::CreateVnicError),
 
     #[error("Bootstrap error: {0}")]
     Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
-    DeleteAddress(#[from] crate::illumos::ExecutionError),
+    DeleteAddress(#[from] illumos_utils::ExecutionError),
 
     #[error("Failed to operate on underlay device: {0}")]
-    Underlay(#[from] crate::common::underlay::Error),
+    Underlay(#[from] underlay::Error),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
     #[error("Failed to create Sled Subnet: {err}")]
-    SledSubnet { err: crate::illumos::zone::EnsureGzAddressError },
+    SledSubnet { err: illumos_utils::zone::EnsureGzAddressError },
 
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
@@ -82,7 +82,7 @@ pub enum Error {
     Download(#[from] crate::updates::Error),
 
     #[error("Error managing guest networking: {0}")]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Error monitoring hardware: {0}")]
     Hardware(String),
@@ -202,7 +202,7 @@ impl SledAgent {
         info!(&log, "created sled agent");
 
         let etherstub = Dladm::ensure_etherstub(
-            crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME,
+            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
         .map_err(|e| Error::Etherstub(e))?;
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
@@ -223,7 +223,8 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        crate::opte::initialize_xde_driver(&log)?;
+        let underlay_nics = underlay::find_nics()?;
+        illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
@@ -262,16 +263,15 @@ impl SledAgent {
             etherstub.clone(),
             *sled_address.ip(),
             request.gateway.mac,
-        );
+        )?;
 
         let svc_config = services::Config::new(
             config.sidecar_revision.clone(),
             request.gateway.address,
         );
 
-        let hardware =
-            HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
-                .map_err(|e| Error::Hardware(e))?;
+        let hardware = HardwareManager::new(&parent_log, config.stub_scrimlet)
+            .map_err(|e| Error::Hardware(e))?;
 
         let update_config =
             ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
@@ -357,7 +357,7 @@ impl SledAgent {
 
         // Rely on monitoring for tracking all future updates.
         loop {
-            use crate::hardware::HardwareUpdate;
+            use sled_hardware::HardwareUpdate;
             use tokio::sync::broadcast::error::RecvError;
             match hardware_updates.recv().await {
                 Ok(update) => match update {
@@ -594,85 +594,4 @@ impl SledAgent {
             .await
             .map_err(Error::from)
     }
-}
-
-// Delete all underlay addresses created directly over the etherstub VNICs used
-// for inter-zone communications.
-fn delete_etherstub_addresses(log: &Logger) -> Result<(), Error> {
-    let underlay_prefix =
-        format!("{}/", crate::illumos::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME);
-    let bootstrap_prefix =
-        format!("{}/", crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME);
-    delete_addresses_matching_prefixes(log, &[underlay_prefix])?;
-    delete_addresses_matching_prefixes(log, &[bootstrap_prefix])
-}
-
-fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
-    use crate::illumos::dladm::VnicSource;
-    let prefixes = crate::common::underlay::find_chelsio_links()?
-        .into_iter()
-        .map(|link| format!("{}/", link.name()))
-        .collect::<Vec<_>>();
-    delete_addresses_matching_prefixes(log, &prefixes)
-}
-
-fn delete_addresses_matching_prefixes(
-    log: &Logger,
-    prefixes: &[String],
-) -> Result<(), Error> {
-    use std::io::BufRead;
-    let mut cmd = Command::new(PFEXEC);
-    let cmd = cmd.args(&[IPADM, "show-addr", "-p", "-o", "ADDROBJ"]);
-    let output = execute(cmd)?;
-
-    // `ipadm show-addr` can return multiple addresses with the same name, but
-    // multiple values. Collecting to a set ensures that only a single name is
-    // used.
-    let addrobjs = output
-        .stdout
-        .lines()
-        .flatten()
-        .collect::<std::collections::HashSet<_>>();
-
-    for addrobj in addrobjs {
-        if prefixes.iter().any(|prefix| addrobj.starts_with(prefix)) {
-            warn!(
-                log,
-                "Deleting existing Omicron IP address";
-                "addrobj" => addrobj.as_str(),
-            );
-            let mut cmd = Command::new(PFEXEC);
-            let cmd = cmd.args(&[IPADM, "delete-addr", addrobj.as_str()]);
-            execute(cmd)?;
-        }
-    }
-    Ok(())
-}
-
-// Delete the etherstub and underlay VNIC used for interzone communication
-fn delete_etherstub(log: &Logger) -> Result<(), Error> {
-    use crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME;
-    use crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
-    use crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME;
-    use crate::illumos::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
-    warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => UNDERLAY_ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic(UNDERLAY_ETHERSTUB_VNIC_NAME)?;
-    warn!(log, "Deleting Omicron underlay etherstub"; "stub_name" => UNDERLAY_ETHERSTUB_NAME);
-    Dladm::delete_etherstub(UNDERLAY_ETHERSTUB_NAME)?;
-    warn!(log, "Deleting Omicron bootstrap VNIC"; "vnic_name" => BOOTSTRAP_ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic(BOOTSTRAP_ETHERSTUB_VNIC_NAME)?;
-    warn!(log, "Deleting Omicron bootstrap etherstub"; "stub_name" => BOOTSTRAP_ETHERSTUB_NAME);
-    Dladm::delete_etherstub(BOOTSTRAP_ETHERSTUB_NAME)?;
-    Ok(())
-}
-
-/// Delete all networking resources installed by the sled agent, in the global
-/// zone.
-pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
-    delete_etherstub_addresses(log)?;
-    delete_underlay_addresses(log)?;
-    crate::bootstrap::agent::delete_omicron_vnics(log).await?;
-    delete_etherstub(log)?;
-    crate::opte::delete_all_xde_devices(log)?;
-    Ok(())
 }

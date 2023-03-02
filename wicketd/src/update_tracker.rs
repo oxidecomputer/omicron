@@ -347,10 +347,6 @@ impl UpdateDriver {
         self.update_log.lock().unwrap().current = Some(state);
     }
 
-    fn clear_current_update_state(&self) {
-        self.update_log.lock().unwrap().current = None;
-    }
-
     fn push_update_success(
         &self,
         kind: UpdateEventSuccessKind,
@@ -640,7 +636,16 @@ impl UpdateDriver {
             };
             self.set_current_update_state(update_state);
         } else {
-            self.clear_current_update_state();
+            // Ideally, if there's no progress update from installinator (which
+            // can happen in between steps), we'd clear the update state.
+            // However, a cleared update state currently means no update is in
+            // progress. So keep the old update state for now, accepting that
+            // there's a possible race condition here.
+            //
+            // There's a few options for how to fix this (and it's possible this
+            // isn't an issue in practice). See
+            // https://github.com/oxidecomputer/omicron/pull/2464#discussion_r1123793897
+            // for some discussion.
         }
     }
 

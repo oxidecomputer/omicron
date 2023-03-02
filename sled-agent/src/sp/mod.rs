@@ -5,9 +5,8 @@
 //! Interface to a (simulated or real) SP / RoT.
 
 use crate::config::ConfigError;
-use crate::illumos;
-use crate::illumos::dladm::CreateVnicError;
-use crate::zone::EnsureGzAddressError;
+use illumos_utils::dladm::CreateVnicError;
+use illumos_utils::zone::EnsureGzAddressError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
@@ -55,7 +54,7 @@ pub enum SpError {
     #[error("Simulated SP config specifies distinct IP addresses ({0}, {1})")]
     SimulatedSpMultipleIpAddresses(Ipv6Addr, Ipv6Addr),
     #[error("Could not access etherstub for simulated SP: {0}")]
-    CreateEtherstub(illumos::ExecutionError),
+    CreateEtherstub(illumos_utils::ExecutionError),
     #[error("Could not access etherstub VNIC device for simulated SP: {0}")]
     CreateEtherstubVnic(CreateVnicError),
     #[error("Could not ensure IP address {addr} in global zone for simulated SP: {err}")]

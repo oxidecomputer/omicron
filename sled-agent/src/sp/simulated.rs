@@ -5,8 +5,8 @@
 //! Implementation of a simulated SP / RoT.
 
 use super::SpError;
-use crate::illumos::dladm::{Dladm, UNDERLAY_ETHERSTUB_NAME};
-use crate::zone::Zones;
+use illumos_utils::dladm::{Dladm, UNDERLAY_ETHERSTUB_NAME};
+use illumos_utils::zone::Zones;
 use slog::Logger;
 use sp_sim::config::GimletConfig;
 use sp_sim::RotRequestV1;
