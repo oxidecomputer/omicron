@@ -263,7 +263,7 @@ impl SledAgent {
             etherstub.clone(),
             *sled_address.ip(),
             request.gateway.mac,
-        );
+        )?;
 
         let svc_config = services::Config::new(
             config.sidecar_revision.clone(),
