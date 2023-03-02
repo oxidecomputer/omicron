@@ -137,7 +137,10 @@ impl Runner {
                 Event::Inventory(event) => {
                     self.handle_inventory_event(event)?;
                 }
-                _ => info!(self.log, "{:?}", event),
+                _ => {
+                    let action = self.screen.on(&mut self.state, event);
+                    self.handle_action(action)?;
+                }
             }
         }
         Ok(())

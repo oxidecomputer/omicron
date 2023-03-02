@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
+
 use super::{align_by, help_text, Control};
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
@@ -14,12 +16,14 @@ use tui::style::Style;
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
+use wicketd_client::types::UpdateLog;
 
 /// Overview of update status and ability to install updates
 /// from a single TUF repo uploaded to wicketd via wicket.
 pub struct UpdatePane {
     tree_state: TreeState,
     items: Vec<TreeItem<'static>>,
+    update_logs: BTreeMap<ComponentId, UpdateLog>,
     help: Vec<(&'static str, &'static str)>,
 }
 
@@ -27,6 +31,7 @@ impl UpdatePane {
     pub fn new() -> UpdatePane {
         UpdatePane {
             tree_state: Default::default(),
+            update_logs: BTreeMap::default(),
             items: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| TreeItem::new(*id, vec![]))

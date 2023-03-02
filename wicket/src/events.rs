@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::state::ComponentId;
 use tokio::time::Instant;
-use wicketd_client::types::RackV1Inventory;
+use wicketd_client::types::{RackV1Inventory, UpdateLogAll};
 
 use crossterm::event::Event as TermEvent;
 
@@ -17,6 +17,9 @@ pub enum Event {
 
     /// An Inventory Update Event
     Inventory(InventoryEvent),
+
+    /// Update Log Event
+    UpdateLog(UpdateLogAll),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal

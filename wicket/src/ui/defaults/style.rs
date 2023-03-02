@@ -55,3 +55,15 @@ pub fn highlighted() -> Style {
 pub fn plain_text() -> Style {
     Style::default().bg(TUI_BLACK).fg(OX_OFF_WHITE)
 }
+
+pub fn successful_update() -> Style {
+    selected()
+}
+
+pub fn failed_update() -> Style {
+    Style::default().fg(OX_RED)
+}
+
+pub fn start_update() -> Style {
+    Style::default().fg(OX_YELLOW)
+}
