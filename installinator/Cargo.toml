@@ -15,6 +15,7 @@ ddm-admin-client.workspace = true
 display-error-chain.workspace = true
 futures.workspace = true
 hex.workspace = true
+http.workspace = true
 installinator-artifact-client.workspace = true
 installinator-common.workspace = true
 ipcc-key-value.workspace = true
@@ -24,6 +25,7 @@ omicron-common.workspace = true
 progenitor-client.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+sled-hardware.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
@@ -36,7 +38,9 @@ uuid.workspace = true
 [dev-dependencies]
 omicron-test-utils.workspace = true
 hex-literal.workspace = true
+partial-io.workspace = true
 proptest.workspace = true
+tempfile.workspace = true
 test-strategy.workspace = true
 tokio = { workspace = true, features = [ "test-util" ] }
 tokio-stream.workspace = true

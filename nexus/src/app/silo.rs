@@ -173,7 +173,7 @@ impl super::Nexus {
             .await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
         self.db_datastore
-            .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
+            .silo_users_list(opctx, &authz_silo_user_list, pagparams)
             .await
     }
 
@@ -805,5 +805,13 @@ impl super::Nexus {
                 .fetch()
                 .await?;
         Ok(saml_identity_provider)
+    }
+
+    pub fn silo_group_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        group_id: &'a Uuid,
+    ) -> db::lookup::SiloGroup<'a> {
+        LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
 }

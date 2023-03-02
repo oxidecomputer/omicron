@@ -351,9 +351,9 @@ dependencies = [
 
 [[package]]
 name = "bcs"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b06b4c1f053002b70e7084ac944c77d58d5d92b2110dbc5e852735e00ad3ccc"
+checksum = "4bd3ffe8b19a604421a5d461d4a70346223e535903fbc3067138bddbebddcf77"
 dependencies = [
  "serde",
  "thiserror",
@@ -544,18 +544,18 @@ dependencies = [
 
 [[package]]
 name = "buf-list"
-version = "0.1.3"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deb213ab6aa87733e74428d8a33f0bb93181810b0ae09ae96b8cc1521d265283"
+checksum = "f462e45b27db47403356859af1cb4bfbbd0021cb7b7d10db6ea40958bb4e2c48"
 dependencies = [
  "bytes",
 ]
 
 [[package]]
 name = "built"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b9c056b9ed43aee5e064b683aa1ec783e19c6acec7559e3ae931b7490472fbe"
+checksum = "96f9cdd34d6eb553f9ea20e5bf84abb7b13c729f113fc1d8e49dc00ad9fa8738"
 dependencies = [
  "cargo-lock",
  "git2",
@@ -2333,9 +2333,9 @@ checksum = "22030e2c5a68ec659fde1e949a745124b48e6fa8b045b7ed5bd1fe4ccc5c4e5d"
 
 [[package]]
 name = "git2"
-version = "0.15.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2994bee4a3a6a51eb90c218523be382fd7ea09b16380b9312e9dbe955ff7c7d1"
+checksum = "ccf7f68c2995f392c49fffb4f95ae2c873297830eb25c6bc4c114ce8f4562acc"
 dependencies = [
  "bitflags",
  "libc",
@@ -2552,9 +2552,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75f43d41e26995c17e71ee126451dd3941010b0514a81a9d11f3b341debc2399"
+checksum = "bd6effc99afb63425aff9b05836f029929e345a6148a14b7ecd5ab67af944482"
 dependencies = [
  "bytes",
  "fnv",
@@ -2771,6 +2771,30 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37#41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37"
 
 [[package]]
+name = "illumos-utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cfg-if 1.0.0",
+ "ipnetwork",
+ "libc",
+ "macaddr",
+ "mockall",
+ "omicron-common",
+ "opte-ioctl",
+ "oxide-vpc",
+ "schemars",
+ "serde",
+ "slog",
+ "smf",
+ "thiserror",
+ "tokio",
+ "toml 0.7.2",
+ "uuid",
+ "zone",
+]
+
+[[package]]
 name = "impl-trait-for-tuples"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2836,6 +2860,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
+ "http",
  "installinator-artifact-client",
  "installinator-common",
  "ipcc-key-value",
@@ -2843,14 +2868,17 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "once_cell",
+ "partial-io",
  "progenitor-client",
  "proptest",
  "reqwest",
  "serde",
+ "sled-hardware",
  "slog",
  "slog-async",
  "slog-envlogger",
  "slog-term",
+ "tempfile",
  "test-strategy",
  "thiserror",
  "tokio",
@@ -2868,6 +2896,7 @@ dependencies = [
  "reqwest",
  "schemars",
  "serde",
+ "serde_json",
  "slog",
  "uuid",
 ]
@@ -2905,6 +2934,7 @@ dependencies = [
  "omicron-common",
  "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3160,9 +3190,12 @@ dependencies = [
 
 [[package]]
 name = "libsw"
-version = "2.2.0"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d81b373cd988b6e2b6e32ded4ea80c15085028efcdd5f83e37f9cbfb9c517ca"
+checksum = "9021b9cc0f078fba93f59d6e6f1fce89682171107a21fc421eb130efd2048189"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "libxml"
@@ -3542,6 +3575,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "slog",
+ "tempfile",
  "tokio",
  "uuid",
 ]
@@ -3954,9 +3988,9 @@ dependencies = [
  "expectorate",
  "futures",
  "hex",
+ "illumos-utils",
  "indicatif",
  "omicron-common",
- "omicron-sled-agent",
  "omicron-zone-package",
  "petgraph",
  "rayon",
@@ -3964,6 +3998,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_derive",
+ "sled-hardware",
  "slog",
  "slog-async",
  "slog-term",
@@ -4002,11 +4037,10 @@ dependencies = [
  "expectorate",
  "futures",
  "http",
- "illumos-devinfo",
+ "illumos-utils",
  "internal-dns-names",
  "ipnetwork",
  "libc",
- "libefi-illumos",
  "macaddr",
  "mockall",
  "nexus-client",
@@ -4031,6 +4065,7 @@ dependencies = [
  "serde_with",
  "serial_test",
  "sled-agent-client",
+ "sled-hardware",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -4494,6 +4529,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "partial-io"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af95cf22649f58b48309da6d05caeb5fab4bb335eba4a3f9ac7c3a8e176d0e16"
+dependencies = [
+ "futures",
+ "pin-project",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
 name = "password-hash"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4935,7 +4982,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#680150559a55f6ff7fc8d783c9a72461a233c3b5"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#82c979df65476fe4dfc2590970ccdf64113e9e0c"
 dependencies = [
  "anyhow",
  "built",
@@ -4953,7 +5000,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#680150559a55f6ff7fc8d783c9a72461a233c3b5"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#82c979df65476fe4dfc2590970ccdf64113e9e0c"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4967,7 +5014,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#680150559a55f6ff7fc8d783c9a72461a233c3b5"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#82c979df65476fe4dfc2590970ccdf64113e9e0c"
 dependencies = [
  "getopts",
  "heck 0.4.1",
@@ -4989,7 +5036,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#680150559a55f6ff7fc8d783c9a72461a233c3b5"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#82c979df65476fe4dfc2590970ccdf64113e9e0c"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -6227,6 +6274,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-hardware"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cfg-if 1.0.0",
+ "futures",
+ "illumos-devinfo",
+ "illumos-utils",
+ "libefi-illumos",
+ "nexus-client",
+ "omicron-test-utils",
+ "serial_test",
+ "slog",
+ "thiserror",
+ "tofino",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "slog"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6660,9 +6727,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "syn"
-version = "1.0.107"
+version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f4064b5b16e03ae50984a5a8ed5d4f8803e6bc1fd170a3cda91a1be4b18e3f5"
+checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7349,7 +7416,7 @@ checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
 [[package]]
 name = "typify"
 version = "0.0.11-dev"
-source = "git+https://github.com/oxidecomputer/typify#f1945ac6f451a25a671429a9812158e9b79464a0"
+source = "git+https://github.com/oxidecomputer/typify#d579a526b3cc2e0c36d17fae8df549a03187f177"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -7358,7 +7425,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.11-dev"
-source = "git+https://github.com/oxidecomputer/typify#f1945ac6f451a25a671429a9812158e9b79464a0"
+source = "git+https://github.com/oxidecomputer/typify#d579a526b3cc2e0c36d17fae8df549a03187f177"
 dependencies = [
  "heck 0.4.1",
  "log",
@@ -7376,7 +7443,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.11-dev"
-source = "git+https://github.com/oxidecomputer/typify#f1945ac6f451a25a671429a9812158e9b79464a0"
+source = "git+https://github.com/oxidecomputer/typify#d579a526b3cc2e0c36d17fae8df549a03187f177"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7803,6 +7870,7 @@ dependencies = [
  "crossterm 0.26.1",
  "futures",
  "hex",
+ "lazy_static",
  "libsw",
  "proptest",
  "reqwest",

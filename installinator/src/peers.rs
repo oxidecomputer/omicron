@@ -3,8 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    fmt, future::Future, net::SocketAddrV6, pin::Pin, str::FromStr,
-    time::Duration,
+    fmt, future::Future, net::SocketAddrV6, str::FromStr, time::Duration,
 };
 
 use anyhow::{bail, Result};
@@ -26,7 +25,7 @@ use uuid::Uuid;
 use crate::{
     artifact::ArtifactClient,
     ddm_admin_client::DdmAdminClient,
-    errors::{ArtifactFetchError, DiscoverPeersError},
+    errors::{ArtifactFetchError, DiscoverPeersError, HttpError},
     reporter::ReportEvent,
 };
 
@@ -285,15 +284,29 @@ impl Peers {
         start: Instant,
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
-        let (sender, mut receiver) = mpsc::channel(8);
 
-        let fetch = self.imp.fetch_from_peer_impl(
-            peer,
-            artifact_hash_id.clone(),
-            sender,
-        );
-
-        tokio::spawn(fetch);
+        let (total_bytes, mut receiver) = match self
+            .imp
+            .fetch_from_peer_impl(peer, artifact_hash_id.clone())
+            .await
+        {
+            Ok(x) => x,
+            Err(error) => {
+                _ = event_sender
+                    .send(ReportEvent::Completion(
+                        CompletionEventKind::DownloadFailed {
+                            attempt,
+                            kind: artifact_hash_id.kind.clone(),
+                            peer,
+                            downloaded_bytes: 0,
+                            elapsed: start.elapsed(),
+                            message: DisplayErrorChain::new(&error).to_string(),
+                        },
+                    ))
+                    .await;
+                return Err(ArtifactFetchError::HttpError { peer, error });
+            }
+        };
 
         let mut artifact_bytes = BufList::new();
         let mut downloaded_bytes = 0u64;
@@ -315,6 +328,7 @@ impl Peers {
                                 kind: artifact_hash_id.kind.clone(),
                                 peer,
                                 downloaded_bytes,
+                                total_bytes,
                                 elapsed: start.elapsed(),
                             },
                         ))
@@ -339,22 +353,14 @@ impl Peers {
                             },
                         ))
                         .await;
-                    return Err(ArtifactFetchError::HttpError { peer, error });
+                    return Err(ArtifactFetchError::HttpError {
+                        peer,
+                        error: error.into(),
+                    });
                 }
                 Ok(None) => {
                     // The entire artifact has been downloaded.
-                    _ = event_sender
-                        .send(ReportEvent::Completion(
-                            CompletionEventKind::DownloadCompleted {
-                                attempt,
-                                kind: artifact_hash_id.kind.clone(),
-                                peer,
-                                artifact_size: downloaded_bytes,
-                                elapsed: start.elapsed(),
-                            },
-                        ))
-                        .await;
-                    return Ok(artifact_bytes);
+                    break;
                 }
                 Err(_) => {
                     // The operation timed out.
@@ -381,6 +387,41 @@ impl Peers {
                 }
             }
         }
+
+        // Check that the artifact size matches the returned size.
+        if total_bytes != artifact_bytes.num_bytes() as u64 {
+            let error = ArtifactFetchError::SizeMismatch {
+                artifact_size: total_bytes,
+                downloaded_bytes,
+            };
+            _ = event_sender
+                .send(ReportEvent::Completion(
+                    CompletionEventKind::DownloadFailed {
+                        attempt,
+                        kind: artifact_hash_id.kind.clone(),
+                        peer,
+                        downloaded_bytes,
+                        elapsed: start.elapsed(),
+                        message: error.to_string(),
+                    },
+                ))
+                .await;
+            return Err(error);
+        }
+
+        _ = event_sender
+            .send(ReportEvent::Completion(
+                CompletionEventKind::DownloadCompleted {
+                    attempt,
+                    kind: artifact_hash_id.kind.clone(),
+                    peer,
+                    artifact_size: downloaded_bytes,
+                    elapsed: start.elapsed(),
+                },
+            ))
+            .await;
+
+        Ok(artifact_bytes)
     }
 
     pub(crate) fn broadcast_report(
@@ -420,15 +461,12 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
     fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_>;
     fn peer_count(&self) -> usize;
 
-    // This method doesn't use async-trait because it must return a future
-    // that's 'static, which async-trait doesn't support. See
-    // https://github.com/dtolnay/async-trait/issues/37.
-    fn fetch_from_peer_impl(
+    /// Returns (size, receiver) on success, and an error on failure.
+    async fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
         artifact_hash_id: ArtifactHashId,
-        sender: FetchSender,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+    ) -> Result<(u64, FetchReceiver), HttpError>;
 
     async fn report_progress_impl(
         &self,
@@ -439,7 +477,7 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
 }
 
 /// The send side of the channel over which data is sent.
-pub(crate) type FetchSender = mpsc::Sender<Result<Bytes, ClientError>>;
+pub(crate) type FetchReceiver = mpsc::Receiver<Result<Bytes, ClientError>>;
 
 /// A [`PeersImpl`] that uses HTTP to fetch artifacts from peers. This is the real implementation.
 #[derive(Clone, Debug)]
@@ -465,17 +503,14 @@ impl PeersImpl for HttpPeers {
         self.peers.len()
     }
 
-    fn fetch_from_peer_impl(
+    async fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
         artifact_hash_id: ArtifactHashId,
-        sender: FetchSender,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    ) -> Result<(u64, FetchReceiver), HttpError> {
         // TODO: be able to fetch from sled-agent clients as well
         let artifact_client = ArtifactClient::new(peer, &self.log);
-        Box::pin(async move {
-            artifact_client.fetch(artifact_hash_id, sender).await
-        })
+        artifact_client.fetch(artifact_hash_id).await
     }
 
     async fn report_progress_impl(

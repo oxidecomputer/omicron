@@ -19,6 +19,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
+use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
@@ -40,6 +41,7 @@ pub struct ControlPlaneTestContext<N> {
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
+    pub sled_agent_storage: tempfile::TempDir,
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
@@ -158,6 +160,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     );
 
     // Set up a single sled agent.
+    let tempdir = tempfile::tempdir().unwrap();
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
     let sled_agent = start_sled_agent(
         logctx.log.new(o!(
@@ -166,6 +169,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         )),
         internal_server_addr,
         sa_id,
+        tempdir.path(),
     )
     .await
     .unwrap();
@@ -207,6 +211,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         internal_client: testctx_internal,
         database,
         clickhouse,
+        sled_agent_storage: tempdir,
         sled_agent,
         oximeter,
         producer,
@@ -218,6 +223,7 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
+    update_directory: &Path,
 ) -> Result<sim::Server, String> {
     let config = sim::Config {
         id,
@@ -233,6 +239,9 @@ pub async fn start_sled_agent(
         storage: sim::ConfigStorage {
             zpools: vec![],
             ip: IpAddr::from(Ipv6Addr::LOCALHOST),
+        },
+        updates: sim::ConfigUpdates {
+            zone_artifact_path: update_directory.to_path_buf(),
         },
     };
 
@@ -362,4 +371,12 @@ pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
     assert_eq!(ident1.description, ident2.description);
     assert_eq!(ident1.time_created, ident2.time_created);
     assert_eq!(ident1.time_modified, ident2.time_modified);
+}
+
+/// Order-agnostic vec equality
+pub fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
+    assert_eq!(v1.len(), v2.len(), "{:?} and {:?} don't match", v1, v2);
+    for item in v1.iter() {
+        assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
+    }
 }

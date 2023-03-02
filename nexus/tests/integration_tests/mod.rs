@@ -25,6 +25,7 @@ mod role_assignments;
 mod roles_builtin;
 mod router_routes;
 mod saml;
+mod silo_users;
 mod silos;
 mod sleds;
 mod snapshots;

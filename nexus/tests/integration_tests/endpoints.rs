@@ -822,11 +822,30 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/users",
+            url: "/v1/users",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/groups",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            // non-existent UUID that will 404
+            url: "/v1/groups/8d90b9a5-1cea-4a2b-9af4-71467dd33a04",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
             ],
         },
 
@@ -876,15 +895,6 @@ lazy_static! {
                 AllowedMethod::Post(serde_json::to_value(
                     params::UserPassword::InvalidPassword
                 ).unwrap()),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/groups",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 
