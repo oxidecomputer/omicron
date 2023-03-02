@@ -245,6 +245,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_delete_v1)?;
 
         api.register(instance_external_ip_list)?;
+        api.register(instance_external_ip_list_v1)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -4606,31 +4607,61 @@ async fn instance_network_interface_update(
 // External IP addresses for instances
 
 /// List external IP addresses
+/// Use `/v1/instances/{instance}/external-ips` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_external_ip_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.instance_name.into(),
+        );
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let ips =
+            nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
+        Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List external IP addresses
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/external-ips",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
+) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
+    let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
+    let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let ips = nexus
-            .instance_list_external_ips(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let ips =
+            nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
         Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

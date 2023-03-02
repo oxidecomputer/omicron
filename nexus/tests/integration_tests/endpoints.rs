@@ -255,11 +255,10 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
         format!("/v1/instances/{}/disks/detach?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
 
-    // To be migrated...
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("/v1/network-interfaces?organization={}&project={}&instance={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
-        format!("/organizations/{}/projects/{}/instances/{}/external-ips", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
+        format!("/v1/instances/{}/external-ips?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {

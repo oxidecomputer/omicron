@@ -2384,6 +2384,7 @@
           "instances"
         ],
         "summary": "List external IP addresses",
+        "description": "Use `/v1/instances/{instance}/external-ips` instead",
         "operationId": "instance_external_ip_list",
         "parameters": [
           {
@@ -2428,7 +2429,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate": {
@@ -8508,6 +8510,57 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/external-ips": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List external IP addresses",
+        "operationId": "instance_external_ip_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalIpResultsPage"
                 }
               }
             }
