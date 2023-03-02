@@ -104,6 +104,10 @@ impl Runner {
     fn main_loop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
 
+        // Size the initial screen
+        let rect = self.terminal.get_frame().size();
+        self.screen.resize(&mut self.state, rect.width, rect.height);
+
         // Draw the initial screen
         self.screen.draw(&self.state, &mut self.terminal)?;
 
@@ -126,7 +130,8 @@ impl Runner {
                     );
                     self.handle_action(action)?;
                 }
-                Event::Term(TermEvent::Resize(_, _)) => {
+                Event::Term(TermEvent::Resize(width, height)) => {
+                    self.screen.resize(&mut self.state, width, height);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Inventory(event) => {

@@ -4,6 +4,7 @@
 
 //! Finding the underlay network physical links and address objects.
 
+use crate::is_gimlet;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::Dladm;
@@ -11,7 +12,6 @@ use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::zone::Zones;
-use sled_hardware::is_gimlet;
 
 // Names of VNICs used as underlay devices for the xde driver.
 //
@@ -55,7 +55,7 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
 /// For a real Gimlet, this should return the devices like `cxgbeN`. For a
 /// developer machine, or generally a non-Gimlet, this will return the
 /// VNICs we use to emulate those Chelsio links.
-pub(crate) fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
+pub fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
     if is_gimlet().map_err(Error::SystemDetection)? {
         Dladm::list_physical().map_err(Error::FindLinks).map(|links| {
             links

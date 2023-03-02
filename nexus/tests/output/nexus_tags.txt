@@ -140,6 +140,7 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
 group_list_v1                            /v1/groups
+group_view                               /v1/groups/{group}
 policy_update                            /policy
 policy_update_v1                         /v1/policy
 policy_view                              /policy
