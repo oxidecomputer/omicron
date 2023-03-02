@@ -22,7 +22,6 @@ use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::dladm::{self, Dladm, GetMacError, PhysicalLink};
-use illumos_utils::link::LinkKind;
 use illumos_utils::zfs::{
     Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
@@ -58,6 +57,9 @@ pub enum BootstrapError {
         #[source]
         err: std::io::Error,
     },
+
+    #[error("Error cleaning up old state: {0}")]
+    Cleanup(anyhow::Error),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -176,31 +178,6 @@ fn bootstrap_address(
     Ok(SocketAddrV6::new(ip, port, 0, 0))
 }
 
-// Delete all VNICs that can be managed by the control plane.
-//
-// These are currently those that match the prefix `ox` or `vopte`.
-pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), BootstrapError> {
-    let vnics = Dladm::get_vnics()?;
-    stream::iter(vnics)
-        .zip(stream::iter(std::iter::repeat(log.clone())))
-        .map(Ok::<_, illumos_utils::dladm::DeleteVnicError>)
-        .try_for_each_concurrent(None, |(vnic, log)| async {
-            tokio::task::spawn_blocking(move || {
-                warn!(
-                  log,
-                  "Deleting existing VNIC";
-                    "vnic_name" => &vnic,
-                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
-                );
-                Dladm::delete_vnic(&vnic)
-            })
-            .await
-            .unwrap()
-        })
-        .await?;
-    Ok(())
-}
-
 // Deletes all state which may be left-over from a previous execution of the
 // Sled Agent.
 //
@@ -240,7 +217,9 @@ async fn cleanup_all_old_global_state(
     // Note that we don't currently delete the VNICs in any particular
     // order. That should be OK, since we're definitely deleting the guest
     // VNICs before the xde devices, which is the main constraint.
-    delete_omicron_vnics(&log).await?;
+    sled_hardware::cleanup::delete_omicron_vnics(&log)
+        .await
+        .map_err(|err| BootstrapError::Cleanup(err))?;
 
     // Also delete any extant xde devices. These should also eventually be
     // recovered / tracked, to avoid interruption of any guests that are

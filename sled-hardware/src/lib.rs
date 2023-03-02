@@ -20,6 +20,9 @@ cfg_if::cfg_if! {
     }
 }
 
+pub mod cleanup;
+pub mod underlay;
+
 /// Provides information from the underlying hardware about updates
 /// which may require action on behalf of the Sled Agent.
 ///

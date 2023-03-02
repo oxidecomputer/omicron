@@ -16,6 +16,7 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use sled_hardware::underlay;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
@@ -67,11 +68,8 @@ impl InstanceManager {
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> InstanceManager {
-        let data_link = crate::common::underlay::find_chelsio_links()
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
+        let data_link =
+            underlay::find_chelsio_links().unwrap().into_iter().next().unwrap();
         InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
