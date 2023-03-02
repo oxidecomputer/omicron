@@ -6,6 +6,7 @@ mod artifact;
 mod ddm_admin_client;
 mod dispatch;
 mod errors;
+mod hardware;
 #[cfg(test)]
 mod mock_peers;
 mod peers;
