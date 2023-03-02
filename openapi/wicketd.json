@@ -1151,6 +1151,32 @@
           {
             "type": "object",
             "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "component": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "component"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "state": {
                 "type": "string",
                 "enum": [

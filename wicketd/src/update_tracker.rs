@@ -591,8 +591,9 @@ impl UpdateDriver {
         // Currently, progress reports have zero or one progress events. Don't
         // assert that here, in case this version of wicketd is updating a
         // future installinator which reports multiple progress events.
-        if let Some(event) = report.progress_events.drain(..).next() {
-            let update_state = match event.kind {
+        let kind = if let Some(event) = report.progress_events.drain(..).next()
+        {
+            match event.kind {
                 ProgressEventKind::DownloadProgress {
                     attempt,
                     kind,
@@ -633,20 +634,14 @@ impl UpdateDriver {
                     total_bytes,
                     elapsed,
                 },
-            };
-            self.set_current_update_state(update_state);
+            }
         } else {
-            // Ideally, if there's no progress update from installinator (which
-            // can happen in between steps), we'd clear the update state.
-            // However, a cleared update state currently means no update is in
-            // progress. So keep the old update state for now, accepting that
-            // there's a possible race condition here.
-            //
-            // There's a few options for how to fix this (and it's possible this
-            // isn't an issue in practice). See
-            // https://github.com/oxidecomputer/omicron/pull/2464#discussion_r1123793897
-            // for some discussion.
-        }
+            UpdateStateKind::WaitingForProgress {
+                component: "installinator".to_owned(),
+            }
+        };
+
+        self.set_current_update_state(kind);
     }
 
     // Installs the installinator phase 1 and configures the host to fetch phase

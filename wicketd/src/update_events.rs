@@ -27,6 +27,13 @@ pub struct UpdateState {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "state", content = "data")]
 pub enum UpdateStateKind {
+    // This is a hack to handle cases where a completion has just happened and
+    // there's no progress from the next step yet: see
+    // https://github.com/oxidecomputer/omicron/pull/2464#discussion_r1123308999
+    // for some discussion.
+    WaitingForProgress {
+        component: String,
+    },
     ResettingSp,
     SendingArtifactToMgs {
         artifact: ArtifactId,
