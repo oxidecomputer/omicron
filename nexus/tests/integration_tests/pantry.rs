@@ -240,6 +240,31 @@ async fn bulk_write_bytes(client: &ClientTestContext) {
     }
 }
 
+async fn bulk_write_bytes_expect_failure(client: &ClientTestContext) {
+    let bulk_write_url = format!(
+        "/v1/disks/{}/bulk-write?project={}&organization={}",
+        DISK_NAME, PROJECT_NAME, ORG_NAME,
+    );
+
+    const CHUNK_SIZE: u64 = 4096 * 1024;
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &bulk_write_url)
+            .body(Some(&params::ImportBlocksBulkWrite {
+                offset: CHUNK_SIZE,
+                base64_encoded_data: base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    vec![0; CHUNK_SIZE as usize],
+                ),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 async fn bulk_write_bytes_manual(
     client: &ClientTestContext,
     offset: u64,
@@ -268,7 +293,10 @@ async fn bulk_write_bytes_manual(
     .unwrap();
 }
 
-async fn bulk_write_stop(client: &ClientTestContext) {
+async fn bulk_write_stop(
+    client: &ClientTestContext,
+    expected_status: StatusCode,
+) {
     let bulk_write_stop_url = format!(
         "/v1/disks/{}/bulk-write-stop?project={}&organization={}",
         DISK_NAME, PROJECT_NAME, ORG_NAME,
@@ -276,7 +304,7 @@ async fn bulk_write_stop(client: &ClientTestContext) {
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &bulk_write_stop_url)
-            .expect_status(Some(StatusCode::NO_CONTENT)),
+            .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -500,7 +528,7 @@ async fn test_import_blocks_with_bulk_write(
     bulk_write_bytes(client).await;
 
     // bulk write stop
-    bulk_write_stop(client).await;
+    bulk_write_stop(client, StatusCode::NO_CONTENT).await;
 
     // Validate disk is in state ImportReady
     validate_disk_state(client, DiskState::ImportReady).await;
@@ -541,7 +569,7 @@ async fn test_import_blocks_with_bulk_write_with_snapshot(
     bulk_write_bytes(client).await;
 
     // bulk write stop
-    bulk_write_stop(client).await;
+    bulk_write_stop(client, StatusCode::NO_CONTENT).await;
 
     // Validate disk is in state ImportReady
     validate_disk_state(client, DiskState::ImportReady).await;
@@ -754,7 +782,7 @@ async fn test_can_stop_start_import_from_bulk_write(
         bulk_write_start(client, StatusCode::NO_CONTENT).await;
         validate_disk_state(client, DiskState::ImportingFromBulkWrites).await;
 
-        bulk_write_stop(client).await;
+        bulk_write_stop(client, StatusCode::NO_CONTENT).await;
         validate_disk_state(client, DiskState::ImportReady).await;
     }
 
@@ -778,7 +806,7 @@ async fn test_cannot_bulk_write_start_attached_disk(
     // bulk write bytes in and finalize
     bulk_write_start(client, StatusCode::NO_CONTENT).await;
     bulk_write_bytes(client).await;
-    bulk_write_stop(client).await;
+    bulk_write_stop(client, StatusCode::NO_CONTENT).await;
     finalize_import(client, StatusCode::NO_CONTENT).await;
 
     // Validate disk is in state detached
@@ -789,6 +817,66 @@ async fn test_cannot_bulk_write_start_attached_disk(
 
     // Validate that a user cannot start a bulk write
     bulk_write_start(client, StatusCode::BAD_REQUEST).await;
+}
+
+// Test that users cannot bulk write when a disk is attached to an
+// instance
+#[nexus_test]
+async fn test_cannot_bulk_write_attached_disk(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    create_disk_with_state_importing_blocks(client).await;
+
+    // bulk write bytes in and finalize
+    bulk_write_start(client, StatusCode::NO_CONTENT).await;
+    bulk_write_bytes(client).await;
+    bulk_write_stop(client, StatusCode::NO_CONTENT).await;
+    finalize_import(client, StatusCode::NO_CONTENT).await;
+
+    // Validate disk is in state detached
+    validate_disk_state(client, DiskState::Detached).await;
+
+    // Create an instance to attach the disk.
+    create_instance_and_attach_disk(client, nexus, StatusCode::ACCEPTED).await;
+
+    // Validate that a user cannot bulk write
+    bulk_write_bytes_expect_failure(client).await;
+}
+
+// Test that users cannot stop a bulk write when a disk is attached to an
+// instance
+#[nexus_test]
+async fn test_cannot_bulk_write_stop_attached_disk(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    create_disk_with_state_importing_blocks(client).await;
+
+    // bulk write bytes in and finalize
+    bulk_write_start(client, StatusCode::NO_CONTENT).await;
+    bulk_write_bytes(client).await;
+    bulk_write_stop(client, StatusCode::NO_CONTENT).await;
+    finalize_import(client, StatusCode::NO_CONTENT).await;
+
+    // Validate disk is in state detached
+    validate_disk_state(client, DiskState::Detached).await;
+
+    // Create an instance to attach the disk.
+    create_instance_and_attach_disk(client, nexus, StatusCode::ACCEPTED).await;
+
+    // Validate that a user cannot stop a bulk write
+    bulk_write_stop(client, StatusCode::BAD_REQUEST).await;
 }
 
 // Test that users cannot finalize a disk it is attached to an instance
@@ -807,7 +895,7 @@ async fn test_cannot_finalize_attached_disk(
     // bulk write bytes in and finalize
     bulk_write_start(client, StatusCode::NO_CONTENT).await;
     bulk_write_bytes(client).await;
-    bulk_write_stop(client).await;
+    bulk_write_stop(client, StatusCode::NO_CONTENT).await;
     finalize_import(client, StatusCode::NO_CONTENT).await;
 
     // Validate disk is in state detached
