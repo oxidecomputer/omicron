@@ -79,18 +79,24 @@ impl Resolver {
     // nameservers is _itself_ provided by a DNS name.  We would periodically
     // re-resolve this.  That's how we'd learn about dynamic changes to the set
     // of DNS servers.
-    pub fn new_from_subnet(
-        log: slog::Logger,
+    pub fn servers_from_subnet(
         subnet: Ipv6Subnet<AZ_PREFIX>,
-    ) -> Result<Self, ResolveError> {
-        let dns_ips = ReservedRackSubnet::new(subnet)
+    ) -> Vec<SocketAddr> {
+        ReservedRackSubnet::new(subnet)
             .get_dns_subnets()
             .into_iter()
             .map(|dns_subnet| {
                 let ip_addr = IpAddr::V6(dns_subnet.dns_address().ip());
                 SocketAddr::new(ip_addr, DNS_PORT)
             })
-            .collect();
+            .collect()
+    }
+
+    pub fn new_from_subnet(
+        log: slog::Logger,
+        subnet: Ipv6Subnet<AZ_PREFIX>,
+    ) -> Result<Self, ResolveError> {
+        let dns_ips = Self::servers_from_subnet(subnet);
         Resolver::new_from_addrs(log, dns_ips)
     }
 

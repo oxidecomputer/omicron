@@ -1922,6 +1922,7 @@ name = "dpd-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "futures",
  "omicron-zone-package",
  "progenitor",
@@ -1933,6 +1934,7 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.7.3",
+ "uuid",
 ]
 
 [[package]]
