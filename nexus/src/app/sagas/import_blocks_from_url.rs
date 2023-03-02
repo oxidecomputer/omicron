@@ -285,17 +285,25 @@ async fn sibfu_wait_for_import_from_url(
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
-    while !client.is_job_finished(&job_id).await.unwrap().job_is_finished {
-        info!(
-                log,
-                "waiting for import from url job {} for disk {} to complete on pantry {}",
-                job_id,
-                params.disk_id,
-                endpoint,
-            );
+    info!(
+        log,
+        "waiting for import from url job {} for disk {} to complete on pantry {}",
+        job_id,
+        params.disk_id,
+        endpoint,
+    );
 
+    while !client.is_job_finished(&job_id).await.unwrap().job_is_finished {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
+
+    info!(
+        log,
+        "import from url job {} for disk {} on pantry {} completed",
+        job_id,
+        params.disk_id,
+        endpoint,
+    );
 
     client
         .job_result_ok(&job_id)
