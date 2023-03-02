@@ -111,8 +111,12 @@ impl DebugHardwareScan {
     async fn exec(self, log: slog::Logger) -> Result<()> {
         let hardware = Hardware::scan(&log)?;
 
+        // We want the `,raw`-suffixed path to the boot image partition, as that
+        // allows us file-like access via the character device.
+        let raw_devfs_path = true;
+
         for disk in hardware.m2_disks() {
-            match disk.boot_image_devfs_path() {
+            match disk.boot_image_devfs_path(raw_devfs_path) {
                 Ok(boot_image_path) => {
                     info!(
                         log, "found M.2 disk";
