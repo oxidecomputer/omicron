@@ -4,17 +4,19 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::VnicAllocator;
 use crate::nexus::LazyNexusClient;
-use crate::opte::PortManager;
+use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData, VpcFirewallRule,
+    InstanceSerialConsoleData,
 };
 use crate::serial::ByteOffset;
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
+use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use sled_hardware::underlay;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
@@ -35,7 +37,13 @@ pub enum Error {
     NoSuchInstance(Uuid),
 
     #[error("OPTE port management error: {0}")]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
+
+    #[error("Cannot find data link: {0}")]
+    Underlay(#[from] sled_hardware::underlay::Error),
+
+    #[error("No datalinks found")]
+    NoDatalinks,
 }
 
 struct InstanceManagerInternal {
@@ -65,8 +73,12 @@ impl InstanceManager {
         etherstub: Etherstub,
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
-    ) -> InstanceManager {
-        InstanceManager {
+    ) -> Result<InstanceManager, Error> {
+        let data_link = underlay::find_chelsio_links()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::NoDatalinks)?;
+        Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
                 lazy_nexus_client,
@@ -74,11 +86,12 @@ impl InstanceManager {
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 port_manager: PortManager::new(
                     log.new(o!("component" => "PortManager")),
+                    data_link,
                     underlay_ip,
                     gateway_mac,
                 ),
             }),
-        }
+        })
     }
 
     /// Idempotently ensures that the given Instance (described by
@@ -259,13 +272,13 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::Etherstub;
-    use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
     use chrono::Utc;
+    use illumos_utils::dladm::Etherstub;
+    use illumos_utils::{dladm::MockDladm, zone::MockZones};
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
@@ -335,7 +348,8 @@ mod test {
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
             MacAddr6::from([0u8; 6]),
-        );
+        )
+        .unwrap();
 
         // Verify that no instances exist.
         assert!(im.inner.instances.lock().unwrap().is_empty());
@@ -423,7 +437,8 @@ mod test {
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
             MacAddr6::from([0u8; 6]),
-        );
+        )
+        .unwrap();
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
