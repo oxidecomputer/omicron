@@ -120,6 +120,20 @@ async fn test_silo_group_users_bad_group_id(
     expect_failure(&client, &"/v1/users?group=", StatusCode::BAD_REQUEST).await;
 }
 
+#[nexus_test]
+async fn test_silo_group_detail_bad_group_id(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // 404 on UUID that doesn't exist
+    let nonexistent_group = format!("/v1/groups/{}", Uuid::new_v4());
+    expect_failure(&client, &nonexistent_group, StatusCode::NOT_FOUND).await;
+
+    // 400 on non-UUID identifier
+    expect_failure(&client, &"/v1/groups/abc", StatusCode::BAD_REQUEST).await;
+}
+
 async fn expect_failure(
     client: &ClientTestContext,
     url: &str,
