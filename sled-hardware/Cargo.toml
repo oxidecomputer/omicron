@@ -1,0 +1,26 @@
+[package]
+name = "sled-hardware"
+description = "Monitoring and managing sled-local hardware"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+cfg-if.workspace = true
+illumos-utils.workspace = true
+nexus-client.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tofino.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", branch = "main" }
+libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", branch = "master" }
+
+[dev-dependencies]
+illumos-utils = { workspace = true, features = ["testing"] }
+omicron-test-utils.workspace = true
+serial_test.workspace = true

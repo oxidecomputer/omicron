@@ -4,7 +4,7 @@
 
 //! VLAN ID wrapper.
 
-use omicron_common::api::external::Error;
+use crate::api::external::Error;
 use serde::Deserialize;
 use std::fmt;
 use std::str::FromStr;

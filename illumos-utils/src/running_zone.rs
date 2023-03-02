@@ -4,21 +4,24 @@
 
 //! Utilities to manage running zones.
 
-use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::{Link, VnicAllocator};
-use crate::illumos::svc::wait_for_service;
-use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
+use crate::addrobj::AddrObject;
+use crate::dladm::Etherstub;
+use crate::link::{Link, VnicAllocator};
 use crate::opte::Port;
+use crate::svc::wait_for_service;
+use crate::zone::{AddressRequest, ZONE_PREFIX};
 use ipnetwork::IpNetwork;
+use slog::info;
+use slog::o;
+use slog::warn;
 use slog::Logger;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
-#[cfg(test)]
-use crate::illumos::zone::MockZones as Zones;
-#[cfg(not(test))]
-use crate::illumos::zone::Zones;
+#[cfg(any(test, feature = "testing"))]
+use crate::zone::MockZones as Zones;
+#[cfg(not(any(test, feature = "testing")))]
+use crate::zone::Zones;
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
@@ -26,14 +29,14 @@ use crate::illumos::zone::Zones;
 pub struct RunCommandError {
     zone: String,
     #[source]
-    err: crate::illumos::ExecutionError,
+    err: crate::ExecutionError,
 }
 
 /// Errors returned from [`RunningZone::boot`].
 #[derive(thiserror::Error, Debug)]
 pub enum BootError {
     #[error("Error booting zone: {0}")]
-    Booting(#[from] crate::illumos::zone::AdmError),
+    Booting(#[from] crate::zone::AdmError),
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
     Timeout { service: String, zone: String },
@@ -46,11 +49,11 @@ pub enum EnsureAddressError {
     AddrObject {
         request: AddressRequest,
         zone: String,
-        err: crate::illumos::addrobj::ParseError,
+        err: crate::addrobj::ParseError,
     },
 
     #[error(transparent)]
-    EnsureAddressError(#[from] crate::illumos::zone::EnsureAddressError),
+    EnsureAddressError(#[from] crate::zone::EnsureAddressError),
 
     #[error(
         "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
@@ -65,7 +68,7 @@ pub enum GetZoneError {
     GetZones {
         prefix: String,
         #[source]
-        err: crate::illumos::zone::AdmError,
+        err: crate::zone::AdmError,
     },
 
     #[error("Zone with prefix '{prefix}' not found")]
@@ -80,14 +83,14 @@ pub enum GetZoneError {
     ControlInterface {
         name: String,
         #[source]
-        err: crate::illumos::zone::GetControlInterfaceError,
+        err: crate::zone::GetControlInterfaceError,
     },
 
     #[error("Cannot get zone '{name}': Failed to create addrobj: {err}")]
     AddrObject {
         name: String,
         #[source]
-        err: crate::illumos::addrobj::ParseError,
+        err: crate::addrobj::ParseError,
     },
 
     #[error(
@@ -96,7 +99,7 @@ pub enum GetZoneError {
     EnsureAddress {
         name: String,
         #[source]
-        err: crate::illumos::zone::EnsureAddressError,
+        err: crate::zone::EnsureAddressError,
     },
 
     #[error(
@@ -105,7 +108,7 @@ pub enum GetZoneError {
     BootstrapInterface {
         name: String,
         #[source]
-        err: crate::illumos::zone::GetBootstrapInterfaceError,
+        err: crate::zone::GetBootstrapInterfaceError,
     },
 }
 
@@ -126,7 +129,7 @@ impl RunningZone {
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
-        let mut command = std::process::Command::new(crate::illumos::PFEXEC);
+        let mut command = std::process::Command::new(crate::PFEXEC);
 
         let name = self.name();
         let prefix = &[super::zone::ZLOGIN, name];
@@ -137,7 +140,7 @@ impl RunningZone {
             .chain(suffix.iter().map(|a| a.as_ref()));
 
         let cmd = command.args(full_args);
-        let output = crate::illumos::execute(cmd)
+        let output = crate::execute(cmd)
             .map_err(|err| RunCommandError { zone: name.to_string(), err })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(stdout.to_string())
@@ -407,7 +410,7 @@ pub enum InstallZoneError {
     CreateVnic {
         zone: String,
         #[source]
-        err: crate::illumos::dladm::CreateVnicError,
+        err: crate::dladm::CreateVnicError,
     },
 
     #[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
@@ -415,7 +418,7 @@ pub enum InstallZoneError {
         zone: String,
         image_path: PathBuf,
         #[source]
-        err: crate::illumos::zone::AdmError,
+        err: crate::zone::AdmError,
     },
 }
 

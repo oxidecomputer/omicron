@@ -4,11 +4,11 @@
 
 //! Utilities for poking at data links.
 
-use crate::common::vlan::VlanID;
-use crate::illumos::link::{Link, LinkKind};
-use crate::illumos::zone::IPADM;
-use crate::illumos::{execute, ExecutionError, PFEXEC};
+use crate::link::{Link, LinkKind};
+use crate::zone::IPADM;
+use crate::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
+use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::str::Utf8Error;
@@ -150,7 +150,7 @@ impl VnicSource for PhysicalLink {
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
     pub fn ensure_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
@@ -173,7 +173,7 @@ impl Dladm {
 
     /// Creates a VNIC on top of the etherstub.
     ///
-    /// This VNIC is not tracked like [`crate::illumos::link::Link`], because
+    /// This VNIC is not tracked like [`crate::link::Link`], because
     /// it is expected to exist for the lifetime of the sled.
     pub fn ensure_etherstub_vnic(
         source: &Etherstub,
@@ -209,9 +209,7 @@ impl Dladm {
     }
 
     /// Delete the VNIC over the inter-zone comms etherstub.
-    pub(crate) fn delete_etherstub_vnic(
-        name: &str,
-    ) -> Result<(), ExecutionError> {
+    pub fn delete_etherstub_vnic(name: &str) -> Result<(), ExecutionError> {
         // It's not clear why, but this requires deleting the _interface_ that's
         // over the VNIC first. Other VNICs don't require this for some reason.
         if Self::get_etherstub_vnic_interface(name).is_ok() {
@@ -229,7 +227,7 @@ impl Dladm {
     }
 
     /// Delete the inter-zone comms etherstub.
-    pub(crate) fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
+    pub fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
         if Self::get_etherstub(name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
             let cmd = cmd.args(&[DLADM, "delete-etherstub", name]);

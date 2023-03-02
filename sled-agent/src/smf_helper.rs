@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::illumos::running_zone::RunningZone;
 use crate::params::ServiceType;
+use illumos_utils::running_zone::RunningZone;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -11,7 +11,7 @@ pub enum Error {
     ZoneCommand {
         intent: String,
         #[source]
-        err: crate::illumos::running_zone::RunCommandError,
+        err: illumos_utils::running_zone::RunCommandError,
     },
 }
 
@@ -34,7 +34,7 @@ impl<'t> SmfHelper<'t> {
     pub fn import_manifest(&self) -> Result<(), Error> {
         self.running_zone
             .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
+                illumos_utils::zone::SVCCFG,
                 "import",
                 &format!(
                     "/var/svc/manifest/site/{}/manifest.xml",
@@ -55,7 +55,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
+                illumos_utils::zone::SVCCFG,
                 "-s",
                 &self.smf_name,
                 "setprop",
@@ -75,7 +75,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
+                illumos_utils::zone::SVCCFG,
                 "-s",
                 &self.smf_name,
                 "addpropvalue",
@@ -96,7 +96,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
+                illumos_utils::zone::SVCCFG,
                 "-s",
                 &self.smf_name,
                 "delpropvalue",
@@ -113,7 +113,7 @@ impl<'t> SmfHelper<'t> {
     pub fn refresh(&self) -> Result<(), Error> {
         self.running_zone
             .run_cmd(&[
-                crate::illumos::zone::SVCCFG,
+                illumos_utils::zone::SVCCFG,
                 "-s",
                 &self.default_smf_name,
                 "refresh",
@@ -131,7 +131,7 @@ impl<'t> SmfHelper<'t> {
     pub fn restart(&self) -> Result<(), Error> {
         self.running_zone
             .run_cmd(&[
-                crate::illumos::zone::SVCADM,
+                illumos_utils::zone::SVCADM,
                 "restart",
                 &self.default_smf_name,
             ])
@@ -145,7 +145,7 @@ impl<'t> SmfHelper<'t> {
     pub fn enable(&self) -> Result<(), Error> {
         self.running_zone
             .run_cmd(&[
-                crate::illumos::zone::SVCADM,
+                illumos_utils::zone::SVCADM,
                 "enable",
                 "-t",
                 &self.default_smf_name,

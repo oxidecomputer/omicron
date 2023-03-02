@@ -12,6 +12,8 @@ cfg_if::cfg_if! {
     }
 }
 
+pub mod params;
+
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 pub use oxide_vpc::api::BoundaryServices;

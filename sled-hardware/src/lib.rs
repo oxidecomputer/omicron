@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::illumos::fstyp::Fstyp;
-use crate::illumos::zpool::Zpool;
-use crate::illumos::zpool::ZpoolName;
+use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zpool::Zpool;
+use illumos_utils::zpool::ZpoolName;
+use slog::info;
 use slog::Logger;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -12,10 +13,10 @@ use uuid::Uuid;
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
         mod illumos;
-        pub(crate) use illumos::*;
+        pub use illumos::*;
     } else {
         mod non_illumos;
-        pub(crate) use non_illumos::*;
+        pub use non_illumos::*;
     }
 }
 
@@ -93,7 +94,7 @@ pub enum DiskError {
     #[error("Requested partition {partition:?} not found on device {path}")]
     NotFound { path: PathBuf, partition: Partition },
     #[error(transparent)]
-    ZpoolCreate(#[from] crate::illumos::zpool::CreateError),
+    ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
     #[error("Cannot format {path}: missing a '/dev' path")]
     CannotFormatMissingDevPath { path: PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]

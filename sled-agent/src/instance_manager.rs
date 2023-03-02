@@ -4,15 +4,16 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::VnicAllocator;
 use crate::nexus::LazyNexusClient;
-use crate::opte::PortManager;
+use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData, VpcFirewallRule,
+    InstanceSerialConsoleData,
 };
 use crate::serial::ByteOffset;
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
+use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
@@ -35,7 +36,7 @@ pub enum Error {
     NoSuchInstance(Uuid),
 
     #[error("OPTE port management error: {0}")]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 }
 
 struct InstanceManagerInternal {
@@ -66,6 +67,11 @@ impl InstanceManager {
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> InstanceManager {
+        let data_link = crate::common::underlay::find_chelsio_links()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
         InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
@@ -74,6 +80,7 @@ impl InstanceManager {
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 port_manager: PortManager::new(
                     log.new(o!("component" => "PortManager")),
+                    data_link,
                     underlay_ip,
                     gateway_mac,
                 ),
@@ -259,13 +266,13 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::Etherstub;
-    use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
     use chrono::Utc;
+    use illumos_utils::dladm::Etherstub;
+    use illumos_utils::{dladm::MockDladm, zone::MockZones};
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,

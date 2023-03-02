@@ -9,3 +9,4 @@ camino.workspace = true
 omicron-common.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true

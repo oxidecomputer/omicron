@@ -27,16 +27,16 @@
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::common::underlay;
-use crate::illumos::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
-use crate::illumos::link::{Link, VnicAllocator};
-use crate::illumos::running_zone::{InstalledZone, RunningZone};
-use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
-use crate::illumos::zone::AddressRequest;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
 use crate::smf_helper::SmfHelper;
-use crate::zone::Zones;
+use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
+use illumos_utils::link::{Link, VnicAllocator};
+use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
+use illumos_utils::zone::AddressRequest;
+use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -99,17 +99,17 @@ pub enum Error {
     ZoneCommand {
         intent: String,
         #[source]
-        err: crate::illumos::running_zone::RunCommandError,
+        err: illumos_utils::running_zone::RunCommandError,
     },
 
     #[error("Failed to boot zone: {0}")]
-    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+    ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
-    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+    ZoneEnsureAddress(#[from] illumos_utils::running_zone::EnsureAddressError),
 
     #[error(transparent)]
-    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+    ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -118,15 +118,15 @@ pub enum Error {
     Underlay(#[from] underlay::Error),
 
     #[error("Failed to create Vnic for Nexus: {0}")]
-    NexusVnicCreation(crate::illumos::dladm::CreateVnicError),
+    NexusVnicCreation(illumos_utils::dladm::CreateVnicError),
 
     #[error("Failed to create Vnic in switch zone: {0}")]
-    SwitchVnicCreation(crate::illumos::dladm::CreateVnicError),
+    SwitchVnicCreation(illumos_utils::dladm::CreateVnicError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
         message: String,
-        err: crate::illumos::zone::EnsureGzAddressError,
+        err: illumos_utils::zone::EnsureGzAddressError,
     },
 
     #[error("Could not initialize service {service} as requested: {message}")]
@@ -1179,7 +1179,8 @@ impl ServiceManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::{
+    use crate::params::ZoneType;
+    use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
@@ -1187,7 +1188,6 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use crate::params::ZoneType;
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -1231,7 +1231,7 @@ mod test {
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
-        let execute_ctx = crate::illumos::execute_context();
+        let execute_ctx = illumos_utils::execute_context();
         execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),

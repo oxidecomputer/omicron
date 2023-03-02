@@ -4,7 +4,7 @@
 
 //! Utilities for poking at ZFS.
 
-use crate::illumos::{execute, PFEXEC};
+use crate::{execute, PFEXEC};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -18,7 +18,7 @@ const ZFS: &str = "/usr/sbin/zfs";
 pub struct ListDatasetsError {
     name: String,
     #[source]
-    err: crate::illumos::ExecutionError,
+    err: crate::ExecutionError,
 }
 
 /// Error returned by [`Zfs::destroy_dataset`].
@@ -27,13 +27,13 @@ pub struct ListDatasetsError {
 pub struct DestroyDatasetError {
     name: String,
     #[source]
-    err: crate::illumos::ExecutionError,
+    err: crate::ExecutionError,
 }
 
 #[derive(thiserror::Error, Debug)]
 enum EnsureFilesystemErrorRaw {
     #[error("ZFS execution error: {0}")]
-    Execution(#[from] crate::illumos::ExecutionError),
+    Execution(#[from] crate::ExecutionError),
 
     #[error("Filesystem does not exist, and formatting was not requested")]
     NotFoundNotFormatted,
@@ -63,13 +63,13 @@ pub struct SetValueError {
     filesystem: String,
     name: String,
     value: String,
-    err: crate::illumos::ExecutionError,
+    err: crate::ExecutionError,
 }
 
 #[derive(thiserror::Error, Debug)]
 enum GetValueErrorRaw {
     #[error(transparent)]
-    Execution(#[from] crate::illumos::ExecutionError),
+    Execution(#[from] crate::ExecutionError),
 
     #[error("No value found with that name")]
     MissingValue,
@@ -104,7 +104,7 @@ impl fmt::Display for Mountpoint {
     }
 }
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     pub fn list_datasets(name: &str) -> Result<Vec<String>, ListDatasetsError> {
