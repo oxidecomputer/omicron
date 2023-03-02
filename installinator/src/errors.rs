@@ -13,11 +13,14 @@ pub(crate) enum ArtifactFetchError {
     HttpError {
         peer: SocketAddrV6,
         #[source]
-        error: ClientError,
+        error: HttpError,
     },
 
     #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
     Timeout { peer: SocketAddrV6, timeout: Duration, bytes_fetched: usize },
+
+    #[error("artifact size in Content-Length header ({artifact_size}) did not match downloaded size ({downloaded_bytes})")]
+    SizeMismatch { artifact_size: u64, downloaded_bytes: u64 },
 }
 
 #[derive(Debug, Error)]
@@ -29,4 +32,16 @@ pub(crate) enum DiscoverPeersError {
     #[error("failed to discover peers (no more retries left, will abort)")]
     #[allow(unused)]
     Abort(#[source] anyhow::Error),
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum HttpError {
+    #[error("HTTP client error")]
+    Client(#[from] ClientError),
+
+    #[error("missing Content-Length header")]
+    MissingContentLength,
+
+    #[error("Content-Length header could not be parsed into an integer")]
+    InvalidContentLength,
 }

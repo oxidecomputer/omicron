@@ -2836,6 +2836,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
+ "http",
  "installinator-artifact-client",
  "installinator-common",
  "ipcc-key-value",
@@ -3164,9 +3165,12 @@ dependencies = [
 
 [[package]]
 name = "libsw"
-version = "2.2.0"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d81b373cd988b6e2b6e32ded4ea80c15085028efcdd5f83e37f9cbfb9c517ca"
+checksum = "9021b9cc0f078fba93f59d6e6f1fce89682171107a21fc421eb130efd2048189"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "libxml"

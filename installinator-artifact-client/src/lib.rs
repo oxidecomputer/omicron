@@ -174,12 +174,14 @@ impl From<installinator_common::ProgressEventKind>
                 kind,
                 peer,
                 downloaded_bytes,
+                total_bytes,
                 elapsed,
             } => Self::DownloadProgress {
                 attempt: attempt as u32,
                 kind: kind.to_string(),
                 peer: peer.to_string(),
                 downloaded_bytes,
+                total_bytes,
                 elapsed: elapsed.into(),
             },
             installinator_common::ProgressEventKind::FormatProgress {
