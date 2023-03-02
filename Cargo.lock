@@ -2836,6 +2836,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
+ "http",
  "installinator-artifact-client",
  "installinator-common",
  "ipcc-key-value",

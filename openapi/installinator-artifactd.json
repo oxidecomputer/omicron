@@ -649,6 +649,12 @@
                 "enum": [
                   "download_progress"
                 ]
+              },
+              "total_bytes": {
+                "description": "The size of the artifact, as provided in the Content-Length header.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
               }
             },
             "required": [
@@ -657,7 +663,8 @@
               "elapsed",
               "kind",
               "peer",
-              "reason"
+              "reason",
+              "total_bytes"
             ]
           },
           {

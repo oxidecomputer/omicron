@@ -17,11 +17,11 @@ use uuid::Uuid;
 /// Represents a way to fetch artifacts.
 #[async_trait]
 pub trait ArtifactGetter: fmt::Debug + Send + Sync + 'static {
-    /// Gets an artifact, returning it as a [`Body`].
-    async fn get(&self, id: &ArtifactId) -> Option<Body>;
+    /// Gets an artifact, returning it as a [`Body`] along with its length.
+    async fn get(&self, id: &ArtifactId) -> Option<(Body, usize)>;
 
     /// Gets an artifact by hash, returning it as a [`Body`].
-    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<Body>;
+    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<(Body, usize)>;
 
     /// Reports update progress events from the installinator.
     async fn report_progress(
@@ -60,7 +60,10 @@ impl ArtifactStore {
         Self { log, getter: Box::new(getter) }
     }
 
-    pub(crate) async fn get_artifact(&self, id: &ArtifactId) -> Option<Body> {
+    pub(crate) async fn get_artifact(
+        &self,
+        id: &ArtifactId,
+    ) -> Option<(Body, usize)> {
         slog::debug!(self.log, "Artifact requested: {:?}", id);
         self.getter.get(id).await
     }
@@ -68,7 +71,7 @@ impl ArtifactStore {
     pub(crate) async fn get_artifact_by_hash(
         &self,
         id: &ArtifactHashId,
-    ) -> Option<Body> {
+    ) -> Option<(Body, usize)> {
         slog::debug!(self.log, "Artifact requested by hash: {:?}", id);
         self.getter.get_by_hash(id).await
     }
