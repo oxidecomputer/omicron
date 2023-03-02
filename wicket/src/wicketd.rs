@@ -159,7 +159,7 @@ impl InventoryState {
                     .send(InventoryEvent::Inventory {
                         changed_inventory,
                         wicketd_received: Instant::now(),
-                        mgs_received: libsw::Stopwatch::with_elapsed_started(
+                        mgs_received: libsw::TokioSw::with_elapsed_started(
                             mgs_received_ago,
                         ),
                     })

@@ -58,7 +58,7 @@ pub enum InventoryEvent {
         wicketd_received: Instant,
 
         /// The time at which information was received from MGS.
-        mgs_received: libsw::Stopwatch,
+        mgs_received: libsw::TokioSw,
     },
     /// The inventory is unavailable.
     Unavailable {
