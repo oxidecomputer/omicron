@@ -5,9 +5,9 @@
 //! The bootstrap agent's view into hardware
 
 use crate::config::Config as SledConfig;
-use crate::hardware::HardwareManager;
-use crate::illumos::dladm::{Etherstub, EtherstubVnic};
 use crate::services::ServiceManager;
+use illumos_utils::dladm::{Etherstub, EtherstubVnic};
+use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use thiserror::Error;
@@ -62,13 +62,13 @@ impl HardwareMonitorWorker {
                 update = hardware_updates.recv() => {
                     match update {
                         Ok(update) => match update {
-                            crate::hardware::HardwareUpdate::TofinoLoaded => {
+                            sled_hardware::HardwareUpdate::TofinoLoaded => {
                                 let switch_zone_ip = None;
                                 if let Err(e) = self.services.activate_switch(switch_zone_ip).await {
                                     warn!(self.log, "Failed to activate switch: {e}");
                                 }
                             }
-                            crate::hardware::HardwareUpdate::TofinoUnloaded => {
+                            sled_hardware::HardwareUpdate::TofinoUnloaded => {
                                 if let Err(e) = self.services.deactivate_switch().await {
                                     warn!(self.log, "Failed to deactivate switch: {e}");
                                 }

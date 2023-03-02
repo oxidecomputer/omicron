@@ -4,7 +4,7 @@
 
 //! API for allocating and managing data links.
 
-use crate::illumos::dladm::{
+use crate::dladm::{
     CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
     VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
@@ -14,10 +14,10 @@ use std::sync::{
     Arc,
 };
 
-#[cfg(not(test))]
-use crate::illumos::dladm::Dladm;
-#[cfg(test)]
-use crate::illumos::dladm::MockDladm as Dladm;
+#[cfg(not(any(test, feature = "testing")))]
+use crate::dladm::Dladm;
+#[cfg(any(test, feature = "testing"))]
+use crate::dladm::MockDladm as Dladm;
 
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
@@ -188,7 +188,7 @@ impl Drop for Link {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::Etherstub;
+    use crate::dladm::Etherstub;
 
     #[test]
     fn test_allocate() {

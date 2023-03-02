@@ -6,15 +6,14 @@
 
 use anyhow::anyhow;
 use ipnetwork::IpNetwork;
+use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
-use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{
-    EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL,
-};
-use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
-use crate::illumos::{execute, PFEXEC};
+use crate::addrobj::AddrObject;
+use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
+use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
+use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -30,10 +29,10 @@ pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Zone execution error: {0}")]
-    Execution(#[from] crate::illumos::ExecutionError),
+    Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
-    AddrObject(#[from] crate::illumos::addrobj::ParseError),
+    AddrObject(#[from] crate::addrobj::ParseError),
 
     #[error("Address not found: {addrobj}")]
     AddressNotFound { addrobj: AddrObject },
@@ -68,7 +67,7 @@ pub struct DeleteAddressError {
     zone: String,
     addrobj: AddrObject,
     #[source]
-    err: crate::illumos::ExecutionError,
+    err: crate::ExecutionError,
 }
 
 /// Errors from [`Zones::get_control_interface`].
@@ -79,7 +78,7 @@ pub enum GetControlInterfaceError {
     Execution {
         zone: String,
         #[source]
-        err: crate::illumos::ExecutionError,
+        err: crate::ExecutionError,
     },
 
     #[error("VNIC starting with 'oxControl' not found in {zone}")]
@@ -94,7 +93,7 @@ pub enum GetBootstrapInterfaceError {
     Execution {
         zone: String,
         #[source]
-        err: crate::illumos::ExecutionError,
+        err: crate::ExecutionError,
     },
 
     #[error("VNIC starting with 'oxBootstrap' not found in {zone}")]
@@ -156,7 +155,7 @@ impl AddressRequest {
 /// Wraps commands for interacting with Zones.
 pub struct Zones {}
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
     ///
@@ -525,7 +524,7 @@ impl Zones {
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
-    ) -> Result<(), crate::illumos::ExecutionError> {
+    ) -> Result<(), crate::ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -592,7 +591,7 @@ impl Zones {
     pub fn ensure_has_link_local_v6_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
-    ) -> Result<(), crate::illumos::ExecutionError> {
+    ) -> Result<(), crate::ExecutionError> {
         if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj) {
             return Ok(());
         }

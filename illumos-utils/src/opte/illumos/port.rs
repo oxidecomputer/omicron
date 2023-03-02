@@ -4,10 +4,11 @@
 
 //! A single port on the OPTE virtual switch.
 
+use crate::dladm::Dladm;
+use crate::opte::params::SourceNatConfig;
 use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::Vni;
-use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
@@ -15,7 +16,6 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 #[derive(Debug)]
-#[allow(dead_code)]
 struct PortInner {
     // Name of the port as identified by OPTE
     name: String,
@@ -28,12 +28,12 @@ struct PortInner {
     // Emulated PCI slot for the guest NIC, passed to Propolis
     slot: u8,
     // Geneve VNI for the VPC
-    _vni: Vni,
+    vni: Vni,
     // IP address of the hosting sled
     _underlay_ip: Ipv6Addr,
     // The external IP address and port range provided for this port, to allow
     // outbound network connectivity.
-    source_nat: Option<SourceNatConfig>,
+    _source_nat: Option<SourceNatConfig>,
     // The external IP addresses provided to this port, to allow _inbound_
     // network connectivity.
     external_ips: Option<Vec<IpAddr>>,
@@ -52,6 +52,41 @@ struct PortInner {
     // can be changed back to a real VNIC when that is resolved, and the Drop
     // impl below can simplify to just call `drop(self.vnic)`.
     vnic: String,
+}
+
+impl Drop for PortInner {
+    fn drop(&mut self) {
+        if let Err(e) = Dladm::delete_vnic(&self.vnic) {
+            eprintln!(
+                "WARNING: Failed to delete OPTE port overlay VNIC \
+                while dropping port. The VNIC will not be cleaned up \
+                properly, and the xde device itself will not be deleted. \
+                Both the VNIC and the xde device must be deleted out \
+                of band, and it will not be possible to recreate the xde \
+                device until then. Error: {:?}",
+                e
+            );
+            return;
+        }
+        let err = match opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)
+        {
+            Ok(hdl) => {
+                if let Err(e) = hdl.delete_xde(&self.name) {
+                    e
+                } else {
+                    return;
+                }
+            }
+            Err(e) => e,
+        };
+        eprintln!(
+            "WARNING: OPTE port overlay VNIC deleted, but failed \
+            to delete the xde device. It must be deleted out \
+            of band, and it will not be possible to recreate the xde \
+            device until then. Error: {:?}",
+            err,
+        );
+    }
 }
 
 /// A port on the OPTE virtual switch, providing the virtual networking
@@ -87,9 +122,9 @@ impl Port {
                 _subnet: subnet,
                 mac,
                 slot,
-                _vni: vni,
+                vni: vni,
                 _underlay_ip: underlay_ip,
-                source_nat,
+                _source_nat: source_nat,
                 external_ips,
                 _gateway: gateway,
                 _boundary_services: boundary_services,
@@ -98,12 +133,18 @@ impl Port {
         }
     }
 
+    #[allow(dead_code)]
     pub fn external_ips(&self) -> &Option<Vec<IpAddr>> {
         &self.inner.external_ips
     }
 
+    #[allow(dead_code)]
     pub fn mac(&self) -> &MacAddr6 {
         &self.inner.mac
+    }
+
+    pub fn vni(&self) -> &Vni {
+        &self.inner.vni
     }
 
     pub fn vnic_name(&self) -> &str {

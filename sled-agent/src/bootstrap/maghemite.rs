@@ -4,7 +4,7 @@
 
 //! Starting the mg-ddm service.
 
-use crate::illumos::addrobj::AddrObject;
+use illumos_utils::addrobj::AddrObject;
 use slog::Logger;
 use thiserror::Error;
 

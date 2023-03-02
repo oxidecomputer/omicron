@@ -4,7 +4,7 @@
 
 //! Utilities for managing Zpools.
 
-use crate::illumos::{execute, PFEXEC};
+use crate::{execute, PFEXEC};
 use serde::{Deserialize, Deserializer};
 use std::path::Path;
 use std::str::FromStr;
@@ -20,7 +20,7 @@ pub struct ParseError(String);
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Zpool execution error: {0}")]
-    Execution(#[from] crate::illumos::ExecutionError),
+    Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
     Parse(#[from] ParseError),
@@ -159,7 +159,7 @@ impl FromStr for ZpoolInfo {
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool {}
 
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
     pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);

@@ -9,7 +9,7 @@ use cfg_if::cfg_if;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 mod inner {
     use super::*;
 
@@ -63,7 +63,7 @@ mod inner {
 }
 
 cfg_if! {
-    if #[cfg(test)] {
+    if #[cfg(any(test, feature = "testing"))] {
         pub use mock_inner::*;
     } else {
         pub use inner::*;

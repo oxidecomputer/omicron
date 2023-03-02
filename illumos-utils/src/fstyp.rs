@@ -4,8 +4,8 @@
 
 //! Helper for calling fstyp.
 
-use crate::illumos::zpool::ZpoolName;
-use crate::illumos::{execute, PFEXEC};
+use crate::zpool::ZpoolName;
+use crate::{execute, PFEXEC};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -17,7 +17,7 @@ pub enum Error {
     NotValidUtf8(#[from] std::string::FromUtf8Error),
 
     #[error("fstyp execution error: {0}")]
-    Execution(#[from] crate::illumos::ExecutionError),
+    Execution(#[from] crate::ExecutionError),
 
     #[error("Failed to find zpool name from fstyp")]
     NotFound,

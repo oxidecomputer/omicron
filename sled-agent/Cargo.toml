@@ -22,6 +22,7 @@ dns-server.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+illumos-utils.workspace = true
 internal-dns-names.workspace = true
 ipnetwork.workspace = true
 libc.workspace = true
@@ -43,6 +44,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 sled-agent-client.workspace = true
+sled-hardware.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 smf.workspace = true
@@ -60,8 +62,6 @@ vsss-rs.workspace = true
 zone.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", branch = "main" }
-libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", branch = "master" }
 opte-ioctl.workspace = true
 
 [dev-dependencies]
@@ -76,6 +76,8 @@ serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+
+illumos-utils = { workspace = true, features = ["testing"] }
 
 #
 # Disable doc builds by default for our binaries to work around issue

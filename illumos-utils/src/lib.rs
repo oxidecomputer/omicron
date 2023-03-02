@@ -10,6 +10,7 @@ pub mod addrobj;
 pub mod dladm;
 pub mod fstyp;
 pub mod link;
+pub mod opte;
 pub mod running_zone;
 pub mod svc;
 pub mod zfs;
@@ -49,7 +50,7 @@ pub enum ExecutionError {
 
 // We wrap this method in an inner module to make it possible to mock
 // these free functions.
-#[cfg_attr(test, mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 mod inner {
     use super::*;
 
@@ -90,7 +91,7 @@ mod inner {
 }
 
 cfg_if! {
-    if #[cfg(test)] {
+    if #[cfg(any(test, feature = "testing"))] {
         pub use mock_inner::*;
     } else {
         pub use inner::*;
