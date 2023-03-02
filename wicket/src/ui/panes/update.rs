@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::help_text;
-use super::Control;
+use super::{align_by, help_text, Control};
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind};
@@ -30,14 +29,7 @@ impl UpdatePane {
             tree_state: Default::default(),
             items: ALL_COMPONENT_IDS
                 .iter()
-                .map(|id| {
-                    TreeItem::new(
-                        *id,
-                        vec![TreeItem::new_leaf(Text::from(
-                            "ArtifactId     0.1.0    \u{25b6}    1.0.0",
-                        ))],
-                    )
-                })
+                .map(|id| TreeItem::new(*id, vec![]))
                 .collect(),
             help: vec![
                 ("OPEN", "<RIGHT>"),
@@ -118,15 +110,31 @@ impl Control for UpdatePane {
         frame.render_widget(title_bar, chunks[0]);
 
         // Draw the table headers
-        let headers = Paragraph::new(Spans::from(vec![Span::styled(
-            "COMPONENT             VERSION              TARGET",
-            style::selected(),
-        )]))
+        let mut line_rect = chunks[1];
+        line_rect.x += 2;
+        line_rect.width -= 2;
+        let headers = Paragraph::new(align_by(
+            2,
+            25,
+            line_rect,
+            vec![
+                Span::styled("COMPONENT", style::selected()),
+                Span::styled("VERSION", style::selected()),
+                Span::styled("TARGET", style::selected()),
+            ],
+        ))
         .block(block.clone());
         frame.render_widget(headers, chunks[1]);
 
+        // Populate the contents
+        // TODO: Put this in a function and use real data
+        let items: Vec<_> = ALL_COMPONENT_IDS
+            .iter()
+            .map(|id| TreeItem::new(*id, vec![]))
+            .collect();
+
         // Draw the contents
-        let tree = Tree::new(self.items.clone())
+        let tree = Tree::new(items)
             .block(block.clone().borders(Borders::LEFT | Borders::RIGHT))
             .style(style::plain_text())
             .highlight_style(style::highlighted());
