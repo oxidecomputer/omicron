@@ -2872,6 +2872,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "serde",
+ "sled-hardware",
  "slog",
  "slog-async",
  "slog-envlogger",

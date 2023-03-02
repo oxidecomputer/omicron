@@ -6,6 +6,7 @@
 
 use crate::{execute, PFEXEC};
 use serde::{Deserialize, Deserializer};
+use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -236,7 +237,7 @@ impl<'de> Deserialize<'de> for ZpoolName {
                 "Bad zpool prefix - must start with 'oxp_'",
             )
         })?;
-        let id = Uuid::from_str(&s).map_err(serde::de::Error::custom)?;
+        let id = Uuid::from_str(s).map_err(serde::de::Error::custom)?;
         Ok(ZpoolName(id))
     }
 }
@@ -248,14 +249,14 @@ impl FromStr for ZpoolName {
         let s = s.strip_prefix(ZPOOL_PREFIX).ok_or_else(|| {
             format!("Bad zpool name {}; must start with {}", s, ZPOOL_PREFIX)
         })?;
-        let id = Uuid::from_str(&s).map_err(|e| e.to_string())?;
+        let id = Uuid::from_str(s).map_err(|e| e.to_string())?;
         Ok(ZpoolName(id))
     }
 }
 
-impl ToString for ZpoolName {
-    fn to_string(&self) -> String {
-        format!("{}{}", ZPOOL_PREFIX, self.0)
+impl fmt::Display for ZpoolName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", ZPOOL_PREFIX, self.0)
     }
 }
 
@@ -268,7 +269,7 @@ mod test {
     }
 
     fn parse_name(s: &str) -> Result<ZpoolName, toml::de::Error> {
-        toml_string(&s)
+        toml_string(s)
             .parse::<toml::Value>()
             .expect("Cannot parse as TOML value")
             .get("zpool_name")
