@@ -27,6 +27,9 @@ use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 pub struct MainScreen {
     sidebar: Sidebar,
     panes: BTreeMap<&'static str, Box<dyn Control>>,
+    rect: Rect,
+    sidebar_rect: Rect,
+    pane_rect: Rect,
 }
 
 impl MainScreen {
@@ -41,6 +44,9 @@ impl MainScreen {
         MainScreen {
             sidebar: Sidebar::new(sidebar_keys),
             panes: BTreeMap::from_iter(sidebar_ordered_panes),
+            rect: Rect::default(),
+            sidebar_rect: Rect::default(),
+            pane_rect: Rect::default(),
         }
     }
 
@@ -80,6 +86,34 @@ impl MainScreen {
         Ok(())
     }
 
+    /// Compute the layout of the [`Sidebar`] and pane
+    ///
+    // A draw is issued after every resize, so no need to return an Action
+    pub fn resize(&mut self, state: &mut State, width: u16, height: u16) {
+        self.rect = Rect { x: 0, y: 0, width, height };
+
+        // We have a 1 row status bar at the bottom when we draw. Subtract it
+        // from the height;
+        let mut layout_rect = self.rect;
+        layout_rect.height -= 1;
+
+        // Size the individual components of the screen
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .margin(1)
+            .constraints(
+                [Constraint::Length(20), Constraint::Max(1000)].as_ref(),
+            )
+            .split(layout_rect);
+
+        self.sidebar_rect = chunks[0];
+        self.pane_rect = chunks[1];
+
+        // Avoid borrow checker complaints
+        let pane_rect = self.pane_rect;
+        self.current_pane().resize(state, pane_rect);
+    }
+
     /// Handle an [`Event`] to update state and output any necessary actions for the
     /// system to take.
     pub fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
@@ -113,8 +147,17 @@ impl MainScreen {
                 }
             },
             e => {
+                let current_pane = self.sidebar.selected();
                 if self.sidebar.selected {
-                    self.sidebar.on(state, e)
+                    let _ = self.sidebar.on(state, e);
+                    if self.sidebar.selected() != current_pane {
+                        // We need to inform the new pane, which may not have
+                        // ever been drawn what its Rect is.
+                        self.resize(state, self.rect.width, self.rect.height);
+                        Some(Action::Redraw)
+                    } else {
+                        None
+                    }
                 } else {
                     self.current_pane().on(state, e)
                 }
