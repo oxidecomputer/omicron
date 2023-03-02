@@ -12,8 +12,8 @@ use super::params::RequestEnvelope;
 use super::trust_quorum::ShareDistribution;
 use super::views::Response;
 use super::views::ResponseEnvelope;
-use crate::bootstrap::maghemite;
 use crate::bootstrap::http_entrypoints::api as http_api;
+use crate::bootstrap::maghemite;
 use crate::common::underlay;
 use crate::config::Config as SledConfig;
 use crate::sp::AsyncReadWrite;
@@ -102,8 +102,10 @@ impl Server {
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
-        dropshot_config.bind_address = SocketAddr::V6(bootstrap_agent.http_address());
-        let dropshot_log = log.new(o!("component" => "dropshot (BootstrapAgent)"));
+        dropshot_config.bind_address =
+            SocketAddr::V6(bootstrap_agent.http_address());
+        let dropshot_log =
+            log.new(o!("component" => "dropshot (BootstrapAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,
             http_api(),
@@ -113,7 +115,8 @@ impl Server {
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
 
-        let sprockets_log = log.new(o!("component" => "sprockets (BootstrapAgent)"));
+        let sprockets_log =
+            log.new(o!("component" => "sprockets (BootstrapAgent)"));
         let sprockets_server_handle = Inner::start_sprockets(
             sp.clone(),
             trust_quorum,
@@ -122,7 +125,11 @@ impl Server {
         )
         .await?;
 
-        let server = Server { bootstrap_agent, sprockets_server_handle, _http_server: http_server };
+        let server = Server {
+            bootstrap_agent,
+            sprockets_server_handle,
+            _http_server: http_server,
+        };
 
         // Initialize the bootstrap agent *after* the server has started.
         // This ordering allows the bootstrap agent to communicate with

@@ -5,7 +5,9 @@
 //! Bootstrap-related APIs.
 
 use super::client::Client as BootstrapAgentClient;
-use super::config::{Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT};
+use super::config::{
+    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
+};
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
 use super::params::SledAgentRequest;
@@ -27,6 +29,7 @@ use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
+use crate::updates::UpdateManager;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
@@ -97,6 +100,9 @@ pub enum BootstrapError {
 
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] crate::opte::Error),
+
+    #[error("Error accessing version information: {0}")]
+    Version(#[from] crate::updates::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -748,6 +754,14 @@ impl Agent {
             self.rss.lock().await.replace(rss);
         }
         Ok(())
+    }
+
+    pub async fn components_get(
+        &self,
+    ) -> Result<Vec<crate::updates::Component>, BootstrapError> {
+        let updates = UpdateManager::new(self.sled_config.updates.clone());
+        let components = updates.components_get().await?;
+        Ok(components)
     }
 
     /// The GZ address used by the bootstrap agent for Sprockets.

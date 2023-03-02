@@ -8,20 +8,20 @@
 //! and has a separate interface for establishing the trust quorum.
 
 use crate::bootstrap::agent::Agent;
+use crate::updates::Component;
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseOk,
-    RequestContext,
+    endpoint, ApiDescription, HttpError, HttpResponseOk, RequestContext,
 };
-use omicron_common::api::external::SemverVersion;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use omicron_common::api::external::Error;
 use std::sync::Arc;
 
 type BootstrapApiDescription = ApiDescription<Arc<Agent>>;
 
 /// Returns a description of the bootstrap agent API
 pub(crate) fn api() -> BootstrapApiDescription {
-    fn register_endpoints(api: &mut BootstrapApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut BootstrapApiDescription,
+    ) -> Result<(), String> {
         api.register(components_get)?;
         Ok(())
     }
@@ -33,12 +33,6 @@ pub(crate) fn api() -> BootstrapApiDescription {
     api
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-struct Component {
-    name: String,
-    version: SemverVersion,
-}
-
 #[endpoint {
     method = GET,
     path = "/components",
@@ -47,10 +41,6 @@ async fn components_get(
     rqctx: RequestContext<Arc<Agent>>,
 ) -> Result<HttpResponseOk<Vec<Component>>, HttpError> {
     let ba = rqctx.context();
-
-    // TODO TODO TODO
-    // ba.components_get().await.map_err(|e| Error::from(e))?;
-    let components = vec![];
-
+    let components = ba.components_get().await.map_err(|e| Error::from(e))?;
     Ok(HttpResponseOk(components))
 }

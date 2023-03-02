@@ -126,8 +126,12 @@ impl Plan {
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let allocations = bootstrap_addrs.map(|(idx, bootstrap_addr)| {
             info!(log, "Creating plan for the sled at {:?}", bootstrap_addr);
-            let bootstrap_addr =
-                SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0);
+            let bootstrap_addr = SocketAddrV6::new(
+                bootstrap_addr,
+                BOOTSTRAP_AGENT_SPROCKETS_PORT,
+                0,
+                0,
+            );
             let sled_subnet_index =
                 u8::try_from(idx + 1).expect("Too many peers!");
             let subnet = config.sled_subnet(sled_subnet_index);

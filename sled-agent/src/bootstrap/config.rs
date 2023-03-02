@@ -6,6 +6,7 @@
 
 use crate::illumos::dladm::PhysicalLink;
 use crate::sp::SimSpConfig;
+use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
@@ -20,6 +21,7 @@ pub struct Config {
     pub id: Uuid,
     pub link: PhysicalLink,
     pub log: ConfigLogging,
+    pub updates: ConfigUpdates,
     pub rss_config: Option<crate::rack_setup::config::SetupServiceConfig>,
     pub sp_config: Option<SimSpConfig>,
 }

@@ -11,6 +11,7 @@ use crate::illumos::dladm::FindPhysicalLinkError;
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::dladm::CHELSIO_LINK_PREFIX;
 use crate::illumos::zpool::ZpoolName;
+use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -40,6 +41,9 @@ pub struct Config {
     /// This allows continued support for development and testing on emulated
     /// systems.
     pub data_link: Option<PhysicalLink>,
+
+    #[serde(default)]
+    pub updates: ConfigUpdates,
 }
 
 #[derive(Debug, thiserror::Error)]

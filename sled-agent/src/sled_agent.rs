@@ -18,7 +18,7 @@ use crate::params::{
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
-use crate::updates::{ConfigUpdates, UpdateManager};
+use crate::updates::UpdateManager;
 use dropshot::HttpError;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -32,7 +32,6 @@ use omicron_common::backoff::{
 };
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -273,9 +272,7 @@ impl SledAgent {
             HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
                 .map_err(|e| Error::Hardware(e))?;
 
-        let update_config =
-            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
-        let updates = UpdateManager::new(update_config);
+        let updates = UpdateManager::new(config.updates.clone());
 
         services
             .sled_agent_started(
