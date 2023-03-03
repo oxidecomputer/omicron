@@ -155,6 +155,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_create_v1)?;
         api.register(disk_view_v1)?;
         api.register(disk_delete_v1)?;
+        api.register(disk_metrics_list_v1)?;
 
         api.register(instance_list)?;
         api.register(instance_create)?;
@@ -2701,7 +2702,7 @@ async fn disk_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Display, Deserialize, JsonSchema)]
+#[derive(Display, Serialize, Deserialize, JsonSchema)]
 #[display(style = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DiskMetricName {
@@ -2713,11 +2714,22 @@ pub enum DiskMetricName {
     WriteBytes,
 }
 
+/// Path parameters for metrics requests where `/metrics/{metric_name}` is
+/// appended to an existing path parameter type
+#[derive(Deserialize, JsonSchema)]
+struct MetricsPathParam<T, M> {
+    #[serde(flatten)]
+    inner: T,
+    metric_name: M,
+}
+
 /// Fetch disk metrics
+/// Use `/v1/disks/{disk}/{metric}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
     tags = ["disks"],
+    deprecated = true,
 }]
 async fn disk_metrics_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2746,6 +2758,57 @@ async fn disk_metrics_list(
         let result = nexus
             .select_timeseries(
                 &format!("crucible_upstairs:{}", path.metric_name),
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
+                query,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct DiskMetricsPath {
+    disk: NameOrId,
+    metric: DiskMetricName,
+}
+
+/// Fetch disk metrics
+#[endpoint {
+    method = GET,
+    path = "/v1/disks/{disk}/metrics/{metric}",
+    tags = ["disks"],
+}]
+async fn disk_metrics_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<DiskMetricsPath>,
+    query_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+    selector_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let selector = selector_params.into_inner();
+        let limit = rqctx.page_limit(&query)?;
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: selector.project_selector.clone(),
+        };
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., authz_disk) = nexus
+            .disk_lookup(&opctx, &disk_selector)?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let result = nexus
+            .select_timeseries(
+                &format!("crucible_upstairs:{}", path.metric),
                 &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
@@ -7974,15 +8037,6 @@ async fn session_sshkey_delete(
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for metrics requests where `/metrics/{metric_name}` is
-/// appended to an existing path parameter type
-#[derive(Deserialize, JsonSchema)]
-struct MetricsPathParam<T, M> {
-    #[serde(flatten)]
-    inner: T,
-    metric_name: M,
 }
 
 #[cfg(test)]
