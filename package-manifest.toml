@@ -42,6 +42,15 @@ source.rust.release = true
 source.paths = [ { from = "smf/sled-agent", to = "pkg" } ]
 output.type = "tarball"
 
+[package.installinator]
+service_name = "installinator"
+source.type = "local"
+source.rust.binary_names = ["installinator"]
+source.rust.release = true
+source.paths = [ { from = "smf/installinator", to = "pkg" } ]
+output.type = "tarball"
+output.intermediate_only = true
+
 [package.omicron-nexus]
 service_name = "nexus"
 source.type = "local"
