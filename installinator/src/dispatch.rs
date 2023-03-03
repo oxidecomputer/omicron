@@ -5,7 +5,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::CompletionEventKind;
@@ -13,13 +12,15 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
-use slog::Drain;
-use tokio::{io::AsyncWriteExt, sync::mpsc};
+use slog::{info, warn, Drain};
+use tokio::sync::mpsc;
 
 use crate::{
     artifact::ArtifactIdOpts,
+    hardware::Hardware,
     peers::{DiscoveryMechanism, FetchedArtifact, Peers},
     reporter::{ProgressReporter, ReportEvent},
+    write::{write_artifact, WriteDestination},
 };
 
 /// Installinator app.
@@ -37,6 +38,9 @@ impl InstallinatorApp {
 
         match self.subcommand {
             InstallinatorCommand::DebugDiscover(opts) => opts.exec(log).await,
+            InstallinatorCommand::DebugHardwareScan(opts) => {
+                opts.exec(log).await
+            }
             InstallinatorCommand::Install(opts) => opts.exec(log).await,
         }
     }
@@ -64,6 +68,8 @@ impl InstallinatorApp {
 enum InstallinatorCommand {
     /// Discover peers on the bootstrap network.
     DebugDiscover(DebugDiscoverOpts),
+    /// Scan hardware to find the target M.2 device.
+    DebugHardwareScan(DebugHardwareScan),
     /// Perform the installation.
     Install(InstallOpts),
 }
@@ -94,6 +100,44 @@ struct DiscoverOpts {
     /// The mechanism by which to discover peers: bootstrap or list:[::1]:8000
     #[clap(long, default_value_t = DiscoveryMechanism::Bootstrap)]
     mechanism: DiscoveryMechanism,
+}
+
+/// Perform a scan of the device hardware looking for the target M.2.
+#[derive(Debug, Args)]
+#[command(version)]
+struct DebugHardwareScan {}
+
+impl DebugHardwareScan {
+    async fn exec(self, log: slog::Logger) -> Result<()> {
+        let hardware = Hardware::scan(&log)?;
+
+        for disk in hardware.m2_disks() {
+            match disk.boot_image_devfs_path() {
+                Ok(boot_image_path) => {
+                    info!(
+                        log, "found M.2 disk";
+                        "identity" => ?disk.identity(),
+                        "path" => disk.devfs_path().display(),
+                        "slot" => disk.slot(),
+                        "boot_image_path" => boot_image_path.display(),
+                        "zpool" => %disk.zpool_name(),
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        log, "found M.2 disk but failed to find boot image path";
+                        "identity" => ?disk.identity(),
+                        "path" => disk.devfs_path().display(),
+                        "slot" => disk.slot(),
+                        "boot_image_path_err" => %err,
+                        "zpool" => %disk.zpool_name(),
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Args)]
@@ -162,26 +206,27 @@ impl InstallOpts {
         .await?;
 
         // TODO: figure out the actual destination.
-
-        // TODO: add retries to this process
-        // TODO: publish write events.
-        std::fs::create_dir_all(&self.destination).with_context(|| {
-            format!("error creating directories at {}", self.destination)
-        })?;
+        let destination = WriteDestination::in_directory(&self.destination)?;
 
         write_artifact(
+            &log,
             &host_phase_2_id,
             host_phase_2_artifact.artifact,
-            &self.destination.join("host_phase_2.bin"),
+            &destination.host_phase_2,
+            &event_sender,
         )
-        .await?;
+        .await;
 
         write_artifact(
+            &log,
             &control_plane_id,
             control_plane_artifact.artifact,
-            &self.destination.join("control_plane.bin"),
+            &destination.control_plane,
+            &event_sender,
         )
-        .await?;
+        .await;
+
+        // TODO: verify artifact was correctly written out to disk.
 
         // Drop the event sender: this signals completion.
         _ = event_sender
@@ -228,31 +273,6 @@ async fn fetch_artifact(
     );
 
     Ok(artifact)
-}
-
-async fn write_artifact(
-    artifact_id: &ArtifactHashId,
-    mut artifact: BufList,
-    destination: &Utf8Path,
-) -> Result<()> {
-    let mut file = tokio::fs::OpenOptions::new()
-        // TODO: do we want create = true? Maybe only if writing to a file and not an M.2.
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(destination)
-        .await
-        .with_context(|| {
-            format!("failed to open destination `{destination}` for writing")
-        })?;
-
-    let num_bytes = artifact.num_bytes();
-
-    file.write_all_buf(&mut artifact).await.with_context(|| {
-        format!("failed to write artifact {artifact_id:?} ({num_bytes} bytes) to destination `{destination}`")
-    })?;
-
-    Ok(())
 }
 
 pub(crate) fn stderr_env_drain(

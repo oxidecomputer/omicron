@@ -62,38 +62,46 @@ impl WicketdArtifactServer {
 
 #[async_trait]
 impl ArtifactGetter for WicketdArtifactServer {
-    async fn get(&self, id: &ArtifactId) -> Option<Body> {
+    async fn get(&self, id: &ArtifactId) -> Option<(u64, Body)> {
         // This is a test artifact name used by the installinator.
         if id.name == "__installinator-test" {
             // For testing, the version is the size of the artifact.
-            let size: usize = id
+            let size: u64 = id
                         .version
                         .parse()
                         .map_err(|err| {
                             slog::warn!(
                                 self.log,
-                                "for installinator-test, version should be a usize indicating the size but found {}: {err}",
+                                "for installinator-test, version should be a u64 indicating the size but found {}: {err}",
                                 id.version
                             );
                         })
                         .ok()?;
-            let mut bytes = BytesMut::with_capacity(size);
-            bytes.put_bytes(0, size);
-            return Some(Body::from(bytes.freeze()));
+            let mut bytes = BytesMut::with_capacity(size as usize);
+            bytes.put_bytes(0, size as usize);
+            return Some((size, Body::from(bytes.freeze())));
         }
 
         let buf_list = self.store.get(id)?;
+        let size = buf_list.num_bytes() as u64;
         // Return the list as a stream of bytes.
-        Some(Body::wrap_stream(stream::iter(
-            buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
-        )))
+        Some((
+            size,
+            Body::wrap_stream(stream::iter(
+                buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
+            )),
+        ))
     }
 
-    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<Body> {
+    async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<(u64, Body)> {
         let buf_list = self.store.get_by_hash(id)?;
-        Some(Body::wrap_stream(stream::iter(
-            buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
-        )))
+        let size = buf_list.num_bytes() as u64;
+        Some((
+            size,
+            Body::wrap_stream(stream::iter(
+                buf_list.into_iter().map(|bytes| Ok::<_, Infallible>(bytes)),
+            )),
+        ))
     }
 
     async fn report_progress(

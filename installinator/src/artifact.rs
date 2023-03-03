@@ -11,9 +11,10 @@ use installinator_artifact_client::ClientError;
 use installinator_common::ProgressReport;
 use ipcc_key_value::{InstallinatorImageId, Ipcc};
 use omicron_common::update::{ArtifactHash, ArtifactHashId};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::peers::FetchSender;
+use crate::{errors::HttpError, peers::FetchReceiver};
 
 #[derive(Clone, Debug, Eq, PartialEq, Args)]
 pub(crate) struct ArtifactIdOpts {
@@ -79,22 +80,14 @@ impl ArtifactClient {
     pub(crate) async fn fetch(
         &self,
         artifact_hash_id: ArtifactHashId,
-        sender: FetchSender,
-    ) {
-        let artifact_bytes = match self
+    ) -> Result<(u64, FetchReceiver), HttpError> {
+        let artifact_bytes = self
             .client
             .get_artifact_by_hash(
                 artifact_hash_id.kind.as_str(),
                 &artifact_hash_id.hash.to_string(),
             )
-            .await
-        {
-            Ok(artifact_bytes) => artifact_bytes,
-            Err(error) => {
-                _ = sender.send(Err(error)).await;
-                return;
-            }
-        };
+            .await?;
 
         slog::debug!(
             &self.log,
@@ -102,13 +95,33 @@ impl ArtifactClient {
             artifact_bytes.content_length(),
         );
 
-        let mut bytes = artifact_bytes.into_inner_stream();
-        while let Some(item) = bytes.next().await {
-            if let Err(_) = sender.send(item.map_err(Into::into)).await {
-                // The sender was dropped, which indicates that the job was cancelled.
-                return;
+        // We expect servers to set a Content-Length header.
+        let content_length =
+            match artifact_bytes.headers().get(http::header::CONTENT_LENGTH) {
+                Some(v) => {
+                    let s = v
+                        .to_str()
+                        .map_err(|_| HttpError::InvalidContentLength)?;
+                    s.parse().map_err(|_| HttpError::InvalidContentLength)?
+                }
+                None => return Err(HttpError::MissingContentLength),
+            };
+
+        let (fetch_sender, fetch_receiver) = mpsc::channel(8);
+
+        tokio::spawn(async move {
+            let mut bytes = artifact_bytes.into_inner_stream();
+            while let Some(item) = bytes.next().await {
+                if let Err(_) =
+                    fetch_sender.send(item.map_err(Into::into)).await
+                {
+                    // The sender was dropped, which indicates that the job was cancelled.
+                    return;
+                }
             }
-        }
+        });
+
+        Ok((content_length, fetch_receiver))
     }
 
     pub(crate) async fn report_progress(

@@ -8067,6 +8067,44 @@
         "x-dropshot-pagination": true
       }
     },
+    "/v1/groups/{group}": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch group",
+        "operationId": "group_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Group"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/images": {
       "get": {
         "tags": [

@@ -370,6 +370,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_user_view)?;
         api.register(group_list)?;
         api.register(group_list_v1)?;
+        api.register(group_view)?;
 
         // Console API operations
         api.register(console_api::login_begin)?;
@@ -7718,6 +7719,28 @@ async fn group_list_v1(
             groups,
             &|_, group: &Group| group.id,
         )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch group
+#[endpoint {
+    method = GET,
+    path = "/v1/groups/{group}",
+    tags = ["silos"],
+}]
+async fn group_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::GroupPath>,
+) -> Result<HttpResponseOk<Group>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., group) =
+            nexus.silo_group_lookup(&opctx, &path.group).fetch().await?;
+        Ok(HttpResponseOk(group.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
