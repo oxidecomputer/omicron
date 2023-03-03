@@ -221,12 +221,11 @@ lazy_static! {
         };
     pub static ref DEMO_DISK_METRICS_URL: String =
         format!(
-            "/organizations/{}/projects/{}/disks/{}/metrics/activated?start_time={:?}&end_time={:?}",
-            *DEMO_ORG_NAME,
-            *DEMO_PROJECT_NAME,
+            "/v1/disks/{}/metrics/activated?start_time={:?}&end_time={:?}&{}",
             *DEMO_DISK_NAME,
             Utc::now(),
             Utc::now(),
+            *DEMO_PROJECT_SELECTOR,
         );
 }
 
