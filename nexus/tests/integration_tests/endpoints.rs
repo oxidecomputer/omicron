@@ -114,7 +114,7 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("/v1/disks?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
-        format!("/organizations/{}/projects/{}/images", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/images?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
         format!("/v1/snapshots?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
@@ -329,7 +329,9 @@ lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
-        format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
+        format!("/v1/images/{}?organization={}&project={}", *DEMO_IMAGE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_IMAGE_PROMOTE_URL: String =
+        format!("/v1/images/{}/promote?organization={}&project={}", *DEMO_IMAGE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
         params::ImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -1238,15 +1240,6 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/by-id/images/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
-            ],
-        },
-
-        VerifyEndpoint {
             url: &DEMO_PROJECT_IMAGE_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
@@ -1254,6 +1247,15 @@ lazy_static! {
                 AllowedMethod::GetUnimplemented,
                 AllowedMethod::Delete,
             ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_PROJECT_IMAGE_PROMOTE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::Value::Null)
+            ]
         },
 
         /* Snapshots */
