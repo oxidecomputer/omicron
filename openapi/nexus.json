@@ -6828,7 +6828,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/sagas": {
@@ -6936,7 +6937,7 @@
           "system"
         ],
         "summary": "List silos",
-        "description": "Lists silos that are discoverable based on the current permissions.",
+        "description": "Lists silos that are discoverable based on the current permissions. Use `GET /v1/system/silos` instead",
         "operationId": "silo_list",
         "parameters": [
           {
@@ -6985,6 +6986,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -6992,6 +6994,7 @@
           "system"
         ],
         "summary": "Create a silo",
+        "description": "Use `POST /v1/system/silos` instead",
         "operationId": "silo_create",
         "requestBody": {
           "content": {
@@ -7020,7 +7023,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}": {
@@ -7313,6 +7317,7 @@
           "system"
         ],
         "summary": "Create a SAML IDP",
+        "description": "Use `POST /v1/system/identity-providers/saml` instead.",
         "operationId": "saml_identity_provider_create",
         "parameters": [
           {
@@ -7352,7 +7357,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/identity-providers/saml/{provider_name}": {
@@ -7448,6 +7454,7 @@
           "system"
         ],
         "summary": "Update a silo's IAM policy",
+        "description": "Use `PUT /v1/system/silos/{silo}/policy` instead",
         "operationId": "silo_policy_update",
         "parameters": [
           {
@@ -7487,7 +7494,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/users/all": {
@@ -7564,6 +7572,7 @@
           "system"
         ],
         "summary": "Fetch a user",
+        "description": "Use `GET /v1/system/users/{user_id}` instead",
         "operationId": "silo_user_view",
         "parameters": [
           {
@@ -7603,7 +7612,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/user": {
@@ -10688,7 +10698,7 @@
           "system"
         ],
         "summary": "Create a user",
-        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
+        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider. Use `POST /v1/system/identity-providers/local/users` instead",
         "operationId": "local_idp_user_create_v1",
         "parameters": [
           {
@@ -10727,7 +10737,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/v1/system/identity-providers/local/users/{user_id}": {

@@ -800,12 +800,12 @@ impl super::Nexus {
             .saml_identity_provider_create(opctx, &authz_idp_list, provider)
             .await
     }
-}
 
-pub fn silo_group_lookup<'a>(
-    &'a self,
-    opctx: &'a OpContext,
-    group_id: &'a Uuid,
-) -> db::lookup::SiloGroup<'a> {
-    LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
+    pub fn silo_group_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        group_id: &'a Uuid,
+    ) -> db::lookup::SiloGroup<'a> {
+        LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
+    }
 }

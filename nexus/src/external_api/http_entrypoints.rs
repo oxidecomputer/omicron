@@ -533,6 +533,7 @@ async fn system_policy_update_v1(
     method = PUT,
     path = "/system/policy",
     tags = ["policy"],
+    deprecated = true
 }]
 async fn system_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -714,10 +715,12 @@ async fn silo_list_v1(
 /// List silos
 ///
 /// Lists silos that are discoverable based on the current permissions.
+/// Use `GET /v1/system/silos` instead
 #[endpoint {
     method = GET,
     path = "/system/silos",
     tags = ["system"],
+    deprecated = true
 }]
 async fn silo_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -768,10 +771,12 @@ async fn silo_create_v1(
 }
 
 /// Create a silo
+/// Use `POST /v1/system/silos` instead
 #[endpoint {
     method = POST,
     path = "/system/silos",
     tags = ["system"],
+    deprecated = true
 }]
 async fn silo_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -998,10 +1003,12 @@ async fn silo_policy_update_v1(
 }
 
 /// Update a silo's IAM policy
+/// Use `PUT /v1/system/silos/{silo}/policy` instead
 #[endpoint {
     method = PUT,
     path = "/system/silos/{silo_name}/policy",
     tags = ["system"],
+    deprecated = true
 }]
 async fn silo_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1140,10 +1147,12 @@ struct UserPathParam {
 }
 
 /// Fetch a user
+/// Use `GET /v1/system/users/{user_id}` instead
 #[endpoint {
     method = GET,
     path = "/system/silos/{silo_name}/users/id/{user_id}",
     tags = ["system"],
+    deprecated = true
 }]
 async fn silo_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1272,10 +1281,12 @@ async fn saml_identity_provider_create_v1(
 }
 
 /// Create a SAML IDP
+/// Use `POST /v1/system/identity-providers/saml` instead.
 #[endpoint {
     method = POST,
     path = "/system/silos/{silo_name}/identity-providers/saml",
     tags = ["system"],
+    deprecated = true
 }]
 async fn saml_identity_provider_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1383,10 +1394,12 @@ async fn saml_identity_provider_view(
 /// Users can only be created in Silos with `provision_type` == `Fixed`.
 /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
 /// logs in using an external Identity Provider.
+/// Use `POST /v1/system/identity-providers/local/users` instead
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/local/users",
     tags = ["system"],
+    deprecated = true
 }]
 async fn local_idp_user_create_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
