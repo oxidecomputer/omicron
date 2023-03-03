@@ -5689,6 +5689,10 @@ async fn vpc_subnet_list_network_interfaces(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// This endpoint is likely temporary. We would rather list all IPs allocated in
+// a subnet whether they come from NICs or something else. See
+// https://github.com/oxidecomputer/omicron/issues/2476
+
 /// List network interfaces
 #[endpoint {
     method = GET,
