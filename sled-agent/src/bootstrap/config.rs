@@ -4,10 +4,10 @@
 
 //! Interfaces for working with bootstrap agent configuration
 
-use crate::illumos::dladm::PhysicalLink;
 use crate::sp::SimSpConfig;
 use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
+use illumos_utils::dladm::PhysicalLink;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;

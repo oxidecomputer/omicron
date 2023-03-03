@@ -290,6 +290,85 @@
             ]
           },
           {
+            "description": "Failed to format a disk.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The format attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the format attempt took.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "message": {
+                "description": "A message indicating the reason for failure.",
+                "type": "string"
+              },
+              "path": {
+                "description": "The path to the disk.",
+                "type": "string",
+                "format": "UTF-8 path"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "format_failed"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "elapsed",
+              "message",
+              "path",
+              "reason"
+            ]
+          },
+          {
+            "description": "Completed formatting a disk.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The format attempt.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the format attempt took.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "path": {
+                "description": "The path to the disk.",
+                "type": "string",
+                "format": "UTF-8 path"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "format_completed"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "elapsed",
+              "path",
+              "reason"
+            ]
+          },
+          {
             "description": "Failed to write an artifact.",
             "type": "object",
             "properties": {
@@ -396,6 +475,56 @@
               "destination",
               "elapsed",
               "kind",
+              "reason"
+            ]
+          },
+          {
+            "description": "A miscellaneous error occurred.\n\nThis is a catch-all for errors that aren't described by any of the variants.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "data": {
+                "description": "Data about the operation, serialized as JSON."
+              },
+              "elapsed": {
+                "description": "How long the operation took before it failed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "is_fatal": {
+                "description": "Whether this operation is fatal, i.e. will not be retried.",
+                "type": "boolean"
+              },
+              "message": {
+                "description": "A message indicating why the operation failed.",
+                "type": "string"
+              },
+              "operation": {
+                "description": "The name of the operation that failed.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "misc_error"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "data",
+              "elapsed",
+              "is_fatal",
+              "message",
+              "operation",
               "reason"
             ]
           },
@@ -528,6 +657,50 @@
               "elapsed",
               "kind",
               "peer",
+              "reason"
+            ]
+          },
+          {
+            "description": "A disk is being formatted.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The format attempt.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long it's been since the format started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "path": {
+                "description": "The path to the disk.",
+                "type": "string",
+                "format": "UTF-8 path"
+              },
+              "percentage": {
+                "description": "Percentage progress.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "format_progress"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "elapsed",
+              "path",
+              "percentage",
               "reason"
             ]
           },
