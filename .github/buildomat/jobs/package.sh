@@ -23,7 +23,7 @@ rustc --version
 
 # Build
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m cargo run --locked --release --bin omicron-package -- package
+ptime -m cargo run --locked --release --bin omicron-package -- -t switch_variant=asic package
 
 # Assemble global zone files in a temporary directory.
 tmp=$(mktemp -d)
