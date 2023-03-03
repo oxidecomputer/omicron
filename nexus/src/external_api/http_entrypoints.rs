@@ -4649,10 +4649,10 @@ async fn instance_external_ip_list_v1(
     path_params: Path<params::InstancePath>,
 ) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let instance_selector = params::InstanceSelector {
             project_selector: query.project_selector,
