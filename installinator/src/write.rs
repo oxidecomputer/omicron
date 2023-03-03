@@ -174,10 +174,7 @@ enum DriveWriteProgress {
 
 pub(crate) struct ArtifactWriter<'a> {
     drives: BTreeMap<M2Slot, (ArtifactDestination, DriveWriteProgress)>,
-    host_phase_2_id: &'a ArtifactHashId,
-    host_phase_2_data: &'a BufList,
-    control_plane_id: &'a ArtifactHashId,
-    control_plane_data: &'a BufList,
+    artifacts: ArtifactsToWrite<'a>,
 }
 
 impl<'a> ArtifactWriter<'a> {
@@ -195,10 +192,12 @@ impl<'a> ArtifactWriter<'a> {
             .collect();
         Self {
             drives,
-            host_phase_2_id,
-            host_phase_2_data,
-            control_plane_id,
-            control_plane_data,
+            artifacts: ArtifactsToWrite {
+                host_phase_2_id,
+                host_phase_2_data,
+                control_plane_id,
+                control_plane_data,
+            },
         }
     }
 
@@ -229,18 +228,16 @@ impl<'a> ArtifactWriter<'a> {
             for (drive, (destinations, progress)) in self.drives.iter_mut() {
                 *progress = match progress {
                     DriveWriteProgress::Unstarted => {
-                        let new_progress = write_starting_with_host_phase_2(
-                            log,
-                            1,
-                            destinations,
-                            self.host_phase_2_id,
-                            self.host_phase_2_data,
-                            self.control_plane_id,
-                            self.control_plane_data,
-                            transport,
-                            event_sender,
-                        )
-                        .await;
+                        let new_progress = self
+                            .artifacts
+                            .write_starting_with_host_phase_2(
+                                log,
+                                1,
+                                destinations,
+                                transport,
+                                event_sender,
+                            )
+                            .await;
 
                         if new_progress == DriveWriteProgress::Done {
                             done_drives.push(*drive);
@@ -250,18 +247,16 @@ impl<'a> ArtifactWriter<'a> {
                         new_progress
                     }
                     DriveWriteProgress::HostPhase2Failed { attempts } => {
-                        let new_progress = write_starting_with_host_phase_2(
-                            log,
-                            *attempts + 1,
-                            destinations,
-                            self.host_phase_2_id,
-                            self.host_phase_2_data,
-                            self.control_plane_id,
-                            self.control_plane_data,
-                            transport,
-                            event_sender,
-                        )
-                        .await;
+                        let new_progress = self
+                            .artifacts
+                            .write_starting_with_host_phase_2(
+                                log,
+                                *attempts + 1,
+                                destinations,
+                                transport,
+                                event_sender,
+                            )
+                            .await;
 
                         if new_progress == DriveWriteProgress::Done {
                             done_drives.push(*drive);
@@ -271,16 +266,16 @@ impl<'a> ArtifactWriter<'a> {
                         new_progress
                     }
                     DriveWriteProgress::ControlPlaneFailed { attempts } => {
-                        let new_progress = write_starting_with_control_plane(
-                            log,
-                            *attempts + 1,
-                            destinations,
-                            self.control_plane_id,
-                            self.control_plane_data,
-                            transport,
-                            event_sender,
-                        )
-                        .await;
+                        let new_progress = self
+                            .artifacts
+                            .write_starting_with_control_plane(
+                                log,
+                                *attempts + 1,
+                                destinations,
+                                transport,
+                                event_sender,
+                            )
+                            .await;
 
                         if new_progress == DriveWriteProgress::Done {
                             done_drives.push(*drive);
@@ -315,83 +310,87 @@ impl<'a> ArtifactWriter<'a> {
     }
 }
 
-// Attempt to write the host phase 2 and then, if successful, the control plane
-// image.
-async fn write_starting_with_host_phase_2(
-    log: &Logger,
-    host_phase_2_attempt: usize,
-    destinations: &ArtifactDestination,
-    host_phase_2_id: &ArtifactHashId,
-    host_phase_2_data: &BufList,
-    control_plane_id: &ArtifactHashId,
-    control_plane_data: &BufList,
-    transport: &mut impl WriteTransport,
-    event_sender: &mpsc::Sender<ReportEvent>,
-) -> DriveWriteProgress {
-    if let Err(error) = write_artifact_impl(
-        host_phase_2_attempt,
-        host_phase_2_id,
-        host_phase_2_data.clone(),
-        &destinations.host_phase_2,
-        destinations.create_host_phase_2,
-        transport,
-        event_sender,
-    )
-    .await
-    {
-        info!(log, "{error:?}"; "artifact_id" => ?host_phase_2_id);
-        return DriveWriteProgress::HostPhase2Failed {
-            attempts: host_phase_2_attempt,
-        };
-    }
-
-    write_starting_with_control_plane(
-        log,
-        1,
-        destinations,
-        control_plane_id,
-        control_plane_data,
-        transport,
-        event_sender,
-    )
-    .await
+struct ArtifactsToWrite<'a> {
+    host_phase_2_id: &'a ArtifactHashId,
+    host_phase_2_data: &'a BufList,
+    control_plane_id: &'a ArtifactHashId,
+    control_plane_data: &'a BufList,
 }
 
-// Attempt to write the control plane image, assuming the host phase 2 has
-// already been written.
-async fn write_starting_with_control_plane(
-    log: &Logger,
-    control_plane_attempt: usize,
-    destinations: &ArtifactDestination,
-    control_plane_id: &ArtifactHashId,
-    control_plane_data: &BufList,
-    transport: &mut impl WriteTransport,
-    event_sender: &mpsc::Sender<ReportEvent>,
-) -> DriveWriteProgress {
-    // Temporary workaround while we may not know how to write the control plane
-    // image: if we don't know where to put it, we're done.
-    let Some(control_plane_dest) = destinations.control_plane.as_ref() else {
-        return DriveWriteProgress::Done;
-    };
+impl ArtifactsToWrite<'_> {
+    // Attempt to write the host phase 2 and then, if successful, the control
+    // plane image.
+    async fn write_starting_with_host_phase_2(
+        &self,
+        log: &Logger,
+        host_phase_2_attempt: usize,
+        destinations: &ArtifactDestination,
+        transport: &mut impl WriteTransport,
+        event_sender: &mpsc::Sender<ReportEvent>,
+    ) -> DriveWriteProgress {
+        if let Err(error) = write_artifact_impl(
+            host_phase_2_attempt,
+            self.host_phase_2_id,
+            self.host_phase_2_data.clone(),
+            &destinations.host_phase_2,
+            destinations.create_host_phase_2,
+            transport,
+            event_sender,
+        )
+        .await
+        {
+            info!(log, "{error:?}"; "artifact_id" => ?self.host_phase_2_id);
+            return DriveWriteProgress::HostPhase2Failed {
+                attempts: host_phase_2_attempt,
+            };
+        }
 
-    if let Err(error) = write_artifact_impl(
-        control_plane_attempt,
-        control_plane_id,
-        control_plane_data.clone(),
-        control_plane_dest,
-        true,
-        transport,
-        event_sender,
-    )
-    .await
-    {
-        info!(log, "{error:?}"; "artifact_id" => ?control_plane_id);
-        return DriveWriteProgress::ControlPlaneFailed {
-            attempts: control_plane_attempt,
-        };
+        self.write_starting_with_control_plane(
+            log,
+            1,
+            destinations,
+            transport,
+            event_sender,
+        )
+        .await
     }
 
-    DriveWriteProgress::Done
+    // Attempt to write the control plane image, assuming the host phase 2 has
+    // already been written.
+    async fn write_starting_with_control_plane(
+        &self,
+        log: &Logger,
+        control_plane_attempt: usize,
+        destinations: &ArtifactDestination,
+        transport: &mut impl WriteTransport,
+        event_sender: &mpsc::Sender<ReportEvent>,
+    ) -> DriveWriteProgress {
+        // Temporary workaround while we may not know how to write the control
+        // plane image: if we don't know where to put it, we're done.
+        let Some(control_plane_dest) = destinations.control_plane.as_ref() else
+        {
+            return DriveWriteProgress::Done;
+        };
+
+        if let Err(error) = write_artifact_impl(
+            control_plane_attempt,
+            self.control_plane_id,
+            self.control_plane_data.clone(),
+            control_plane_dest,
+            true,
+            transport,
+            event_sender,
+        )
+        .await
+        {
+            info!(log, "{error:?}"; "artifact_id" => ?self.control_plane_id);
+            return DriveWriteProgress::ControlPlaneFailed {
+                attempts: control_plane_attempt,
+            };
+        }
+
+        DriveWriteProgress::Done
+    }
 }
 
 // Used in tests to test against file failures.
