@@ -338,6 +338,8 @@ lazy_static! {
             },
             source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
             block_size: params::BlockSize::try_from(4096).unwrap(),
+            os: "fake-os".to_string(),
+            version: "1.0".to_string()
         };
 
     // Global Images

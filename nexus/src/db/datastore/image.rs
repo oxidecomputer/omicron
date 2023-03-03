@@ -3,8 +3,10 @@ use nexus_db_model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 
 use crate::authz;
@@ -85,5 +87,34 @@ impl DataStore {
             }
         })?;
         Ok(image)
+    }
+
+    pub async fn image_promote(
+        &self,
+        opctx: &OpContext,
+        authz_image: &authz::Image,
+    ) -> UpdateResult<Image> {
+        opctx.authorize(authz::Action::Modify, authz_image).await?;
+        let authz_silo = opctx.authn.silo_required().internal_context(
+            "fetching silo permissions for image promotion",
+        )?;
+        // Promoting an image impacts all projects in the silo so we ensure the user
+        // has the equivalent permissions of creating a resource in the silo.
+        opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
+
+        use db::schema::image::dsl;
+        diesel::update(dsl::image)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_image.id()))
+            .set(dsl::is_global.eq(true))
+            .returning(Image::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_image),
+                )
+            })
     }
 }

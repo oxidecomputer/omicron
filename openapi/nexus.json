@@ -1706,7 +1706,7 @@
           "images"
         ],
         "summary": "List images",
-        "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first.",
+        "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first. Use `GET /v1/images` instead",
         "operationId": "image_list",
         "parameters": [
           {
@@ -1773,6 +1773,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -8066,6 +8067,278 @@
         "x-dropshot-pagination": true
       }
     },
+    "/v1/images": {
+      "get": {
+        "tags": [
+          "images"
+        ],
+        "summary": "List images",
+        "description": "List images which are global or scoped to the specified project. The images are returned sorted by creation date, with the most recent images appearing first.",
+        "operationId": "image_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Create an image",
+        "description": "Create a new image in a project.",
+        "operationId": "image_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/images/{image}": {
+      "get": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Fetch an image",
+        "description": "Fetch the details for a specific image in a project.",
+        "operationId": "image_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Delete an image",
+        "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
+        "operationId": "image_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/images/{image}/promote": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Promote an image",
+        "description": "Makes an image available to all other projects",
+        "operationId": "image_promote_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/instances": {
       "get": {
         "tags": [
@@ -14157,6 +14430,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "is_global": {
+            "description": "If the image is visible to all projects",
+            "type": "boolean"
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -14165,8 +14442,12 @@
               }
             ]
           },
+          "os": {
+            "description": "The family of the operating system like Debian, Ubuntu, etc.",
+            "type": "string"
+          },
           "project_id": {
-            "description": "The project the disk belongs to",
+            "description": "The project the image belongs to",
             "type": "string",
             "format": "uuid"
           },
@@ -14194,8 +14475,7 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
-            "description": "Version of this, if any",
+            "description": "Version of the operating system",
             "type": "string"
           }
         },
@@ -14203,11 +14483,14 @@
           "block_size",
           "description",
           "id",
+          "is_global",
           "name",
+          "os",
           "project_id",
           "size",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "version"
         ]
       },
       "ImageCreate": {
@@ -14228,6 +14511,10 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
+          "os": {
+            "description": "The family of the operating system (e.g. Debian, Ubuntu, etc.)",
+            "type": "string"
+          },
           "source": {
             "description": "The source of the image's contents.",
             "allOf": [
@@ -14235,13 +14522,19 @@
                 "$ref": "#/components/schemas/ImageSource"
               }
             ]
+          },
+          "version": {
+            "description": "The version of the operating system (e.g. 18.04, 20.04, etc.)",
+            "type": "string"
           }
         },
         "required": [
           "block_size",
           "description",
           "name",
-          "source"
+          "os",
+          "source",
+          "version"
         ]
       },
       "ImageResultsPage": {

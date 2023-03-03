@@ -24,6 +24,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -279,6 +280,16 @@ impl super::Nexus {
         Err(self
             .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
             .await)
+    }
+
+    pub async fn image_promote(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        image_lookup: &lookup::Image<'_>,
+    ) -> UpdateResult<db::model::Image> {
+        let (.., authz_image) =
+            image_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore.image_promote(opctx, &authz_image).await
     }
 
     // Globally-Scoped Images

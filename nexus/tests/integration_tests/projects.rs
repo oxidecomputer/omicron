@@ -265,6 +265,8 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
                 "you can boot any image, as long as it's alpine",
             ),
         },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
         source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
