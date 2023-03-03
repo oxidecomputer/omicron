@@ -153,7 +153,9 @@ sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
 	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
 	-i out/sled-agent/pkg/config-rss.toml
 
-svccfg import out/sled-agent/pkg/manifest.xml
+mkdir -p /opt/oxide
+mv out/sled-agent /opt/oxide/
+svccfg import /opt/oxide/sled-agent/pkg/manifest.xml
 
 ./tests/bootstrap
 rm ./tests/bootstrap
