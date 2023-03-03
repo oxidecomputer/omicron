@@ -5,6 +5,7 @@
 #: target = "helios-latest"
 #: rust_toolchain = "1.66.1"
 #: output_rules = [
+#:	"=/work/utilities-package.tar.gz",
 #:	"=/work/global-zone-packages.tar.gz",
 #:	"=/work/zones/*.tar.gz",
 #: ]
@@ -24,6 +25,17 @@ rustc --version
 # Build
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 ptime -m cargo run --locked --release --bin omicron-package -- -t switch_variant=asic package
+
+
+# Assemble some utilities into a tarball that can be used by deployment
+# phases of buildomat.
+
+utilities=(
+  package-manifest.toml
+  tools/create_virtual_hardware.sh
+)
+
+ptime -m tar cvzf /work/utilities-package.tar.gz "${utilities[@]}"
 
 # Assemble global zone files in a temporary directory.
 tmp=$(mktemp -d)

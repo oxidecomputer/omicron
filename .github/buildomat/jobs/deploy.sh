@@ -109,6 +109,7 @@ pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
+ptime -m tar xvzf /input/package/work/utilities-package.tar.gz
 mkdir out/
 ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz -C out
 cp /input/package/work/zones/* out/
