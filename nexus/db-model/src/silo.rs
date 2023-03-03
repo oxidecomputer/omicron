@@ -5,7 +5,7 @@
 use super::{Generation, Organization};
 use crate::collection::DatastoreCollectionConfig;
 use crate::impl_enum_type;
-use crate::schema::{organization, silo};
+use crate::schema::{image, organization, silo};
 use db_macros::Resource;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views;

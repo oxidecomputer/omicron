@@ -192,6 +192,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_view_by_id)?;
         api.register(image_delete)?;
 
+        // Silo-scoped images API
+        api.register(image_list_v1)?;
+        api.register(image_create_v1)?;
+        api.register(image_view_v1)?;
+        api.register(image_delete_v1)?;
+
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
         api.register(snapshot_view)?;
@@ -2535,15 +2541,15 @@ async fn disk_create(
     new_disk: TypedBody<params::DiskCreate>,
 ) -> Result<HttpResponseCreated<Disk>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let new_disk_params = &new_disk.into_inner();
-    let project_selector = params::ProjectSelector::new(
-        Some(path.organization_name.into()),
-        path.project_name.into(),
-    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let new_disk_params = &new_disk.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let disk = nexus
             .project_create_disk(&opctx, &project_lookup, &new_disk_params)
@@ -2565,15 +2571,15 @@ async fn disk_view_v1(
     query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
-    let disk_selector = params::DiskSelector {
-        disk: path.disk,
-        project_selector: query.project_selector,
-    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
         let (.., disk) =
             nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
@@ -2602,15 +2608,15 @@ async fn disk_view(
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let disk_selector = params::DiskSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.disk_name.into(),
-    );
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let disk_selector = params::DiskSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.disk_name.into(),
+        );
         let (.., disk) =
             nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
@@ -2631,11 +2637,12 @@ async fn disk_view_by_id(
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let disk_selector = params::DiskSelector::new(None, None, path.id.into());
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let disk_selector =
+            params::DiskSelector::new(None, None, path.id.into());
         let (.., disk) =
             nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
@@ -2655,15 +2662,15 @@ async fn disk_delete_v1(
     query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
-    let disk_selector = params::DiskSelector {
-        disk: path.disk,
-        project_selector: query.project_selector,
-    };
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
         nexus.project_delete_disk(&opctx, &disk_lookup).await?;
         Ok(HttpResponseDeleted())
@@ -4040,12 +4047,51 @@ async fn system_image_delete(
 
 /// List images
 ///
+/// Lists silo or project images depending on if the project selector is provided.
+#[endpoint {
+    method = GET,
+    path = "/v1/images",
+    tags = ["images"],
+}]
+async fn image_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, &scan_params.selector)?;
+        let images = nexus
+            .image_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            images,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List images
+///
 /// List images in a project. The images are returned sorted by creation date,
 /// with the most recent images appearing first.
+/// Use `GET /v1/images` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
     tags = ["images"],
+    deprecated = true
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4053,20 +4099,21 @@ async fn image_list(
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let images = nexus
-            .project_list_images(
+            .image_list(
                 &opctx,
-                organization_name,
-                project_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &project_lookup,
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
             )
             .await?
             .into_iter()
@@ -4086,6 +4133,33 @@ async fn image_list(
 /// Create a new image in a project.
 #[endpoint {
     method = POST,
+    path = "/v1/images",
+    tags = ["images"]
+}]
+async fn image_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    new_image: TypedBody<params::ImageCreate>,
+) -> Result<HttpResponseCreated<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let params = &new_image.into_inner();
+        let project_lookup = nexus.project_lookup(&opctx, &query)?;
+        let image =
+            nexus.image_create(&opctx, &project_lookup, &params).await?;
+        Ok(HttpResponseCreated(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create an image
+///
+/// Create a new image in a project.
+#[endpoint {
+    method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
     tags = ["images"]
 }]
@@ -4095,26 +4169,53 @@ async fn image_create(
     new_image: TypedBody<params::ImageCreate>,
 ) -> Result<HttpResponseCreated<Image>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let new_image_params = &new_image.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let new_image_params = &new_image.into_inner();
+        let project_selector = params::ProjectSelector::new(
+            Some(path.organization_name.into()),
+            path.project_name.into(),
+        );
+        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let image = nexus
-            .project_create_image(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &new_image_params,
-            )
+            .image_create(&opctx, &project_lookup, &new_image_params)
             .await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an image
+///
+/// Fetch the details for a specific image in a project.
+#[endpoint {
+    method = GET,
+    path = "/v1/images/{image}",
+    tags = ["images"],
+}]
+async fn image_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::ImagePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let image_selector = params::ImageSelector {
+            image: path.image,
+            project_selector: query.project_selector,
+        };
+        let (.., image) =
+            nexus.image_lookup(&opctx, &image_selector)?.fetch().await?;
+        Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 /// Path parameters for Image requests
 #[derive(Deserialize, JsonSchema)]
 struct ImagePathParam {
@@ -4136,21 +4237,17 @@ async fn image_view(
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let image_name = &path.image_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let image = nexus
-            .project_image_fetch(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &image_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let image_selector = params::ImageSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.image_name.into(),
+        );
+        let (.., image) =
+            nexus.image_lookup(&opctx, &image_selector)?.fetch().await?;
         Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4167,13 +4264,47 @@ async fn image_view_by_id(
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let image = nexus.project_image_fetch_by_id(&opctx, id).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let image_selector =
+            params::ImageSelector::new(None, None, path.id.into());
+        let (.., image) =
+            nexus.image_lookup(&opctx, &image_selector)?.fetch().await?;
         Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete an image
+///
+/// Permanently delete an image from a project. This operation cannot be undone.
+/// Any instances in the project using the image will continue to run, however
+/// new instances can not be created with this image.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/images/{image}",
+    tags = ["images"],
+}]
+async fn image_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::ImagePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let image_selector = params::ImageSelector {
+            image: path.image,
+            project_selector: query.project_selector,
+        };
+        let image_lookup = nexus.image_lookup(&opctx, &image_selector)?;
+        nexus.image_delete(&opctx, &image_lookup).await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4193,21 +4324,17 @@ async fn image_delete(
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let image_name = &path.image_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus
-            .project_delete_image(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &image_name,
-            )
-            .await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let image_selector = params::ImageSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.image_name.into(),
+        );
+        let image_lookup = nexus.image_lookup(&opctx, &image_selector)?;
+        nexus.image_delete(&opctx, &image_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

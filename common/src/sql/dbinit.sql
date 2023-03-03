@@ -875,10 +875,12 @@ CREATE TABLE omicron.public.image (
     time_deleted TIMESTAMPTZ,
 
     project_id UUID NOT NULL,
+    is_global BOOL NOT NULL,
     volume_id UUID NOT NULL,
 
     url STRING(8192),
-    version STRING(64),
+    os STRING(64) NOT NULL,
+    version STRING(64) NOT NULL,
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
@@ -890,6 +892,7 @@ CREATE UNIQUE INDEX on omicron.public.image (
 ) WHERE
     time_deleted is NULL;
 
+/* TODO-v1: Delete this after migration */
 CREATE TABLE omicron.public.global_image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,

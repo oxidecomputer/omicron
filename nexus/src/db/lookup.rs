@@ -548,7 +548,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo", "Organization" ],
-    children = [ "Disk", "Instance", "Vpc", "Snapshot" ],
+    children = [ "Disk", "Instance", "Vpc", "Snapshot", "Image" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
