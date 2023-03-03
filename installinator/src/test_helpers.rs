@@ -8,9 +8,11 @@ use omicron_common::{
     update::{ArtifactHash, ArtifactHashId},
 };
 
-pub(crate) fn dummy_artifact_hash_id() -> ArtifactHashId {
+pub(crate) fn dummy_artifact_hash_id(
+    kind: KnownArtifactKind,
+) -> ArtifactHashId {
     ArtifactHashId {
-        kind: KnownArtifactKind::ControlPlane.into(),
+        kind: kind.into(),
         hash: ArtifactHash(
             hex_literal::hex!("b5bb9d8014a0f9b1d61e21e796d78dcc" "df1352f23cd32812f4850b878ae4944c"),
         ),

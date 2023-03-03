@@ -12,15 +12,14 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
-use slog::{info, warn, Drain};
+use slog::Drain;
 use tokio::sync::mpsc;
 
 use crate::{
     artifact::ArtifactIdOpts,
-    hardware::Hardware,
     peers::{DiscoveryMechanism, FetchedArtifact, Peers},
     reporter::{ProgressReporter, ReportEvent},
-    write::{write_artifact, WriteDestination},
+    write::{ArtifactWriter, WriteDestination},
 };
 
 /// Installinator app.
@@ -109,33 +108,10 @@ struct DebugHardwareScan {}
 
 impl DebugHardwareScan {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        let hardware = Hardware::scan(&log)?;
-
-        for disk in hardware.m2_disks() {
-            match disk.boot_image_devfs_path() {
-                Ok(boot_image_path) => {
-                    info!(
-                        log, "found M.2 disk";
-                        "identity" => ?disk.identity(),
-                        "path" => disk.devfs_path().display(),
-                        "slot" => disk.slot(),
-                        "boot_image_path" => boot_image_path.display(),
-                        "zpool" => %disk.zpool_name(),
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        log, "found M.2 disk but failed to find boot image path";
-                        "identity" => ?disk.identity(),
-                        "path" => disk.devfs_path().display(),
-                        "slot" => disk.slot(),
-                        "boot_image_path_err" => %err,
-                        "zpool" => %disk.zpool_name(),
-                    );
-                }
-            }
-        }
-
+        // Finding the write destination from the gimlet hardware logs details
+        // about what it's doing sufficiently for this subcommand; just create a
+        // write destination and then discard it.
+        _ = WriteDestination::from_hardware(&log)?;
         Ok(())
     }
 }
@@ -151,9 +127,19 @@ struct InstallOpts {
     artifact_ids: ArtifactIdOpts,
 
     // TODO: checksum?
+    /// Install on a gimlet's M.2 drives, found via scanning for hardware.
+    ///
+    /// WARNING: This will overwrite the boot image slice of both M.2 drives, if
+    /// present!
+    #[clap(long)]
+    install_on_gimlet: bool,
 
     // The destination to write to.
-    destination: Utf8PathBuf,
+    #[clap(
+        required_unless_present = "install_on_gimlet",
+        conflicts_with = "install_on_gimlet"
+    )]
+    destination: Option<Utf8PathBuf>,
 }
 
 impl InstallOpts {
@@ -205,26 +191,24 @@ impl InstallOpts {
         )
         .await?;
 
-        // TODO: figure out the actual destination.
-        let destination = WriteDestination::in_directory(&self.destination)?;
+        let destination = if self.install_on_gimlet {
+            WriteDestination::from_hardware(&log)?
+        } else {
+            // clap ensures `self.destinatino` is not `None` if
+            // `install_on_gimlet` is false.
+            let destination = self.destination.as_ref().unwrap();
+            WriteDestination::in_directory(destination)?
+        };
 
-        write_artifact(
-            &log,
+        let mut writer = ArtifactWriter::new(
             &host_phase_2_id,
-            host_phase_2_artifact.artifact,
-            &destination.host_phase_2,
-            &event_sender,
-        )
-        .await;
-
-        write_artifact(
-            &log,
+            &host_phase_2_artifact.artifact,
             &control_plane_id,
-            control_plane_artifact.artifact,
-            &destination.control_plane,
-            &event_sender,
-        )
-        .await;
+            &control_plane_artifact.artifact,
+            destination,
+        );
+
+        writer.write(&log, &event_sender).await;
 
         // TODO: verify artifact was correctly written out to disk.
 
