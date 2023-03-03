@@ -32,6 +32,7 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
+use installinator_common::ProgressEventKind;
 use installinator_common::ProgressReport;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
@@ -441,8 +442,8 @@ impl UpdateDriver {
                 }
             })?;
 
-        while let Some(_report) = ipr_receiver.recv().await {
-            // TODO: process progress reports, not just completion.
+        while let Some(report) = ipr_receiver.recv().await {
+            self.process_installinator_report(report).await;
         }
 
         // The receiver being closed means that the installinator has completed.
@@ -581,6 +582,66 @@ impl UpdateDriver {
                 );
             }
         }
+    }
+
+    async fn process_installinator_report(
+        &mut self,
+        mut report: ProgressReport,
+    ) {
+        // Currently, progress reports have zero or one progress events. Don't
+        // assert that here, in case this version of wicketd is updating a
+        // future installinator which reports multiple progress events.
+        let kind = if let Some(event) = report.progress_events.drain(..).next()
+        {
+            match event.kind {
+                ProgressEventKind::DownloadProgress {
+                    attempt,
+                    kind,
+                    peer: _peer,
+                    downloaded_bytes,
+                    total_bytes,
+                    elapsed,
+                } => UpdateStateKind::ArtifactDownloadProgress {
+                    attempt,
+                    kind,
+                    downloaded_bytes,
+                    total_bytes,
+                    elapsed,
+                },
+                ProgressEventKind::FormatProgress {
+                    attempt,
+                    path,
+                    percentage,
+                    elapsed,
+                } => UpdateStateKind::InstallinatorFormatProgress {
+                    attempt,
+                    path,
+                    percentage,
+                    elapsed,
+                },
+                ProgressEventKind::WriteProgress {
+                    attempt,
+                    kind,
+                    destination,
+                    written_bytes,
+                    total_bytes,
+                    elapsed,
+                } => UpdateStateKind::ArtifactWriteProgress {
+                    attempt,
+                    kind,
+                    destination: Some(destination),
+                    written_bytes,
+                    total_bytes,
+                    elapsed,
+                },
+            }
+        } else {
+            UpdateStateKind::WaitingForProgress {
+                component: "installinator".to_owned(),
+            }
+        };
+
+        self.set_current_update_state(kind);
     }
 
     // Installs the installinator phase 1 and configures the host to fetch phase
@@ -887,6 +948,7 @@ impl UpdateDriver {
     ) -> anyhow::Result<()> {
         // How often we poll MGS for the progress of an update once it starts.
         const STATUS_POLL_FREQ: Duration = Duration::from_millis(300);
+        let start = Instant::now();
 
         loop {
             let status = self
@@ -919,9 +981,14 @@ impl UpdateDriver {
                 } => {
                     ensure!(id == update_id, "SP processing different update");
                     self.set_current_update_state(
-                        UpdateStateKind::ArtifactUpdateProgress {
-                            bytes_received: bytes_received.into(),
+                        UpdateStateKind::ArtifactWriteProgress {
+                            // We currently don't do any retries, so this is attempt 1.
+                            attempt: 1,
+                            kind: artifact.kind.clone(),
+                            destination: None,
+                            written_bytes: bytes_received.into(),
                             total_bytes: total_bytes.into(),
+                            elapsed: start.elapsed(),
                         },
                     );
                 }
