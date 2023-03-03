@@ -3036,8 +3036,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // Fetch the external IPs for the instance.
     let ips_url = format!(
-        "{}/{}/external-ips",
-        url_instances, instance_params.identity.name
+        "/v1/instances/{}/external-ips?organization={}&project={}",
+        instance_params.identity.name, ORGANIZATION_NAME, PROJECT_NAME
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)
