@@ -222,7 +222,7 @@ pub struct VpcSelector {
     pub vpc: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,

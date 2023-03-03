@@ -45,6 +45,7 @@ vpc_router_route_list                    (get    "/organizations/{organization_n
 vpc_router_route_view                    (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}")
 vpc_subnet_list                          (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets")
 vpc_subnet_view                          (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}")
+vpc_subnet_list_network_interfaces       (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces")
 policy_view                              (get    "/policy")
 certificate_list                         (get    "/system/certificates")
 certificate_view                         (get    "/system/certificates/{certificate}")
