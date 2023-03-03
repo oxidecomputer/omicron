@@ -1235,7 +1235,7 @@
         ]
       },
       "InstanceStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`external::InstanceState`].",
+        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
         "oneOf": [
           {
             "description": "Start the instance if it is not already running.",

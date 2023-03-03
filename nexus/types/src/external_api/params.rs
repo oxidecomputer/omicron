@@ -112,6 +112,15 @@ impl SamlIdentityProviderSelector {
     }
 }
 
+// Only by ID because groups have an `external_id` instead of a name and
+// therefore don't implement `ObjectIdentity`, which makes lookup by name
+// inconvenient. We should figure this out more generally, as there are several
+// resources like this.
+#[derive(Deserialize, JsonSchema)]
+pub struct GroupPath {
+    pub group: Uuid,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,

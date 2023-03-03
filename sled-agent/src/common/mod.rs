@@ -6,5 +6,3 @@
 
 pub mod disk;
 pub mod instance;
-pub mod underlay;
-pub mod vlan;

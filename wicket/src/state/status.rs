@@ -69,7 +69,7 @@ impl ServiceStatus {
 #[derive(Debug)]
 pub struct LivenessState {
     // None means that the stopwatch hasn't yet been initialized.
-    stopwatch: Option<libsw::Stopwatch>,
+    stopwatch: Option<libsw::TokioSw>,
 
     #[allow(unused)]
     live_threshold: Duration,
@@ -82,7 +82,7 @@ impl LivenessState {
 
     /// Resets or initializes the stopwatch state.
     pub fn reset(&mut self, elapsed: Duration) {
-        self.stopwatch = Some(libsw::Stopwatch::with_elapsed_started(elapsed));
+        self.stopwatch = Some(libsw::TokioSw::with_elapsed_started(elapsed));
     }
 
     /// Compute the liveness for this state.

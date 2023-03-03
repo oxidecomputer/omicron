@@ -11,6 +11,7 @@ members = [
     "gateway",
     "gateway-cli",
     "gateway-client",
+    "illumos-utils",
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
@@ -40,6 +41,7 @@ members = [
     "rpaths",
     "sled-agent",
     "sled-agent-client",
+    "sled-hardware",
     "sp-sim",
     "test-utils",
     "tufaceous",
@@ -58,6 +60,7 @@ default-members = [
     "gateway",
     "gateway-cli",
     "gateway-client",
+    "illumos-utils",
     "installinator",
     "installinator-artifact-client",
     "installinator-artifactd",
@@ -84,6 +87,7 @@ default-members = [
     "rpaths",
     "sled-agent",
     "sled-agent-client",
+    "sled-hardware",
     "sp-sim",
     "test-utils",
     "tufaceous",
@@ -146,6 +150,7 @@ http = "0.2.9"
 httptest = "0.15.4"
 hyper-rustls = "0.23.2"
 hyper = "0.14"
+illumos-utils = { path = "illumos-utils" }
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
@@ -237,6 +242,7 @@ signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sled = "0.34"
 sled-agent-client = { path = "sled-agent-client" }
+sled-hardware = { path = "sled-hardware" }
 slog = { version = "2.7", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.7"
 slog-dtrace = "0.2"
@@ -254,7 +260,7 @@ sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df
 steno = "0.3.1"
 strum = { version = "0.24", features = [ "derive" ] }
 subprocess = "0.2.9"
-libsw = "2.2.0"
+libsw = { version = "3.1.0", features = ["tokio"] }
 syn = { version = "1.0" }
 tar = "0.4"
 tempdir = "0.3"

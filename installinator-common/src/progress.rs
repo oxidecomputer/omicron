@@ -93,6 +93,35 @@ pub enum CompletionEventKind {
         elapsed: Duration,
     },
 
+    /// Failed to format a disk.
+    FormatFailed {
+        /// The format attempt that failed.
+        attempt: usize,
+
+        /// The path to the disk.
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+
+        /// How long the format attempt took.
+        elapsed: Duration,
+
+        /// A message indicating the reason for failure.
+        message: String,
+    },
+
+    /// Completed formatting a disk.
+    FormatCompleted {
+        /// The format attempt.
+        attempt: usize,
+
+        /// The path to the disk.
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+
+        /// How long the format attempt took.
+        elapsed: Duration,
+    },
+
     /// Failed to write an artifact.
     WriteFailed {
         /// The write attempt that failed.
@@ -137,6 +166,29 @@ pub enum CompletionEventKind {
         elapsed: Duration,
     },
 
+    /// A miscellaneous error occurred.
+    ///
+    /// This is a catch-all for errors that aren't described by any of the variants.
+    MiscError {
+        /// The name of the operation that failed.
+        operation: String,
+
+        /// The attempt that failed.
+        attempt: usize,
+
+        /// Data about the operation, serialized as JSON.
+        data: serde_json::Value,
+
+        /// How long the operation took before it failed.
+        elapsed: Duration,
+
+        /// A message indicating why the operation failed.
+        message: String,
+
+        /// Whether this operation is fatal, i.e. will not be retried.
+        is_fatal: bool,
+    },
+
     /// Completed the entire operation.
     Completed,
 }
@@ -147,8 +199,11 @@ impl CompletionEventKind {
         match self {
             Self::DownloadCompleted { attempt, .. }
             | Self::DownloadFailed { attempt, .. }
+            | Self::FormatFailed { attempt, .. }
+            | Self::FormatCompleted { attempt, .. }
             | Self::WriteCompleted { attempt, .. }
-            | Self::WriteFailed { attempt, .. } => Some(*attempt),
+            | Self::WriteFailed { attempt, .. }
+            | Self::MiscError { attempt, .. } => Some(*attempt),
             Self::Completed => None,
         }
     }
@@ -157,9 +212,13 @@ impl CompletionEventKind {
     pub fn is_success(&self) -> bool {
         match self {
             Self::DownloadCompleted { .. }
+            | Self::FormatCompleted { .. }
             | Self::WriteCompleted { .. }
             | Self::Completed => true,
-            Self::DownloadFailed { .. } | Self::WriteFailed { .. } => false,
+            Self::DownloadFailed { .. }
+            | Self::FormatFailed { .. }
+            | Self::WriteFailed { .. }
+            | Self::MiscError { .. } => false,
         }
     }
 
@@ -170,8 +229,11 @@ impl CompletionEventKind {
         match self {
             Self::DownloadCompleted { peer, .. }
             | Self::DownloadFailed { peer, .. } => Some(*peer),
-            Self::WriteCompleted { .. }
+            Self::FormatCompleted { .. }
+            | Self::FormatFailed { .. }
+            | Self::WriteCompleted { .. }
             | Self::WriteFailed { .. }
+            | Self::MiscError { .. }
             | Self::Completed => None,
         }
     }
@@ -213,7 +275,26 @@ pub enum ProgressEventKind {
         /// The number of bytes downloaded so far.
         downloaded_bytes: u64,
 
+        /// The size of the artifact, as provided in the Content-Length header.
+        total_bytes: u64,
+
         /// How long it's been since the download started.
+        elapsed: Duration,
+    },
+
+    /// A disk is being formatted.
+    FormatProgress {
+        /// The format attempt.
+        attempt: usize,
+
+        /// The path to the disk.
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+
+        /// Percentage progress.
+        percentage: usize,
+
+        /// How long it's been since the format started.
         elapsed: Duration,
     },
 
@@ -242,6 +323,6 @@ pub enum ProgressEventKind {
 
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
-    schema.format = Some("UTF-8 path".to_owned());
+    schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

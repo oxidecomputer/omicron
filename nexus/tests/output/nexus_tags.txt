@@ -42,6 +42,7 @@ instance_disk_detach_v1                  /v1/instances/{instance}/disks/detach
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
 instance_disk_list_v1                    /v1/instances/{instance}/disks
 instance_external_ip_list                /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips
+instance_external_ip_list_v1             /v1/instances/{instance}/external-ips
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
 instance_list_v1                         /v1/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
@@ -140,6 +141,7 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
 group_list_v1                            /v1/groups
+group_view                               /v1/groups/{group}
 policy_update                            /policy
 policy_update_v1                         /v1/policy
 policy_view                              /policy
