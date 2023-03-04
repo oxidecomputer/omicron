@@ -46,6 +46,7 @@ impl RssHandle {
         config: SetupServiceConfig,
         our_bootstrap_address: Ipv6Addr,
         storage_resources: StorageResources,
+        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
@@ -54,6 +55,7 @@ impl RssHandle {
             config,
             storage_resources,
             tx,
+            external_port_count,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;
