@@ -2,13 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// See RFD 248
-// See https://github.com/oxidecomputer/omicron/issues/718
-//
-// Milestones:
-// - Dropshot server
-// - Sqlite task
-// - DNS task
+// XXX-dap documentation
 
 use anyhow::anyhow;
 use anyhow::Context;

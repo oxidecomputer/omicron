@@ -100,7 +100,7 @@ async fn respond_nxdomain(
     }
 }
 
-async fn handle_req<'a, 'b, 'c>(
+async fn handle_req(
     log: Logger,
     db: Arc<sled::Db>,
     socket: Arc<UdpSocket>,
