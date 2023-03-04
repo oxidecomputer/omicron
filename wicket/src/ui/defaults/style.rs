@@ -67,3 +67,19 @@ pub fn failed_update() -> Style {
 pub fn start_update() -> Style {
     Style::default().fg(OX_YELLOW)
 }
+
+pub fn line(active: bool) -> Style {
+    if active {
+        selected_line()
+    } else {
+        deselected()
+    }
+}
+
+pub fn header(active: bool) -> Style {
+    if active {
+        selected()
+    } else {
+        deselected()
+    }
+}

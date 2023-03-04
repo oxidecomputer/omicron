@@ -142,8 +142,8 @@ impl Control for UpdatePane {
         _: Rect,
         active: bool,
     ) {
-        let border_style =
-            if active { style::selected_line() } else { style::deselected() };
+        let border_style = style::line(active);
+        let header_style = style::header(active);
 
         let block = Block::default()
             .borders(Borders::ALL)
@@ -153,7 +153,7 @@ impl Control for UpdatePane {
         // Draw the title/tab bar
         let title_bar = Paragraph::new(Spans::from(vec![Span::styled(
             "UPDATE STATUS",
-            style::selected(),
+            header_style,
         )]))
         .block(block.clone().title("<ENTER>"));
         frame.render_widget(title_bar, self.title_rect);
@@ -167,10 +167,10 @@ impl Control for UpdatePane {
             25,
             line_rect,
             vec![
-                Span::styled("COMPONENT", style::selected()),
-                Span::styled("VERSION", style::selected()),
-                Span::styled("TARGET", style::selected()),
-                Span::styled("STATUS", style::selected()),
+                Span::styled("COMPONENT", header_style),
+                Span::styled("VERSION", header_style),
+                Span::styled("TARGET", header_style),
+                Span::styled("STATUS", header_style),
             ],
         ))
         .block(block.clone());

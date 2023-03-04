@@ -7,8 +7,7 @@
 use slog::{o, warn, Logger};
 use std::convert::From;
 use std::net::SocketAddrV6;
-use std::sync::mpsc::Sender;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 use wicketd_client::types::{
     RackV1Inventory, SpIdentifier, SpType, UpdateLogAll,
@@ -49,7 +48,7 @@ pub enum Request {
 }
 
 pub struct WicketdHandle {
-    pub tx: mpsc::Sender<Request>,
+    pub tx: Sender<Request>,
 }
 
 /// Wrapper around Wicketd clients used to poll inventory
@@ -57,35 +56,24 @@ pub struct WicketdHandle {
 pub struct WicketdManager {
     log: Logger,
     rx: mpsc::Receiver<Request>,
-    events_tx: Sender<Event>,
-    inventory_client: wicketd_client::Client,
+    events_tx: UnboundedSender<Event>,
+    wicketd_addr: SocketAddrV6,
     update_client: wicketd_client::Client,
-    update_status_client: wicketd_client::Client,
 }
 
 impl WicketdManager {
     pub fn new(
         log: &Logger,
-        events_tx: Sender<Event>,
+        events_tx: UnboundedSender<Event>,
         wicketd_addr: SocketAddrV6,
     ) -> (WicketdHandle, WicketdManager) {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
-        let inventory_client =
-            create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
         let update_client =
             create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
-        let update_status_client =
-            create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
         let handle = WicketdHandle { tx };
-        let manager = WicketdManager {
-            log,
-            rx,
-            events_tx,
-            inventory_client,
-            update_client,
-            update_status_client,
-        };
+        let manager =
+            WicketdManager { log, rx, events_tx, wicketd_addr, update_client };
 
         (handle, manager)
     }
@@ -97,24 +85,12 @@ impl WicketdManager {
     /// * Translate any responses/errors into [`Event`]s
     ///   that can be utilized by the UI.
     pub async fn run(mut self) {
-        let mut inventory_rx =
-            poll_inventory(&self.log, self.inventory_client).await;
-
-        let mut update_logs_rx =
-            poll_update_log(&self.log, self.update_status_client).await;
+        self.poll_inventory().await;
+        self.poll_update_log().await;
+        self.poll_artifacts().await;
 
         loop {
             tokio::select! {
-                Some(event) = inventory_rx.recv() => {
-                    // XXX: Should we log an error and exit here? This means the wizard
-                    // died and the process is exiting.
-                    let _ = self.events_tx.send(Event::Inventory(event));
-                }
-                Some(logs) = update_logs_rx.recv() => {
-                    // XXX: Should we log an error and exit here? This means the wizard
-                    // died and the process is exiting.
-                    let _ = self.events_tx.send(Event::UpdateLog(logs));
-                }
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
                     let Request::StartUpdate(component_id) = request;
@@ -125,6 +101,84 @@ impl WicketdManager {
                 }
             }
         }
+    }
+
+    async fn poll_artifacts(&self) {
+        let log = self.log.clone();
+        let tx = self.events_tx.clone();
+        let addr = self.wicketd_addr;
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                // TODO: We should really be using ETAGs here
+                match client.get_artifacts().await {
+                    Ok(val) => {
+                        // TODO: Only send on changes
+                        let artifacts = val.into_inner().artifacts;
+                        let _ = tx.send(Event::UpdateArtifacts(artifacts));
+                    }
+                    Err(e) => {
+                        warn!(log, "{e}");
+                    }
+                }
+            }
+        });
+    }
+
+    async fn poll_update_log(&self) {
+        let log = self.log.clone();
+        let tx = self.events_tx.clone();
+        let addr = self.wicketd_addr;
+
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                // TODO: We should really be using ETAGs here
+                match client.get_update_all().await {
+                    Ok(val) => {
+                        // TODO: Only send on changes
+                        let logs = val.into_inner();
+                        let _ = tx.send(Event::UpdateLog(logs));
+                    }
+                    Err(e) => {
+                        warn!(log, "{e}");
+                    }
+                }
+            }
+        });
+    }
+
+    async fn poll_inventory(&self) {
+        let log = self.log.clone();
+        let tx = self.events_tx.clone();
+        let addr = self.wicketd_addr;
+
+        let mut state = InventoryState::new(&log, tx);
+
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let mut ticker = interval(WICKETD_POLL_INTERVAL);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                // TODO: We should really be using ETAGs here
+                match client.get_inventory().await {
+                    Ok(val) => {
+                        let new_inventory = val.into_inner();
+                        state.send_if_changed(new_inventory.into()).await;
+                    }
+                    Err(e) => {
+                        warn!(log, "{e}");
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -144,77 +198,15 @@ pub(crate) fn create_wicketd_client(
     wicketd_client::Client::new_with_client(&endpoint, client, log.clone())
 }
 
-async fn poll_update_log(
-    log: &Logger,
-    client: wicketd_client::Client,
-) -> mpsc::Receiver<UpdateLogAll> {
-    let log = log.clone();
-
-    // We only want one oustanding request at a time
-    let (tx, rx) = mpsc::channel(1);
-
-    tokio::spawn(async move {
-        let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            // TODO: We should really be using ETAGs here
-            match client.get_update_all().await {
-                Ok(val) => {
-                    // TODO: Only send on changes
-                    let logs = val.into_inner();
-                    let _ = tx.send(logs).await;
-                }
-                Err(e) => {
-                    warn!(log, "{e}");
-                }
-            }
-        }
-    });
-
-    rx
-}
-
-async fn poll_inventory(
-    log: &Logger,
-    client: wicketd_client::Client,
-) -> mpsc::Receiver<InventoryEvent> {
-    let log = log.clone();
-
-    // We only want one oustanding request at a time
-    let (tx, rx) = mpsc::channel(1);
-    let mut state = InventoryState::new(&log, tx);
-
-    tokio::spawn(async move {
-        let mut ticker = interval(WICKETD_POLL_INTERVAL);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            // TODO: We should really be using ETAGs here
-            match client.get_inventory().await {
-                Ok(val) => {
-                    let new_inventory = val.into_inner();
-                    state.send_if_changed(new_inventory.into()).await;
-                }
-                Err(e) => {
-                    warn!(log, "{e}");
-                }
-            }
-        }
-    });
-
-    rx
-}
-
 #[derive(Debug)]
 struct InventoryState {
     log: Logger,
     current_inventory: Option<RackV1Inventory>,
-    tx: mpsc::Sender<InventoryEvent>,
+    tx: UnboundedSender<Event>,
 }
 
 impl InventoryState {
-    fn new(log: &Logger, tx: mpsc::Sender<InventoryEvent>) -> Self {
+    fn new(log: &Logger, tx: UnboundedSender<Event>) -> Self {
         let log = log.new(o!("component" => "InventoryState"));
         Self { log, current_inventory: None, tx }
     }
@@ -235,16 +227,14 @@ impl InventoryState {
                     new_inventory
                 });
 
-                let _ = self
-                    .tx
-                    .send(InventoryEvent::Inventory {
+                let _ =
+                    self.tx.send(Event::Inventory(InventoryEvent::Inventory {
                         changed_inventory,
                         wicketd_received: Instant::now(),
                         mgs_received: libsw::TokioSw::with_elapsed_started(
                             mgs_received_ago,
                         ),
-                    })
-                    .await;
+                    }));
             }
             (Some(_), GetInventoryResponse::Unavailable) => {
                 // This is an illegal state transition -- wicketd can never return Unavailable after
@@ -256,12 +246,11 @@ impl InventoryState {
             }
             (None, GetInventoryResponse::Unavailable) => {
                 // No response received by wicketd from MGS yet.
-                let _ = self
-                    .tx
-                    .send(InventoryEvent::Unavailable {
+                let _ = self.tx.send(Event::Inventory(
+                    InventoryEvent::Unavailable {
                         wicketd_received: Instant::now(),
-                    })
-                    .await;
+                    },
+                ));
             }
         };
     }
