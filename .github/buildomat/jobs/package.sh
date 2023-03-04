@@ -41,8 +41,8 @@ ptime -m tar cvzf /work/utilities-package.tar.gz "${utilities[@]}"
 tmp=$(mktemp -d)
 mkdir -p "${tmp}/sled-agent"
 tar -xvzf out/omicron-sled-agent.tar -C "${tmp}/sled-agent"
-mkdir -p "${tmp}/maghemite"
-tar -xvzf out/maghemite.tar -C "${tmp}/maghemite"
+mkdir -p "${tmp}/mg-ddm"
+tar -xvzf out/maghemite.tar -C "${tmp}/mg-ddm"
 
 # Load those global zone files into a tarball that's ready to be exported.
 mkdir -p /work

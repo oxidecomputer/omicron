@@ -154,7 +154,7 @@ sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
 	-i out/sled-agent/pkg/config-rss.toml
 
 pfexec mv out/sled-agent /opt/oxide/
-pfexec mv out/maghemite /opt/oxide/
+pfexec mv out/mg-ddm /opt/oxide/
 pfexec svccfg import /opt/oxide/sled-agent/pkg/manifest.xml
 
 ./tests/bootstrap
