@@ -16,7 +16,7 @@ struct Args {
     config_file: PathBuf,
 
     #[clap(long, action)]
-    server_address: SocketAddrV6,
+    http_address: SocketAddrV6,
 
     #[clap(long, action)]
     dns_address: SocketAddrV6,
@@ -34,7 +34,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut config: dns_server::Config = toml::from_str(&config_file_contents)
         .with_context(|| format!("parse config file {:?}", config_file))?;
 
-    config.dropshot.bind_address = SocketAddr::V6(args.server_address);
+    config.dropshot.bind_address = SocketAddr::V6(args.http_address);
     eprintln!("{:?}", config);
 
     let log = config
