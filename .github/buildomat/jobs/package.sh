@@ -32,6 +32,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- -t switch_variant
 
 utilities=(
   package-manifest.toml
+  mf/sled-agent/config.toml
   tools/create_virtual_hardware.sh
 )
 
