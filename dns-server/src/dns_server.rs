@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::dns_data::DnsRecord;
 use pretty_hex::*;
 use serde::Deserialize;
-use slog::{error, Logger};
+use slog::{debug, error, Logger};
 use tokio::net::UdpSocket;
 use trust_dns_client::rr::LowerName;
 use trust_dns_proto::op::header::Header;
@@ -108,7 +108,7 @@ async fn handle_req(
     buf: Vec<u8>,
     zone: String,
 ) {
-    println!("{:?}", buf.hex_dump());
+    debug!(&log, "handle_req: buffer"; "buffer" => ?buf.hex_dump());
 
     let mut dec = BinDecoder::new(&buf);
     let mr = match MessageRequest::read(&mut dec) {
@@ -119,7 +119,7 @@ async fn handle_req(
         }
     };
 
-    println!("{:#?}", mr);
+    debug!(&log, "handle_req: message_request"; "mr" => #?mr);
 
     let header = Header::response_from_request(mr.header());
     let zone = LowerName::from(Name::from_str(&zone).unwrap());

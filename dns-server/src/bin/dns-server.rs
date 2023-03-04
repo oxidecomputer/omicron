@@ -7,6 +7,7 @@
 use anyhow::anyhow;
 use anyhow::Context;
 use clap::Parser;
+use slog::info;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 
@@ -41,6 +42,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .log
         .to_logger("dns-server")
         .context("failed to create logger")?;
+    info!(&log, "config"; "config" => ?config);
 
     let (_dns_server, dropshot_server) =
         dns_server::start(log, config, args.dns_zone, args.dns_address.into())
