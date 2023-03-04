@@ -11,6 +11,23 @@ disk_list                                GET      /v1/disks
 disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
 
+API operations found with tag "external-networking"
+OPERATION ID                             METHOD   URL PATH
+networking_address_lot_block_list        GET      /v1/system/networking/address-lot/blocks
+networking_address_lot_create            POST     /v1/system/networking/address-lot
+networking_address_lot_delete            DELETE   /v1/system/networking/address-lot
+networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_loopback_address_create       POST     /v1/system/networking/loopback-address
+networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address
+networking_loopback_address_list         GET      /v1/system/networking/loopback-address
+networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
+networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
+networking_switch_port_list              GET      /v1/system/hardware/switch-port
+networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
+networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
+networking_switch_port_settings_info     GET      /v1/system/networking/switch-port-settings/{port}/info
+networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
+
 API operations found with tag "hidden"
 OPERATION ID                             METHOD   URL PATH
 device_access_token                      POST     /device/token

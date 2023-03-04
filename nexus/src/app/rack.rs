@@ -110,6 +110,8 @@ impl super::Nexus {
 
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
+        self.populate_switch_ports(&opctx, request.sidecar_external_radix)
+            .await?;
 
         let dns_zone = request
             .internal_dns_zone_config

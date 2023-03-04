@@ -20,6 +20,7 @@ use super::trust_quorum::{
 };
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
+use crate::config::SidecarRevision;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
@@ -53,6 +54,9 @@ pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
 
 /// IPv6 prefix mask for bootstrap addresses.
 pub(crate) const BOOTSTRAP_MASK: u8 = 64;
+
+/// The number of QSFP28 ports on sidecar revisions A and B
+const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -759,6 +763,10 @@ impl Agent {
                 .as_ref()
                 .map(|sp_config| sp_config.trust_quorum_members.clone())
                 .unwrap_or_default(),
+            match &self.sled_config.sidecar_revision {
+                SidecarRevision::Physical(_) => SIDECAR_REV_A_B_N_QSFP28_PORTS,
+                SidecarRevision::Soft(config) => config.front,
+            },
         )
         .await?;
         Ok(())

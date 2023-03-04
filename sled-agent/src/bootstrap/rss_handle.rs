@@ -49,6 +49,7 @@ impl RssHandle {
         our_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
         member_device_id_certs: Vec<Ed25519Certificate>,
+        sidecar_external_radix: u8,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
@@ -57,6 +58,7 @@ impl RssHandle {
             config,
             tx,
             member_device_id_certs,
+            sidecar_external_radix,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_request(&log, &sp).await;

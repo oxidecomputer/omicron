@@ -104,6 +104,11 @@ pub fn nexus_addr() -> SocketAddr {
     ([192, 168, 1, 20], 80).into()
 }
 
+pub fn gateway_ip() -> String {
+    std::env::var("GATEWAY_IP")
+        .expect("GATEWAY_IP environment variable required")
+}
+
 fn get_base_url() -> String {
     // Check $OXIDE_HOST first.
     if let Ok(host) = std::env::var("OXIDE_HOST") {

@@ -275,8 +275,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6ede1ab4d3dc0c1de23004449bdb11cf73eb2dc7"
-source.sha256 = "96d1f4427b576ad693ae95d2fd91ccd187d87b0967a406327fe6924add581226"
+source.commit = "dfc5529925253160c448a9808c7c825b08e9b3d8"
+source.sha256 = "3c7b9c3a004570f4b7d057c330bc52e812505944057035fc5bb264a392397c03"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -301,8 +301,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6ede1ab4d3dc0c1de23004449bdb11cf73eb2dc7"
-source.sha256 = "704cbb0691d32bcb3f114e2796701d3464dd400eb9f1121ff516f79c31446e8f"
+source.commit = "dfc5529925253160c448a9808c7c825b08e9b3d8"
+source.sha256 = "bcb4db76ed235b0417d800812e05e95466b0804d82c164a67c8a55f58c4b9694"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -320,8 +320,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "6ede1ab4d3dc0c1de23004449bdb11cf73eb2dc7"
-source.sha256 = "df4d3e155ae87014982cc5c859a9716376484108a752e1d87187dcf3a50a70ed"
+source.commit = "dfc5529925253160c448a9808c7c825b08e9b3d8"
+source.sha256 = "e3463ca09bb4a3b287b54f54c6e60a42160f8bfc64f438ba94c1cd152f3b731b"
 output.type = "zone"
 output.intermediate_only = true
 

@@ -231,6 +231,8 @@ pub struct RackInitializationRequest {
     pub certs: Vec<Certificate>,
     /// initial internal DNS config
     pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
+    /// The number of external qsfp ports per sidecar
+    pub sidecar_external_radix: u8,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;

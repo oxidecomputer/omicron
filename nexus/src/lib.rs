@@ -212,6 +212,7 @@ impl nexus_test_interface::NexusServer for Server {
                     internal_services_ip_pool_ranges: vec![],
                     certs: vec![],
                     internal_dns_zone_config: DnsConfigBuilder::new().build(),
+                    sidecar_external_radix: 0,
                 },
             )
             .await

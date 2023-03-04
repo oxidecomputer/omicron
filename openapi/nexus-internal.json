@@ -2206,6 +2206,12 @@
             "items": {
               "$ref": "#/components/schemas/ServicePutRequest"
             }
+          },
+          "sidecar_external_radix": {
+            "description": "The number of external qsfp ports per sidecar",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           }
         },
         "required": [
@@ -2213,7 +2219,8 @@
           "datasets",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
-          "services"
+          "services",
+          "sidecar_external_radix"
         ]
       },
       "Sample": {

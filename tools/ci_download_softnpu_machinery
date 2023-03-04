@@ -19,7 +19,7 @@ fi
 # This is an ASIC administration program.
 if [[ ! -f out/softnpu/scadm ]]; then
     echo "fetching scadm"
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3Y38K0Q14F2989R20QCBA/Ny1N0clhEwz2nfbsdTY8ta7pd9IYy1ofxG6ViCDN6Uy4xW3F/01GTD3YZ0TC9SCB4TFNYWP0DEM/01GTD4CCW2F8Q0NQGD7WEY91D0/scadm
+    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GWSY546C4ZB2XX2XQRPZN3XW/5VRexYs05eSHBr5LlMpyAZl5OugmF27PrnIjIGhC4R5pTgj5/01GWSY5HPK4TA9TBWJZVM1A27A/01GWSYK8QBC3YR54XZ2RXABWMV/scadm
     chmod +x scadm
     mv scadm out/softnpu/
 fi
@@ -27,6 +27,6 @@ fi
 # Fetch the pre-compiled sidecar_lite p4 program
 if [[ ! -f out/softnpu/libsidecar_lite.so ]]; then
     echo "fetching libsidecar_lite.so"
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3Y38K0Q14F2989R20QCBA/Ny1N0clhEwz2nfbsdTY8ta7pd9IYy1ofxG6ViCDN6Uy4xW3F/01GTD3YZ0TC9SCB4TFNYWP0DEM/01GTD4CA8KRGR8HK4S6B0DEEJC/libsidecar_lite.so
+    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GWSY546C4ZB2XX2XQRPZN3XW/5VRexYs05eSHBr5LlMpyAZl5OugmF27PrnIjIGhC4R5pTgj5/01GWSY5HPK4TA9TBWJZVM1A27A/01GWSYK12R9F6DGTN4R9YMS17F/libsidecar_lite.so
     mv libsidecar_lite.so out/softnpu/
 fi

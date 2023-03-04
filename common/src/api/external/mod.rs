@@ -680,6 +680,7 @@ impl TryFrom<i64> for Generation {
 )]
 #[display(style = "kebab-case")]
 pub enum ResourceType {
+    AddressLot,
     Fleet,
     Silo,
     SiloUser,
@@ -697,6 +698,8 @@ pub enum ResourceType {
     Disk,
     Image,
     Instance,
+    LoopbackAddress,
+    SwitchPortSettings,
     IpPool,
     InstanceNetworkInterface,
     PhysicalDisk,
@@ -715,6 +718,7 @@ pub enum ResourceType {
     MetricProducer,
     RoleBuiltin,
     UpdateAvailableArtifact,
+    SwitchPort,
     SystemUpdate,
     ComponentUpdate,
     SystemUpdateComponentUpdate,
@@ -1195,7 +1199,7 @@ impl JsonSchema for Ipv4Net {
                     concat!(
                         r#"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.){3}"#,
                         r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"/([8-9]|1[0-9]|2[0-9]|3[0-2])$"#,
+                        r#"/([0-9]|1[0-9]|2[0-9]|3[0-2])$"#,
                     )
                     .to_string(),
                 ),
@@ -1289,7 +1293,8 @@ impl JsonSchema for Ipv6Net {
                         r#"^([fF][dD])[0-9a-fA-F]{2}:("#,
                         r#"([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}"#,
                         r#"|([0-9a-fA-F]{1,4}:){1,6}:)"#,
-                        r#"\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
+                        r#"([0-9a-fA-F]{1,4})?"#,
+                        r#"\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
                     )
                     .to_string(),
                 ),
@@ -1309,6 +1314,22 @@ pub enum IpNet {
 }
 
 impl IpNet {
+    /// Return the underlying address.
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => inner.ip().into(),
+            IpNet::V6(inner) => inner.ip().into(),
+        }
+    }
+
+    /// Return the underlying prefix length.
+    pub fn prefix(&self) -> u8 {
+        match self {
+            IpNet::V4(inner) => inner.prefix(),
+            IpNet::V6(inner) => inner.prefix(),
+        }
+    }
+
     /// Return the first address in this subnet
     pub fn first_address(&self) -> IpAddr {
         match self {
@@ -2124,6 +2145,376 @@ impl std::fmt::Display for Digest {
     }
 }
 
+/// An address lot and associated blocks resulting from creating an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotCreateResponse {
+    /// The address lot that was created.
+    pub lot: AddressLot,
+
+    /// The address lot blocks that were created.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
+/// Represents an address lot object, containing the id of the lot that can be
+/// used in other API calls.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct AddressLot {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// An address lot block is a part of an address lot and contains a range of
+/// addresses. The range is inclusive.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct AddressLotBlock {
+    /// The id of the address lot block.
+    pub id: Uuid,
+
+    /// The first address of the block (inclusive).
+    pub first_address: IpAddr,
+
+    /// The last address of the block (inclusive).
+    pub last_address: IpAddr,
+}
+
+/// A loopback address is an address that is assigned to a rack switch but is
+/// not associated with any particular port.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LoopbackAddress {
+    /// The id of the loopback address.
+    pub id: Uuid,
+
+    /// The address lot block this address came from.
+    pub address_lot_block_id: Uuid,
+
+    /// The id of the rack where this loopback address is assigned.
+    pub rack_id: Uuid,
+
+    /// Switch location where this loopback address is assigned.
+    pub switch_location: String,
+
+    /// The loopback IP address and prefix length.
+    pub address: IpNet,
+}
+
+/// A switch port represents a physical external port on a rack switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPort {
+    /// The id of the switch port.
+    pub id: Uuid,
+
+    /// The rack this switch port belongs to.
+    pub rack_id: Uuid,
+
+    /// The switch location of this switch port.
+    pub switch_location: String,
+
+    /// The name of this swtich port.
+    pub port_name: String,
+
+    /// The primary settings group of this switch port. Will be `None` until
+    /// this switch port is configured.
+    pub port_settings_id: Option<Uuid>,
+}
+
+/// Represents a port settings object by containing its id. This id may be used
+/// in other API calls to view and manage port settings. This is the central
+/// object for configuring external networking. At face value this likely seems
+/// off as there is only an `identity` member. However most other configuration
+/// objects reference this object by id. This includes
+///     - SwitchPortConfig
+///     - SwitchPortLinkConfig
+///     - LldpServiceConfig
+///     - SwitchInterfaceConfig
+///     - SwitchVlanInterfaceConfig
+///     - SwitchPortRouteConfig
+///     - SwitchPortBgpPeerConfig
+///     - SwitchPortAddressConfig
+/// With the exception of the port configuration all of these relationships are
+/// many to one. So SwitchPortSettings object can contain several link configs,
+/// interface configs, route configs, etc.
+///
+/// The relationships betwen these objects are futher described in RFD 267.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct SwitchPortSettings {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// This structure contains all port settings information in one place. It's a
+/// convenience data structure for getting a complete view of a particular
+/// port's settings.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsInfo {
+    /// The primary switch port settings handle.
+    pub settings: SwitchPortSettings,
+
+    /// Switch port settings included from other switch port settings groups.
+    pub groups: Vec<SwitchPortSettingsGroups>,
+
+    /// Layer 1 physical port settings.
+    pub port: SwitchPortConfig,
+
+    /// Layer 2 link settings.
+    pub links: Vec<SwitchPortLinkConfig>,
+
+    /// Link-layer discovery protocol (LLDP) settings.
+    pub link_lldp: Vec<LldpServiceConfig>,
+
+    /// Layer 3 interface settings.
+    pub interfaces: Vec<SwitchInterfaceConfig>,
+
+    /// Vlan interface settings.
+    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
+
+    /// IP route settings.
+    pub routes: Vec<SwitchPortRouteConfig>,
+
+    /// BGP peer settings.
+    pub bgp_peers: Vec<SwitchPortBgpPeerConfig>,
+
+    /// Layer 3 IP address settings.
+    pub addresses: Vec<SwitchPortAddressConfig>,
+}
+
+/// This structure maps a port settings object to a port settings groups. Port
+/// settings objects may inherit settings from groups. This mapping defines the
+/// relationship between settings objects and the groups they reference.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroups {
+    /// The id of a port settings object referencing a port settings group.
+    pub port_settings_id: Uuid,
+
+    /// The id of a port settings group being referenced by a port settings
+    /// object.
+    pub port_settings_group_id: Uuid,
+}
+
+/// A port settings group is a named object that references a port settings
+/// object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The port settings that comprise this group.
+    pub port_settings_id: Uuid,
+}
+
+/// The link geometry associated with a switch port.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SwitchPortGeometry {
+    /// The port contains a single QSFP28 link with four lanes.
+    Qsfp28x1,
+
+    /// The port contains two QSFP28 links each with two lanes.
+    Qsfp28x2,
+
+    /// The port contains four SFP28 links each with one lane.
+    Sfp28x4,
+}
+
+/// A physical port configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortConfig {
+    /// The id of the port settings object this configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The physical link geometry of the port.
+    pub geometry: SwitchPortGeometry,
+}
+
+/// A link configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortLinkConfig {
+    /// The port settings this link configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The link-layer discovery protocol service configuration id for this
+    /// link.
+    pub lldp_service_config_id: Uuid,
+
+    /// The name of this link.
+    pub link_name: String,
+
+    /// The maximum transmission unit for this link.
+    pub mtu: u16,
+}
+
+/// A link layer discovery protocol (LLDP) service configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpServiceConfig {
+    /// The id of this LLDP service instance.
+    pub id: Uuid,
+
+    /// The link-layer discovery protocol configuration for this service.
+    pub lldp_config_id: Option<Uuid>,
+
+    /// Whether or not the LLDP service is enabled.
+    pub enabled: bool,
+}
+
+/// A link layer discovery protocol (LLDP) base configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The LLDP chassis identifier TLV.
+    pub chassis_id: String,
+
+    /// THE LLDP system name TLV.
+    pub system_name: String,
+
+    /// THE LLDP system description TLV.
+    pub system_description: String,
+
+    /// THE LLDP management IP TLV.
+    pub management_ip: IpNet,
+}
+
+/// Describes the kind of an switch interface.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchInterfaceKind {
+    /// Primary interfaces are associated with physical links. There is exactly
+    /// one primary interface per physical link.
+    Primary,
+
+    /// VLAN interfaces allow physical interfaces to be multiplexed onto
+    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
+    /// tag.
+    Vlan,
+
+    /// Loopback interfaces are anchors for IP addresses that are not specific
+    /// to any particular port.
+    Loopback,
+}
+
+/// A switch port interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchInterfaceConfig {
+    /// The port settings object this switch interface configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// A unique identifier for this switch interface.
+    pub id: Uuid,
+
+    /// The name of this switch interface.
+    pub interface_name: String,
+
+    /// Whether or not IPv6 is enabled on this interface.
+    pub v6_enable: bool,
+
+    /// The switch interface kind.
+    pub kind: SwitchInterfaceKind,
+}
+
+/// A switch port VLAN interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchVlanInterfaceConfig {
+    /// The switch interface configuration this VLAN interface configuration
+    /// belongs to.
+    pub interface_config_id: Uuid,
+
+    /// The virtual network id (VID) that distinguishes this interface and is
+    /// used for producing and consuming 802.1Q Ethernet tags. This field has a
+    /// maximum value of 4095 as 802.1Q tags are twelve bits.
+    pub vid: u16,
+}
+
+/// A route configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortRouteConfig {
+    /// The port settings object this route configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The interface name this route configuration is assigned to.
+    pub interface_name: String,
+
+    /// The route's destination network.
+    pub dst: IpNet,
+
+    /// The route's gateway address.
+    pub gw: IpNet,
+}
+
+/// A BGP peer configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortBgpPeerConfig {
+    /// The port settings object this BGP configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id for the set of prefixes announced in this peer configuration.
+    pub bgp_announce_set_id: Uuid,
+
+    /// The id of the global BGP configuration referenced by this peer
+    /// configuration.
+    pub bgp_config_id: Uuid,
+
+    /// The interface name used to establish a peer session.
+    pub interface_name: String,
+
+    /// The address of the peer.
+    pub addr: IpAddr,
+}
+
+/// A base BGP configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<String>,
+}
+
+/// Represents a BGP announce set by id. The id can be used with other API calls
+/// to view and manage the announce set.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpAnnounceSet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// A BGP announcement tied to an address lot block.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpAnnouncement {
+    /// The id of the set this announcement is a part of.
+    pub announce_set_id: Uuid,
+
+    /// The address block the IP network being announced is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP network being announced.
+    pub network: IpNet,
+}
+
+/// An IP address configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortAddressConfig {
+    /// The port settings object this address configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the address lot block this address is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP address and prefix.
+    pub address: IpNet,
+
+    /// The interface name this address belongs to.
+    pub interface_name: String,
+}
+
 #[cfg(test)]
 mod test {
     use serde::Deserialize;
@@ -2605,6 +2996,13 @@ mod test {
     }
 
     #[test]
+    fn test_ipv4_net_operations() {
+        use super::{IpNet, Ipv4Net};
+        let x: IpNet = "0.0.0.0/0".parse().unwrap();
+        assert_eq!(x, IpNet::V4(Ipv4Net("0.0.0.0/0".parse().unwrap())))
+    }
+
+    #[test]
     fn test_route_target_parse() {
         let name: Name = "foo".parse().unwrap();
         let address = "192.168.0.10".parse().unwrap();
@@ -2734,6 +3132,9 @@ mod test {
 
     #[test]
     fn test_ipnet_serde() {
+        //TODO: none of this actually exercises
+        // schemars::schema::StringValidation bits and the schemars
+        // documentation is not forthcoming on how this might be accomplished.
         let net_str = "fd00:2::/32";
         let net = IpNet::from_str(net_str).unwrap();
         let ser = serde_json::to_string(&net).unwrap();
@@ -2742,7 +3143,23 @@ mod test {
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
 
+        let net_str = "fd00:99::1/64";
+        let net = IpNet::from_str(net_str).unwrap();
+        let ser = serde_json::to_string(&net).unwrap();
+
+        assert_eq!(format!(r#""{}""#, net_str), ser);
+        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
+        assert_eq!(net, net_des);
+
         let net_str = "192.168.1.1/16";
+        let net = IpNet::from_str(net_str).unwrap();
+        let ser = serde_json::to_string(&net).unwrap();
+
+        assert_eq!(format!(r#""{}""#, net_str), ser);
+        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
+        assert_eq!(net, net_des);
+
+        let net_str = "0.0.0.0/0";
         let net = IpNet::from_str(net_str).unwrap();
         let ser = serde_json::to_string(&net).unwrap();
 
