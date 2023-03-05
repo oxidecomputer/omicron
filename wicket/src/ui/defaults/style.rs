@@ -76,10 +76,22 @@ pub fn line(active: bool) -> Style {
     }
 }
 
+pub fn warning() -> Style {
+    Style::default().fg(OX_YELLOW)
+}
+
 pub fn header(active: bool) -> Style {
     if active {
         selected()
     } else {
         deselected()
     }
+}
+
+pub fn popup_highlight() -> Style {
+    Style::default().fg(TUI_PURPLE)
+}
+
+pub fn faded_background() -> Style {
+    Style::default().bg(TUI_BLACK).fg(TUI_GREY)
 }

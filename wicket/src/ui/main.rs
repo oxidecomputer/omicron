@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use super::{Control, OverviewPane, StatefulList, UpdatePane};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
+use crate::ui::widgets::Fade;
 use crate::{Action, Event, Frame, State, Term};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
@@ -123,11 +124,15 @@ impl MainScreen {
                     if self.sidebar.active {
                         None
                     } else {
-                        self.sidebar.active = true;
-                        Some(Action::Redraw)
+                        if self.current_pane().is_modal_active() {
+                            self.current_pane().on(state, event)
+                        } else {
+                            self.sidebar.active = true;
+                            Some(Action::Redraw)
+                        }
                     }
                 }
-                KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Enter => {
                     if self.sidebar.active {
                         self.sidebar.active = false;
                         Some(Action::Redraw)
@@ -178,7 +183,11 @@ impl MainScreen {
     ) {
         let active = !self.sidebar.active;
         let pane = self.current_pane();
-        pane.draw(state, frame, pane_rect, active)
+        pane.draw(state, frame, pane_rect, active);
+        if !active {
+            let fade = Fade::default();
+            frame.render_widget(fade, pane_rect);
+        }
     }
 
     fn draw_statusbar(
@@ -199,8 +208,11 @@ impl MainScreen {
         frame.render_widget(main, rect);
 
         let test = Paragraph::new(Spans::from(vec![
-            Span::styled("VERSION: ", Style::default().fg(TUI_GREEN_DARK)),
-            Span::styled("v0.0.1", Style::default().fg(TUI_GREEN)),
+            Span::styled(
+                "UPDATE VERSION: ",
+                Style::default().fg(TUI_GREEN_DARK),
+            ),
+            Span::styled("UNKNOWN", style::plain_text()),
         ]))
         .alignment(Alignment::Right);
         frame.render_widget(test, rect);
@@ -255,7 +267,7 @@ impl Control for Sidebar {
         _state: &State,
         frame: &mut Frame<'_>,
         area: Rect,
-        _active: bool,
+        active: bool,
     ) {
         let items: Vec<ListItem> = self
             .panes
@@ -268,11 +280,7 @@ impl Control for Sidebar {
             })
             .collect();
 
-        let border_style = if self.active {
-            style::selected_line()
-        } else {
-            style::deselected()
-        };
+        let border_style = style::selected_line();
 
         let panes = List::new(items)
             .block(
@@ -285,5 +293,10 @@ impl Control for Sidebar {
             .highlight_style(style::selected().add_modifier(Modifier::BOLD));
 
         frame.render_stateful_widget(panes, area, &mut self.panes.state);
+
+        if !active {
+            let fade = Fade::default();
+            frame.render_widget(fade, area);
+        }
     }
 }

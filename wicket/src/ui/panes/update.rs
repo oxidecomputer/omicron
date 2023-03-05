@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use super::{align_by, help_text, Control};
 use crate::state::{ComponentId, RackUpdateState, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
-use crate::ui::widgets::{BoxConnector, BoxConnectorKind};
+use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Popup};
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
@@ -32,6 +32,7 @@ pub struct UpdatePane {
     table_headers_rect: Rect,
     contents_rect: Rect,
     help_rect: Rect,
+    popup_open: bool,
 }
 
 impl UpdatePane {
@@ -52,11 +53,51 @@ impl UpdatePane {
             table_headers_rect: Rect::default(),
             contents_rect: Rect::default(),
             help_rect: Rect::default(),
+            popup_open: false,
         }
+    }
+
+    pub fn draw_update_missing_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                " MISSING UPDATE BUNDLE",
+                style::header(true),
+            )])]),
+            body: Text::from(vec![
+                Spans::from(vec![Span::styled(
+                    " Use the following command to transfer an update: ",
+                    style::plain_text(),
+                )]),
+                "".into(),
+                Spans::from(vec![
+                    Span::styled(" cat", style::plain_text()),
+                    Span::styled(" $UPDATE", style::popup_highlight()),
+                    Span::styled(".zip | ssh", style::plain_text()),
+                    Span::styled(" $IPV6_ADDRESS", style::popup_highlight()),
+                    Span::styled(" upload", style::plain_text()),
+                ]),
+            ]),
+            buttons: vec![],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
     }
 }
 
 impl Control for UpdatePane {
+    fn is_modal_active(&self) -> bool {
+        self.popup_open
+    }
+
     fn resize(&mut self, state: &mut State, rect: Rect) {
         self.rect = rect;
         let chunks = Layout::default()
@@ -129,6 +170,22 @@ impl Control for UpdatePane {
                     self.tree_state.key_right();
                     Some(Action::Redraw)
                 }
+                KeyCode::Enter => {
+                    if !self.popup_open {
+                        self.popup_open = true;
+                        Some(Action::Redraw)
+                    } else {
+                        None
+                    }
+                }
+                KeyCode::Esc => {
+                    if self.popup_open {
+                        self.popup_open = false;
+                        Some(Action::Redraw)
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             },
             _ => None,
@@ -137,7 +194,7 @@ impl Control for UpdatePane {
 
     fn draw(
         &mut self,
-        _: &State,
+        state: &State,
         frame: &mut Frame<'_>,
         _: Rect,
         active: bool,
@@ -196,5 +253,14 @@ impl Control for UpdatePane {
             BoxConnector::new(BoxConnectorKind::Both),
             self.contents_rect,
         );
+
+        // TODO: Check to see which popup is open
+        if self.popup_open {
+            // TODO: Only open if an update has not been uploaded to wicketd
+            // Otherwise, prompt whether to update or not.
+            // We can also open the update logs inline once the update has been started
+            // or has completed.
+            self.draw_update_missing_popup(state, frame);
+        }
     }
 }

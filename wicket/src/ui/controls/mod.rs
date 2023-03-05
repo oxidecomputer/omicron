@@ -44,4 +44,15 @@ pub trait Control {
     /// of the child. The parent computes its own layout during resize and
     /// passes the appropriate `Rect` to the child.
     fn resize(&mut self, _: &mut State, _: Rect) {}
+
+    /// Some [`Control`]s can launch modal popups.
+    ///
+    /// Return false by default so parent behavior does not change.
+    ///
+    /// If a control has a modal active, its parent should not switch away from
+    /// it. For example, in [`MainScreen`], the escape key should not allow
+    /// transferring control from a pane's modal to the side bar.
+    fn is_modal_active(&self) -> bool {
+        false
+    }
 }

@@ -4,10 +4,16 @@
 
 //! Custom tui widgets
 
+use tui::style::Color;
+
 mod animated_logo;
 mod box_connector;
+mod fade;
+mod popup;
 mod rack;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use box_connector::{BoxConnector, BoxConnectorKind};
+pub use fade::Fade;
+pub use popup::Popup;
 pub use rack::Rack;

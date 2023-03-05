@@ -22,6 +22,8 @@ pub use update::{FinalInstallArtifact, RackUpdateState, UpdateState};
 /// receipt.
 #[derive(Debug)]
 pub struct State {
+    pub screen_width: u16,
+    pub screen_height: u16,
     pub inventory: Inventory,
     pub rack_state: RackState,
     pub service_status: ServiceStatus,
@@ -37,6 +39,8 @@ impl Default for State {
 impl State {
     pub fn new() -> State {
         State {
+            screen_height: 0,
+            screen_width: 0,
             inventory: Inventory::default(),
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
