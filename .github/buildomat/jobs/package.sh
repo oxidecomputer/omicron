@@ -24,7 +24,7 @@ rustc --version
 
 # Build
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m cargo run --locked --release --bin omicron-package -- -t switch_variant=asic package
+ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=asic' package
 
 tarball_src_dir="$(pwd)/out"
 
