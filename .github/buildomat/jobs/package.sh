@@ -26,6 +26,7 @@ rustc --version
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 ptime -m cargo run --locked --release --bin omicron-package -- -t switch_variant=asic package
 
+tarball_src_dir="$(pwd)/out"
 
 # Assemble some utilities into a tarball that can be used by deployment
 # phases of buildomat.
@@ -39,15 +40,37 @@ utilities=(
 ptime -m tar cvzf /work/utilities-package.tar.gz "${utilities[@]}"
 
 # Assemble global zone files in a temporary directory.
-tmp=$(mktemp -d)
-mkdir -p "${tmp}/sled-agent"
-tar -xvzf out/omicron-sled-agent.tar -C "${tmp}/sled-agent"
-mkdir -p "${tmp}/mg-ddm"
-tar -xvzf out/maghemite.tar -C "${tmp}/mg-ddm"
+if ! tmp=$(mktemp -d); then
+  exit 1
+fi
+trap 'cd /; rm -rf "$tmp"' EXIT
 
-# Load those global zone files into a tarball that's ready to be exported.
+# Header file, identifying this is intended to be layered in the global zone.
+# Within the ramdisk, this means that all files under "root/foo" should appear
+# in the global zone as "/foo".
+echo '{"v":"1","t":"layer"}' > "$tmp/oxide.json"
+
+# Extract the sled-agent tarball for re-packaging into the layered GZ archive.
+pkg_dir="$tmp/root/opt/oxide/sled-agent"
+mkdir -p "$pkg_dir"
+cd "$pkg_dir"
+tar -xvfz "$tarball_src_dir/omicron-sled-agent.tar"
+# Ensure that the manifest for the sled agent exists in a location where it may
+# be automatically initialized.
+mkdir -p "$tmp/root/lib/svc/manifest/site/"
+mv pkg/manifest.xml "$tmp/root/lib/svc/manifest/site/sled-agent.xml"
+cd -
+
+# Extract the mg-ddm tarball for re-packaging into the layered GZ archive.
+pkg_dir="$tmp/root/opt/oxide/mg-ddm"
+mkdir -p "$pkg_dir"
+cd "$pkg_dir"
+tar -xvfz "$tarball_src_dir/maghemite.tar"
+cd -
+
 mkdir -p /work
-ptime -m tar cvzf /work/global-zone-packages.tar.gz -C "${tmp}" .
+cd "$tmp" && tar cvfz /work/global-zone-packages.tar.gz oxide.json root
+cd -
 
 # Assemble Zone Images into their respective output locations.
 mkdir -p /work/zones
@@ -63,4 +86,4 @@ zones=(
 	out/propolis-server.tar.gz
 	out/switch-asic.tar.gz
 )
-mv "${zones[@]}" /work/zones/
+cp "${zones[@]}" /work/zones/

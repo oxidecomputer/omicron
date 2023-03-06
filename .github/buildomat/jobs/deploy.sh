@@ -110,9 +110,17 @@ pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/utilities-package.tar.gz
+
+# Unpack all global zone files into "out".
+# Note that because this is packaged as a layered filesystem, most files
+# exist under "root/".
 mkdir out/
 ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz -C out
-cp /input/package/work/zones/* out/
+pfexec mv out/root/opt/oxide/sled-agent /opt/oxide/sled-agent
+pfexec mv out/root/opt/oxide/mg-ddm /opt/oxide/mg-ddm
+
+# Move all global zones to their installed location
+pfexec cp /input/package/work/zones/* /opt/oxide
 
 mkdir tests
 for p in /input/build-end-to-end-tests/work/*.gz; do
@@ -153,9 +161,7 @@ sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
 	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
 	-i out/sled-agent/pkg/config-rss.toml
 
-pfexec mv out/sled-agent /opt/oxide/
-pfexec mv out/mg-ddm /opt/oxide/
-pfexec svccfg import /opt/oxide/sled-agent/pkg/manifest.xml
+pfexec svccfg import out/root/lib/svc/manifest/site/sled-agent.xml
 
 ./tests/bootstrap
 rm ./tests/bootstrap
