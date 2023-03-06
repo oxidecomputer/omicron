@@ -16,6 +16,7 @@ pub struct RackUpdateState {
     pub items:
         BTreeMap<ComponentId, BTreeMap<FinalInstallArtifact, UpdateState>>,
     pub artifacts: Vec<ArtifactId>,
+    pub final_artifact_versions: BTreeMap<FinalInstallArtifact, String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -50,10 +51,19 @@ impl UpdateState {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FinalInstallArtifact {
-    Sp,
-    RoT,
+    // Sled Artifacts
+    GimletSp,
+    GimletRot,
     Host,
     ControlPlane,
+
+    // PSC Artifacts
+    PscSp,
+    PscRot,
+
+    // Switch Artifacts
+    SwitchSp,
+    SwitchRot,
 }
 
 impl Display for FinalInstallArtifact {
@@ -61,8 +71,12 @@ impl Display for FinalInstallArtifact {
         match self {
             FinalInstallArtifact::Host => write!(f, "HOST"),
             FinalInstallArtifact::ControlPlane => write!(f, "CONTROL PLANE"),
-            FinalInstallArtifact::RoT => write!(f, "ROOT OF TRUST"),
-            FinalInstallArtifact::Sp => write!(f, "SERVICE PROCESSOR"),
+            FinalInstallArtifact::GimletRot => write!(f, "ROOT OF TRUST"),
+            FinalInstallArtifact::GimletSp => write!(f, "SERVICE PROCESSOR"),
+            FinalInstallArtifact::PscSp => write!(f, "ROOT OF TRUST"),
+            FinalInstallArtifact::PscRot => write!(f, "SERVICE PROCESSOR"),
+            FinalInstallArtifact::SwitchSp => write!(f, "ROOT OF TRUST"),
+            FinalInstallArtifact::SwitchRot => write!(f, "SERVICE PROCESSOR"),
         }
     }
 }
@@ -81,20 +95,99 @@ impl RackUpdateState {
                                 FinalInstallArtifact::ControlPlane,
                                 UpdateState::Waiting,
                             ),
-                            (FinalInstallArtifact::RoT, UpdateState::Waiting),
-                            (FinalInstallArtifact::Sp, UpdateState::Waiting),
+                            (
+                                FinalInstallArtifact::GimletRot,
+                                UpdateState::Waiting,
+                            ),
+                            (
+                                FinalInstallArtifact::GimletSp,
+                                UpdateState::Waiting,
+                            ),
                         ]),
                     ),
-                    ComponentId::Switch(_) | ComponentId::Psc(_) => (
+                    ComponentId::Switch(_) => (
                         *id,
                         BTreeMap::from([
-                            (FinalInstallArtifact::RoT, UpdateState::Waiting),
-                            (FinalInstallArtifact::Sp, UpdateState::Waiting),
+                            (
+                                FinalInstallArtifact::SwitchRot,
+                                UpdateState::Waiting,
+                            ),
+                            (
+                                FinalInstallArtifact::SwitchSp,
+                                UpdateState::Waiting,
+                            ),
+                        ]),
+                    ),
+                    ComponentId::Psc(_) => (
+                        *id,
+                        BTreeMap::from([
+                            (
+                                FinalInstallArtifact::PscRot,
+                                UpdateState::Waiting,
+                            ),
+                            (FinalInstallArtifact::PscSp, UpdateState::Waiting),
                         ]),
                     ),
                 })
                 .collect(),
             artifacts: vec![],
+            final_artifact_versions: BTreeMap::default(),
+        }
+    }
+
+    pub fn update_artifacts(&mut self, artifacts: Vec<ArtifactId>) {
+        self.artifacts = artifacts;
+        self.final_artifact_versions.clear();
+        for id in &mut self.artifacts {
+            match id.kind.as_str() {
+                "gimlet_sp" => {
+                    self.final_artifact_versions.insert(
+                        FinalInstallArtifact::GimletSp,
+                        id.version.clone(),
+                    );
+                }
+                "gimlet_rot" => {
+                    self.final_artifact_versions.insert(
+                        FinalInstallArtifact::GimletRot,
+                        id.version.clone(),
+                    );
+                }
+                "psc_sp" => {
+                    self.final_artifact_versions.insert(
+                        FinalInstallArtifact::PscSp,
+                        id.version.clone(),
+                    );
+                }
+                "psc_rot" => {
+                    self.final_artifact_versions.insert(
+                        FinalInstallArtifact::PscRot,
+                        id.version.clone(),
+                    );
+                }
+                "switch_sp" => {
+                    self.final_artifact_versions.insert(
+                        FinalInstallArtifact::SwitchSp,
+                        id.version.clone(),
+                    );
+                }
+                "switch_rot" => {
+                    self.final_artifact_versions.insert(
+                        FinalInstallArtifact::SwitchRot,
+                        id.version.clone(),
+                    );
+                }
+                "host" => {
+                    self.final_artifact_versions
+                        .insert(FinalInstallArtifact::Host, id.version.clone());
+                }
+                "control_plane" => {
+                    self.final_artifact_versions.insert(
+                        FinalInstallArtifact::ControlPlane,
+                        id.version.clone(),
+                    );
+                }
+                _ => (),
+            }
         }
     }
 }

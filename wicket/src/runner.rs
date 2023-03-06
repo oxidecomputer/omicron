@@ -140,7 +140,8 @@ impl Runner {
                     self.handle_inventory_event(event)?;
                 }
                 Event::UpdateArtifacts(artifacts) => {
-                    self.state.update_state.artifacts = artifacts;
+                    self.state.update_state.update_artifacts(artifacts);
+                    self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 _ => {
                     let action = self.screen.on(&mut self.state, event);

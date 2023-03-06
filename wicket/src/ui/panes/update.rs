@@ -5,7 +5,9 @@
 use std::collections::BTreeMap;
 
 use super::{align_by, help_text, Control};
-use crate::state::{ComponentId, RackUpdateState, ALL_COMPONENT_IDS};
+use crate::state::{
+    ComponentId, FinalInstallArtifact, RackUpdateState, ALL_COMPONENT_IDS,
+};
 use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup};
 use crate::{Action, Event, Frame, State};
@@ -91,6 +93,47 @@ impl UpdatePane {
         };
         frame.render_widget(popup, full_screen);
     }
+
+    fn update_items(&mut self, state: &State) {
+        let versions = state.update_state.final_artifact_versions.clone();
+
+        self.items = state
+            .update_state
+            .items
+            .iter()
+            .map(|(id, states)| {
+                let children: Vec<_> = states
+                    .iter()
+                    .map(|(artifact, s)| {
+                        let version = artifact_version(artifact, &versions);
+                        let spans = vec![
+                            Span::styled(
+                                artifact.to_string(),
+                                style::selected(),
+                            ),
+                            Span::styled("UNKOWN", style::selected_line()),
+                            Span::styled(version, style::selected()),
+                            Span::styled(s.to_string(), s.style()),
+                        ];
+                        TreeItem::new_leaf(align_by(
+                            0,
+                            25,
+                            self.contents_rect,
+                            spans,
+                        ))
+                    })
+                    .collect();
+                TreeItem::new(*id, children)
+            })
+            .collect();
+    }
+}
+
+fn artifact_version(
+    artifact: &FinalInstallArtifact,
+    versions: &BTreeMap<FinalInstallArtifact, String>,
+) -> String {
+    versions.get(artifact).cloned().unwrap_or_else(|| "UNKNOWN".to_string())
 }
 
 impl Control for UpdatePane {
@@ -117,34 +160,7 @@ impl Control for UpdatePane {
         self.contents_rect = chunks[2];
         self.help_rect = chunks[3];
 
-        self.items = state
-            .update_state
-            .items
-            .iter()
-            .map(|(id, states)| {
-                let children: Vec<_> = states
-                    .iter()
-                    .map(|(artifact, state)| {
-                        let spans = vec![
-                            Span::styled(
-                                artifact.to_string(),
-                                style::selected(),
-                            ),
-                            Span::styled("UNKOWN", style::selected_line()),
-                            Span::styled("1.0.0", style::selected()),
-                            Span::styled(state.to_string(), state.style()),
-                        ];
-                        TreeItem::new_leaf(align_by(
-                            0,
-                            25,
-                            self.contents_rect,
-                            spans,
-                        ))
-                    })
-                    .collect();
-                TreeItem::new(*id, children)
-            })
-            .collect();
+        self.update_items(state);
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
@@ -237,6 +253,9 @@ impl Control for UpdatePane {
         ))
         .block(block.clone());
         frame.render_widget(headers, self.table_headers_rect);
+
+        // Need to refresh the items, as there versions/state may have changed
+        self.update_items(state);
 
         // Draw the contents
         let tree = Tree::new(self.items.clone())
