@@ -44,7 +44,7 @@ impl From<Image> for views::Image {
         Self {
             identity: image.identity(),
             project_id: image.project_id,
-            is_global: image.is_global.into(),
+            is_global: image.is_global,
             url: image.url,
             os: image.os,
             version: image.version,

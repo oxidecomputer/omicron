@@ -4,6 +4,7 @@
 
 //! Tests images support in the API
 
+use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -16,15 +17,21 @@ use nexus_test_utils_macros::nexus_test;
 
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::GlobalImage;
+use omicron_nexus::external_api::views::{self, GlobalImage};
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+const ORG_NAME: &str = "myorg";
+const PROJECT_NAME: &str = "myproj";
+
+const ORG_NAME_2: &str = "myorg2";
+const PROJECT_NAME_2: &str = "myproj2";
+
 #[nexus_test]
-async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
+async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
@@ -40,17 +47,37 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    // No global images yet
-    let global_images: Vec<GlobalImage> =
-        NexusRequest::iter_collection_authn(client, "/system/images", "", None)
-            .await
-            .expect("failed to list images")
-            .all_items;
+    let images_url = format!(
+        "/v1/images?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    );
 
-    assert_eq!(global_images.len(), 0);
+    // Before project exists, image list 404s
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &images_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Expected 404");
 
-    // Create one!
-    let image_create_params = params::GlobalImageCreate {
+    // create the project, now we expect an empty list
+    create_organization(client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
+
+    let images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(images.len(), 0);
+
+    // Create an image in the project
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -60,28 +87,62 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
+        os: "alpine 11".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    NexusRequest::objects_post(client, "/system/images", &image_create_params)
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    // one image in the project
+    let images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await
-        .unwrap();
+        .items;
 
-    // Verify one global image
-    let global_images: Vec<GlobalImage> =
-        NexusRequest::iter_collection_authn(client, "/system/images", "", None)
-            .await
-            .expect("failed to list images")
-            .all_items;
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].identity.name, "alpine-edge");
 
-    assert_eq!(global_images.len(), 1);
-    assert_eq!(global_images[0].identity.name, "alpine-edge");
+    // create another project, which is empty until we promote the image to global
+    create_organization(client, ORG_NAME_2).await;
+    create_project(client, ORG_NAME_2, PROJECT_NAME_2).await;
+
+    let project_2_images_url = format!(
+        "/v1/images?organization={}&project={}",
+        ORG_NAME_2, PROJECT_NAME_2
+    );
+
+    let images = NexusRequest::object_get(client, &project_2_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+    assert_eq!(images.len(), 0);
+
+    // promote image to global
+    let promote_image_url = format!("/v1/images/{}/promote", image.identity.id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_image_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to promote image");
+
+    // now the image shows up in the other project
+    let images = NexusRequest::object_get(client, &project_2_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].identity.name, "alpine-edge");
 }
 
 #[nexus_test]
@@ -314,8 +375,8 @@ async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
-    create_organization(&client, "myorg").await;
-    create_project(client, "myorg", "myproj").await;
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -387,8 +448,8 @@ async fn test_make_disk_from_global_image_too_small(
     .parsed_body()
     .unwrap();
 
-    create_organization(&client, "myorg").await;
-    create_project(client, "myorg", "myproj").await;
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
