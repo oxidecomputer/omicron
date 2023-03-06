@@ -314,7 +314,7 @@
               "path": {
                 "description": "The path to the disk.",
                 "type": "string",
-                "format": "UTF-8 path"
+                "format": "Utf8PathBuf"
               },
               "reason": {
                 "type": "string",
@@ -352,7 +352,7 @@
               "path": {
                 "description": "The path to the disk.",
                 "type": "string",
-                "format": "UTF-8 path"
+                "format": "Utf8PathBuf"
               },
               "reason": {
                 "type": "string",
@@ -381,7 +381,7 @@
               "destination": {
                 "description": "The destination the artifact is being written out to.",
                 "type": "string",
-                "format": "UTF-8 path"
+                "format": "Utf8PathBuf"
               },
               "elapsed": {
                 "description": "How long the write took before it failed.",
@@ -448,7 +448,7 @@
               "destination": {
                 "description": "The destination for the artifact.",
                 "type": "string",
-                "format": "UTF-8 path"
+                "format": "Utf8PathBuf"
               },
               "elapsed": {
                 "description": "How long the write took to complete.",
@@ -688,7 +688,7 @@
               "path": {
                 "description": "The path to the disk.",
                 "type": "string",
-                "format": "UTF-8 path"
+                "format": "Utf8PathBuf"
               },
               "percentage": {
                 "description": "Percentage progress.",
@@ -724,7 +724,7 @@
               "destination": {
                 "description": "The destination the artifact is being written out to.",
                 "type": "string",
-                "format": "UTF-8 path"
+                "format": "Utf8PathBuf"
               },
               "elapsed": {
                 "description": "How long it's been since the write started.",

@@ -323,6 +323,6 @@ pub enum ProgressEventKind {
 
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
-    schema.format = Some("UTF-8 path".to_owned());
+    schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

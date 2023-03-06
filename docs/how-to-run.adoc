@@ -111,6 +111,9 @@ $ cargo run --release --bin omicron-package -- package
 NOTE: Running in `release` mode isn't strictly required, but improves
 the performance of the packaging tools significantly.
 
+NOTE: To build packages for the trampoline recovery image, pass omicron-package
+`--target image_type=trampoline`.
+
 The aforementioned package command fills a target directory of choice
 (by default, `out/` within the omicron repository) with tarballs ready
 to be unpacked as services.

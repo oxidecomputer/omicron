@@ -155,6 +155,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_create_v1)?;
         api.register(disk_view_v1)?;
         api.register(disk_delete_v1)?;
+        api.register(disk_metrics_list_v1)?;
 
         api.register(disk_bulk_write_import_start_v1)?;
         api.register(disk_bulk_write_import_v1)?;
@@ -235,7 +236,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_create_v1)?;
         api.register(vpc_subnet_delete_v1)?;
         api.register(vpc_subnet_update_v1)?;
-        // api.register(vpc_subnet_list_network_interfaces_v1)?;
+        api.register(vpc_subnet_list_network_interfaces_v1)?;
 
         api.register(instance_network_interface_create)?;
         api.register(instance_network_interface_list)?;
@@ -251,6 +252,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_delete_v1)?;
 
         api.register(instance_external_ip_list)?;
+        api.register(instance_external_ip_list_v1)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -2706,7 +2708,7 @@ async fn disk_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Display, Deserialize, JsonSchema)]
+#[derive(Display, Serialize, Deserialize, JsonSchema)]
 #[display(style = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DiskMetricName {
@@ -2718,11 +2720,22 @@ pub enum DiskMetricName {
     WriteBytes,
 }
 
+/// Path parameters for metrics requests where `/metrics/{metric_name}` is
+/// appended to an existing path parameter type
+#[derive(Deserialize, JsonSchema)]
+struct MetricsPathParam<T, M> {
+    #[serde(flatten)]
+    inner: T,
+    metric_name: M,
+}
+
 /// Fetch disk metrics
+/// Use `/v1/disks/{disk}/{metric}` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
     tags = ["disks"],
+    deprecated = true,
 }]
 async fn disk_metrics_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2751,6 +2764,58 @@ async fn disk_metrics_list(
         let result = nexus
             .select_timeseries(
                 &format!("crucible_upstairs:{}", path.metric_name),
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
+                query,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct DiskMetricsPath {
+    disk: NameOrId,
+    metric: DiskMetricName,
+}
+
+/// Fetch disk metrics
+#[endpoint {
+    method = GET,
+    path = "/v1/disks/{disk}/metrics/{metric}",
+    tags = ["disks"],
+}]
+async fn disk_metrics_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<DiskMetricsPath>,
+    query_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+    selector_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+
+        let selector = selector_params.into_inner();
+        let limit = rqctx.page_limit(&query)?;
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: selector.project_selector.clone(),
+        };
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., authz_disk) = nexus
+            .disk_lookup(&opctx, &disk_selector)?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let result = nexus
+            .select_timeseries(
+                &format!("crucible_upstairs:{}", path.metric),
                 &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
@@ -4768,31 +4833,61 @@ async fn instance_network_interface_update(
 // External IP addresses for instances
 
 /// List external IP addresses
+/// Use `/v1/instances/{instance}/external-ips` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips",
     tags = ["instances"],
+    deprecated = true,
 }]
 async fn instance_external_ip_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let organization_name = &path.organization_name;
-    let project_name = &path.project_name;
-    let instance_name = &path.instance_name;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let ips = nexus
-            .instance_list_external_ips(
-                &opctx,
-                organization_name,
-                project_name,
-                instance_name,
-            )
-            .await?;
+        let instance_selector = params::InstanceSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            path.instance_name.into(),
+        );
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let ips =
+            nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
+        Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List external IP addresses
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/external-ips",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
+) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project_selector: query.project_selector,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector)?;
+        let ips =
+            nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
         Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5802,15 +5897,17 @@ async fn vpc_subnet_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List network interfaces
+/// List network interfaces for a VPC subnet
+/// Use `/v1/vpc-subnets/{subnet}/network-interfaces` instead
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces",
     tags = ["vpcs"],
+    deprecated = true,
 }]
 async fn vpc_subnet_list_network_interfaces(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
+    query_params: Query<PaginatedByNameOrId>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
     let apictx = rqctx.context();
@@ -5819,24 +5916,80 @@ async fn vpc_subnet_list_network_interfaces(
     let path = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let subnet_selector = params::SubnetSelector::new(
+            Some(path.organization_name.into()),
+            Some(path.project_name.into()),
+            Some(path.vpc_name.into()),
+            path.subnet_name.into(),
+        );
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
         let interfaces = nexus
             .subnet_list_network_interfaces(
                 &opctx,
-                &path.organization_name,
-                &path.project_name,
-                &path.vpc_name,
-                &path.subnet_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
+                &subnet_lookup,
+                &paginated_by,
             )
             .await?
             .into_iter()
             .map(|interfaces| interfaces.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             interfaces,
-            &marker_for_name,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// This endpoint is likely temporary. We would rather list all IPs allocated in
+// a subnet whether they come from NICs or something else. See
+// https://github.com/oxidecomputer/omicron/issues/2476
+
+/// List network interfaces
+#[endpoint {
+    method = GET,
+    path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_list_network_interfaces_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SubnetPath>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet_selector = params::SubnetSelector {
+            vpc_selector: scan_params.selector.vpc_selector.clone(),
+            subnet: path.subnet,
+        };
+        let subnet_lookup =
+            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
+        let interfaces = nexus
+            .subnet_list_network_interfaces(
+                &opctx,
+                &subnet_lookup,
+                &paginated_by,
+            )
+            .await?
+            .into_iter()
+            .map(|interfaces| interfaces.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            interfaces,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -8047,15 +8200,6 @@ async fn session_sshkey_delete(
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for metrics requests where `/metrics/{metric_name}` is
-/// appended to an existing path parameter type
-#[derive(Deserialize, JsonSchema)]
-struct MetricsPathParam<T, M> {
-    #[serde(flatten)]
-    inner: T,
-    metric_name: M,
 }
 
 #[cfg(test)]

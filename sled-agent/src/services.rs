@@ -540,6 +540,9 @@ impl ServiceManager {
         }
 
         for addr in &request.addresses {
+            if *addr == Ipv6Addr::LOCALHOST {
+                continue;
+            }
             info!(
                 self.inner.log,
                 "Ensuring address {} exists",
@@ -795,8 +798,9 @@ impl ServiceManager {
                 ServiceType::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
 
-                    if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
+                    smfh.delpropvalue("config/address", "*")?;
+                    for address in &request.addresses {
+                        smfh.addpropvalue(
                             "config/address",
                             &format!("[{}]:{}", address, DENDRITE_PORT),
                         )?;
@@ -828,6 +832,10 @@ impl ServiceManager {
                                 "config/board_rev",
                                 &self.inner.sidecar_revision,
                             )?;
+                            smfh.setprop(
+                                "config/transceiver_interface",
+                                "tfportCPU0",
+                            )?;
                         }
                         DendriteAsic::TofinoStub => smfh.setprop(
                             "config/port_config",
@@ -841,9 +849,10 @@ impl ServiceManager {
                     info!(self.inner.log, "Setting up tfport service");
 
                     smfh.setprop("config/pkt_source", pkt_source)?;
-                    if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop("config/host", &format!("[{}]", address))?;
-                    }
+                    smfh.setprop(
+                        "config/host",
+                        &format!("[{}]", Ipv6Addr::LOCALHOST),
+                    )?;
                     smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
                     smfh.refresh()?;
                 }
@@ -1000,8 +1009,9 @@ impl ServiceManager {
             }
         };
 
-        let addresses =
+        let mut addresses =
             if let Some(ip) = switch_zone_ip { vec![ip] } else { vec![] };
+        addresses.push(Ipv6Addr::LOCALHOST);
 
         let request = ServiceZoneRequest {
             id: Uuid::new_v4(),
@@ -1095,24 +1105,21 @@ impl ServiceManager {
                             smfh.refresh()?;
                         }
                         ServiceType::Dendrite { .. } => {
-                            smfh.setprop(
-                                "config/address",
-                                &format!("[{}]:{}", address, DENDRITE_PORT),
-                            )?;
+                            smfh.delpropvalue("config/address", "*")?;
+                            for address in &request.addresses {
+                                smfh.addpropvalue(
+                                    "config/address",
+                                    &format!("[{}]:{}", address, DENDRITE_PORT),
+                                )?;
+                            }
                             smfh.refresh()?;
                             // TODO: For this restart to be optional, Dendrite must
                             // implement a non-default "refresh" method.
                             smfh.restart()?;
                         }
                         ServiceType::Tfport { .. } => {
-                            smfh.setprop(
-                                "config/host",
-                                &format!("[{}]", address),
-                            )?;
-                            smfh.refresh()?;
-                            // TODO: For this restart to be optional, Tfport must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
+                            // Since tfport and dpd communicate using localhost,
+                            // the tfport service shouldn't need to be restarted.
                         }
                         _ => (),
                     }
