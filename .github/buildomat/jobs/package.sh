@@ -5,7 +5,7 @@
 #: target = "helios-latest"
 #: rust_toolchain = "1.66.1"
 #: output_rules = [
-#:	"=/work/utilities-package.tar.gz",
+#:	"=/work/package.tar.gz",
 #:	"=/work/global-zone-packages.tar.gz",
 #:	"=/work/zones/*.tar.gz",
 #: ]
@@ -25,19 +25,22 @@ rustc --version
 # Build
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=asic' package
+ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=stub' package
 
 tarball_src_dir="$(pwd)/out"
 
 # Assemble some utilities into a tarball that can be used by deployment
 # phases of buildomat.
 
-utilities=(
-  package-manifest.toml
-  smf/sled-agent/config.toml
-  tools/create_virtual_hardware.sh
+files=(
+	out/*.tar
+	package-manifest.toml
+	smf/sled-agent/config.toml
+	target/release/omicron-package
+	tools/create_virtual_hardware.sh
 )
 
-ptime -m tar cvzf /work/utilities-package.tar.gz "${utilities[@]}"
+ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
 
 # Assemble global zone files in a temporary directory.
 if ! tmp=$(mktemp -d); then
@@ -85,5 +88,6 @@ zones=(
 	out/oximeter-collector.tar.gz
 	out/propolis-server.tar.gz
 	out/switch-asic.tar.gz
+	out/switch-stub.tar.gz
 )
 cp "${zones[@]}" /work/zones/

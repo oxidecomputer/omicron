@@ -109,26 +109,8 @@ pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
-ptime -m tar xvzf /input/package/work/utilities-package.tar.gz
-
-# Unpack all global zone files into "out".
-# Note that because this is packaged as a layered filesystem, most files
-# exist under "root/".
-mkdir out/
-ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz -C out
-
-# Modify config-rss.toml in the sled-agent to use our system's IP and MAC
-# address for upstream connectivity.
-sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
-	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
-	-i out/root/opt/oxide/sled-agent/pkg/config-rss.toml
-
-pfexec mv out/root/opt/oxide/sled-agent /opt/oxide/sled-agent
-pfexec mv out/root/opt/oxide/mg-ddm /opt/oxide/mg-ddm
-
-# Move all global zones to their installed location
-pfexec cp /input/package/work/zones/* /opt/oxide
-
+ptime -m tar xvzf /input/package/work/package.tar.gz
+cp /input/package/work/zones/* out/
 mkdir tests
 for p in /input/build-end-to-end-tests/work/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
@@ -162,7 +144,27 @@ pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 #
 pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
 
-pfexec svccfg import out/root/lib/svc/manifest/site/sled-agent.xml
+#
+# Modify config-rss.toml in the sled-agent zone to use our system's IP and MAC
+# address for upstream connectivity.
+#
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
+	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
+	-i pkg/config-rss.toml
+tar rf out/omicron-sled-agent.tar pkg/config-rss.toml
+rm -rf pkg
+
+#
+# This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
+# before the install.  This doesn't work right now because, above, we made
+# /var/oxide a file system so you can't remove it (EBUSY) like a regular
+# directory.  The lab-netdev target is a ramdisk system that is always cleared
+# out between runs, so it has not had any state yet that requires
+# uninstallation.
+#
+OMICRON_NO_UNINSTALL=1 \
+    ptime -m pfexec ./target/release/omicron-package install
 
 ./tests/bootstrap
 rm ./tests/bootstrap
