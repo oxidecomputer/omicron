@@ -171,9 +171,14 @@ impl Control for UpdatePane {
                     Some(Action::Redraw)
                 }
                 KeyCode::Enter => {
-                    if !self.popup_open {
-                        self.popup_open = true;
-                        Some(Action::Redraw)
+                    // Only open the warning popup if an upload is required
+                    if state.update_state.artifacts.is_empty() {
+                        if !self.popup_open {
+                            self.popup_open = true;
+                            Some(Action::Redraw)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }

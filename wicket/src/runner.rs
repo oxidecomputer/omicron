@@ -139,6 +139,9 @@ impl Runner {
                 Event::Inventory(event) => {
                     self.handle_inventory_event(event)?;
                 }
+                Event::UpdateArtifacts(artifacts) => {
+                    self.state.update_state.artifacts = artifacts;
+                }
                 _ => {
                     let action = self.screen.on(&mut self.state, event);
                     self.handle_action(action)?;

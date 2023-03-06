@@ -9,11 +9,13 @@ use crate::ui::defaults::style;
 use super::{ComponentId, ALL_COMPONENT_IDS};
 use std::collections::BTreeMap;
 use std::fmt::Display;
+use wicketd_client::types::ArtifactId;
 
 #[derive(Debug)]
 pub struct RackUpdateState {
     pub items:
         BTreeMap<ComponentId, BTreeMap<FinalInstallArtifact, UpdateState>>,
+    pub artifacts: Vec<ArtifactId>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -92,6 +94,7 @@ impl RackUpdateState {
                     ),
                 })
                 .collect(),
+            artifacts: vec![],
         }
     }
 }
