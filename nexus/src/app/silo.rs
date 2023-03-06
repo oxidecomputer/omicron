@@ -659,8 +659,8 @@ impl super::Nexus {
         silo_lookup: &lookup::Silo<'_>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::IdentityProvider> {
-        let (.., authz_silo) =
-            silo_lookup.lookup_for(authz::Action::ListChildren).await?;
+        // TODO-security: This should likely be lookup_for ListChildren on the silo
+        let (.., authz_silo, _) = silo_lookup.fetch().await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
         self.db_datastore
             .identity_provider_list(opctx, &authz_idp_list, pagparams)
