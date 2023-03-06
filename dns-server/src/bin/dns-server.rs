@@ -21,9 +21,6 @@ struct Args {
 
     #[clap(long, action)]
     dns_address: SocketAddrV6,
-
-    #[clap(long, action)]
-    dns_zone: String,
 }
 
 #[tokio::main]
@@ -35,6 +32,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut config: dns_server::Config = toml::from_str(&config_file_contents)
         .with_context(|| format!("parse config file {:?}", config_file))?;
 
+    // XXX-dap do not override dropshot bind_address
     config.dropshot.bind_address = SocketAddr::V6(args.http_address);
     eprintln!("{:?}", config);
 
@@ -44,8 +42,9 @@ async fn main() -> Result<(), anyhow::Error> {
         .context("failed to create logger")?;
     info!(&log, "config"; "config" => ?config);
 
+    // XXX-dap do not override dns_address
     let (_dns_server, dropshot_server) =
-        dns_server::start(log, config, args.dns_zone, args.dns_address.into())
+        dns_server::start(log, config, args.dns_address.into())
             .await?;
 
     dropshot_server

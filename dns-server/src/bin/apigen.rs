@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{bail, Result};
-use dns_server::dropshot_server::api;
+use dns_server::http_server::api;
 use std::fs::File;
 use std::io;
 

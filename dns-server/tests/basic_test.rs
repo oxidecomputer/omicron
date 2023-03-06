@@ -293,7 +293,7 @@ struct TestContext {
     resolver: TokioAsyncResolver,
     dns_server: dns_server::dns_server::Server,
     dropshot_server:
-        dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
+        dropshot::HttpServer<Arc<dns_server::http_server::Context>>,
     tmp: tempdir::TempDir,
     logctx: LogContext,
 }
@@ -348,6 +348,7 @@ async fn init_client_server(
         dns_server::start_dropshot_server(config, log.clone(), db).await?;
 
     // wait for server to start
+    // XXX-dap wait_for_condition
     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
     let client =
@@ -381,7 +382,7 @@ fn test_config(
             request_body_max_bytes: 1024,
             ..Default::default()
         },
-        data: dns_server::dns_data::Config { nmax_messages: 16, storage_path },
+        data: dns_server::storage::Config { nmax_messages: 16, storage_path },
     };
 
     Ok((tmp_dir, config, logctx))

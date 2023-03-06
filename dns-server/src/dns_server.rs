@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::dns_data::DnsRecord;
+use crate::dns_types::DnsRecord;
 use pretty_hex::*;
 use serde::Deserialize;
 use slog::{debug, error, Logger};
@@ -29,9 +29,6 @@ use trust_dns_server::authority::{MessageRequest, MessageResponseBuilder};
 pub struct Config {
     /// The address to listen for DNS requests on
     pub bind_address: String,
-
-    /// The DNS zone this server presides over. This must be a valid DNS name
-    pub zone: String,
 }
 
 pub struct Server {
@@ -62,11 +59,10 @@ pub async fn run(
             let socket = socket.clone();
             let log = log.clone();
             let db = db.clone();
-            let zone = config.zone.clone();
 
-            tokio::spawn(async move {
-                handle_req(log, db, socket, src, buf, zone).await
-            });
+            tokio::spawn(
+                async move { handle_req(log, db, socket, src, buf).await },
+            );
         }
     });
 
@@ -106,7 +102,6 @@ async fn handle_req(
     socket: Arc<UdpSocket>,
     src: SocketAddr,
     buf: Vec<u8>,
-    zone: String,
 ) {
     debug!(&log, "handle_req: buffer"; "buffer" => ?buf.hex_dump());
 
@@ -122,15 +117,15 @@ async fn handle_req(
     debug!(&log, "handle_req: message_request"; "mr" => #?mr);
 
     let header = Header::response_from_request(mr.header());
-    let zone = LowerName::from(Name::from_str(&zone).unwrap());
 
     // Ensure the query is for this zone, otherwise bail with servfail. This
     // will cause resolvers to look to other DNS servers for this query.
-    let name = mr.query().name();
-    if !zone.zone_of(name) {
-        nack(&log, &mr, &socket, &header, &src).await;
-        return;
-    }
+    // XXX-dap
+//    let name = mr.query().name();
+//    if !zone.zone_of(name) {
+//        nack(&log, &mr, &socket, &header, &src).await;
+//        return;
+//    }
 
     let name = mr.query().original().name().clone();
     let key = name.to_string();
@@ -155,7 +150,7 @@ async fn handle_req(
         }
     };
 
-    let records: Vec<crate::dns_data::DnsRecord> =
+    let records: Vec<crate::dns_types::DnsRecord> =
         match serde_json::from_slice(bits.as_ref()) {
             Ok(r) => r,
             Err(e) => {
@@ -181,7 +176,7 @@ async fn handle_req(
                     .set_data(Some(RData::AAAA(*addr)));
                 aaaa
             }
-            DnsRecord::SRV(crate::dns_data::SRV {
+            DnsRecord::SRV(crate::dns_types::SRV {
                 prio,
                 weight,
                 port,
