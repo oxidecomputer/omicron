@@ -17,7 +17,6 @@ use crate::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -256,19 +255,11 @@ impl super::Nexus {
     pub async fn subnet_list_network_interfaces(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        subnet_lookup: &lookup::VpcSubnet<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::NetworkInterface> {
-        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_subnet) =
+            subnet_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .subnet_list_network_interfaces(opctx, &authz_subnet, pagparams)
             .await

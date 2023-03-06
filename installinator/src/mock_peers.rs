@@ -547,6 +547,7 @@ mod tests {
 
     use bytes::Buf;
     use futures::{future, StreamExt};
+    use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::ReceiverStream;
@@ -610,7 +611,7 @@ mod tests {
                         anyhow::anyhow!("ran out of attempts"),
                     )),
                 },
-                &dummy_artifact_hash_id(),
+                &dummy_artifact_hash_id(KnownArtifactKind::ControlPlane),
                 &event_sender,
             )
             .await;

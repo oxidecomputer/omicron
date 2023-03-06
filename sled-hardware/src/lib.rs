@@ -137,7 +137,7 @@ pub struct DiskIdentity {
 
 impl DiskPaths {
     // Returns the "illumos letter-indexed path" for a device.
-    fn partition_path(&self, index: usize) -> Option<PathBuf> {
+    fn partition_path(&self, index: usize, raw: bool) -> Option<PathBuf> {
         let index = u8::try_from(index).ok()?;
 
         let path = self.devfs_path.display();
@@ -145,7 +145,10 @@ impl DiskPaths {
             0..=5 => (b'a' + index) as char,
             _ => return None,
         };
-        Some(PathBuf::from(format!("{path}:{character}")))
+        Some(PathBuf::from(format!(
+            "{path}:{character}{suffix}",
+            suffix = if raw { ",raw" } else { "" }
+        )))
     }
 
     /// Returns the path to the whole disk
@@ -163,22 +166,24 @@ impl DiskPaths {
         &self,
         partitions: &[Partition],
         expected_partition: Partition,
+        raw: bool,
     ) -> Result<PathBuf, DiskError> {
         for (index, partition) in partitions.iter().enumerate() {
             if &expected_partition == partition {
-                let path = self.partition_path(index).ok_or_else(|| {
-                    DiskError::NotFound {
-                        path: self.devfs_path.clone(),
-                        partition: expected_partition,
-                    }
-                })?;
+                let path =
+                    self.partition_path(index, raw).ok_or_else(|| {
+                        DiskError::NotFound {
+                            path: self.devfs_path.clone(),
+                            partition: expected_partition,
+                        }
+                    })?;
                 return Ok(path);
             }
         }
-        return Err(DiskError::NotFound {
+        Err(DiskError::NotFound {
             path: self.devfs_path.clone(),
             partition: expected_partition,
-        });
+        })
     }
 }
 
@@ -252,8 +257,11 @@ impl Disk {
         //
         // NOTE: At the moment, we're hard-coding the assumption that at least
         // one zpool should exist on every disk.
-        let zpool_path =
-            paths.partition_device_path(&partitions, Partition::ZfsPool)?;
+        let zpool_path = paths.partition_device_path(
+            &partitions,
+            Partition::ZfsPool,
+            false,
+        )?;
 
         let zpool_name = match Fstyp::get_zpool(&zpool_path) {
             Ok(zpool_name) => zpool_name,
@@ -307,8 +315,15 @@ impl Disk {
         &self.zpool_name
     }
 
-    pub fn boot_image_devfs_path(&self) -> Result<PathBuf, DiskError> {
-        self.paths.partition_device_path(&self.partitions, Partition::BootImage)
+    pub fn boot_image_devfs_path(
+        &self,
+        raw: bool,
+    ) -> Result<PathBuf, DiskError> {
+        self.paths.partition_device_path(
+            &self.partitions,
+            Partition::BootImage,
+            raw,
+        )
     }
 
     pub fn slot(&self) -> i64 {
@@ -341,30 +356,56 @@ mod test {
             PathBuf::from(format!("{DEVFS_PATH}:wd,raw"))
         );
         assert_eq!(
-            paths.partition_path(0),
+            paths.partition_path(0, false),
             Some(PathBuf::from(format!("{DEVFS_PATH}:a")))
         );
         assert_eq!(
-            paths.partition_path(1),
+            paths.partition_path(1, false),
             Some(PathBuf::from(format!("{DEVFS_PATH}:b")))
         );
         assert_eq!(
-            paths.partition_path(2),
+            paths.partition_path(2, false),
             Some(PathBuf::from(format!("{DEVFS_PATH}:c")))
         );
         assert_eq!(
-            paths.partition_path(3),
+            paths.partition_path(3, false),
             Some(PathBuf::from(format!("{DEVFS_PATH}:d")))
         );
         assert_eq!(
-            paths.partition_path(4),
+            paths.partition_path(4, false),
             Some(PathBuf::from(format!("{DEVFS_PATH}:e")))
         );
         assert_eq!(
-            paths.partition_path(5),
+            paths.partition_path(5, false),
             Some(PathBuf::from(format!("{DEVFS_PATH}:f")))
         );
-        assert_eq!(paths.partition_path(6), None);
+        assert_eq!(paths.partition_path(6, false), None);
+
+        assert_eq!(
+            paths.partition_path(0, true),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:a,raw")))
+        );
+        assert_eq!(
+            paths.partition_path(1, true),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:b,raw")))
+        );
+        assert_eq!(
+            paths.partition_path(2, true),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:c,raw")))
+        );
+        assert_eq!(
+            paths.partition_path(3, true),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:d,raw")))
+        );
+        assert_eq!(
+            paths.partition_path(4, true),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:e,raw")))
+        );
+        assert_eq!(
+            paths.partition_path(5, true),
+            Some(PathBuf::from(format!("{DEVFS_PATH}:f,raw")))
+        );
+        assert_eq!(paths.partition_path(6, true), None);
     }
 
     #[test]
@@ -378,9 +419,10 @@ mod test {
                 .partition_device_path(
                     &[Partition::ZfsPool,],
                     Partition::ZfsPool,
+                    false,
                 )
                 .expect("Should have found partition"),
-            paths.partition_path(0).unwrap(),
+            paths.partition_path(0, false).unwrap(),
         );
 
         assert_eq!(
@@ -393,14 +435,15 @@ mod test {
                         Partition::DumpDevice,
                     ],
                     Partition::ZfsPool,
+                    false,
                 )
                 .expect("Should have found partition"),
-            paths.partition_path(2).unwrap(),
+            paths.partition_path(2, false).unwrap(),
         );
 
         assert!(matches!(
             paths
-                .partition_device_path(&[], Partition::ZfsPool,)
+                .partition_device_path(&[], Partition::ZfsPool, false)
                 .expect_err("Should not have found partition"),
             DiskError::NotFound { .. },
         ));

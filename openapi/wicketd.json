@@ -1151,6 +1151,32 @@
           {
             "type": "object",
             "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "component": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "component"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "state": {
                 "type": "string",
                 "enum": [
@@ -1228,10 +1254,21 @@
               "data": {
                 "type": "object",
                 "properties": {
-                  "bytes_received": {
+                  "attempt": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "downloaded_bytes": {
                     "type": "integer",
                     "format": "uint64",
                     "minimum": 0
+                  },
+                  "elapsed": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "kind": {
+                    "type": "string"
                   },
                   "total_bytes": {
                     "type": "integer",
@@ -1240,14 +1277,113 @@
                   }
                 },
                 "required": [
-                  "bytes_received",
+                  "attempt",
+                  "downloaded_bytes",
+                  "elapsed",
+                  "kind",
                   "total_bytes"
                 ]
               },
               "state": {
                 "type": "string",
                 "enum": [
-                  "artifact_update_progress"
+                  "artifact_download_progress"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "attempt": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "destination": {
+                    "type": "string",
+                    "format": "Utf8PathBuf"
+                  },
+                  "elapsed": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "total_bytes": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  },
+                  "written_bytes": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "attempt",
+                  "destination",
+                  "elapsed",
+                  "kind",
+                  "total_bytes",
+                  "written_bytes"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "artifact_write_progress"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "attempt": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "elapsed": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "path": {
+                    "type": "string",
+                    "format": "Utf8PathBuf"
+                  },
+                  "percentage": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "attempt",
+                  "elapsed",
+                  "path",
+                  "percentage"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "installinator_format_progress"
                 ]
               }
             },
