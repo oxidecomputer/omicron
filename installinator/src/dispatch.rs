@@ -126,13 +126,19 @@ struct InstallOpts {
     #[command(flatten)]
     artifact_ids: ArtifactIdOpts,
 
-    // TODO: checksum?
+    /// If true, do not exit after successful completion (e.g., to continue
+    /// running as an smf service).
+    #[clap(long)]
+    stay_alive: bool,
+
     /// Install on a gimlet's M.2 drives, found via scanning for hardware.
     ///
     /// WARNING: This will overwrite the boot image slice of both M.2 drives, if
     /// present!
     #[clap(long)]
     install_on_gimlet: bool,
+
+    // TODO: checksum?
 
     // The destination to write to.
     #[clap(
@@ -220,6 +226,13 @@ impl InstallOpts {
 
         // Wait for all progress reports to be sent.
         progress_handle.await.context("progress reporter to complete")?;
+
+        if self.stay_alive {
+            loop {
+                slog::info!(log, "installation complete; sleeping");
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        }
 
         Ok(())
     }
