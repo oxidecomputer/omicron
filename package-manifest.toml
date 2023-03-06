@@ -43,11 +43,10 @@ source.rust.release = true
 source.paths = [ { from = "smf/sled-agent", to = "pkg" } ]
 output.type = "tarball"
 
-# Installinator is a special package: we do not want it bundled into the normal
-# omicron install; it duplicates some of sled-agent's work and would conflict
-# with it if run side-by-side, and it's completely useless! We only want to
-# build it for inclusion in the trampoline ("recovery") image, which we indicate
-# here via `only_for_target.image_type`.
+# Installinator is a service which should run in the Global Zone for the
+# explicit purpose of recovery and OS re-installation. It should not be
+# installed concurrently with the sled-agent, and is built separately using the
+# target only_for_target.image_type = "trampoline".
 [package.installinator]
 service_name = "installinator"
 only_for_targets.image_type = "trampoline"
@@ -56,7 +55,6 @@ source.rust.binary_names = ["installinator"]
 source.rust.release = true
 source.paths = [ { from = "smf/installinator", to = "pkg" } ]
 output.type = "tarball"
-output.intermediate_only = true
 
 [package.omicron-nexus]
 service_name = "nexus"
