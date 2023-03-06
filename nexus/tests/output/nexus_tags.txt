@@ -7,6 +7,7 @@ disk_delete_v1                           /v1/disks/{disk}
 disk_list                                /organizations/{organization_name}/projects/{project_name}/disks
 disk_list_v1                             /v1/disks
 disk_metrics_list                        /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}
+disk_metrics_list_v1                     /v1/disks/{disk}/metrics/{metric}
 disk_view                                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 disk_view_by_id                          /by-id/disks/{id}
 disk_view_v1                             /v1/disks/{disk}
@@ -42,6 +43,7 @@ instance_disk_detach_v1                  /v1/instances/{instance}/disks/detach
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
 instance_disk_list_v1                    /v1/instances/{instance}/disks
 instance_external_ip_list                /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips
+instance_external_ip_list_v1             /v1/instances/{instance}/external-ips
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
 instance_list_v1                         /v1/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
@@ -273,6 +275,7 @@ vpc_subnet_delete                        /organizations/{organization_name}/proj
 vpc_subnet_delete_v1                     /v1/vpc-subnets/{subnet}
 vpc_subnet_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnet_list_network_interfaces       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
+vpc_subnet_list_network_interfaces_v1    /v1/vpc-subnets/{subnet}/network-interfaces
 vpc_subnet_list_v1                       /v1/vpc-subnets
 vpc_subnet_update                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnet_update_v1                     /v1/vpc-subnets/{subnet}
