@@ -3952,7 +3952,8 @@ async fn system_image_list(
 #[endpoint {
     method = POST,
     path = "/system/images",
-    tags = ["system"]
+    tags = ["system"],
+    deprecated = true,
 }]
 async fn system_image_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3982,6 +3983,7 @@ struct GlobalImagePathParam {
     method = GET,
     path = "/system/images/{image_name}",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn system_image_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4004,6 +4006,7 @@ async fn system_image_view(
     method = GET,
     path = "/system/by-id/images/{id}",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn system_image_view_by_id(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4030,6 +4033,7 @@ async fn system_image_view_by_id(
     method = DELETE,
     path = "/system/images/{image_name}",
     tags = ["system"],
+    deprecated = true,
 }]
 async fn system_image_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4094,7 +4098,7 @@ async fn image_list_v1(
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
     tags = ["images"],
-    deprecated = true
+    deprecated = true,
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4164,7 +4168,8 @@ async fn image_create_v1(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/images",
-    tags = ["images"]
+    tags = ["images"],
+    deprecated = true,
 }]
 async fn image_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4234,6 +4239,7 @@ struct ImagePathParam {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
     tags = ["images"],
+    deprecated = true,
 }]
 async fn image_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4261,6 +4267,7 @@ async fn image_view(
     method = GET,
     path = "/by-id/images/{id}",
     tags = ["images"],
+    deprecated = true,
 }]
 async fn image_view_by_id(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4321,6 +4328,7 @@ async fn image_delete_v1(
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
     tags = ["images"],
+    deprecated = true,
 }]
 async fn image_delete(
     rqctx: RequestContext<Arc<ServerContext>>,

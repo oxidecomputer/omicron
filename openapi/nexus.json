@@ -85,7 +85,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/instances/{id}": {
@@ -1830,7 +1831,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/images/{image_name}": {
@@ -1884,7 +1886,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -1929,7 +1932,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances": {
@@ -5451,7 +5455,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/by-id/ip-pools/{id}": {
@@ -6114,7 +6119,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/images/{image_name}": {
@@ -6152,7 +6158,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -6181,7 +6188,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools": {
