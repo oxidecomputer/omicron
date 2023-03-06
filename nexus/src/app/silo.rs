@@ -675,8 +675,8 @@ impl super::Nexus {
         silo_lookup: &lookup::Silo<'_>,
         params: params::SamlIdentityProviderCreate,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
-        let (authz_silo, db_silo) =
-            silo_lookup.fetch_for(authz::Action::CreateChild).await?;
+        // TODO-security: This should likely be fetch_for CreateChild on the silo
+        let (authz_silo, db_silo) = silo_lookup.fetch().await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
 
         if db_silo.user_provision_type != UserProvisionType::Jit {

@@ -40,7 +40,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         .await;
     let silo: Silo = NexusRequest::object_get(
         &client,
-        &format!("/system/silos/{}", SILO_NAME,),
+        &format!("/v1/system/silos/{}", SILO_NAME,),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -59,7 +59,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
+        &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -300,7 +300,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 
     let silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        "/system/silos/hidden/identity-providers/saml",
+        "/v1/system/identity-providers/saml?silo=hidden",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
