@@ -1,6 +1,6 @@
 #!/bin/bash
 #:
-#: name = "helios / package"
+#: name = "helios / package image"
 #: variety = "basic"
 #: target = "helios-latest"
 #: rust_toolchain = "1.66.1"
