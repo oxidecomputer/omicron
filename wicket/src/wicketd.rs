@@ -99,6 +99,10 @@ impl WicketdManager {
                     // TODO: Better error handling
                     slog::info!(self.log,  "Update response: {:?}", res);
                 }
+                else => {
+                    slog::info!(self.log, "Request receiver closed. Process must be exiting.");
+                    break;
+                }
             }
         }
     }
