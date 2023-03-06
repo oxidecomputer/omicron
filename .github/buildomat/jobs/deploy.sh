@@ -116,6 +116,13 @@ ptime -m tar xvzf /input/package/work/utilities-package.tar.gz
 # exist under "root/".
 mkdir out/
 ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz -C out
+
+# Modify config-rss.toml in the sled-agent to use our system's IP and MAC
+# address for upstream connectivity.
+sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
+	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
+	-i out/root/opt/oxide/sled-agent/pkg/config-rss.toml
+
 pfexec mv out/root/opt/oxide/sled-agent /opt/oxide/sled-agent
 pfexec mv out/root/opt/oxide/mg-ddm /opt/oxide/mg-ddm
 
@@ -154,12 +161,6 @@ pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 # the prefix length which apparently defaults (in the Rust code) to /24.
 #
 pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
-
-# Modify config-rss.toml in the sled-agent to use our system's IP and MAC
-# address for upstream connectivity.
-sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
-	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
-	-i out/sled-agent/pkg/config-rss.toml
 
 pfexec svccfg import out/root/lib/svc/manifest/site/sled-agent.xml
 
