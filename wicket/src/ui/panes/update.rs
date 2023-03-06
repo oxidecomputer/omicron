@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use super::{align_by, help_text, Control};
 use crate::state::{ComponentId, RackUpdateState, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
-use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Popup};
+use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup};
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
@@ -81,7 +81,7 @@ impl UpdatePane {
                     Span::styled(" upload", style::plain_text()),
                 ]),
             ]),
-            buttons: vec![],
+            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
         };
         let full_screen = Rect {
             width: state.screen_width,
