@@ -7,6 +7,7 @@
 #: output_rules = [
 #:	"=/work/package.tar.gz",
 #:	"=/work/global-zone-packages.tar.gz",
+#:	"=/work/trampoline-global-zone-packages.tar.gz",
 #:	"=/work/zones/*.tar.gz",
 #: ]
 #:
@@ -14,6 +15,11 @@
 #: series = "image"
 #: name = "global-zone-packages"
 #: from_output = "/out/global-zone-packages.tar.gz"
+#:
+#: [[publish]]
+#: series = "image"
+#: name = "trampoline-global-zone-packages"
+#: from_output = "/out/trampoline-global-zone-packages.tar.gz"
 
 set -o errexit
 set -o pipefail
@@ -26,6 +32,7 @@ rustc --version
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=asic' package
 ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=stub' package
+ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=trampoline' package
 
 tarball_src_dir="$(pwd)/out"
 
@@ -42,38 +49,76 @@ files=(
 
 ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
 
-# Assemble global zone files in a temporary directory.
-if ! tmp=$(mktemp -d); then
+#
+# Global Zone files for Host OS
+#
+
+if ! tmp_gz=$(mktemp -d); then
   exit 1
 fi
-trap 'cd /; rm -rf "$tmp"' EXIT
+trap 'cd /; rm -rf "$tmp_gz"' EXIT
 
 # Header file, identifying this is intended to be layered in the global zone.
 # Within the ramdisk, this means that all files under "root/foo" should appear
 # in the global zone as "/foo".
-echo '{"v":"1","t":"layer"}' > "$tmp/oxide.json"
+echo '{"v":"1","t":"layer"}' > "$tmp_gz/oxide.json"
 
 # Extract the sled-agent tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp/root/opt/oxide/sled-agent"
+pkg_dir="$tmp_gz/root/opt/oxide/sled-agent"
 mkdir -p "$pkg_dir"
 cd "$pkg_dir"
 tar -xvfz "$tarball_src_dir/omicron-sled-agent.tar"
 # Ensure that the manifest for the sled agent exists in a location where it may
 # be automatically initialized.
-mkdir -p "$tmp/root/lib/svc/manifest/site/"
-mv pkg/manifest.xml "$tmp/root/lib/svc/manifest/site/sled-agent.xml"
+mkdir -p "$tmp_gz/root/lib/svc/manifest/site/"
+mv pkg/manifest.xml "$tmp_gz/root/lib/svc/manifest/site/sled-agent.xml"
 cd -
-
 # Extract the mg-ddm tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp/root/opt/oxide/mg-ddm"
+pkg_dir="$tmp_gz/root/opt/oxide/mg-ddm"
 mkdir -p "$pkg_dir"
 cd "$pkg_dir"
 tar -xvfz "$tarball_src_dir/maghemite.tar"
 cd -
 
 mkdir -p /work
-cd "$tmp" && tar cvfz /work/global-zone-packages.tar.gz oxide.json root
+cd "$tmp_gz" && tar cvfz /work/global-zone-packages.tar.gz oxide.json root
 cd -
+
+#
+# Global Zone files for for Trampoline image
+#
+
+if ! tmp_trampoline=$(mktemp -d); then
+  exit 1
+fi
+trap 'cd /; rm -rf "$tmp_trampoline"' EXIT
+
+echo '{"v":"1","t":"layer"}' > "$tmp_trampoline/oxide.json"
+
+# Extract the installinator tarball for re-packaging into the layered GZ archive.
+pkg_dir="$tmp_trampoline/root/opt/oxide/installinator"
+mkdir -p "$pkg_dir"
+cd "$pkg_dir"
+tar -xvfz "$tarball_src_dir/installinator.tar"
+# Ensure that the manifest for the installinator exists in a location where it may
+# be automatically initialized.
+mkdir -p "$tmp_trampoline/root/lib/svc/manifest/site/"
+mv pkg/manifest.xml "$tmp_trampoline/root/lib/svc/manifest/site/installinator.xml"
+cd -
+# Extract the mg-ddm tarball for re-packaging into the layered GZ archive.
+pkg_dir="$tmp_trampoline/root/opt/oxide/mg-ddm"
+mkdir -p "$pkg_dir"
+cd "$pkg_dir"
+tar -xvfz "$tarball_src_dir/maghemite.tar"
+cd -
+
+mkdir -p /work
+cd "$tmp_trampoline" && tar cvfz /work/trampoline-global-zone-packages.tar.gz oxide.json root
+cd -
+
+#
+# Non-Global Zones
+#
 
 # Assemble Zone Images into their respective output locations.
 mkdir -p /work/zones
