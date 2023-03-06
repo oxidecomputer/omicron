@@ -71,6 +71,47 @@ pub struct SnapshotPath {
     pub snapshot: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SiloPath {
+    pub silo: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProviderPath {
+    pub provider: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SiloSelector {
+    pub silo: NameOrId,
+}
+
+impl From<Name> for SiloSelector {
+    fn from(name: Name) -> Self {
+        SiloSelector { silo: name.into() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SamlIdentityProviderSelector {
+    #[serde(flatten)]
+    pub silo_selector: Option<SiloSelector>,
+    pub saml_identity_provider: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SamlIdentityProviderSelector {
+    pub fn new(
+        silo: Option<NameOrId>,
+        saml_identity_provider: NameOrId,
+    ) -> Self {
+        SamlIdentityProviderSelector {
+            silo_selector: silo.map(|s| SiloSelector { silo: s }),
+            saml_identity_provider,
+        }
+    }
+}
+
 // Only by ID because groups have an `external_id` instead of a name and
 // therefore don't implement `ObjectIdentity`, which makes lookup by name
 // inconvenient. We should figure this out more generally, as there are several
