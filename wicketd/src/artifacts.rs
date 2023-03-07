@@ -36,8 +36,10 @@ use crate::installinator_progress::IprArtifactServer;
 // A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug, Default)]
 struct ArtifactsWithPlan {
-    by_id: DebugIgnore<HashMap<ArtifactId, BufList>>,
-    by_hash: DebugIgnore<HashMap<ArtifactHashId, BufList>>,
+    // TODO: replace with BufList once it supports Read via a cursor (required
+    // for host tarball extraction)
+    by_id: DebugIgnore<HashMap<ArtifactId, Bytes>>,
+    by_hash: DebugIgnore<HashMap<ArtifactHashId, Bytes>>,
     plan: Option<UpdatePlan>,
 }
 
@@ -157,13 +159,17 @@ impl WicketdArtifactStore {
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
-        self.artifacts_with_plan.lock().unwrap().get(id)
+        self.artifacts_with_plan.lock().unwrap().get(id).map(BufList::from)
     }
 
     fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
-        self.artifacts_with_plan.lock().unwrap().get_by_hash(id)
+        self.artifacts_with_plan
+            .lock()
+            .unwrap()
+            .get_by_hash(id)
+            .map(BufList::from)
     }
 
     /// Replaces the artifact hash map, returning the previous map.
@@ -282,8 +288,8 @@ impl ArtifactsWithPlan {
                 }
             })?;
 
-            let buf_list = BufList::from_iter([Bytes::from(buf)]);
-            let num_bytes = buf_list.num_bytes();
+            let bytes = Bytes::from(buf);
+            let num_bytes = bytes.len();
 
             match by_id.entry(artifact_id.clone()) {
                 Entry::Occupied(_) => {
@@ -291,7 +297,7 @@ impl ArtifactsWithPlan {
                     return Err(RepositoryError::DuplicateEntry(artifact_id));
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(buf_list.clone());
+                    entry.insert(bytes.clone());
                 }
             }
 
@@ -303,7 +309,7 @@ impl ArtifactsWithPlan {
                     ));
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(buf_list);
+                    entry.insert(bytes);
                 }
             }
 
@@ -330,11 +336,11 @@ impl ArtifactsWithPlan {
     }
 
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
-        self.by_id.get(id).cloned()
+        self.by_id.get(id).cloned().map(|bytes| BufList::from_iter([bytes]))
     }
 
     fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
-        self.by_hash.get(id).cloned()
+        self.by_hash.get(id).cloned().map(|bytes| BufList::from_iter([bytes]))
     }
 }
 
@@ -443,7 +449,7 @@ impl RepositoryError {
 #[derive(Debug, Clone)]
 pub(crate) struct ArtifactIdData {
     pub(crate) id: ArtifactId,
-    pub(crate) data: DebugIgnore<BufList>,
+    pub(crate) data: DebugIgnore<Bytes>,
 }
 
 #[derive(Debug, Clone)]
@@ -476,8 +482,8 @@ pub(crate) struct UpdatePlan {
 
 impl UpdatePlan {
     fn new(
-        by_id: &HashMap<ArtifactId, BufList>,
-        by_hash: &mut HashMap<ArtifactHashId, BufList>,
+        by_id: &HashMap<ArtifactId, Bytes>,
+        by_hash: &mut HashMap<ArtifactHashId, Bytes>,
         log: &Logger,
     ) -> Result<Self, RepositoryError> {
         // We expect exactly one of each of these kinds to be present in the
@@ -492,7 +498,7 @@ impl UpdatePlan {
         let mut trampoline_phase_2 = None;
 
         let artifact_found =
-            |out: &mut Option<ArtifactIdData>, id, data: &BufList| {
+            |out: &mut Option<ArtifactIdData>, id, data: &Bytes| {
                 let data = DebugIgnore(data.clone());
                 match out.replace(ArtifactIdData { id, data }) {
                     None => Ok(()),
@@ -571,9 +577,7 @@ impl UpdatePlan {
 
         // Compute the SHA-256 of the extracted host phase 2 data.
         let mut host_phase_2_hash = Sha256::new();
-        for chunk in host_phase_2.data.iter() {
-            host_phase_2_hash.update(chunk);
-        }
+        host_phase_2_hash.update(&host_phase_2.data);
         let host_phase_2_hash =
             ArtifactHash(host_phase_2_hash.finalize().into());
 
@@ -629,12 +633,12 @@ impl UpdatePlan {
 }
 
 fn unpack_host_artifact(
-    data: &BufList,
+    data: &Bytes,
     log: &Logger,
-) -> Result<(BufList, BufList), RepositoryError> {
+) -> Result<(Bytes, Bytes), RepositoryError> {
     // TODO What do host artifacts look like? Probably a tarball? We need to
     // unpack it here and find the phase1/phase2. For now, just return the
     // incoming data as phase1 and an empty buflist as phase 2.
     warn!(log, "FIXME FIXME FIXME PLACEHOLDER UNPACKING HOST ARTIFACT");
-    Ok((data.clone(), BufList::new()))
+    Ok((data.clone(), Bytes::new()))
 }
