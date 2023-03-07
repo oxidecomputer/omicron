@@ -7,6 +7,7 @@ disk_delete_v1                           /v1/disks/{disk}
 disk_list                                /organizations/{organization_name}/projects/{project_name}/disks
 disk_list_v1                             /v1/disks
 disk_metrics_list                        /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}
+disk_metrics_list_v1                     /v1/disks/{disk}/metrics/{metric}
 disk_view                                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 disk_view_by_id                          /by-id/disks/{id}
 disk_view_v1                             /v1/disks/{disk}
@@ -42,6 +43,7 @@ instance_disk_detach_v1                  /v1/instances/{instance}/disks/detach
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
 instance_disk_list_v1                    /v1/instances/{instance}/disks
 instance_external_ip_list                /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips
+instance_external_ip_list_v1             /v1/instances/{instance}/external-ips
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
 instance_list_v1                         /v1/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
@@ -139,11 +141,14 @@ session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
+group_list_v1                            /v1/groups
+group_view                               /v1/groups/{group}
 policy_update                            /policy
 policy_update_v1                         /v1/policy
 policy_view                              /policy
 policy_view_v1                           /v1/policy
 user_list                                /users
+user_list_v1                             /v1/users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
@@ -181,8 +186,11 @@ ip_pool_update                           /system/ip-pools/{pool_name}
 ip_pool_view                             /system/ip-pools/{pool_name}
 ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
 local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
+local_idp_user_create_v1                 /v1/system/identity-providers/local/users
 local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
+local_idp_user_delete_v1                 /v1/system/identity-providers/local/users/{user_id}
 local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
+local_idp_user_set_password_v1           /v1/system/identity-providers/local/users/{user_id}/set-password
 physical_disk_list                       /system/hardware/disks
 physical_disk_list_v1                    /v1/system/hardware/disks
 rack_list                                /system/hardware/racks
@@ -194,17 +202,28 @@ saga_list_v1                             /v1/system/sagas
 saga_view                                /system/sagas/{saga_id}
 saga_view_v1                             /v1/system/sagas/{saga_id}
 saml_identity_provider_create            /system/silos/{silo_name}/identity-providers/saml
+saml_identity_provider_create_v1         /v1/system/identity-providers/saml
 saml_identity_provider_view              /system/silos/{silo_name}/identity-providers/saml/{provider_name}
+saml_identity_provider_view_v1           /v1/system/identity-providers/saml/{provider}
 silo_create                              /system/silos
+silo_create_v1                           /v1/system/silos
 silo_delete                              /system/silos/{silo_name}
+silo_delete_v1                           /v1/system/silos/{silo}
 silo_identity_provider_list              /system/silos/{silo_name}/identity-providers
+silo_identity_provider_list_v1           /v1/system/identity-providers
 silo_list                                /system/silos
+silo_list_v1                             /v1/system/silos
 silo_policy_update                       /system/silos/{silo_name}/policy
+silo_policy_update_v1                    /v1/system/silos/{silo}/policy
 silo_policy_view                         /system/silos/{silo_name}/policy
+silo_policy_view_v1                      /v1/system/silos/{silo}/policy
 silo_user_view                           /system/silos/{silo_name}/users/id/{user_id}
+silo_user_view_v1                        /v1/system/users/{user_id}
 silo_users_list                          /system/silos/{silo_name}/users/all
+silo_users_list_v1                       /v1/system/users
 silo_view                                /system/silos/{silo_name}
 silo_view_by_id                          /system/by-id/silos/{id}
+silo_view_v1                             /v1/system/silos/{silo}
 sled_list                                /system/hardware/sleds
 sled_list_v1                             /v1/system/hardware/sleds
 sled_physical_disk_list                  /system/hardware/sleds/{sled_id}/disks
@@ -237,7 +256,9 @@ vpc_create_v1                            /v1/vpcs
 vpc_delete                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 vpc_delete_v1                            /v1/vpcs/{vpc}
 vpc_firewall_rules_update                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_update_v1             /v1/vpc-firewall-rules
 vpc_firewall_rules_view                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_view_v1               /v1/vpc-firewall-rules
 vpc_list                                 /organizations/{organization_name}/projects/{project_name}/vpcs
 vpc_list_v1                              /v1/vpcs
 vpc_router_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
@@ -268,6 +289,7 @@ vpc_subnet_delete                        /organizations/{organization_name}/proj
 vpc_subnet_delete_v1                     /v1/vpc-subnets/{subnet}
 vpc_subnet_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnet_list_network_interfaces       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
+vpc_subnet_list_network_interfaces_v1    /v1/vpc-subnets/{subnet}/network-interfaces
 vpc_subnet_list_v1                       /v1/vpc-subnets
 vpc_subnet_update                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnet_update_v1                     /v1/vpc-subnets/{subnet}

@@ -12,8 +12,7 @@ use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 use wicketd_client::types::RackV1Inventory;
 use wicketd_client::GetInventoryResponse;
 
-use crate::wizard::Event;
-use crate::InventoryEvent;
+use crate::{Event, InventoryEvent};
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const WICKETD_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -160,7 +159,7 @@ impl InventoryState {
                     .send(InventoryEvent::Inventory {
                         changed_inventory,
                         wicketd_received: Instant::now(),
-                        mgs_received: libsw::Stopwatch::with_elapsed_started(
+                        mgs_received: libsw::TokioSw::with_elapsed_started(
                             mgs_received_ago,
                         ),
                     })

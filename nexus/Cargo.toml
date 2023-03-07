@@ -20,6 +20,7 @@ crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
 diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace.workspace = true
+dns-service-client.workspace = true
 dropshot.workspace = true
 fatfs.workspace = true
 futures.workspace = true
@@ -27,7 +28,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
-internal-dns-client.workspace = true
+internal-dns-names.workspace = true
 ipnetwork.workspace = true
 lazy_static.workspace = true
 macaddr.workspace = true

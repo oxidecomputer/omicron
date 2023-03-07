@@ -142,7 +142,7 @@ pub async fn login_spoof(
 // TODO If the user does not have this information it's unclear what should
 // happen.  If they know the silo name they are trying to log into, they could
 // `GET /system/silos/{silo_name}/identity_providers` in order to list available
-// identity providers. If not, TODO.
+// identity providers.
 //
 // Once the appropriate login URL is created, the user's browser is redirected:
 //
@@ -412,16 +412,16 @@ pub async fn login_local(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let path_params = path_params.into_inner();
+        let path = path_params.into_inner();
         let credentials = credentials.into_inner();
+        let silo = path.silo_name.into();
 
         // By definition, this request is not authenticated.  These operations
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
-        let user = nexus
-            .login_local(&opctx, &path_params.silo_name, credentials)
-            .await?;
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
         login_finish(&opctx, apictx, user, None).await
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

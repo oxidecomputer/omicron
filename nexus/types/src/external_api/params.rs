@@ -71,6 +71,56 @@ pub struct SnapshotPath {
     pub snapshot: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SiloPath {
+    pub silo: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProviderPath {
+    pub provider: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SiloSelector {
+    pub silo: NameOrId,
+}
+
+impl From<Name> for SiloSelector {
+    fn from(name: Name) -> Self {
+        SiloSelector { silo: name.into() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SamlIdentityProviderSelector {
+    #[serde(flatten)]
+    pub silo_selector: Option<SiloSelector>,
+    pub saml_identity_provider: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SamlIdentityProviderSelector {
+    pub fn new(
+        silo: Option<NameOrId>,
+        saml_identity_provider: NameOrId,
+    ) -> Self {
+        SamlIdentityProviderSelector {
+            silo_selector: silo.map(|s| SiloSelector { silo: s }),
+            saml_identity_provider,
+        }
+    }
+}
+
+// Only by ID because groups have an `external_id` instead of a name and
+// therefore don't implement `ObjectIdentity`, which makes lookup by name
+// inconvenient. We should figure this out more generally, as there are several
+// resources like this.
+#[derive(Deserialize, JsonSchema)]
+pub struct GroupPath {
+    pub group: Uuid,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
@@ -213,7 +263,7 @@ pub struct VpcSelector {
     pub vpc: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
@@ -409,7 +459,7 @@ impl TryFrom<String> for Password {
             .map_err(|e| format!("unsupported password: {:#}", e))?;
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
-        // OpenAPI schema below.
+        // OpenAPI schema below.  See omicron#2307.
         Ok(Password(value, inner))
     }
 }
@@ -437,7 +487,7 @@ impl JsonSchema for Password {
                     "A password used to authenticate a user".to_string(),
                 ),
                 // TODO-doc If we apply password strength rules, they should
-                // presumably be documented here.
+                // presumably be documented here.  See omicron#2307.
                 description: Some(
                     "Passwords may be subject to additional constraints."
                         .to_string(),
@@ -770,7 +820,7 @@ pub struct NetworkInterfaceUpdate {
     /// Note that this can only be used to select a new primary interface for an
     /// instance. Requests to change the primary interface into a secondary will
     /// return an error.
-    // TODO-completeness TODO-docs: When we get there, this should note that a
+    // TODO-completeness TODO-doc When we get there, this should note that a
     // change in the primary interface will result in changes to the DNS records
     // for the instance, though not the name.
     #[serde(default)]
@@ -1305,6 +1355,13 @@ pub struct SnapshotCreate {
 
     /// The name of the disk to be snapshotted
     pub disk: Name,
+}
+
+// USERS AND GROUPS
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalGroupSelector {
+    pub group: Option<Uuid>,
 }
 
 // BUILT-IN USERS

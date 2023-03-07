@@ -17,28 +17,38 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use ref_cast::RefCast;
 
 impl DataStore {
     pub async fn identity_provider_list(
         &self,
         opctx: &OpContext,
         authz_idp_list: &authz::SiloIdentityProviderList,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IdentityProvider> {
         opctx.authorize(authz::Action::ListChildren, authz_idp_list).await?;
 
         use db::schema::identity_provider::dsl;
-        paginated(dsl::identity_provider, dsl::name, pagparams)
-            .filter(dsl::silo_id.eq(authz_idp_list.silo().id()))
-            .filter(dsl::time_deleted.is_null())
-            .select(IdentityProvider::as_select())
-            .load_async::<IdentityProvider>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::identity_provider, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::identity_provider,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::silo_id.eq(authz_idp_list.silo().id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(IdentityProvider::as_select())
+        .load_async::<IdentityProvider>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn saml_identity_provider_create(

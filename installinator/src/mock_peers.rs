@@ -3,19 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    collections::BTreeMap, fmt, net::SocketAddrV6, pin::Pin, time::Duration,
+    collections::BTreeMap,
+    fmt,
+    net::{Ipv6Addr, SocketAddrV6},
+    time::Duration,
 };
 
 use anyhow::{bail, Result};
+use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_artifact_client::ClientError;
+use installinator_common::ProgressReport;
 use omicron_common::update::ArtifactHashId;
 use progenitor_client::ResponseValue;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
+use tokio::sync::mpsc;
+use uuid::Uuid;
 
-use crate::peers::{FetchSender, PeersImpl};
+use crate::{
+    errors::HttpError,
+    peers::{FetchReceiver, PeersImpl},
+};
 
 struct MockPeersUniverse {
     artifact: Bytes,
@@ -210,8 +220,9 @@ impl MockPeers {
     }
 }
 
+#[async_trait]
 impl PeersImpl for MockPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + '_> {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_> {
         Box::new(self.selected_peers.keys().copied())
     }
 
@@ -219,18 +230,34 @@ impl PeersImpl for MockPeers {
         self.selected_peers.len()
     }
 
-    fn fetch_from_peer_impl(
+    async fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
         // We don't (yet) use the artifact ID in MockPeers
         _artifact_hash_id: ArtifactHashId,
-        sender: FetchSender,
-    ) -> Pin<Box<dyn futures::Future<Output = ()> + Send>> {
+    ) -> Result<(u64, FetchReceiver), HttpError> {
         let peer_data = self
             .get(peer)
             .unwrap_or_else(|| panic!("peer {peer} not found in selection"))
             .clone();
-        Box::pin(async move { peer_data.send_response(sender).await })
+        let artifact_size = peer_data.artifact.len() as u64;
+
+        let (sender, receiver) = mpsc::channel(8);
+        tokio::spawn(async move { peer_data.send_response(sender).await });
+        // TODO: add tests to ensure an invalid artifact size is correctly detected
+        Ok((artifact_size, receiver))
+    }
+
+    async fn report_progress_impl(
+        &self,
+        _peer: SocketAddrV6,
+        _update_id: Uuid,
+        _report: ProgressReport,
+    ) -> Result<(), ClientError> {
+        panic!(
+            "this is currently unused -- at some point we'll want to \
+             unify this with MockReportPeers"
+        )
     }
 }
 
@@ -250,7 +277,10 @@ impl fmt::Debug for MockPeer {
 }
 
 impl MockPeer {
-    async fn send_response(self, sender: FetchSender) {
+    async fn send_response(
+        self,
+        sender: mpsc::Sender<Result<Bytes, ClientError>>,
+    ) {
         let mut artifact = self.artifact;
         match self.response {
             MockResponse::Response(actions) => {
@@ -276,11 +306,9 @@ impl MockPeer {
                             // The real implementation generates a reqwest::Error, which can't be
                             // created outside of the reqwest library. Generate a different error.
                             _ = sender
-                                .send(Err(
-                                    progenitor_client::Error::InvalidRequest(
-                                        "sending error".to_owned(),
-                                    ),
-                                ))
+                                .send(Err(ClientError::InvalidRequest(
+                                    "sending error".to_owned(),
+                                )))
                                 .await;
                             return;
                         }
@@ -419,22 +447,110 @@ impl ResponseAction_ {
     }
 }
 
+/// A `PeersImpl` for reporting values.
+///
+/// In the future, this will be combined with `MockPeers` so we can model.
+#[derive(Debug)]
+struct MockReportPeers {
+    update_id: Uuid,
+    report_sender: mpsc::Sender<ProgressReport>,
+}
+
+impl MockReportPeers {
+    // SocketAddrV6::new is not a const fn in stable Rust as of this writing
+    fn valid_peer() -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 2000, 0, 0)
+    }
+
+    fn invalid_peer() -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2), 2000, 0, 0)
+    }
+
+    fn unresponsive_peer() -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3), 2000, 0, 0)
+    }
+
+    fn new(
+        update_id: Uuid,
+        report_sender: mpsc::Sender<ProgressReport>,
+    ) -> Self {
+        Self { update_id, report_sender }
+    }
+}
+
+#[async_trait]
+impl PeersImpl for MockReportPeers {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_> {
+        Box::new(
+            [
+                Self::valid_peer(),
+                Self::invalid_peer(),
+                Self::unresponsive_peer(),
+            ]
+            .into_iter(),
+        )
+    }
+
+    fn peer_count(&self) -> usize {
+        3
+    }
+
+    async fn fetch_from_peer_impl(
+        &self,
+        _peer: SocketAddrV6,
+        _artifact_hash_id: ArtifactHashId,
+    ) -> Result<(u64, FetchReceiver), HttpError> {
+        unimplemented!(
+            "this should never be called -- \
+            eventually we'll want to unify this with MockPeers",
+        )
+    }
+
+    async fn report_progress_impl(
+        &self,
+        peer: SocketAddrV6,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> Result<(), ClientError> {
+        assert_eq!(update_id, self.update_id, "update ID matches");
+        if peer == Self::valid_peer() {
+            _ = self.report_sender.send(report).await;
+            Ok(())
+        } else if peer == Self::invalid_peer() {
+            Err(ClientError::ErrorResponse(ResponseValue::new(
+                installinator_artifact_client::types::Error {
+                    error_code: None,
+                    message: "invalid peer => HTTP 422".to_owned(),
+                    request_id: "mock-request-id".to_owned(),
+                },
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Default::default(),
+            )))
+        } else if peer == Self::unresponsive_peer() {
+            // The real implementation generates a reqwest::Error, which can't be
+            // created outside of the reqwest library. Generate a different error.
+            Err(ClientError::InvalidRequest("unresponsive peer".to_owned()))
+        } else {
+            panic!("unrecognized peer: {peer}")
+        }
+    }
+}
+
 mod tests {
     use super::*;
     use crate::{
         errors::DiscoverPeersError,
         peers::{FetchedArtifact, Peers},
+        reporter::ProgressReporter,
+        test_helpers::{dummy_artifact_hash_id, with_test_runtime},
     };
 
     use bytes::Buf;
-    use futures::future;
-    use omicron_common::{
-        api::internal::nexus::KnownArtifactKind, update::ArtifactHash,
-    };
+    use futures::{future, StreamExt};
+    use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
-
-    use std::future::Future;
+    use tokio_stream::wrappers::ReceiverStream;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
     #[proptest]
@@ -443,6 +559,8 @@ mod tests {
         universe: MockPeersUniverse,
         #[strategy((0..2000u64).prop_map(Duration::from_millis))]
         timeout: Duration,
+        #[strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes))]
+        update_id: Uuid,
     ) {
         with_test_runtime(move || async move {
             let logctx = test_setup_log("proptest_fetch_artifact");
@@ -450,6 +568,33 @@ mod tests {
             let expected_artifact = universe.artifact.clone();
 
             let mut attempts = universe.attempts();
+
+            let (report_sender, report_receiver) = mpsc::channel(512);
+
+            let receiver_handle = tokio::spawn(async move {
+                ReceiverStream::new(report_receiver).collect::<Vec<_>>().await
+            });
+
+            let reporter_log = logctx.log.clone();
+
+            let (progress_reporter, event_sender) =
+                ProgressReporter::new(&logctx.log, update_id, move || {
+                    let reporter_log = reporter_log.clone();
+                    let report_sender = report_sender.clone();
+
+                    async move {
+                        Ok(Peers::new(
+                            &reporter_log,
+                            Box::new(MockReportPeers::new(
+                                update_id,
+                                report_sender,
+                            )),
+                            // The timeout is currently unused by broadcast_report.
+                            Duration::from_secs(10),
+                        ))
+                    }
+                });
+            let progress_handle = progress_reporter.start();
 
             let fetched_artifact = FetchedArtifact::loop_fetch_from_peers(
                 &logctx.log,
@@ -466,9 +611,22 @@ mod tests {
                         anyhow::anyhow!("ran out of attempts"),
                     )),
                 },
-                &dummy_artifact_hash_id(),
+                &dummy_artifact_hash_id(KnownArtifactKind::ControlPlane),
+                &event_sender,
             )
             .await;
+
+            std::mem::drop(event_sender);
+
+            progress_handle
+                .await
+                .expect("progress reporter task exited successfully");
+
+            let reports = receiver_handle
+                .await
+                .expect("progress report receiver task exited successfully");
+
+            println!("finished receiving reports");
 
             match (expected_success, fetched_artifact) {
                 (
@@ -498,29 +656,117 @@ mod tests {
                     panic!("expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}");
                 }
             }
+
+            assert_progress_reports(&reports, expected_success);
+
             logctx.cleanup_successful();
         });
     }
 
-    fn with_test_runtime<F, Fut, T>(f: F) -> T
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = T>,
-    {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .start_paused(true)
-            .build()
-            .expect("tokio Runtime built successfully");
-        runtime.block_on(f())
-    }
+    fn assert_progress_reports(
+        reports: &[ProgressReport],
+        expected_success: Option<(usize, SocketAddrV6)>,
+    ) {
+        for report in reports {
+            // Assert that completion event timestamps are before report timestamps.
+            for event in &report.completion_events {
+                assert!(
+                    event.total_elapsed <= report.total_elapsed,
+                    "event elapsed {:?} is before report elapsed {:?}",
+                    event.total_elapsed,
+                    report.total_elapsed
+                );
+            }
+            // Assert that completion events are correctly ordered.
+            for events in report.completion_events.windows(2) {
+                assert!(
+                    events[0].total_elapsed <= events[1].total_elapsed,
+                    "preceding event elapsed {:?} is less than event elapsed {:?}",
+                    events[0].total_elapsed,
+                    events[1].total_elapsed
+                );
+                assert!(
+                    events[0].kind.attempt() <= events[1].kind.attempt(),
+                    "preceding event attempt {:?} is less than event attempt {:?}",
+                    events[0].kind.attempt(),
+                    events[1].kind.attempt(),
+                );
+            }
+            // For now we only send a single progress event at most.
+            assert!(
+                report.progress_events.len() <= 1,
+                "at most one progress event"
+            );
+            // Assert that progress event timestamps are before report timestamps.
+            for event in &report.progress_events {
+                assert!(
+                    event.total_elapsed <= report.total_elapsed,
+                    "event elapsed {:?} is before report elapsed {:?}",
+                    event.total_elapsed,
+                    report.total_elapsed
+                )
+            }
+        }
 
-    fn dummy_artifact_hash_id() -> ArtifactHashId {
-        ArtifactHashId {
-            kind: KnownArtifactKind::ControlPlane.into(),
-            hash: ArtifactHash(
-                hex_literal::hex!("b5bb9d8014a0f9b1d61e21e796d78dcc" "df1352f23cd32812f4850b878ae4944c"),
-            ),
+        let all_completion_events: Vec<_> = reports
+            .iter()
+            .flat_map(|report| &report.completion_events)
+            .collect();
+
+        // Assert that we received failure events for all prior attempts and
+        // a success event for the current attempt.
+        if let Some((attempt, expected_addr)) = expected_success {
+            let mut saw_success = false;
+
+            for event in all_completion_events {
+                match (event.kind.is_success(), event.kind.peer()) {
+                    (true, Some(peer)) => {
+                        saw_success = true;
+                        assert_eq!(
+                            peer, expected_addr,
+                            "successful peer should match address"
+                        );
+                        assert_eq!(
+                            event.kind.attempt(),
+                            Some(attempt),
+                            "successful attempt should match"
+                        );
+                    }
+                    (false, Some(peer)) => {
+                        // If the peer is the expected one, ensure that the
+                        // attempt is lower.
+                        if peer == expected_addr {
+                            assert!(
+                                event.kind.attempt().unwrap() < attempt,
+                                "for expected peer, failed attempt {:?} < {attempt}",
+                                event.kind.attempt()
+                            );
+                        } else {
+                            assert!(
+                                event.kind.attempt().unwrap() <= attempt,
+                                "for different peer than expected, failed attempt {:?} <= {attempt}",
+                                event.kind.attempt()
+                            );
+                        }
+                    }
+                    (_, None) => {
+                        // This is a non-download event; ignore it.
+                    }
+                }
+            }
+
+            assert!(saw_success, "successful event must have been produced");
+            // It's hard to say anything about failing events for now because
+            // it's possible we didn't have any peers. In the future we can look
+            // at the MockPeersUniverse to ensure that we receive failing
+            // events from every peer that should have failed.
+        } else {
+            for event in all_completion_events {
+                assert!(
+                    !event.kind.is_success(),
+                    "for failed attempts, all events must be failures"
+                );
+            }
         }
     }
 }

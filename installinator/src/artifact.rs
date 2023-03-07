@@ -2,137 +2,136 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, str::FromStr};
+use std::net::SocketAddrV6;
 
-use anyhow::{anyhow, Context, Result};
-use omicron_common::update::ArtifactHash;
+use anyhow::{Context, Result};
+use clap::Args;
+use futures::StreamExt;
+use installinator_artifact_client::ClientError;
+use installinator_common::ProgressReport;
+use ipcc_key_value::{InstallinatorImageId, Ipcc};
+use omicron_common::update::{ArtifactHash, ArtifactHashId};
+use tokio::sync::mpsc;
+use uuid::Uuid;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ArtifactIdsOpt {
-    FromIpcc,
-    Manual(ArtifactHashes),
+use crate::{errors::HttpError, peers::FetchReceiver};
+
+#[derive(Clone, Debug, Eq, PartialEq, Args)]
+pub(crate) struct ArtifactIdOpts {
+    /// Retrieve artifact ID from IPCC
+    #[clap(long, required_unless_present_any = ["update_id", "host_phase_2", "control_plane"])]
+    from_ipcc: bool,
+
+    #[clap(
+        long,
+        conflicts_with = "from_ipcc",
+        required_unless_present = "from_ipcc"
+    )]
+    update_id: Option<Uuid>,
+
+    #[clap(
+        long,
+        conflicts_with = "from_ipcc",
+        required_unless_present = "from_ipcc"
+    )]
+    host_phase_2: Option<ArtifactHash>,
+
+    #[clap(
+        long,
+        conflicts_with = "from_ipcc",
+        required_unless_present = "from_ipcc"
+    )]
+    control_plane: Option<ArtifactHash>,
 }
 
-impl ArtifactIdsOpt {
-    pub(crate) fn resolve(&self) -> Result<ArtifactHashes> {
-        match self {
-            Self::FromIpcc => {
-                todo!("obtain hashes from ipcc");
+impl ArtifactIdOpts {
+    pub(crate) fn resolve(&self) -> Result<InstallinatorImageId> {
+        if self.from_ipcc {
+            let ipcc = Ipcc::open().context("error opening IPCC")?;
+            ipcc.installinator_image_id()
+                .context("error retrieving installinator image ID")
+        } else {
+            let update_id = self.update_id.unwrap();
+            let host_phase_2 = self.host_phase_2.unwrap();
+            let control_plane = self.control_plane.unwrap();
+
+            Ok(InstallinatorImageId { update_id, host_phase_2, control_plane })
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ArtifactClient {
+    log: slog::Logger,
+    client: installinator_artifact_client::Client,
+}
+
+impl ArtifactClient {
+    pub(crate) fn new(addr: SocketAddrV6, log: &slog::Logger) -> Self {
+        let endpoint = format!("http://[{}]:{}", addr.ip(), addr.port());
+        let log = log.new(
+            slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
+        );
+        let client =
+            installinator_artifact_client::Client::new(&endpoint, log.clone());
+        Self { log, client }
+    }
+
+    pub(crate) async fn fetch(
+        &self,
+        artifact_hash_id: ArtifactHashId,
+    ) -> Result<(u64, FetchReceiver), HttpError> {
+        let artifact_bytes = self
+            .client
+            .get_artifact_by_hash(
+                artifact_hash_id.kind.as_str(),
+                &artifact_hash_id.hash.to_string(),
+            )
+            .await?;
+
+        slog::debug!(
+            &self.log,
+            "preparing to receive {:?} bytes from artifact",
+            artifact_bytes.content_length(),
+        );
+
+        // We expect servers to set a Content-Length header.
+        let content_length =
+            match artifact_bytes.headers().get(http::header::CONTENT_LENGTH) {
+                Some(v) => {
+                    let s = v
+                        .to_str()
+                        .map_err(|_| HttpError::InvalidContentLength)?;
+                    s.parse().map_err(|_| HttpError::InvalidContentLength)?
+                }
+                None => return Err(HttpError::MissingContentLength),
+            };
+
+        let (fetch_sender, fetch_receiver) = mpsc::channel(8);
+
+        tokio::spawn(async move {
+            let mut bytes = artifact_bytes.into_inner_stream();
+            while let Some(item) = bytes.next().await {
+                if let Err(_) =
+                    fetch_sender.send(item.map_err(Into::into)).await
+                {
+                    // The sender was dropped, which indicates that the job was cancelled.
+                    return;
+                }
             }
-            Self::Manual(hashes) => Ok(*hashes),
-        }
+        });
+
+        Ok((content_length, fetch_receiver))
     }
-}
 
-impl fmt::Display for ArtifactIdsOpt {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ArtifactIdsOpt::FromIpcc => f.write_str("from-ipcc"),
-            ArtifactIdsOpt::Manual(hashes) => write!(f, "{}", hashes),
-        }
-    }
-}
-
-impl FromStr for ArtifactIdsOpt {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "from-ipcc" {
-            return Ok(Self::FromIpcc);
-        }
-
-        let (host_phase_2,control_plane) = s.split_once(',').ok_or_else(|| anyhow!(
-            "expected data in the format host_phase_2:<hash>,control_plane:<hash>")
-        )?;
-
-        fn parse_hash(
-            input: &str,
-            prefix: &str,
-        ) -> Result<ArtifactHash, anyhow::Error> {
-            let hash = input.strip_prefix(prefix).ok_or_else(|| {
-                anyhow!("input `{input}` did not start with `{prefix}`")
-            })?;
-            hash.parse()
-                .with_context(|| format!("input `{input}` has invalid hash"))
-        }
-
-        let host_phase_2 = parse_hash(host_phase_2, "host_phase_2:")?;
-        let control_plane = parse_hash(control_plane, "control_plane:")?;
-
-        Ok(Self::Manual(ArtifactHashes { host_phase_2, control_plane }))
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub(crate) struct ArtifactHashes {
-    pub(crate) host_phase_2: ArtifactHash,
-    pub(crate) control_plane: ArtifactHash,
-}
-
-impl fmt::Display for ArtifactHashes {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "host_phase_2:{},control_plane:{}",
-            self.host_phase_2, self.control_plane
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_artifact_ids() -> Result<()> {
-        let valid = [
-            ("from-ipcc", ArtifactIdsOpt::FromIpcc),
-            (
-                "host_phase_2:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef,\
-                 control_plane:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
-                ArtifactIdsOpt::Manual(ArtifactHashes {
-                    host_phase_2: ArtifactHash(
-                        hex_literal::hex!(
-                            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                        ),
-                    ),
-                    control_plane: ArtifactHash(
-                        hex_literal::hex!(
-                            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
-                        ),
-                    ),
-                }),
-            ),
-        ];
-
-        for (input, expected) in valid {
-            let actual =
-                input.parse::<ArtifactIdsOpt>().with_context(|| {
-                    format!("for input `{input}`, parsing failed")
-                })?;
-            assert_eq!(
-                expected, actual,
-                "for input `{input}`, expected output matches actual"
-            );
-        }
-
-        let invalid = [
-            "foobar",
-            // Control plane hash missing.
-            "host_phase_2:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            // Host phase 2 hash missing.
-            "control_plane:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
-            // The control plane hash is not the correct length.
-            "host_phase_2:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef,\
-             control_plane:fedcba9876543210fedcba9876543210fedcba9876543210fedcba987654321",
-        ];
-
-        for input in invalid {
-            let _ = input.parse::<ArtifactIdsOpt>().map(|output| {
-                panic!("for input `{input}`, expected an error but parsed output `{output:?}`")
-            });
-        }
-
-        Ok(())
+    pub(crate) async fn report_progress(
+        &self,
+        update_id: Uuid,
+        report: ProgressReport,
+    ) -> Result<(), ClientError> {
+        self.client
+            .report_progress(&update_id, &report.into())
+            .await
+            .map(|resp| resp.into_inner())
     }
 }

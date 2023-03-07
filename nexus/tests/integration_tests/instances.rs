@@ -268,12 +268,12 @@ async fn test_instances_create_reboot_halt(
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
     // Check that the instance got a network interface
-    let ips_url = format!(
-        "/organizations/{}/projects/{}/vpcs/default/subnets/default/network-interfaces",
+    let nics_url = format!(
+        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let network_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &ips_url)
+        objects_list_page_authz::<NetworkInterface>(client, &nics_url)
             .await
             .items;
     assert_eq!(network_interfaces.len(), 1);
@@ -465,7 +465,7 @@ async fn test_instances_create_reboot_halt(
     // Check that the network interfaces for that instance are gone, peeking
     // at the subnet-scoped URL so we don't 404 at the instance-scoped route.
     let url_interfaces = format!(
-        "/organizations/{}/projects/{}/vpcs/default/subnets/default/network-interfaces",
+        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
         ORGANIZATION_NAME, PROJECT_NAME,
     );
     let interfaces =
@@ -1094,7 +1094,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     .await
     .expect("Failed to create custom VPC Subnet");
 
-    // TODO-testing: We'd like to assert things about this VPC Subnet we just
+    // TODO-coverage: We'd like to assert things about this VPC Subnet we just
     // created, but the `vpc_subnets_post` endpoint in Nexus currently returns
     // the "private" `omicron_nexus::db::model::VpcSubnet` type. That should be
     // converted to return the public `omicron_common::external` type, which is
@@ -1150,17 +1150,17 @@ async fn test_instance_with_new_custom_network_interfaces(
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Check that both interfaces actually appear correct.
-    let ip_url = |subnet_name: &Name| {
+    let nics_url = |subnet_name: &Name| {
         format!(
-            "/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces",
-            ORGANIZATION_NAME, PROJECT_NAME, "default", subnet_name
+            "/v1/vpc-subnets/{}/network-interfaces?organization={}&project={}&vpc=default",
+            subnet_name, ORGANIZATION_NAME, PROJECT_NAME
         )
     };
 
     // The first interface is in the default VPC Subnet
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client,
-        ip_url(&default_name).as_str(),
+        nics_url(&default_name).as_str(),
         "",
         Some(100),
     )
@@ -1179,7 +1179,7 @@ async fn test_instance_with_new_custom_network_interfaces(
 
     let interfaces1 = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client,
-        ip_url(&non_default_subnet_name).as_str(),
+        nics_url(&non_default_subnet_name).as_str(),
         "",
         Some(100),
     )
@@ -1192,7 +1192,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     );
     let if1 = &interfaces1.all_items[0];
 
-    // TODO-testing: Add this test once the `VpcSubnet` type can be
+    // TODO-coverage: Add this test once the `VpcSubnet` type can be
     // deserialized.
     // assert_eq!(if1.subnet_id, non_default_vpc_subnet.id);
 
@@ -1912,8 +1912,8 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 
     // Verify that there are no NICs at all in the subnet.
     let url_nics = format!(
-        "/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces",
-        ORGANIZATION_NAME, PROJECT_NAME, "default", "default"
+        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
+        ORGANIZATION_NAME, PROJECT_NAME,
     );
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client, &url_nics, "", None,
@@ -3036,8 +3036,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // Fetch the external IPs for the instance.
     let ips_url = format!(
-        "{}/{}/external-ips",
-        url_instances, instance_params.identity.name
+        "/v1/instances/{}/external-ips?organization={}&project={}",
+        instance_params.identity.name, ORGANIZATION_NAME, PROJECT_NAME
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)

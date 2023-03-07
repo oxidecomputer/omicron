@@ -53,9 +53,9 @@ lazy_static! {
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
     pub static ref DEMO_SILO_URL: String =
-        format!("/system/silos/{}", *DEMO_SILO_NAME);
+        format!("/v1/system/silos/{}", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_POLICY_URL: String =
-        format!("/system/silos/{}/policy", *DEMO_SILO_NAME);
+        format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -68,23 +68,23 @@ lazy_static! {
         };
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
-        "/system/silos/{}/identity-providers/local/users",
+        "/v1/system/identity-providers/local/users?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USERS_LIST_URL: String = format!(
-        "/system/silos/{}/users/all",
+        "/v1/system/users?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_GET_URL: String = format!(
-        "/system/silos/{}/users/id/{{id}}",
+        "/v1/system/users/{{id}}?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_DELETE_URL: String = format!(
-        "/system/silos/{}/identity-providers/local/users/{{id}}",
+        "/v1/system/identity-providers/local/users/{{id}}?silo={}",
         DEFAULT_SILO.identity().name,
     );
     pub static ref DEMO_SILO_USER_ID_SET_PASSWORD_URL: String = format!(
-        "/system/silos/{}/identity-providers/local/users/{{id}}/set-password",
+        "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
         DEFAULT_SILO.identity().name,
     );
 
@@ -131,13 +131,16 @@ lazy_static! {
     // VPC used for testing
     pub static ref DEMO_VPC_NAME: Name = "demo-vpc".parse().unwrap();
     pub static ref DEMO_VPC_URL: String =
-        format!("/v1/vpcs/{}?organization={}&project={}", *DEMO_VPC_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/vpcs/{}?{}", *DEMO_VPC_NAME, *DEMO_PROJECT_SELECTOR);
+
+    pub static ref DEMO_VPC_SELECTOR: String =
+        format!("organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_FIREWALL_RULES: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}/firewall/rules", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-firewall-rules?{}", *DEMO_VPC_SELECTOR);
     pub static ref DEMO_VPC_URL_ROUTERS: String =
-        format!("/v1/vpc-routers?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-routers?{}", *DEMO_VPC_SELECTOR);
     pub static ref DEMO_VPC_URL_SUBNETS: String =
-        format!("/v1/vpc-subnets?organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-subnets?{}", *DEMO_VPC_SELECTOR);
     pub static ref DEMO_VPC_CREATE: params::VpcCreate =
         params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -152,9 +155,9 @@ lazy_static! {
     pub static ref DEMO_VPC_SUBNET_NAME: Name =
         "demo-vpc-subnet".parse().unwrap();
     pub static ref DEMO_VPC_SUBNET_URL: String =
-        format!("/v1/vpc-subnets/{}?organization={}&project={}&vpc={}", *DEMO_VPC_SUBNET_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-subnets/{}?{}", *DEMO_VPC_SUBNET_NAME, *DEMO_VPC_SELECTOR);
     pub static ref DEMO_VPC_SUBNET_INTERFACES_URL: String =
-        format!("/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_SUBNET_NAME);
+        format!("/v1/vpc-subnets/{}/network-interfaces?{}", *DEMO_VPC_SUBNET_NAME, *DEMO_VPC_SELECTOR);
     pub static ref DEMO_VPC_SUBNET_CREATE: params::VpcSubnetCreate =
         params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
@@ -218,12 +221,11 @@ lazy_static! {
         };
     pub static ref DEMO_DISK_METRICS_URL: String =
         format!(
-            "/organizations/{}/projects/{}/disks/{}/metrics/activated?start_time={:?}&end_time={:?}",
-            *DEMO_ORG_NAME,
-            *DEMO_PROJECT_NAME,
+            "/v1/disks/{}/metrics/activated?start_time={:?}&end_time={:?}&{}",
             *DEMO_DISK_NAME,
             Utc::now(),
             Utc::now(),
+            *DEMO_PROJECT_SELECTOR,
         );
 }
 
@@ -255,11 +257,10 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_DISKS_DETACH_URL: String =
         format!("/v1/instances/{}/disks/detach?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
 
-    // To be migrated...
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("/v1/network-interfaces?organization={}&project={}&instance={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
-        format!("/organizations/{}/projects/{}/instances/{}/external-ips", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
+        format!("/v1/instances/{}/external-ips?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -427,11 +428,11 @@ lazy_static! {
 
 lazy_static! {
     // Identity providers
-    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/system/silos/demo-silo/identity-providers");
-    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/system/silos/demo-silo/identity-providers/saml");
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/v1/system/identity-providers?silo=demo-silo");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/v1/system/identity-providers/saml?silo=demo-silo");
 
     pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
-    pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
+    pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("/v1/system/identity-providers/saml/{}?silo=demo-silo", *DEMO_SAML_IDENTITY_PROVIDER_NAME);
 
     pub static ref SAML_IDENTITY_PROVIDER: params::SamlIdentityProviderCreate =
         params::SamlIdentityProviderCreate {
@@ -733,7 +734,7 @@ lazy_static! {
 
         /* Silos */
         VerifyEndpoint {
-            url: "/system/silos",
+            url: "/v1/system/silos",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -741,14 +742,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
                 )
-            ],
-        },
-        VerifyEndpoint {
-            url: "/system/by-id/silos/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
         VerifyEndpoint {
@@ -792,11 +785,30 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/users",
+            url: "/v1/users",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/groups",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            // non-existent UUID that will 404
+            url: "/v1/groups/8d90b9a5-1cea-4a2b-9af4-71467dd33a04",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
             ],
         },
 
@@ -846,15 +858,6 @@ lazy_static! {
                 AllowedMethod::Post(serde_json::to_value(
                     params::UserPassword::InvalidPassword
                 ).unwrap()),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/groups",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
             ],
         },
 

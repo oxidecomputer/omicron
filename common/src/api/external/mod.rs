@@ -285,13 +285,13 @@ impl JsonSchema for Name {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
-                min_length: None,
+                min_length: Some(1),
                 pattern: Some(
                     concat!(
                         r#"^"#,
                         // Cannot match a UUID
                         r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]"#,
+                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]*"#,
                         r#"$"#,
                     )
                     .to_string(),
@@ -480,9 +480,6 @@ impl JsonSchema for RoleName {
 /// can fail (if the value is larger than i64::MAX).  We provide all of these for
 /// consumers' convenience.
 // TODO-cleanup This could benefit from a more complete implementation.
-// TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
-// need to write a validator for that.
-// /
 //
 // The maximum byte count of i64::MAX comes from the fact that this is stored in
 // the database as an i64.  Constraining it here ensures that we can't fail to
@@ -2141,6 +2138,7 @@ mod test {
 
         // Success cases
         let valid_names: Vec<&str> = vec![
+            "a",
             "abc",
             "abc-123",
             "a123",

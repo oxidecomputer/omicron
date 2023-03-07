@@ -4,6 +4,7 @@
 
 //! Interfaces for working with sled agent configuration
 
+use crate::updates::ConfigUpdates;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
@@ -56,4 +57,6 @@ pub struct Config {
     pub log: ConfigLogging,
     /// configuration for the sled agent's storage
     pub storage: ConfigStorage,
+    /// configuration for the sled agent's updates
+    pub updates: ConfigUpdates,
 }

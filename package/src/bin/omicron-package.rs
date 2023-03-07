@@ -7,16 +7,16 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::{zfs, zone, zpool};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
-use omicron_sled_agent::cleanup_networking_resources;
-use omicron_sled_agent::{zfs, zone, zpool};
 use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::Target;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
+use sled_hardware::cleanup::cleanup_networking_resources;
 use slog::debug;
 use slog::o;
 use slog::Drain;
@@ -47,7 +47,7 @@ enum SubCommand {
 // involvement. If we choose to remove it, having users pick one of a few
 // "build profiles" (in other words, a curated list of target strings)
 // seems like a promising alternative.
-const DEFAULT_TARGET: &str = "switch_variant=stub";
+const DEFAULT_TARGET: &str = "image_type=standard switch_variant=stub";
 
 #[derive(Debug, Parser)]
 #[clap(name = "packaging tool")]
@@ -159,6 +159,11 @@ async fn do_check(config: &Config) -> Result<()> {
 
 async fn do_build(config: &Config) -> Result<()> {
     do_for_all_rust_packages(config, "build").await
+}
+
+async fn do_dot(config: &Config) -> Result<()> {
+    println!("{}", omicron_package::dot::do_dot(&config.package_config)?);
+    Ok(())
 }
 
 // Calculates the SHA256 digest for a file.
@@ -718,6 +723,9 @@ async fn main() -> Result<()> {
     }
 
     match &args.subcommand {
+        SubCommand::Build(BuildCommand::Dot) => {
+            do_dot(&config).await?;
+        }
         SubCommand::Build(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, &artifact_dir).await?;
         }
