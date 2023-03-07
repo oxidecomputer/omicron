@@ -151,12 +151,6 @@ impl Plan {
                     BackoffError::transient(PlanError::SledApi(err))
                 })?;
 
-            // TODO(https://github.com/oxidecomputer/omicron/issues/732):
-            // We're currently waiting for ALL zpools to appear, so RSS can be
-            // responsible for provisioning Crucible datasets.
-            //
-            // Once this responsibility shifts to Nexus, we actually only
-            // need enough zpools to provision CRDB.
             if zpools.len() < MINIMUM_U2_ZPOOL_COUNT {
                 return Err(BackoffError::transient(
                     PlanError::SledInitialization(
