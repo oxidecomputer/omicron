@@ -70,6 +70,8 @@ cd helios
 git checkout ac8a7e7ef9e9b5ef27334bc8016f5d123f852449
 
 gmake setup
+pfexec pkg install /system/zones/brand/omicron1/tools
+
 ./helios-build experiment-image \
 	-p helios-netdev=https://pkg.oxide.computer/helios-netdev \
 	-F optever=0.21 \
