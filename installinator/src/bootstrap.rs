@@ -15,6 +15,7 @@ use slog::info;
 use slog::Logger;
 
 const MG_DDM_SERVICE_FMRI: &str = "svc:/system/illumos/mg-ddm";
+const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 
 // TODO-cleanup The implementation of this function is heavily derived from
 // `sled_agent::bootstrap::server::Server::start()`; consider whether we could
@@ -45,8 +46,10 @@ fn enable_mg_ddm_service_blocking(
         "Service mg-ddm requires at least one interface"
     );
 
-    // Unlike sled-agent, we do not import the mg-ddm service; we assume in the
-    // trampoline image it's built into `/lib/manifest/...` just like we are.
+    info!(log, "Importing mg-ddm service"; "path" => MG_DDM_MANIFEST_PATH);
+    smf::Config::import().run(MG_DDM_MANIFEST_PATH).with_context(|| {
+        format!("failed to import mg-ddm from {MG_DDM_MANIFEST_PATH}")
+    })?;
 
     let interface_names: Vec<String> = interfaces
         .iter()
