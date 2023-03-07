@@ -33,6 +33,14 @@
   <service_fmri value='svc:/milestone/network:default' />
   </dependency>
 
+  <!-- ... and make sure we run after the T6 has been configured. This is
+  grouped as `optional_all` to allow sled-agent to run on devices that do
+  not have a t6init service (e.g., testing in CI). -->
+  <dependency name='t6init' grouping='optional_all' restart_on='none'
+    type='service'>
+        <service_fmri value='svc:/system/t6init' />
+  </dependency>
+
   <method_context>
     <method_environment>
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
