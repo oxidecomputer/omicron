@@ -107,12 +107,12 @@ impl RackUpdateState {
 
 #[allow(unused)]
 pub fn artifact_title(kind: KnownArtifactKind) -> &'static str {
-    type K = KnownArtifactKind;
+    use KnownArtifactKind::*;
     match kind {
-        K::GimletSp | K::PscSp | K::SwitchSp => "SP",
-        K::GimletRot | K::PscRot | K::SwitchRot => "ROT",
-        K::Host => "HOST",
-        K::Trampoline => "TRAMPOLINE",
-        K::ControlPlane => "CONTROL PLANE",
+        GimletSp | PscSp | SwitchSp => "SP",
+        GimletRot | PscRot | SwitchRot => "ROT",
+        Host => "HOST",
+        Trampoline => "TRAMPOLINE",
+        ControlPlane => "CONTROL PLANE",
     }
 }
