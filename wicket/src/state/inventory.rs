@@ -9,6 +9,7 @@ use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
+use tui::text::Text;
 use wicketd_client::types::{
     RackV1Inventory, SpComponentInfo, SpIgnition, SpState, SpType,
 };
@@ -130,6 +131,12 @@ impl Display for ComponentId {
             ComponentId::Switch(i) => write!(f, "SWITCH {}", i),
             ComponentId::Psc(i) => write!(f, "PSC {}", i),
         }
+    }
+}
+
+impl From<ComponentId> for Text<'_> {
+    fn from(value: ComponentId) -> Self {
+        value.to_string().into()
     }
 }
 
