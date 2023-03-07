@@ -86,4 +86,4 @@ pfexec zfs create -p rpool/images/build
 	-p helios-netdev=https://pkg.oxide.computer/helios-netdev \
 	-F optever=0.21 \
 	-P /work/gz/root \
-	-B
+	-R
