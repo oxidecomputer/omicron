@@ -13,6 +13,7 @@
 #:	"oxidecomputer/amd-apcb",
 #:	"oxidecomputer/amd-efs",
 #:	"oxidecomputer/amd-firmware",
+#:	"oxidecomputer/amd-flash",
 #:	"oxidecomputer/amd-host-image-builder",
 #:	"oxidecomputer/boot-image-tools",
 #:	"oxidecomputer/chelsio-t6-roms",
