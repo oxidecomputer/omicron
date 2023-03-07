@@ -2913,8 +2913,7 @@ async fn ip_pool_range_list_v1(
             direction: PaginationOrder::Ascending,
             marker,
         };
-        let pool_selector = &path.pool.into();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let ranges = nexus
             .ip_pool_list_ranges(&opctx, &pool_lookup, &pag_params)
             .await?
@@ -2998,8 +2997,7 @@ async fn ip_pool_range_add_v1(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let range = range_params.into_inner();
-        let pool_selector = path.pool.into();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let out = nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
         Ok(HttpResponseCreated(out.into()))
     };
