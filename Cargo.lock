@@ -1633,6 +1633,7 @@ dependencies = [
  "slog-term",
  "subprocess",
  "tempdir",
+ "thiserror",
  "tokio",
  "toml 0.7.2",
  "trust-dns-client",

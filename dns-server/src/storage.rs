@@ -8,11 +8,10 @@
 
 use anyhow::Context;
 use camino::Utf8PathBuf;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use slog::{error, info, o, trace};
-use std::net::Ipv6Addr;
+use slog::error;
 use std::sync::Arc;
+use thiserror::Error;
 // XXX-dap
 use crate::dns_types::*;
 
@@ -39,7 +38,7 @@ impl Store {
             format!("open DNS database {:?}", &config.storage_path)
         })?;
 
-        Self::new_with_db(log, Arc::new(db));
+        Ok(Self::new_with_db(log, Arc::new(db)))
     }
 
     pub fn new_with_db(log: slog::Logger, db: Arc<sled::Db>) -> Store {
@@ -58,12 +57,13 @@ impl Store {
         config: &DnsConfig,
     ) -> Result<(), anyhow::Error> {
         // XXX-dap log, atomically replace everything
+        // XXX-dap don't forget flush
         todo!();
     }
 
     pub(crate) async fn query(
         &self,
-        query: trust_dns_server::authority::MessageRequest,
+        query: &trust_dns_server::authority::MessageRequest,
     ) -> Result<Vec<DnsRecord>, QueryError> {
         // XXX-dap
         todo!();

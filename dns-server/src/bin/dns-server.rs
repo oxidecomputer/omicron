@@ -8,6 +8,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use clap::Parser;
 use slog::info;
+use slog::o;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 
@@ -45,36 +46,35 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let store = dns_server::storage::Store::new(
         log.new(o!("component" => "store")),
-        config.storage,
+        &config.storage,
     )
-    .await
     .context("initializing persistent storage")?;
 
     let _dns_server = {
         let dns_server_config = dns_server::dns_server::Config {
-            bind_address: args.dns_address.into(),
+            bind_address: args.dns_address.to_string(), // XXX-dap
         };
-        let dns_server = dns_server::dns_server::Server::start(
+        dns_server::dns_server::Server::start(
             log.new(o!("component" => "dns")),
             store.clone(),
             dns_server_config,
         )
         .await
-        .context("starting DNS server")?;
+        .context("starting DNS server")?
     };
 
     let dropshot_server = {
-        let http_api = http_server::api();
-        let http_api_context = http_server::Context::new(store);
+        let http_api = dns_server::http_server::api();
+        let http_api_context = dns_server::http_server::Context::new(store);
 
         dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_api,
             http_api_context,
-            log.new(o!("component" => "http")),
+            &log.new(o!("component" => "http")),
         )
-        .await
-        .context("starting HTTP server")?
+        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
+        .start()
     };
 
     dropshot_server

@@ -20,6 +20,7 @@ slog-term.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 tempdir.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
 trust-dns-proto.workspace = true
