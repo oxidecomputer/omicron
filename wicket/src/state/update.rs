@@ -7,11 +7,10 @@ use tui::style::Style;
 use crate::ui::defaults::style;
 
 use super::{ComponentId, ALL_COMPONENT_IDS};
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::ArtifactId;
-
-pub use omicron_common::api::internal::nexus::KnownArtifactKind;
 
 #[derive(Debug)]
 pub struct RackUpdateState {
@@ -103,5 +102,17 @@ impl RackUpdateState {
                 self.artifact_versions.insert(known, id.version.clone());
             }
         }
+    }
+}
+
+#[allow(unused)]
+pub fn artifact_title(kind: KnownArtifactKind) -> &'static str {
+    type K = KnownArtifactKind;
+    match kind {
+        K::GimletSp | K::PscSp | K::SwitchSp => "SP",
+        K::GimletRot | K::PscRot | K::SwitchRot => "ROT",
+        K::Host => "HOST",
+        K::Trampoline => "TRAMPOLINE",
+        K::ControlPlane => "CONTROL PLANE",
     }
 }

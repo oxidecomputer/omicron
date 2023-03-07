@@ -14,7 +14,7 @@ pub use inventory::{
 };
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
-pub use update::{KnownArtifactKind, RackUpdateState, UpdateState};
+pub use update::{RackUpdateState, UpdateState};
 
 /// The global state of wicket
 ///
