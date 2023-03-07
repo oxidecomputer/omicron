@@ -69,8 +69,13 @@ git clone https://github.com/oxidecomputer/helios.git
 cd helios
 git checkout ac8a7e7ef9e9b5ef27334bc8016f5d123f852449
 
+# Create the "./helios-build" command, which lets us build images
 gmake setup
+
+# Commands that "./helios-build" would ask us to run (either explicitly
+# or implicitly, to avoid an error).
 pfexec pkg install /system/zones/brand/omicron1/tools
+pfexec zfs create rpool/images/build
 
 ./helios-build experiment-image \
 	-p helios-netdev=https://pkg.oxide.computer/helios-netdev \
