@@ -340,7 +340,7 @@ async fn ensure_running_zone(
                         warn!(log, "cockroachdb not yet alive");
                     };
                     backoff::retry_notify(
-                        backoff::internal_service_policy(),
+                        backoff::retry_policy_internal_service(),
                         check_health,
                         log_failure,
                     )
