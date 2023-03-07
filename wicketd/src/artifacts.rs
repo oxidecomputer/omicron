@@ -656,12 +656,11 @@ fn unpack_host_artifact(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
 
+    use std::collections::BTreeSet;
+
     use anyhow::{Context, Result};
-    use camino::Utf8Path;
     use clap::Parser;
     use omicron_test_utils::dev::test_setup_log;
     use tempfile::TempDir;
@@ -691,14 +690,12 @@ mod tests {
         let plan = ArtifactsWithPlan::from_zip(&zip_bytes, &logctx.log)
             .context("error reading archive.zip")?;
         // Check that all known artifact kinds are present in the map.
-        let by_id_kinds: HashSet<_> =
+        let by_id_kinds: BTreeSet<_> =
             plan.by_id.keys().map(|id| id.kind.clone()).collect();
-        let by_hash_kinds: HashSet<_> =
+        let by_hash_kinds: BTreeSet<_> =
             plan.by_hash.keys().map(|id| id.kind.clone()).collect();
 
-        // Expected kinds contains all known kinds + extra kinds extracted from
-        // tarballs.
-        let mut expected_kinds: HashSet<_> =
+        let mut expected_kinds: BTreeSet<_> =
             KnownArtifactKind::iter().map(ArtifactKind::from).collect();
         assert_eq!(
             expected_kinds, by_id_kinds,
