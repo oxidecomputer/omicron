@@ -10,13 +10,12 @@
 #: ]
 #: skip_clone = true
 #: access_repos = [
-#:	"oxidecomputer/amd-apcb",
-#:	"oxidecomputer/amd-efs",
-#:	"oxidecomputer/amd-firmware",
-#:	"oxidecomputer/amd-flash",
+#:	"oxidecomputer/amd-host-image-builder",
+#:	"oxidecomputer/boot-image-tools",
+#:	"oxidecomputer/chelsio-t6-roms",
 #:	"oxidecomputer/helios",
+#:	"oxidecomputer/helios-omnios-extra",
 #:	"oxidecomputer/helios-omnios-build",
-#:	"oxidecomputer/nanobl-rs",
 #: ]
 set -o errexit
 set -o pipefail
