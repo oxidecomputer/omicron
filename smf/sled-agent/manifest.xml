@@ -17,20 +17,17 @@
     <service_fmri value='svc:/system/filesystem/minimal' />
   </dependency>
 
-  <!-- The bootstrapping portion of the agent uses the network to communicate with
-    other servers on the rack. -->
-  <dependency name='loopback' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/milestone/network' />
-  </dependency>
   <!-- Run after initial device configuration has completed. -->
   <dependency name='devices' grouping='require_all' restart_on='none'
     type='service'>
     <service_fmri value='svc:/milestone/devices' />
   </dependency>
+
+  <!-- The bootstrapping portion of the agent uses the network to communicate
+    with other servers on the rack. -->
   <dependency name='network' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/milestone/network:default' />
+  <service_fmri value='svc:/milestone/network' />
   </dependency>
 
   <!-- ... and make sure we run after the T6 has been configured. This is
