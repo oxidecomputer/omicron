@@ -75,7 +75,7 @@ gmake setup
 # Commands that "./helios-build" would ask us to run (either explicitly
 # or implicitly, to avoid an error).
 pfexec pkg install /system/zones/brand/omicron1/tools
-pfexec zfs create rpool/images/build
+pfexec zfs create -p rpool/images/build
 
 ./helios-build experiment-image \
 	-p helios-netdev=https://pkg.oxide.computer/helios-netdev \
