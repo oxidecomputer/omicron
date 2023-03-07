@@ -1,6 +1,6 @@
 #!/bin/bash
 #:
-#: name = "helios / package image"
+#: name = "helios / build OS image"
 #: variety = "basic"
 #: target = "helios-latest"
 #: rust_toolchain = "1.66.1"
@@ -10,6 +10,7 @@
 #: ]
 #: skip_clone = true
 #: access_repos = [
+#:	"oxidecomputer/amd-apcb",
 #:	"oxidecomputer/amd-firmware",
 #:	"oxidecomputer/amd-host-image-builder",
 #:	"oxidecomputer/boot-image-tools",
