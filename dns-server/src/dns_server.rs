@@ -2,15 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::io::Result;
+// XXX-dap TODO-doc (this whole file)
+
+use crate::dns_types::DnsRecord;
+use crate::storage;
+use crate::storage::QueryError;
+use pretty_hex::*;
+use serde::Deserialize;
+use slog::{debug, error, o, Logger};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
-
-use crate::dns_types::DnsRecord;
-use pretty_hex::*;
-use serde::Deserialize;
-use slog::{debug, error, Logger};
 use tokio::net::UdpSocket;
 use trust_dns_client::rr::LowerName;
 use trust_dns_proto::op::header::Header;
@@ -31,177 +33,206 @@ pub struct Config {
     pub bind_address: String,
 }
 
-pub struct Server {
-    pub address: SocketAddr,
-    pub handle: tokio::task::JoinHandle<Result<()>>,
+pub struct ServerHandle {
+    local_address: SocketAddr,
+    handle: tokio::task::JoinHandle<std::io::Result<()>>,
 }
 
-impl Drop for Server {
+impl Drop for ServerHandle {
     fn drop(&mut self) {
         self.handle.abort()
     }
 }
 
-pub async fn run(
-    log: Logger,
-    db: Arc<sled::Db>,
-    config: Config,
-) -> Result<Server> {
-    let socket = Arc::new(UdpSocket::bind(config.bind_address).await?);
-    let address = socket.local_addr()?;
+impl ServerHandle {
+    fn local_address(&self) -> &SocketAddr {
+        &self.local_address
+    }
+}
 
-    let handle = tokio::task::spawn(async move {
+pub struct Server {
+    log: Logger,
+    store: storage::Store,
+    server_socket: Arc<UdpSocket>,
+}
+
+impl Server {
+    pub async fn start(
+        log: Logger,
+        store: storage::Store,
+        config: Config,
+    ) -> anyhow::Result<ServerHandle> {
+        let server_socket = UdpSocket::bind(config.bind_address.clone())
+            .await
+            .with_context(|| {
+                format!(
+                    "DNS server start: UDP bind to {:?}",
+                    config.bind_address
+                )
+            })?;
+
+        let local_address = socket.local_addr().context(|| {
+            format!(
+                "DNS server start: failed to get local address of bound socket"
+            )
+        })?;
+
+        let server = Server { log, store, server_socket };
+        let handle = tokio::task::spawn(server.run());
+        ServerHandle { local_address, handle }
+    }
+
+    async fn run(self) -> anyhow::Result<()> {
         loop {
             let mut buf = vec![0u8; 16384];
-            let (n, src) = socket.recv_from(&mut buf).await?;
+            let (n, client_addr) = self
+                .server_socket
+                .recv_from(&mut buf)
+                .await
+                .context("receiving packet from UDP listen socket")?;
             buf.resize(n, 0);
 
-            let socket = socket.clone();
-            let log = log.clone();
-            let db = db.clone();
+            let socket = self.server_socket.clone();
+            let req_id = Uuid::new_v4();
+            let log = self.log.new(o!({
+                "req_id" => req_id.to_string(),
+                "peer_addr" => ?client_addr.to_string(),
+            }));
 
-            tokio::spawn(
-                async move { handle_req(log, db, socket, src, buf).await },
-            );
-        }
-    });
+            let request = Request {
+                log,
+                store: self.store.clone(),
+                socket: self.server_socket.clone(),
+                client_addr,
+                packet: buffer,
+                req_id,
+            };
 
-    Ok(Server { address, handle })
-}
-
-async fn respond_nxdomain(
-    log: &Logger,
-    socket: Arc<UdpSocket>,
-    src: SocketAddr,
-    rb: MessageResponseBuilder<'_>,
-    header: Header,
-    mr: &MessageRequest,
-) {
-    let mresp = rb.error_msg(&header, ResponseCode::NXDomain);
-    let mut resp_data = Vec::new();
-    let mut enc = BinEncoder::new(&mut resp_data);
-    match mresp.destructive_emit(&mut enc) {
-        Ok(_) => {}
-        Err(e) => {
-            error!(log, "NXDOMAIN destructive emit: {}", e);
-            nack(&log, &mr, &socket, &header, &src).await;
-            return;
-        }
-    }
-    match socket.send_to(&resp_data, &src).await {
-        Ok(_) => {}
-        Err(e) => {
-            error!(log, "NXDOMAIN send: {}", e);
+            // XXX-dap cap the number of these
+            tokio::spawn(handle_dns_packet(request));
         }
     }
 }
 
-async fn handle_req(
+struct Request {
     log: Logger,
-    db: Arc<sled::Db>,
+    store: Store,
     socket: Arc<UdpSocket>,
-    src: SocketAddr,
-    buf: Vec<u8>,
-) {
-    debug!(&log, "handle_req: buffer"; "buffer" => ?buf.hex_dump());
+    client_addr: SocketAddr,
+    packet: Vec<u8>,
+    req_id: Uuid,
+}
 
+async fn handle_dns_packet(request: Request) {
+    let log = &request.log;
+    let buf = &request.packet;
+
+    debug!(&log, "buffer"; "buffer" => ?buf.hex_dump());
+
+    // Decode the message.
     let mut dec = BinDecoder::new(&buf);
     let mr = match MessageRequest::read(&mut dec) {
         Ok(mr) => mr,
-        Err(e) => {
-            error!(log, "read message: {}", e);
+        Err(error) => {
+            error!(log, "failed to parse incoming DNS message: {:#}", error);
             return;
         }
     };
 
-    debug!(&log, "handle_req: message_request"; "mr" => #?mr);
+    // Handle the message.
+    let header = Header::response_from_request(mr.header());
+    let rb = MessageResponseBuilder::from_message_request(&mr);
+    match handle_dns_message(request: Request, mr: MessageRequest).await {
+        Ok(_) => (),
+        Err(error) => {
+            error!(log, "failed to handle incoming DNS message: {:#}", error);
+            match error {
+                RequestError::NxDomain => {
+                    respond_nxdomain(request, &rb, &header).await
+                }
+                RequestError::ServFail => {
+                    respond_servfail(&request, rb, &header).await
+                }
+            };
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+enum RequestError {
+    #[error("NXDOMAIN: {0:#}")]
+    NxDomain(#[source] QueryError),
+    #[error("SERVFAIL: {0:#}")]
+    ServFail(#[source] anyhow::Error),
+}
+
+impl From<QueryError> for RequestError {
+    fn from(source: QueryError) -> Self {
+        match &source {
+            QueryError::NoName(_) => RequestError::NxDomain(source),
+            QueryError::NoZone(_)
+            | QueryError::QueryFail(_)
+            | QueryError::ParseFail(_) => RequestError::ServFail(source.into()),
+        }
+    }
+}
+
+async fn handle_dns_message(
+    request: Request,
+    mr: MessageRequest,
+) -> Result<(), RequestError> {
+    let log = &request.log;
+    let store = &request.store;
+    let socket = &request.socket;
+    let buf = &request.packet;
+    debug!(&log, "message_request"; "mr" => #?mr);
 
     let header = Header::response_from_request(mr.header());
-
-    // Ensure the query is for this zone, otherwise bail with servfail. This
-    // will cause resolvers to look to other DNS servers for this query.
-    // XXX-dap
-//    let name = mr.query().name();
-//    if !zone.zone_of(name) {
-//        nack(&log, &mr, &socket, &header, &src).await;
-//        return;
-//    }
-
-    let name = mr.query().original().name().clone();
-    let key = name.to_string();
-    let key = key.trim_end_matches('.');
-
+    let query = mr.query();
+    let name = query.original().name().clone();
+    let records = store.query(query)?;
     let rb = MessageResponseBuilder::from_message_request(&mr);
-
-    let bits = match db.get(key.as_bytes()) {
-        Ok(Some(bits)) => bits,
-
-        // If no record is found bail with NXDOMAIN.
-        Ok(None) => {
-            respond_nxdomain(&log, socket, src, rb, header, &mr).await;
-            return;
-        }
-
-        // If we encountered an error bail with SERVFAIL.
-        Err(e) => {
-            error!(log, "db get: {}", e);
-            nack(&log, &mr, &socket, &header, &src).await;
-            return;
-        }
-    };
-
-    let records: Vec<crate::dns_types::DnsRecord> =
-        match serde_json::from_slice(bits.as_ref()) {
-            Ok(r) => r,
-            Err(e) => {
-                error!(log, "deserialize record: {}", e);
-                nack(&log, &mr, &socket, &header, &src).await;
-                return;
-            }
-        };
-
-    if records.is_empty() {
-        error!(log, "No records found for {}", key);
-        respond_nxdomain(&log, socket, src, rb, header, &mr).await;
-        return;
-    }
-
-    let mut response_records: Vec<Record> = vec![];
-    for record in &records {
-        let resp = match record {
+    let response_records = records
+        .map(|record| match record {
             DnsRecord::AAAA(addr) => {
                 let mut aaaa = Record::new();
                 aaaa.set_name(name.clone())
                     .set_rr_type(RecordType::AAAA)
                     .set_data(Some(RData::AAAA(*addr)));
-                aaaa
+                Ok(aaaa)
             }
+
             DnsRecord::SRV(crate::dns_types::SRV {
                 prio,
                 weight,
                 port,
                 target,
             }) => {
+                let tgt = Name::from_str(&target).map_err(|error| {
+                    RequestError::ServFail(anyhow!(
+                        "serialization failed due to bad SRV target: {:?}",
+                        &target
+                    ))
+                })?;
                 let mut srv = Record::new();
-                let tgt = match Name::from_str(&target) {
-                    Ok(tgt) => tgt,
-                    Err(e) => {
-                        error!(log, "srv target: '{}' {}", target, e);
-                        nack(&log, &mr, &socket, &header, &src).await;
-                        return;
-                    }
-                };
                 srv.set_name(name.clone())
                     .set_rr_type(RecordType::SRV)
                     .set_data(Some(RData::SRV(SRV::new(
                         *prio, *weight, *port, tgt,
                     ))));
-                srv
+                Ok(srv)
             }
-        };
-        response_records.push(resp);
-    }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    respond_records(&request, rb, &header)
+}
 
+async fn respond_records(
+    request: &Request,
+    rb: MessageResponseBuilder,
+    header: &Header,
+    response_records: Vec<DnsRecord>,
+) -> Result<(), RequestError> {
     let mresp = rb.build(
         header,
         response_records.iter().collect::<Vec<&Record>>(),
@@ -210,46 +241,63 @@ async fn handle_req(
         vec![],
     );
 
-    let mut resp_data = Vec::new();
-    let mut enc = BinEncoder::new(&mut resp_data);
-    match mresp.destructive_emit(&mut enc) {
-        Ok(_) => {}
-        Err(e) => {
-            error!(log, "destructive emit: {}", e);
-            nack(&log, &mr, &socket, &header, &src).await;
-            return;
-        }
-    }
-    match socket.send_to(&resp_data, &src).await {
-        Ok(_) => {}
-        Err(e) => {
-            error!(log, "send: {}", e);
-        }
+    encode_and_send(&request, mresp, "records").map_err(|error| {
+        RequestError::ServFail(anyhow!("failed to emit response: {:#}", error))
+    })
+}
+
+async fn respond_nxdomain(
+    request: &Request,
+    rb: MessageResponseBuilder,
+    header: &Header,
+) {
+    let log = &request.log;
+    let mresp = rb.error_msg(&header, ResponseCode::NXDomain);
+    if let Err(error) = encode_and_send(request, mresp, "NXDOMAIN").await {
+        error!(
+            log,
+            "switching to SERVFAIL after failure to encode NXDOMAIN ({:#})",
+            error
+        );
+        respond_servfail(request, rb, header).await;
     }
 }
 
-async fn nack(
-    log: &Logger,
-    mr: &MessageRequest,
-    socket: &UdpSocket,
+async fn respond_servfail(
+    request: &Request,
+    rb: MessageResponseBuilder,
     header: &Header,
-    src: &SocketAddr,
 ) {
-    let rb = MessageResponseBuilder::from_message_request(mr);
     let mresp = rb.error_msg(header, ResponseCode::ServFail);
+    if let Error(error) = encode_and_send(request, mresp, "SERVFAIL") {
+        error!(&request.log, "failed to send SERVFAIL: {:#}", error);
+    }
+}
+
+async fn encode_and_send<Answers, NameServers, Soa, Additionals>(
+    request: &Request,
+    mresp: MessageResponse<Answers, Namesesrvers, Soa, Additionals>,
+    label: &'static str,
+) -> anyhow::Result<()> {
     let mut resp_data = Vec::new();
     let mut enc = BinEncoder::new(&mut resp_data);
-    match mresp.destructive_emit(&mut enc) {
-        Ok(_) => {}
-        Err(e) => {
-            error!(log, "destructive emit: {}", e);
-            return;
-        }
+    let _ = mresp
+        .destructive_emit(&mut enc)
+        .with_context(|| format!("encoding {}", label))?;
+
+    // If we get this far and fail to send the data, there's nothing else to do.
+    // Log the problem and treat this as a success as far as the caller is
+    // concerned.
+    if let Err(error) = request.socket.send_to(&resp_data, &request.client_addr)
+    {
+        error!(
+            &request.log,
+            "failed to send {} to {:?}: {:#}",
+            label,
+            request.client_addr.to_string(),
+            error
+        );
     }
-    match socket.send_to(&resp_data, &src).await {
-        Ok(_) => {}
-        Err(e) => {
-            error!(log, "destructive emit: {}", e);
-        }
-    }
+
+    Ok(())
 }

@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 clap.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
@@ -24,6 +25,7 @@ toml.workspace = true
 trust-dns-proto.workspace = true
 trust-dns-server.workspace = true
 trust-dns-client.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

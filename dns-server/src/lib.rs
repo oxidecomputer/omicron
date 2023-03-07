@@ -2,65 +2,43 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+/// There are three pieces to our running DNS server:
+///
+/// 1. Persistent [`storage::Store`] of DNS data
+/// 2. A [`dns_server::Server`], that serves the data in a `storage::Client` out
+///    over the DNS protocol
+/// 3. A Dropshot server that serves HTTP endpoints for reading and modifying
+///    the persistent DNS data.
+
 use anyhow::anyhow;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-mod dns_server;
-mod dns_types;
-pub mod http_server; // XXX-dap remove pub?
-mod storage;
+pub mod dns_server;
+pub mod dns_types;
+pub mod http_server;
+pub mod storage;
 
 // XXX-dap where should this go?  depends on what uses it besides the CLI?
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub log: dropshot::ConfigLogging,
     pub dropshot: dropshot::ConfigDropshot,
-    pub data: storage::Config,
-}
-
-// XXX-dap still something weird about the fact that we have separate start()
-// and pub start_dropshot_server().  Should there be one object that combines
-// both?
-pub async fn start(
-    log: slog::Logger,
-    config: Config,
-    dns_address: SocketAddr,
-) -> anyhow::Result<(
-    dns_server::Server,
-    dropshot::HttpServer<http_server::Context>,
-)> {
-    let db = Arc::new(sled::open(&config.data.storage_path)?);
-
-    let dns_server = {
-        let db = db.clone();
-        let log = log.clone();
-        let dns_config =
-            dns_server::Config { bind_address: dns_address.to_string() };
-        dns_server::run(log, db, dns_config).await?
-    };
-
-    let dropshot_server = start_dropshot_server(config, log, db).await?;
-
-    Ok((dns_server, dropshot_server))
+    pub storage: storage::Config,
 }
 
 // XXX-dap weird that this config isn't just the dropshot config.  The reason is
 // that the storage client that we create here also looks at the
 // nmax_messages...but weirdly, it *doesn't* look at the storage section.
+/// Starts just the Dropshot server
 pub async fn start_dropshot_server(
-    config: Config,
     log: slog::Logger,
-    db: Arc<sled::Db>,
+    store: storage::Store,
+    config: &dropshot::Config,
 ) -> Result<dropshot::HttpServer<http_server::Context>, anyhow::Error> {
-    let data_client = storage::Client::new(
-        log.new(slog::o!("component" => "DataClient")),
-        db,
-    );
-
     let api = http_server::api();
-    let api_context = http_server::Context::new(data_client);
+    let api_context = http_server::Context::new(store);
 
     Ok(dropshot::HttpServerStarter::new(
         &config.dropshot,

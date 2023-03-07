@@ -8,6 +8,5 @@ mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
 
-[data]
-nmax_messages = 16
+[storage]
 storage_path = "/var/oxide/dns"

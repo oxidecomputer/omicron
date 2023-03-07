@@ -1614,6 +1614,7 @@ name = "dns-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap 4.1.6",
  "dns-service-client",
  "dropshot",
@@ -1638,6 +1639,7 @@ dependencies = [
  "trust-dns-proto",
  "trust-dns-resolver",
  "trust-dns-server",
+ "uuid",
 ]
 
 [[package]]
