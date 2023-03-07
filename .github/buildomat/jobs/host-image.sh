@@ -15,12 +15,9 @@
 #:	"oxidecomputer/amd-firmware",
 #:	"oxidecomputer/amd-flash",
 #:	"oxidecomputer/helios",
+#:	"oxidecomputer/helios-omnios-build",
 #:	"oxidecomputer/nanobl-rs",
 #: ]
-#:
-#: [dependencies.package]
-#: job = "helios / package"
-#:
 set -o errexit
 set -o pipefail
 set -o xtrace
@@ -57,9 +54,9 @@ pfexec mkdir -p /work
 cd /work
 
 # /work/gz: Global Zone artifacts to be placed in the Helios image.
-mkdir gz && cd gz
-ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz
-cd -
+# mkdir gz && cd gz
+# ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz
+# cd -
 
 # TODO: Consider importing zones here too?
 
@@ -72,5 +69,4 @@ gmake setup
 ./helios-build experiment-image \
 	-p helios-netdev=https://pkg.oxide.computer/helios-netdev \
 	-F optever=0.21 \
-	-B \
-	-P /work/gz/root
+	-B
