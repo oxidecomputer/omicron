@@ -329,6 +329,8 @@ lazy_static! {
 lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
+    pub static ref DEMO_PROJECT_IMAGES_URL: String =
+        format!("/v1/images?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
         format!("/v1/images/{}?organization={}&project={}", *DEMO_IMAGE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_IMAGE_PROMOTE_URL: String =
@@ -566,6 +568,7 @@ pub enum AllowedMethod {
     /// to configure the test's expectation for *privileged* requests.  For the
     /// other HTTP methods, we only make unprivileged requests, and they should
     /// always fail in the correct way.
+    #[allow(dead_code)]
     GetUnimplemented,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
@@ -1235,7 +1238,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
                 ),
@@ -1247,7 +1250,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Delete,
             ],
         },

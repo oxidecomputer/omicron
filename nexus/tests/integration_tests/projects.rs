@@ -271,26 +271,45 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
 
-    // TODO: This test is incomplete, because project-scoped images have not
-    // been implemented.
-    //
-    // When project-scoped images are supported, we should do the following:
-    // - Change this POST request, making it succeed
-    // - Attempt to delete the project, verify that it fails with the
-    // appropriate error ("project to be deleted contains an image").
-    // - Delete the image
-    // - Delete the project without error.
+    let images_url =
+        format!("/v1/images?organization={}&project={}", org_name, name);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    assert_eq!(
+        "project to be deleted contains an image: alpine-edge",
+        delete_project_expect_fail(&url, &client).await,
+    );
+
+    // TODO: finish test once image delete is implemented. Image create works
+    // and project delete with image fails as expected, but image delete is not
+    // implemented yet, so we can't show that project delete works after image
+    // delete.
+    let image_url = format!("/v1/images/{}", image.identity.id);
     NexusRequest::expect_failure_with_body(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
-        Method::POST,
-        &format!("{url}/images"),
+        Method::DELETE,
+        &image_url,
         &image_create_params,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .unwrap();
+
+    // TODO: delete the image
+    // NexusRequest::object_delete(&client, &image_url)
+    //     .authn_as(AuthnMode::PrivilegedUser)
+    //     .execute()
+    //     .await
+    //     .expect("failed to delete image");
+
+    // TODO: now delete project works
+    // delete_project(&url, &client).await;
 }
 
 #[nexus_test]

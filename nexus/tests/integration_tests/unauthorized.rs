@@ -272,6 +272,12 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_SNAPSHOT_CREATE).unwrap(),
             id_routes: vec!["/by-id/snapshots/{id}"],
         },
+        // Create an Image in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_IMAGES_URL,
+            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
+            id_routes: vec!["/v1/images/{id}"],
+        },
         // Create a GlobalImage
         SetupReq::Post {
             url: "/system/images",
