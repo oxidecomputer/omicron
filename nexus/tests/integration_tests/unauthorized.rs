@@ -278,12 +278,6 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
             id_routes: vec!["/v1/images/{id}"],
         },
-        // Create a GlobalImage
-        SetupReq::Post {
-            url: "/system/images",
-            body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
-            id_routes: vec!["/system/by-id/images/{id}"],
-        },
         // Create a SAML identity provider
         SetupReq::Post {
             url: &SAML_IDENTITY_PROVIDERS_URL,

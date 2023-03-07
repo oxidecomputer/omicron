@@ -292,7 +292,7 @@ async fn make_project(
     builder.new_resource(authz::Image::new(
         project.clone(),
         Uuid::new_v4(),
-        LookupType::ByName(image_name.clone()),
+        LookupType::ByName(image_name),
     ));
 }
 

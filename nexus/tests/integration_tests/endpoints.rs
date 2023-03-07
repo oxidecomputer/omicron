@@ -347,24 +347,6 @@ lazy_static! {
             version: "1.0".to_string()
         };
 
-    // Global Images
-    pub static ref DEMO_GLOBAL_IMAGE_NAME: Name = "alpine-edge".parse().unwrap();
-    pub static ref DEMO_GLOBAL_IMAGE_URL: String =
-        format!("/system/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
-    pub static ref DEMO_GLOBAL_IMAGE_CREATE: params::GlobalImageCreate =
-        params::GlobalImageCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_GLOBAL_IMAGE_NAME.clone(),
-                description: String::from(""),
-            },
-            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
-            distribution: params::Distribution {
-                name: "alpine".parse().unwrap(),
-                version: String::from("edge"),
-            },
-            block_size: params::BlockSize::try_from(4096).unwrap(),
-        };
-
     // IP Pools
     pub static ref DEMO_IP_POOLS_URL: &'static str = "/system/ip-pools";
     pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
@@ -1586,28 +1568,7 @@ lazy_static! {
             ],
         },
 
-        /* Global Images */
-
-        VerifyEndpoint {
-            url: "/system/images",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/system/by-id/images/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
+        /* IP pools */
 
         VerifyEndpoint {
             url: "/system/by-id/ip-pools/{id}",
@@ -1615,16 +1576,6 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_GLOBAL_IMAGE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
             ],
         },
 
