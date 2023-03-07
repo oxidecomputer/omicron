@@ -10,15 +10,17 @@ use camino::Utf8PathBuf;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
 };
+use omicron_test_utils::dev::test_setup_log;
 use predicates::prelude::*;
 use tufaceous_lib::{Key, OmicronRepo};
 
 #[test]
 fn test_init_and_add() -> Result<()> {
+    let logctx = test_setup_log("test_init_and_add");
     let tempdir = tempfile::tempdir().unwrap();
     let key = Key::generate_ed25519();
 
-    let mut cmd = make_cmd(tempdir.path(), &key);
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.args(["init"]);
     cmd.assert().success();
 
@@ -28,14 +30,14 @@ fn test_init_and_add() -> Result<()> {
     let unknown_path = tempdir.path().join("my-unknown-kind.tar.gz");
     fs_err::write(&unknown_path, "unknown test")?;
 
-    let mut cmd = make_cmd(tempdir.path(), &key);
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.args(["add", "gimlet_sp"]);
     cmd.arg(&nexus_path);
     cmd.arg("42.0.0");
     cmd.assert().success();
 
     // Try adding an unknown kind without --allow-unknown-kinds.
-    let mut cmd = make_cmd(tempdir.path(), &key);
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.args(["add", "my_unknown_kind"]);
     cmd.arg(&nexus_path);
     cmd.arg("0.0.0");
@@ -44,7 +46,7 @@ fn test_init_and_add() -> Result<()> {
     ));
 
     // Try adding one with --allow-unknown-kinds.
-    let mut cmd = make_cmd(tempdir.path(), &key);
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.args(["add", "my_unknown_kind", "--allow-unknown-kinds"]);
     cmd.arg(&unknown_path);
     cmd.arg("0.1.0");
@@ -52,7 +54,7 @@ fn test_init_and_add() -> Result<()> {
 
     // Now read the repository and ensure the list of expected artifacts.
     let repo_path: Utf8PathBuf = tempdir.path().join("repo").try_into()?;
-    let repo = OmicronRepo::load(&repo_path)?;
+    let repo = OmicronRepo::load(&logctx.log, &repo_path)?;
 
     let artifacts = repo.read_artifacts()?;
     assert_eq!(
@@ -90,28 +92,61 @@ fn test_init_and_add() -> Result<()> {
 
     // Create an archive from the given path.
     let archive_path = tempdir.path().join("archive.zip");
-    let mut cmd = make_cmd(tempdir.path(), &key);
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.arg("archive");
     cmd.arg(&archive_path);
     cmd.assert().success();
 
     // Extract the archive to a new directory.
     let dest_path = tempdir.path().join("dest");
-    let mut cmd = make_cmd(tempdir.path(), &key);
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.arg("extract");
     cmd.arg(&archive_path);
     cmd.arg(&dest_path);
 
     cmd.assert().success();
 
+    logctx.cleanup_successful();
     Ok(())
 }
 
-fn make_cmd(tempdir: &Path, key: &Key) -> Command {
+#[test]
+fn test_assemble_fake() -> Result<()> {
+    let logctx = test_setup_log("test_assemble_fake");
+    let tempdir = tempfile::tempdir().unwrap();
+    let key = Key::generate_ed25519();
+
+    let archive_path = tempdir.path().join("archive.zip");
+
+    let mut cmd = make_cmd(&key);
+    cmd.args(["assemble", "manifests/fake.toml"]);
+    cmd.arg(&archive_path);
+    cmd.assert().success();
+
+    // Extract the archive to a new directory.
+    let dest_path = tempdir.path().join("dest");
+    let mut cmd = make_cmd(&key);
+    cmd.arg("extract");
+    cmd.arg(&archive_path);
+    cmd.arg(&dest_path);
+
+    cmd.assert().success();
+
+    logctx.cleanup_successful();
+    Ok(())
+}
+
+fn make_cmd(key: &Key) -> Command {
     let mut cmd = Command::cargo_bin("tufaceous").unwrap();
+    cmd.env("TUFACEOUS_KEY", key.to_string());
+
+    cmd
+}
+
+fn make_cmd_with_repo(tempdir: &Path, key: &Key) -> Command {
+    let mut cmd = make_cmd(key);
     cmd.arg("--repo");
     cmd.arg(tempdir.join("repo"));
-    cmd.env("TUFACEOUS_KEY", key.to_string());
 
     cmd
 }
