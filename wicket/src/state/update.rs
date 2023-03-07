@@ -11,12 +11,13 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::ArtifactId;
 
+pub use omicron_common::api::internal::nexus::KnownArtifactKind;
+
 #[derive(Debug)]
 pub struct RackUpdateState {
-    pub items:
-        BTreeMap<ComponentId, BTreeMap<FinalInstallArtifact, UpdateState>>,
+    pub items: BTreeMap<ComponentId, BTreeMap<KnownArtifactKind, UpdateState>>,
     pub artifacts: Vec<ArtifactId>,
-    pub final_artifact_versions: BTreeMap<FinalInstallArtifact, String>,
+    pub artifact_versions: BTreeMap<KnownArtifactKind, String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -49,38 +50,6 @@ impl UpdateState {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FinalInstallArtifact {
-    // Sled Artifacts
-    GimletSp,
-    GimletRot,
-    Host,
-    ControlPlane,
-
-    // PSC Artifacts
-    PscSp,
-    PscRot,
-
-    // Switch Artifacts
-    SwitchSp,
-    SwitchRot,
-}
-
-impl Display for FinalInstallArtifact {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FinalInstallArtifact::Host => write!(f, "HOST"),
-            FinalInstallArtifact::ControlPlane => write!(f, "CONTROL PLANE"),
-            FinalInstallArtifact::GimletRot => write!(f, "ROOT OF TRUST"),
-            FinalInstallArtifact::GimletSp => write!(f, "SERVICE PROCESSOR"),
-            FinalInstallArtifact::PscSp => write!(f, "ROOT OF TRUST"),
-            FinalInstallArtifact::PscRot => write!(f, "SERVICE PROCESSOR"),
-            FinalInstallArtifact::SwitchSp => write!(f, "ROOT OF TRUST"),
-            FinalInstallArtifact::SwitchRot => write!(f, "SERVICE PROCESSOR"),
-        }
-    }
-}
-
 impl RackUpdateState {
     pub fn new() -> Self {
         RackUpdateState {
@@ -90,103 +59,48 @@ impl RackUpdateState {
                     ComponentId::Sled(_) => (
                         *id,
                         BTreeMap::from([
-                            (FinalInstallArtifact::Host, UpdateState::Waiting),
+                            (KnownArtifactKind::Host, UpdateState::Waiting),
                             (
-                                FinalInstallArtifact::ControlPlane,
+                                KnownArtifactKind::ControlPlane,
                                 UpdateState::Waiting,
                             ),
                             (
-                                FinalInstallArtifact::GimletRot,
+                                KnownArtifactKind::GimletRot,
                                 UpdateState::Waiting,
                             ),
-                            (
-                                FinalInstallArtifact::GimletSp,
-                                UpdateState::Waiting,
-                            ),
+                            (KnownArtifactKind::GimletSp, UpdateState::Waiting),
                         ]),
                     ),
                     ComponentId::Switch(_) => (
                         *id,
                         BTreeMap::from([
                             (
-                                FinalInstallArtifact::SwitchRot,
+                                KnownArtifactKind::SwitchRot,
                                 UpdateState::Waiting,
                             ),
-                            (
-                                FinalInstallArtifact::SwitchSp,
-                                UpdateState::Waiting,
-                            ),
+                            (KnownArtifactKind::SwitchSp, UpdateState::Waiting),
                         ]),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
                         BTreeMap::from([
-                            (
-                                FinalInstallArtifact::PscRot,
-                                UpdateState::Waiting,
-                            ),
-                            (FinalInstallArtifact::PscSp, UpdateState::Waiting),
+                            (KnownArtifactKind::PscRot, UpdateState::Waiting),
+                            (KnownArtifactKind::PscSp, UpdateState::Waiting),
                         ]),
                     ),
                 })
                 .collect(),
             artifacts: vec![],
-            final_artifact_versions: BTreeMap::default(),
+            artifact_versions: BTreeMap::default(),
         }
     }
 
     pub fn update_artifacts(&mut self, artifacts: Vec<ArtifactId>) {
         self.artifacts = artifacts;
-        self.final_artifact_versions.clear();
+        self.artifact_versions.clear();
         for id in &mut self.artifacts {
-            match id.kind.as_str() {
-                "gimlet_sp" => {
-                    self.final_artifact_versions.insert(
-                        FinalInstallArtifact::GimletSp,
-                        id.version.clone(),
-                    );
-                }
-                "gimlet_rot" => {
-                    self.final_artifact_versions.insert(
-                        FinalInstallArtifact::GimletRot,
-                        id.version.clone(),
-                    );
-                }
-                "psc_sp" => {
-                    self.final_artifact_versions.insert(
-                        FinalInstallArtifact::PscSp,
-                        id.version.clone(),
-                    );
-                }
-                "psc_rot" => {
-                    self.final_artifact_versions.insert(
-                        FinalInstallArtifact::PscRot,
-                        id.version.clone(),
-                    );
-                }
-                "switch_sp" => {
-                    self.final_artifact_versions.insert(
-                        FinalInstallArtifact::SwitchSp,
-                        id.version.clone(),
-                    );
-                }
-                "switch_rot" => {
-                    self.final_artifact_versions.insert(
-                        FinalInstallArtifact::SwitchRot,
-                        id.version.clone(),
-                    );
-                }
-                "host" => {
-                    self.final_artifact_versions
-                        .insert(FinalInstallArtifact::Host, id.version.clone());
-                }
-                "control_plane" => {
-                    self.final_artifact_versions.insert(
-                        FinalInstallArtifact::ControlPlane,
-                        id.version.clone(),
-                    );
-                }
-                _ => (),
+            if let Ok(known) = id.kind.parse() {
+                self.artifact_versions.insert(known, id.version.clone());
             }
         }
     }
