@@ -1236,7 +1236,6 @@ impl StorageManager {
                     // don't know about, that's an error.
                     return Err(Error::ZpoolNotFound(
                         format!("zpool: {name} claims to be from unknown disk: {disk_path}",
-                            name = name.to_string(),
                             disk_path = disk_path.display()
                         )
                     ));
