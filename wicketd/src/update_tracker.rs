@@ -831,7 +831,11 @@ impl UpdateDriver {
         const HOST_BOOT_FLASH: &str =
             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
 
-        let phase1_image = buf_list_to_try_stream(artifact.data.0.clone());
+        let phase1_image =
+            buf_list_to_try_stream(BufList::from_iter([artifact
+                .data
+                .0
+                .clone()]));
 
         // Ensure host is in A2.
         self.set_host_power_state(PowerState::A2).await?;
@@ -912,7 +916,7 @@ impl UpdateDriver {
                 firmware_slot,
                 &update_id,
                 reqwest::Body::wrap_stream(buf_list_to_try_stream(
-                    artifact.data.0.clone(),
+                    BufList::from_iter([artifact.data.0.clone()]),
                 )),
             )
             .await
@@ -1026,7 +1030,8 @@ async fn upload_trampoline_phase_2_to_mgs(
     let data = artifact.data;
     let upload_task = move || {
         let mgs_client = mgs_client.clone();
-        let image = buf_list_to_try_stream(data.0.clone());
+        let image =
+            buf_list_to_try_stream(BufList::from_iter([data.0.clone()]));
 
         async move {
             mgs_client

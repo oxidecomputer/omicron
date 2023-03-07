@@ -296,7 +296,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let _users: ResultsPage<views::IdentityProvider> =
         NexusRequest::object_get(
             client,
-            &"/system/silos/authz/identity-providers",
+            &"/v1/system/identity-providers?silo=authz",
         )
         .authn_as(AuthnMode::SiloUser(new_silo_user_id))
         .execute()
@@ -373,7 +373,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // That user can access their own silo
     let _silo: views::Silo =
-        NexusRequest::object_get(client, &"/system/silos/authz")
+        NexusRequest::object_get(client, &"/v1/system/silos/authz")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -383,8 +383,12 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // But not others
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::GET, &"/system/silos/other")
-            .expect_status(Some(http::StatusCode::NOT_FOUND)),
+        RequestBuilder::new(
+            client,
+            http::Method::GET,
+            &"/v1/system/silos/other",
+        )
+        .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()

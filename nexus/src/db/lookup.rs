@@ -446,6 +446,17 @@ impl<'a> LookupPath<'a> {
     {
         Certificate::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    /// Select a resource of type SamlIdentityProvider, identified by its id
+    pub fn saml_identity_provider_id<'b>(
+        self,
+        id: Uuid,
+    ) -> SamlIdentityProvider<'b>
+    where
+        'a: 'b,
+    {
+        SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource
