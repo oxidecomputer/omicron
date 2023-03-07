@@ -6,88 +6,71 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
-use crate::hardware::HardwareManager;
-use crate::illumos::link::LinkKind;
-use crate::illumos::zfs::{
-    Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
-};
-use crate::illumos::zone::IPADM;
-use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
+use crate::params::VpcFirewallRule;
 use crate::params::{
-    DatasetKind, DendriteAsic, DiskStateRequested, InstanceHardware,
-    InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData, ServiceEnsureBody, ServiceType,
-    ServiceZoneRequest, VpcFirewallRule, ZoneType,
+    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
+    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
+    ServiceEnsureBody, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
+use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
-use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifact,
+    internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    internal_service_policy_with_max, retry_notify, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use sled_hardware::underlay;
+use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crucible_client_types::VolumeConstructionRequest;
-
-#[cfg(not(test))]
-use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
-#[cfg(test)]
-use crate::illumos::{
-    dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
-};
 use crate::serial::ByteOffset;
+#[cfg(not(test))]
+use illumos_utils::{dladm::Dladm, zone::Zones};
+#[cfg(test)]
+use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Physical link not in config, nor found automatically: {0}")]
-    FindPhysicalLink(#[from] crate::illumos::dladm::FindPhysicalLinkError),
+    #[error("Configuration error: {0}")]
+    Config(#[from] crate::config::ConfigError),
 
     #[error("Failed to enable routing: {0}")]
-    EnablingRouting(crate::illumos::ExecutionError),
+    EnablingRouting(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(crate::illumos::ExecutionError),
+    Etherstub(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub VNIC: {0}")]
-    EtherstubVnic(crate::illumos::dladm::CreateVnicError),
+    EtherstubVnic(illumos_utils::dladm::CreateVnicError),
 
-    #[error("Failed to lookup VNICs on boot: {0}")]
-    GetVnics(#[from] crate::illumos::dladm::GetVnicError),
-
-    #[error("Failed to delete VNIC on boot: {0}")]
-    DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
+    #[error("Bootstrap error: {0}")]
+    Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
-    DeleteAddress(#[from] crate::illumos::ExecutionError),
+    DeleteAddress(#[from] illumos_utils::ExecutionError),
 
     #[error("Failed to operate on underlay device: {0}")]
-    Underlay(#[from] crate::common::underlay::Error),
+    Underlay(#[from] underlay::Error),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
-    #[error(transparent)]
-    ZoneOperation(#[from] crate::illumos::zone::AdmError),
-
     #[error("Failed to create Sled Subnet: {err}")]
-    SledSubnet { err: crate::illumos::zone::EnsureGzAddressError },
-
-    #[error(transparent)]
-    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
+    SledSubnet { err: illumos_utils::zone::EnsureGzAddressError },
 
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
@@ -99,13 +82,13 @@ pub enum Error {
     Download(#[from] crate::updates::Error),
 
     #[error("Error managing guest networking: {0}")]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Error monitoring hardware: {0}")]
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
+    ResolveError(#[from] dns_service_client::multiclient::ResolveError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -156,9 +139,6 @@ struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
 
-    // The sled's initial configuration
-    config: Config,
-
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
@@ -172,6 +152,9 @@ struct SledAgentInner {
 
     // Component of Sled Agent responsible for monitoring hardware.
     hardware: HardwareManager,
+
+    // Component of Sled Agent responsible for managing updates.
+    updates: UpdateManager,
 
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
@@ -188,7 +171,7 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    fn switch_ip(&self) -> Ipv6Addr {
+    fn switch_zone_ip(&self) -> Ipv6Addr {
         get_switch_zone_address(self.subnet)
     }
 }
@@ -205,9 +188,8 @@ impl SledAgent {
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
         request: SledAgentRequest,
+        services: ServiceManager,
     ) -> Result<SledAgent, Error> {
-        let id = config.id;
-
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
         let parent_log = log.clone();
@@ -215,25 +197,16 @@ impl SledAgent {
         // Use "log" for ourself.
         let log = log.new(o!(
             "component" => "SledAgent",
-            "sled_id" => id.to_string(),
+            "sled_id" => request.id.to_string(),
         ));
         info!(&log, "created sled agent");
 
-        let etherstub =
-            Dladm::ensure_etherstub().map_err(|e| Error::Etherstub(e))?;
+        let etherstub = Dladm::ensure_etherstub(
+            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
+        )
+        .map_err(|e| Error::Etherstub(e))?;
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
             .map_err(|e| Error::EtherstubVnic(e))?;
-
-        // Before we start creating zones, we need to ensure that the
-        // necessary ZFS and Zone resources are ready.
-        Zfs::ensure_zoned_filesystem(
-            ZONE_ZFS_DATASET,
-            Mountpoint::Path(std::path::PathBuf::from(
-                ZONE_ZFS_DATASET_MOUNTPOINT,
-            )),
-            // do_format=
-            true,
-        )?;
 
         // Ensure the global zone has a functioning IPv6 address.
         //
@@ -250,52 +223,8 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        crate::opte::initialize_xde_driver(&log)?;
-
-        // Identify all existing zones which should be managed by the Sled
-        // Agent.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/725):
-        // Currently, we're removing these zones. In the future, we should
-        // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
-        // to leave the running Zones intact).
-        let zones = Zones::get()?;
-        stream::iter(zones)
-            .zip(stream::iter(std::iter::repeat(log.clone())))
-            .map(Ok::<_, crate::zone::AdmError>)
-            .try_for_each_concurrent(
-                None,
-                |(zone, log)| async {
-                    tokio::task::spawn_blocking(move || {
-                        warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-                        Zones::halt_and_remove_logged(&log, zone.name())
-                    }).await.unwrap()
-                }
-            ).await?;
-
-        // Identify all VNICs which should be managed by the Sled Agent.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/725)
-        // Currently, we're removing these VNICs. In the future, we should
-        // identify if they're being used by the aforementioned existing zones,
-        // and track them once more.
-        //
-        // This should be accessible via:
-        // $ dladm show-linkprop -c -p zone -o LINK,VALUE
-        //
-        // Note that we don't currently delete the VNICs in any particular
-        // order. That should be OK, since we're definitely deleting the guest
-        // VNICs before the xde devices, which is the main constraint.
-        delete_omicron_vnics(&log).await?;
-
-        // Also delete any extant xde devices. These should also eventually be
-        // recovered / tracked, to avoid interruption of any guests that are
-        // still running. That's currently irrelevant, since we're deleting the
-        // zones anyway.
-        //
-        // This is also tracked by
-        // https://github.com/oxidecomputer/omicron/issues/725.
-        crate::opte::delete_all_xde_devices(&log)?;
+        let underlay_nics = underlay::find_nics()?;
+        illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
@@ -312,7 +241,7 @@ impl SledAgent {
 
         let storage = StorageManager::new(
             &parent_log,
-            id,
+            request.id,
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
@@ -325,7 +254,7 @@ impl SledAgent {
                     "Sled Agent upserting zpool to Storage Manager: {}",
                     pool.to_string()
                 );
-                storage.upsert_zpool(pool).await?;
+                storage.upsert_zpool(pool.clone()).await;
             }
         }
         let instances = InstanceManager::new(
@@ -334,36 +263,37 @@ impl SledAgent {
             etherstub.clone(),
             *sled_address.ip(),
             request.gateway.mac,
+        )?;
+
+        let svc_config = services::Config::new(
+            config.sidecar_revision.clone(),
+            request.gateway.address,
         );
 
-        let svc_config = services::Config {
-            gateway_address: request.gateway.address,
-            ..Default::default()
-        };
+        let hardware = HardwareManager::new(&parent_log, config.stub_scrimlet)
+            .map_err(|e| Error::Hardware(e))?;
 
-        let hardware =
-            HardwareManager::new(parent_log.clone(), config.stub_scrimlet)
-                .map_err(|e| Error::Hardware(e))?;
+        let update_config =
+            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
+        let updates = UpdateManager::new(update_config);
 
-        let services = ServiceManager::new(
-            parent_log.clone(),
-            etherstub.clone(),
-            etherstub_vnic.clone(),
-            *sled_address.ip(),
-            svc_config,
-            config.get_link()?,
-            request.rack_id,
-        )
-        .await?;
+        services
+            .sled_agent_started(
+                svc_config,
+                config.get_link()?,
+                *sled_address.ip(),
+                request.rack_id,
+            )
+            .await?;
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
-                id,
-                config: config.clone(),
+                id: request.id,
                 subnet: request.subnet,
                 storage,
                 instances,
                 hardware,
+                updates,
                 services,
                 lazy_nexus_client,
 
@@ -384,7 +314,7 @@ impl SledAgent {
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
         tokio::spawn(async move {
-            sa.monitor(log).await;
+            sa.hardware_monitor_task(log).await;
         });
 
         Ok(sled_agent)
@@ -397,14 +327,27 @@ impl SledAgent {
     async fn full_hardware_scan(&self, log: &Logger) {
         info!(log, "Performing full hardware scan");
         self.notify_nexus_about_self(log);
+
         if self.inner.hardware.is_scrimlet_driver_loaded() {
-            self.ensure_scrimlet_services_active(&log).await;
+            let switch_zone_ip = Some(self.inner.switch_zone_ip());
+            if let Err(e) =
+                self.inner.services.activate_switch(switch_zone_ip).await
+            {
+                warn!(log, "Failed to activate switch: {e}");
+            }
         } else {
-            self.ensure_scrimlet_services_deactive(&log).await;
+            if let Err(e) = self.inner.services.deactivate_switch().await {
+                warn!(log, "Failed to deactivate switch: {e}");
+            }
         }
+
+        self.inner
+            .storage
+            .ensure_using_exactly_these_disks(self.inner.hardware.disks())
+            .await;
     }
 
-    async fn monitor(&self, log: Logger) {
+    async fn hardware_monitor_task(&self, log: Logger) {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.inner.hardware.monitor();
 
@@ -414,21 +357,40 @@ impl SledAgent {
 
         // Rely on monitoring for tracking all future updates.
         loop {
+            use sled_hardware::HardwareUpdate;
             use tokio::sync::broadcast::error::RecvError;
             match hardware_updates.recv().await {
                 Ok(update) => match update {
-                    crate::hardware::HardwareUpdate::TofinoDeviceChange => {
+                    HardwareUpdate::TofinoDeviceChange => {
                         // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
                         //
                         // This won't block on Nexus responding; it may take while before
                         // Nexus actually comes online.
                         self.notify_nexus_about_self(&log);
                     }
-                    crate::hardware::HardwareUpdate::TofinoLoaded => {
-                        self.ensure_scrimlet_services_active(&log).await;
+                    HardwareUpdate::TofinoLoaded => {
+                        let switch_zone_ip = Some(self.inner.switch_zone_ip());
+                        if let Err(e) = self
+                            .inner
+                            .services
+                            .activate_switch(switch_zone_ip)
+                            .await
+                        {
+                            warn!(log, "Failed to activate switch: {e}");
+                        }
                     }
-                    crate::hardware::HardwareUpdate::TofinoUnloaded => {
-                        self.ensure_scrimlet_services_deactive(&log).await;
+                    HardwareUpdate::TofinoUnloaded => {
+                        if let Err(e) =
+                            self.inner.services.deactivate_switch().await
+                        {
+                            warn!(log, "Failed to deactivate switch: {e}");
+                        }
+                    }
+                    HardwareUpdate::DiskAdded(disk) => {
+                        self.inner.storage.upsert_disk(disk).await;
+                    }
+                    HardwareUpdate::DiskRemoved(disk) => {
+                        self.inner.storage.delete_disk(disk).await;
                     }
                 },
                 Err(RecvError::Lagged(count)) => {
@@ -443,37 +405,6 @@ impl SledAgent {
         }
     }
 
-    async fn ensure_scrimlet_services_active(&self, log: &Logger) {
-        info!(log, "Ensuring scrimlet services (enabling services)");
-
-        let services = match self.inner.config.stub_scrimlet {
-            Some(_) => {
-                vec![ServiceType::Dendrite { asic: DendriteAsic::TofinoStub }]
-            }
-            None => {
-                vec![
-                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
-                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
-                ]
-            }
-        };
-
-        let request = ServiceZoneRequest {
-            id: Uuid::new_v4(),
-            zone_type: ZoneType::Switch,
-            addresses: vec![self.inner.switch_ip()],
-            gz_addresses: vec![],
-            services,
-        };
-
-        self.inner.services.ensure_switch(Some(request)).await;
-    }
-
-    async fn ensure_scrimlet_services_deactive(&self, log: &Logger) {
-        info!(log, "Ensuring scrimlet services (disabling services)");
-        self.inner.services.ensure_switch(None).await;
-    }
-
     pub fn id(&self) -> Uuid {
         self.inner.id
     }
@@ -484,6 +415,9 @@ impl SledAgent {
         let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = nexus_client::types::Baseboard::from(
+            self.inner.hardware.baseboard(),
+        );
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
@@ -495,7 +429,9 @@ impl SledAgent {
             let notify_nexus = || async {
                 info!(
                     log,
-                    "contacting server nexus, registering sled: {}", sled_id
+                    "contacting server nexus, registering sled";
+                    "id" => ?sled_id,
+                    "baseboard" => ?baseboard,
                 );
                 let role = if is_scrimlet {
                     nexus_client::types::SledRole::Scrimlet
@@ -513,6 +449,7 @@ impl SledAgent {
                         &nexus_client::types::SledAgentStartupInfo {
                             sa_address: sled_address.to_string(),
                             role,
+                            baseboard: baseboard.clone(),
                         },
                     )
                     .await
@@ -525,9 +462,7 @@ impl SledAgent {
                 );
             };
             retry_notify(
-                internal_service_policy_with_max(
-                    std::time::Duration::from_secs(1),
-                ),
+                retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_notification_failure,
             )
@@ -553,6 +488,12 @@ impl SledAgent {
     ) -> Result<(), Error> {
         self.inner.services.ensure_persistent(requested_services).await?;
         Ok(())
+    }
+
+    /// Gets the sled's current list of all zpools.
+    pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
+        let zpools = self.inner.storage.get_zpools().await?;
+        Ok(zpools)
     }
 
     /// Ensures that a filesystem type exists within the zpool.
@@ -600,10 +541,10 @@ impl SledAgent {
     /// Downloads and applies an artifact.
     pub async fn update_artifact(
         &self,
-        artifact: UpdateArtifact,
+        artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
         let nexus_client = self.inner.lazy_nexus_client.get().await?;
-        crate::updates::download_artifact(artifact, &nexus_client).await?;
+        self.inner.updates.download_artifact(artifact, &nexus_client).await?;
         Ok(())
     }
 
@@ -642,20 +583,6 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    /// Issue a snapshot request for a Crucible disk not attached to an
-    /// instance.
-    pub async fn issue_disk_snapshot_request(
-        &self,
-        _disk_id: Uuid,
-        _volume_construction_request: VolumeConstructionRequest,
-        _snapshot_id: Uuid,
-    ) -> Result<(), Error> {
-        // For a disk not attached to an instance, implementation requires
-        // constructing a volume and performing a snapshot through some other
-        // means. Currently unimplemented.
-        todo!();
-    }
-
     pub async fn firewall_rules_ensure(
         &self,
         _vpc_id: Uuid,
@@ -667,100 +594,4 @@ impl SledAgent {
             .await
             .map_err(Error::from)
     }
-}
-
-// Delete all underlay addresses created directly over the etherstub VNIC used
-// for inter-zone communications.
-fn delete_etherstub_addresses(log: &Logger) -> Result<(), Error> {
-    let prefix = format!("{}/", crate::illumos::dladm::ETHERSTUB_VNIC_NAME);
-    delete_addresses_matching_prefixes(log, &[prefix])
-}
-
-fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
-    use crate::illumos::dladm::VnicSource;
-    let prefixes = crate::common::underlay::find_chelsio_links()?
-        .into_iter()
-        .map(|link| format!("{}/", link.name()))
-        .collect::<Vec<_>>();
-    delete_addresses_matching_prefixes(log, &prefixes)
-}
-
-fn delete_addresses_matching_prefixes(
-    log: &Logger,
-    prefixes: &[String],
-) -> Result<(), Error> {
-    use std::io::BufRead;
-    let mut cmd = Command::new(PFEXEC);
-    let cmd = cmd.args(&[IPADM, "show-addr", "-p", "-o", "ADDROBJ"]);
-    let output = execute(cmd)?;
-
-    // `ipadm show-addr` can return multiple addresses with the same name, but
-    // multiple values. Collecting to a set ensures that only a single name is
-    // used.
-    let addrobjs = output
-        .stdout
-        .lines()
-        .flatten()
-        .collect::<std::collections::HashSet<_>>();
-
-    for addrobj in addrobjs {
-        if prefixes.iter().any(|prefix| addrobj.starts_with(prefix)) {
-            warn!(
-                log,
-                "Deleting existing Omicron IP address";
-                "addrobj" => addrobj.as_str(),
-            );
-            let mut cmd = Command::new(PFEXEC);
-            let cmd = cmd.args(&[IPADM, "delete-addr", addrobj.as_str()]);
-            execute(cmd)?;
-        }
-    }
-    Ok(())
-}
-
-// Delete all VNICs that can be managed by the control plane.
-//
-// These are currently those that match the prefix `ox` or `vopte`.
-async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
-    let vnics = Dladm::get_vnics()?;
-    stream::iter(vnics)
-        .zip(stream::iter(std::iter::repeat(log.clone())))
-        .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
-        .try_for_each_concurrent(None, |(vnic, log)| async {
-            tokio::task::spawn_blocking(move || {
-                warn!(
-                  log,
-                  "Deleting existing VNIC";
-                    "vnic_name" => &vnic,
-                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
-                );
-                Dladm::delete_vnic(&vnic)
-            })
-            .await
-            .unwrap()
-        })
-        .await?;
-    Ok(())
-}
-
-// Delete the etherstub and underlay VNIC used for interzone communication
-fn delete_etherstub(log: &Logger) -> Result<(), Error> {
-    use crate::illumos::dladm::ETHERSTUB_NAME;
-    use crate::illumos::dladm::ETHERSTUB_VNIC_NAME;
-    warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic()?;
-    warn!(log, "Deleting Omicron etherstub"; "stub_name" => ETHERSTUB_NAME);
-    Dladm::delete_etherstub()?;
-    Ok(())
-}
-
-/// Delete all networking resources installed by the sled agent, in the global
-/// zone.
-pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
-    delete_etherstub_addresses(log)?;
-    delete_underlay_addresses(log)?;
-    delete_omicron_vnics(log).await?;
-    delete_etherstub(log)?;
-    crate::opte::delete_all_xde_devices(log)?;
-    Ok(())
 }

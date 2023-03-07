@@ -64,7 +64,7 @@ pub struct DeviceAuthRequest {
     tags = ["hidden"], // "token"
 }]
 pub async fn device_auth_request(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAuthRequest>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
@@ -72,7 +72,7 @@ pub async fn device_auth_request(
     let params = params.into_inner();
     let handler = async {
         let opctx = nexus.opctx_external_authn();
-        let request = rqctx.request.lock().await;
+        let request = &rqctx.request;
 
         let host = if request.version() > hyper::Version::HTTP_11 {
             request.uri().authority().map(|a| a.as_str())
@@ -112,7 +112,7 @@ pub async fn device_auth_request(
             nexus.device_auth_request_create(&opctx, params.client_id).await?;
         build_oauth_response(
             StatusCode::OK,
-            &model.into_response(rqctx.server.tls, host),
+            &model.into_response(rqctx.server.using_tls(), host),
         )
     };
     // TODO: instrumentation doesn't work because we use `Response<Body>`
@@ -138,7 +138,7 @@ pub struct DeviceAuthVerify {
     unpublished = true,
 }]
 pub async fn device_auth_verify(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -149,7 +149,7 @@ pub async fn device_auth_verify(
     unpublished = true,
 }]
 pub async fn device_auth_success(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -165,7 +165,7 @@ pub async fn device_auth_success(
     tags = ["hidden"], // "token"
 }]
 pub async fn device_auth_confirm(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAuthVerify>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -213,7 +213,7 @@ pub enum DeviceAccessTokenResponse {
     tags = ["hidden"], // "token"
 }]
 pub async fn device_access_token(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAccessTokenRequest>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();

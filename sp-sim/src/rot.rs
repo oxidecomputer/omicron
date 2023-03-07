@@ -23,11 +23,17 @@ impl RotSprocketExt for RotSprocket {
     fn bootstrap_from_config(
         config: &SpCommonConfig,
     ) -> (Ed25519PublicKey, Self) {
+        let mut serial_number = [0; 16];
+        serial_number
+            .get_mut(0..config.serial_number.len())
+            .expect("simulated serial number too long")
+            .copy_from_slice(config.serial_number.as_bytes());
+
         let manufacturing_keypair =
             salty::Keypair::from(&config.manufacturing_root_cert_seed);
         let device_id_keypair =
             salty::Keypair::from(&config.device_id_cert_seed);
-        let serial_number = SerialNumber(config.serial_number);
+        let serial_number = SerialNumber(serial_number);
         let config = RotConfig::bootstrap_for_testing(
             &manufacturing_keypair,
             device_id_keypair,

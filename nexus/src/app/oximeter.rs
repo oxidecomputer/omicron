@@ -10,11 +10,9 @@ use crate::db;
 use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
+use dns_service_client::multiclient::{ResolveError, Resolver};
 use dropshot::PaginationParams;
-use internal_dns_client::{
-    multiclient::{ResolveError, Resolver},
-    names::{ServiceName, SRV},
-};
+use internal_dns_names::{ServiceName, SRV};
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -32,7 +30,9 @@ use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// A client which knows how to connect to Clickhouse, but does so
@@ -48,12 +48,12 @@ pub struct LazyTimeseriesClient {
 }
 
 enum ClientSource {
-    FromDns { resolver: Resolver },
+    FromDns { resolver: Arc<Mutex<Resolver>> },
     FromIp { address: SocketAddr },
 }
 
 impl LazyTimeseriesClient {
-    pub fn new_from_dns(log: Logger, resolver: Resolver) -> Self {
+    pub fn new_from_dns(log: Logger, resolver: Arc<Mutex<Resolver>>) -> Self {
         Self { log, source: ClientSource::FromDns { resolver } }
     }
 
@@ -66,6 +66,8 @@ impl LazyTimeseriesClient {
             ClientSource::FromIp { address } => *address,
             ClientSource::FromDns { resolver } => SocketAddr::new(
                 resolver
+                    .lock()
+                    .await
                     .lookup_ip(SRV::Service(ServiceName::Clickhouse))
                     .await?,
                 CLICKHOUSE_PORT,
@@ -172,7 +174,7 @@ impl super::Nexus {
             );
         };
         backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_internal_service(),
             register,
             log_registration_failure,
         ).await

@@ -19,6 +19,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
+use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
@@ -40,6 +41,7 @@ pub struct ControlPlaneTestContext<N> {
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
+    pub sled_agent_storage: tempfile::TempDir,
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
@@ -54,6 +56,36 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
         self.logctx.cleanup_successful();
+    }
+
+    pub async fn external_http_client(&self) -> ClientTestContext {
+        self.server
+            .get_http_server_external_address()
+            .await
+            .map(|addr| {
+                ClientTestContext::new(
+                    addr,
+                    self.logctx.log.new(
+                        o!("component" => "external http client test context"),
+                    ),
+                )
+            })
+            .unwrap()
+    }
+
+    pub async fn external_https_client(&self) -> ClientTestContext {
+        self.server
+            .get_https_server_external_address()
+            .await
+            .map(|addr| {
+                ClientTestContext::new(
+                    addr,
+                    self.logctx.log.new(
+                        o!("component" => "external https client test context"),
+                    ),
+                )
+            })
+            .unwrap()
     }
 }
 
@@ -114,33 +146,53 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
     let server = N::start_and_populate(&config, &logctx.log).await;
 
+    let external_server_addr =
+        server.get_http_server_external_address().await.unwrap();
+    let internal_server_addr = server.get_http_server_internal_address().await;
+
     let testctx_external = ClientTestContext::new(
-        server.get_http_servers_external()[0],
+        external_server_addr,
         logctx.log.new(o!("component" => "external client test context")),
     );
     let testctx_internal = ClientTestContext::new(
-        server.get_http_server_internal(),
+        internal_server_addr,
         logctx.log.new(o!("component" => "internal client test context")),
     );
 
     // Set up a single sled agent.
+    let tempdir = tempfile::tempdir().unwrap();
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
     let sled_agent = start_sled_agent(
         logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::Server",
             "sled_id" => sa_id.to_string(),
         )),
-        server.get_http_server_internal(),
+        internal_server_addr,
         sa_id,
+        tempdir.path(),
     )
     .await
     .unwrap();
+
+    // Set Nexus' shared resolver to point to the simulated sled agent's
+    // internal DNS server
+    server
+        .set_resolver(
+            dns_service_client::multiclient::Resolver::new(
+                &dns_service_client::multiclient::ServerAddresses {
+                    dropshot_server_addrs: vec![],
+                    dns_server_addrs: vec![sled_agent.dns_server.address],
+                },
+            )
+            .unwrap(),
+        )
+        .await;
 
     // Set up an Oximeter collector server
     let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
     let oximeter = start_oximeter(
         log.new(o!("component" => "oximeter")),
-        server.get_http_server_internal(),
+        internal_server_addr,
         clickhouse.port(),
         collector_id,
     )
@@ -150,9 +202,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Set up a test metric producer server
     let producer_id = Uuid::parse_str(PRODUCER_UUID).unwrap();
     let producer =
-        start_producer_server(server.get_http_server_internal(), producer_id)
-            .await
-            .unwrap();
+        start_producer_server(internal_server_addr, producer_id).await.unwrap();
     register_test_producer(&producer).unwrap();
 
     ControlPlaneTestContext {
@@ -161,6 +211,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         internal_client: testctx_internal,
         database,
         clickhouse,
+        sled_agent_storage: tempdir,
         sled_agent,
         oximeter,
         producer,
@@ -172,6 +223,7 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
+    update_directory: &Path,
 ) -> Result<sim::Server, String> {
     let config = sim::Config {
         id,
@@ -188,9 +240,14 @@ pub async fn start_sled_agent(
             zpools: vec![],
             ip: IpAddr::from(Ipv6Addr::LOCALHOST),
         },
+        updates: sim::ConfigUpdates {
+            zone_artifact_path: update_directory.to_path_buf(),
+        },
     };
 
-    sim::Server::start(&config, &log).await
+    let (server, _rack_init_request) =
+        sim::Server::start(&config, &log).await?;
+    Ok(server)
 }
 
 pub async fn start_oximeter(
@@ -314,4 +371,12 @@ pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
     assert_eq!(ident1.description, ident2.description);
     assert_eq!(ident1.time_created, ident2.time_created);
     assert_eq!(ident1.time_modified, ident2.time_modified);
+}
+
+/// Order-agnostic vec equality
+pub fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
+    assert_eq!(v1.len(), v2.len(), "{:?} and {:?} don't match", v1, v2);
+    for item in v1.iter() {
+        assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
+    }
 }

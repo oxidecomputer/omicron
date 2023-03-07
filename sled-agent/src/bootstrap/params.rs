@@ -43,7 +43,7 @@ impl<'de> DeserializeAs<'de, MacAddr6> for ZeroPadded {
     where
         D: Deserializer<'de>,
     {
-        <&str>::deserialize(deserializer)?
+        String::deserialize(deserializer)?
             .split(':')
             .map(|segment| format!("{:0>2}", segment))
             .collect::<Vec<String>>()
@@ -83,7 +83,7 @@ impl SledAgentRequest {
         address::get_sled_address(self.subnet)
     }
 
-    pub fn switch_ip(&self) -> Ipv6Addr {
+    pub fn switch_zone_ip(&self) -> Ipv6Addr {
         address::get_switch_zone_address(self.subnet)
     }
 }

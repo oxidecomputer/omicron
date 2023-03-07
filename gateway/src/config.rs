@@ -5,25 +5,21 @@
 //! Interfaces for parsing configuration files and working with a gateway server
 //! configuration
 
+use crate::management_switch::SwitchConfig;
 use dropshot::ConfigLogging;
-use gateway_sp_comms::SwitchConfig;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Timeouts {
-    /// Default timeout for requests that collect responses from multiple
-    /// targets, if the client doesn't provide one.
-    pub bulk_request_default_millis: u64,
-}
-
 /// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /// Various timeouts
-    pub timeouts: Timeouts,
+    /// Maximum number of host phase2 recover images we're willing to keep
+    /// cached.
+    pub host_phase2_recovery_image_cache_max_images: usize,
+    /// Partial configuration for our dropshot server.
+    pub dropshot: PartialDropshotConfig,
     /// Configuration of the management switch.
     pub switch: SwitchConfig,
     /// Server-wide logging configuration.
@@ -43,6 +39,11 @@ impl Config {
             .map_err(|e| (path.to_path_buf(), e))?;
         Ok(config_parsed)
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PartialDropshotConfig {
+    pub request_body_max_bytes: usize,
 }
 
 #[derive(Debug, Error)]

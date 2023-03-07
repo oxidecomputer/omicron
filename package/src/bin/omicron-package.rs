@@ -7,21 +7,21 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::{zfs, zone, zpool};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
-use omicron_sled_agent::cleanup_networking_resources;
-use omicron_sled_agent::{zfs, zone, zpool};
 use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::Target;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
+use sled_hardware::cleanup::cleanup_networking_resources;
 use slog::debug;
-use slog::info;
 use slog::o;
 use slog::Drain;
 use slog::Logger;
+use slog::{info, warn};
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
@@ -47,7 +47,7 @@ enum SubCommand {
 // involvement. If we choose to remove it, having users pick one of a few
 // "build profiles" (in other words, a curated list of target strings)
 // seems like a promising alternative.
-const DEFAULT_TARGET: &str = "switch_variant=stub";
+const DEFAULT_TARGET: &str = "image_type=standard switch_variant=stub";
 
 #[derive(Debug, Parser)]
 #[clap(name = "packaging tool")]
@@ -159,6 +159,11 @@ async fn do_check(config: &Config) -> Result<()> {
 
 async fn do_build(config: &Config) -> Result<()> {
     do_for_all_rust_packages(config, "build").await
+}
+
+async fn do_dot(config: &Config) -> Result<()> {
+    println!("{}", omicron_package::dot::do_dot(&config.package_config)?);
+    Ok(())
 }
 
 // Calculates the SHA256 digest for a file.
@@ -419,11 +424,15 @@ async fn do_install(
     do_activate(config, install_dir)
 }
 
-fn uninstall_all_omicron_zones() -> Result<()> {
-    zone::Zones::get()?.into_par_iter().try_for_each(|zone| -> Result<()> {
-        zone::Zones::halt_and_remove(zone.name())?;
-        Ok(())
-    })?;
+async fn uninstall_all_omicron_zones() -> Result<()> {
+    const CONCURRENCY_CAP: usize = 32;
+    futures::stream::iter(zone::Zones::get().await?)
+        .map(Ok::<_, anyhow::Error>)
+        .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
+            zone::Zones::halt_and_remove(zone.name()).await?;
+            Ok(())
+        })
+        .await?;
     Ok(())
 }
 
@@ -450,7 +459,14 @@ fn get_all_omicron_datasets() -> Result<Vec<String>> {
 }
 
 fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = get_all_omicron_datasets()?;
+    let datasets = match get_all_omicron_datasets() {
+        Err(e) => {
+            warn!(config.log, "Failed to get omicron datasets: {}", e);
+            return Ok(());
+        }
+        Ok(datasets) => datasets,
+    };
+
     if datasets.is_empty() {
         return Ok(());
     }
@@ -538,7 +554,7 @@ fn remove_all_except<P: AsRef<Path>>(
 
 async fn do_deactivate(config: &Config) -> Result<()> {
     info!(&config.log, "Removing all Omicron zones");
-    uninstall_all_omicron_zones()?;
+    uninstall_all_omicron_zones().await?;
     info!(config.log, "Uninstalling all packages");
     uninstall_all_packages(config);
     info!(config.log, "Removing networking resources");
@@ -707,6 +723,9 @@ async fn main() -> Result<()> {
     }
 
     match &args.subcommand {
+        SubCommand::Build(BuildCommand::Dot) => {
+            do_dot(&config).await?;
+        }
         SubCommand::Build(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, &artifact_dir).await?;
         }

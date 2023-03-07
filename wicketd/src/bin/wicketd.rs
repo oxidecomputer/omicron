@@ -21,8 +21,17 @@ enum Args {
         #[clap(name = "CONFIG_FILE_PATH", action)]
         config_file_path: PathBuf,
 
+        /// The address for the technician port
         #[clap(short, long, action)]
         address: SocketAddrV6,
+
+        /// The address on the bootstrap network to serve artifacts at
+        #[clap(long, action)]
+        artifact_address: SocketAddrV6,
+
+        /// The port on localhost for MGS
+        #[clap(long, action)]
+        mgs_address: SocketAddrV6,
     },
 }
 
@@ -38,7 +47,12 @@ async fn do_run() -> Result<(), CmdError> {
 
     match args {
         Args::Openapi => run_openapi().map_err(CmdError::Failure),
-        Args::Run { config_file_path, address } => {
+        Args::Run {
+            config_file_path,
+            address,
+            artifact_address,
+            mgs_address,
+        } => {
             let config = Config::from_file(&config_file_path).map_err(|e| {
                 CmdError::Failure(format!(
                     "failed to parse {}: {}",
@@ -47,7 +61,7 @@ async fn do_run() -> Result<(), CmdError> {
                 ))
             })?;
 
-            let args = wicketd::Args { address };
+            let args = wicketd::Args { address, artifact_address, mgs_address };
             run_server(config, args).await.map_err(CmdError::Failure)
         }
     }

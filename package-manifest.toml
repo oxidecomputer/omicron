@@ -1,17 +1,64 @@
-# This manifest describes packages which will be ingested by
-# the "omicron-package" tool - instructing how they should be
-# build, thrown into a tarball, and installed on the target system.
+# Omicron Packages
+# ----------------
+#
+# The Oxide control plane software (Omicron) is built and assembled into
+# *packages* that can be shipped to Oxide systems and deployed.  Note that
+# "package" here is an Omicron concept.  There is overlap with Rust packages,
+# but they're not the same thing.  This "package" has nothing to do with illumos
+# IPS packages or any other kind of operating system or ecosystem package.
+#
+# Four kinds of packages are supported, as determined by their _source_ type:
+#
+# (1) "local": packages whose contents come from any combination of files in the
+#     current directory, blobs stored in S3, or the result of building a Rust
+#     package in the current workspace
+#
+#     If the package involves building a Rust package in the same workspace,
+#     then the Rust package *must* have the same name as the Omicron package.
+#
+# (2) "prebuilt": packages whose contents come wholesale from the output of a
+#     buildomat job
+#
+# (3) "composite": packages whose contents come from combining the results of
+#     one or more other packages
+#
+# (4) "manual": packages whose contents are assumed to be put into place by hand
+#
+#     Manual packages are intended for developers (in development) to override
+#     the source of prebuilt packages with custom contents.
+#
+# For more on these, see the documentation on
+# `omicron_zone_package::PackageSource`.
+#
+# This file defines all of the packages that make up Omicron and how to build
+# each one.  `omicron-package` and `thing-flinger` process this file to build
+# and deploy these packages.
 
 [package.omicron-sled-agent]
 service_name = "sled-agent"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["sled-agent"]
 source.rust.release = true
 source.paths = [ { from = "smf/sled-agent", to = "pkg" } ]
 output.type = "tarball"
 
+# Installinator is a service which should run in the Global Zone for the
+# explicit purpose of recovery and OS re-installation. It should not be
+# installed concurrently with the sled-agent, and is built separately using the
+# target only_for_target.image_type = "trampoline".
+[package.installinator]
+service_name = "installinator"
+only_for_targets.image_type = "trampoline"
+source.type = "local"
+source.rust.binary_names = ["installinator"]
+source.rust.release = true
+source.paths = [ { from = "smf/installinator", to = "pkg" } ]
+output.type = "tarball"
+
 [package.omicron-nexus]
 service_name = "nexus"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["nexus"]
 source.rust.release = true
@@ -19,20 +66,16 @@ source.paths = [
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
   { from = "smf/nexus", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
-  # Note, we could just map the whole "out/certs" directory, but this ensures
-  # both files exist.
-  { from = "out/certs/cert.pem", to = "/var/nexus/certs/cert.pem" },
-  { from = "out/certs/key.pem", to = "/var/nexus/certs/key.pem" }
 ]
 output.type = "zone"
 setup_hint = """
 - Run `./tools/ci_download_console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
-- Run `./tools/create_self_signed_cert.sh` to generate a certificate
 """
 
 [package.oximeter-collector]
 service_name = "oximeter"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["oximeter"]
 source.rust.release = true
@@ -41,6 +84,7 @@ output.type = "zone"
 
 [package.clickhouse]
 service_name = "clickhouse"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
@@ -51,6 +95,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 
 [package.cockroachdb]
 service_name = "cockroachdb"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/cockroachdb", to = "/opt/oxide/cockroachdb" },
@@ -62,20 +107,73 @@ setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary bi
 
 [package.internal-dns]
 service_name = "internal_dns"
+only_for_targets.image_type = "standard"
+source.type = "composite"
+source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
+output.type = "zone"
+
+[package.external-dns]
+service_name = "external_dns"
+only_for_targets.image_type = "standard"
+source.type = "composite"
+source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
+output.type = "zone"
+
+[package.dns-server]
+service_name = "dns-server"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["dnsadm", "dns-server"]
 source.rust.release = true
+source.paths = []
+output.type = "zone"
+output.intermediate_only = true
+
+[package.internal-dns-customizations]
+service_name = "internal-dns-customizations"
+only_for_targets.image_type = "standard"
+source.type = "local"
 source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal_dns" } ]
+output.intermediate_only = true
+output.type = "zone"
+
+[package.external-dns-customizations]
+service_name = "external-dns-customizations"
+only_for_targets.image_type = "standard"
+source.type = "local"
+source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" } ]
+output.intermediate_only = true
 output.type = "zone"
 
 [package.omicron-gateway]
 service_name = "mgs"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["mgs"]
 source.rust.release = true
 source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
 output.type = "zone"
 output.intermediate_only = true
+
+[package.wicketd]
+service_name = "wicketd"
+only_for_targets.image_type = "standard"
+source.type = "local"
+source.rust.binary_names = ["wicketd"]
+source.rust.release = true
+source.paths = [ { from = "smf/wicketd", to = "/var/svc/manifest/site/wicketd" } ]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.wicket]
+service_name = "wicket"
+only_for_targets.image_type = "standard"
+source.type = "local"
+source.rust.binary_names = ["wicket"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
 
 # Packages not built within Omicron, but which must be imported.
 
@@ -84,6 +182,7 @@ output.intermediate_only = true
 # for instructions on building this manually.
 [package.crucible]
 service_name = "crucible"
+only_for_targets.image_type = "standard"
 # To manually override the package source (for example, to test a change in
 # both Crucible and Omicron simultaneously):
 #
@@ -92,10 +191,21 @@ service_name = "crucible"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "bc3e63078c2ba0ec909638436dc60c97f3427454"
+source.commit = "597b08d64c3b259ad2e02f9560731df13efd3163"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "c11668fb5c4e9be8bdb9a95d346f8f63d110931fe12d1d44d8125ebe62b2fb91"
+source.sha256 = "f34b2a5277096685421e901f7136b551e210c6bd66c88c1bdda726aa4d3aba40"
+output.type = "zone"
+
+[package.crucible-pantry]
+service_name = "crucible_pantry"
+only_for_targets.image_type = "standard"
+source.type = "prebuilt"
+source.repo = "crucible"
+source.commit = "597b08d64c3b259ad2e02f9560731df13efd3163"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
+source.sha256 = "380162c317332b4a48711dd459116200a982b878686bc0f1de4582debf6b9586"
 output.type = "zone"
 
 # Refer to
@@ -103,61 +213,66 @@ output.type = "zone"
 # for instructions on building this manually.
 [package.propolis-server]
 service_name = "propolis-server"
+only_for_targets.image_type = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "e58937fea67aca6bc2d37a3cc50a72291328ae0e"
+source.commit = "880a031fbdd7417cd3a4643f8bf419d8d5ea8224"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "00d11a6f669e9f7caa03963c3bd345f2f3a2e6b4ec0e713f2e1dbf94177b4fa9"
+source.sha256 = "93265033a62a998ebc2d64ed3c0f0d4a97c16d34132d3d59660f5430a24990e9"
 output.type = "zone"
 
 [package.maghemite]
 service_name = "mg-ddm"
+# Note: unlike every other package, `maghemite` is not restricted to either the
+# "standard" or "trampoline" image_type; it is included in both.
 source.type = "prebuilt"
 source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "21fd8236c23dc38fea5d1e4c8196be685c251da2"
+source.commit = "459ca9f302b78c78aafc836d9ace7c22067f0b65"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "039c9b3e97b0d61012850c1476574742c0cb9274ffa86cfeb15d619854ebacfa"
+source.sha256 = "c365c25f87cb13d2960dc196cd18849dc99bbba0f992f7cb4168feff47fa855d"
 output.type = "tarball"
 
 [package.dendrite-stub]
 service_name = "dendrite"
 only_for_targets.switch_variant = "stub"
+only_for_targets.image_type = "standard"
 # To manually override the package source:
 #
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
-#   1b. cargo build --features=tofino_stub
-#   1c. cargo xtask dist -o
+#   1b. cargo build --features=tofino_stub --release
+#   1c. cargo xtask dist -o -r --features tofino_stub
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
-source.sha256 = "e05d33dc5d3deafae7d618c45b019c87ddd97e7a1fff11fa3ffb7593a3e10eaf"
+source.commit = "67a45ff847989e8b8be37c099f70a7451b277c0d"
+source.sha256 = "a2d7bda00d53e1fc2f569ef9afbef4a56a82636e2d613b7668fba7b767805474"
 output.type = "zone"
 output.intermediate_only = true
 
 [package.dendrite-asic]
 service_name = "dendrite"
 only_for_targets.switch_variant = "asic"
+only_for_targets.image_type = "standard"
 # To manually override the package source:
 #
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
-#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
-#   1c. cargo xtask dist -o
+#   1b. cargo build --features=tofino_asic --release
+#   1c. cargo xtask dist -o -r --features tofino_asic
 # 2. Copy the output zone image from dendrite/out to omicron/out
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
-source.sha256 = "208ae10a61f834608378eb135e4b6e5993dc363019b8fba75465b6ea5506b635"
+source.commit = "67a45ff847989e8b8be37c099f70a7451b277c0d"
+source.sha256 = "633e71a764fe02adf2c62dff31923ca4f8863818d0e4d68983c8a360bf23eb3a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -168,8 +283,9 @@ output.intermediate_only = true
 [package.switch-asic]
 service_name = "switch"
 only_for_targets.switch_variant = "asic"
+only_for_targets.image_type = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
@@ -181,6 +297,7 @@ output.type = "zone"
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch_variant = "stub"
+only_for_targets.image_type = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"

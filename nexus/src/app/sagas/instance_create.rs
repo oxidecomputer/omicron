@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
-use crate::app::sagas::NexusAction;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
@@ -12,11 +12,11 @@ use crate::app::{
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::ByteCount as DbByteCount;
 use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use chrono::Utc;
-use lazy_static::lazy_static;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::Error;
@@ -33,10 +33,7 @@ use slog::warn;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
-use std::sync::Arc;
-use steno::new_action_noop_undo;
 use steno::ActionError;
-use steno::ActionFunc;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
 use uuid::Uuid;
@@ -46,8 +43,6 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub organization_name: Name,
-    pub project_name: Name,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
 }
@@ -73,47 +68,44 @@ struct DiskAttachParams {
 
 // instance create saga: actions
 
-lazy_static! {
-    static ref ALLOC_SERVER: NexusAction = new_action_noop_undo(
-        // TODO-robustness This still needs an undo action, and we should really
-        // keep track of resources and reservations, etc.  See the comment on
-        // SagaContext::alloc_server()
-        "instance-create.alloc-server",
-        sic_alloc_server
-    );
-    static ref ALLOC_PROPOLIS_IP: NexusAction = new_action_noop_undo(
-        "instance-create.allocate-propolis-ip",
-        sic_allocate_propolis_ip,
-    );
-    static ref CREATE_INSTANCE_RECORD: NexusAction = ActionFunc::new_action(
-        "instance-create.create-instance-record",
-        sic_create_instance_record,
-        sic_delete_instance_record,
-    );
-    static ref CREATE_NETWORK_INTERFACE: NexusAction = ActionFunc::new_action(
-        "instance-create.create-network-interface",
-        sic_create_network_interface,
-        sic_create_network_interface_undo,
-    );
-    static ref CREATE_SNAT_IP: NexusAction = ActionFunc::new_action(
-        "instance-create.create-snat-ip",
-        sic_allocate_instance_snat_ip,
-        sic_allocate_instance_snat_ip_undo,
-    );
-    static ref CREATE_EXTERNAL_IP: NexusAction = ActionFunc::new_action(
-        "instance-create.create-external-ip",
-        sic_allocate_instance_external_ip,
-        sic_allocate_instance_external_ip_undo,
-    );
-    static ref ATTACH_DISKS_TO_INSTANCE: NexusAction = ActionFunc::new_action(
-        "instance-create.attach-disks-to-instance",
-        sic_attach_disk_to_instance,
-        sic_attach_disk_to_instance_undo,
-    );
-    static ref INSTANCE_ENSURE: NexusAction = new_action_noop_undo(
-        "instance-create.instance-ensure",
-        sic_instance_ensure,
-    );
+declare_saga_actions! {
+    instance_create;
+    // TODO-robustness This still needs an undo action, and we should really
+    // keep track of resources and reservations, etc.  See the comment on
+    // SagaContext::alloc_server()
+    ALLOC_SERVER -> "server_id" {
+        + sic_alloc_server
+    }
+    RESOURCES_ACCOUNT -> "no_result" {
+        + sic_account_resources
+        - sic_account_resources_undo
+    }
+    ALLOC_PROPOLIS_IP -> "propolis_ip" {
+        + sic_allocate_propolis_ip
+    }
+    CREATE_INSTANCE_RECORD -> "instance_name" {
+        + sic_create_instance_record
+        - sic_delete_instance_record
+    }
+    CREATE_NETWORK_INTERFACE -> "output" {
+        + sic_create_network_interface
+        - sic_create_network_interface_undo
+    }
+    CREATE_SNAT_IP -> "snat_ip" {
+        + sic_allocate_instance_snat_ip
+        - sic_allocate_instance_snat_ip_undo
+    }
+    CREATE_EXTERNAL_IP -> "output" {
+        + sic_allocate_instance_external_ip
+        - sic_allocate_instance_external_ip_undo
+    }
+    ATTACH_DISKS_TO_INSTANCE -> "attach_disk_output" {
+        + sic_attach_disk_to_instance
+        - sic_attach_disk_to_instance_undo
+    }
+    INSTANCE_ENSURE -> "instance_ensure" {
+        + sic_instance_ensure
+    }
 }
 
 // instance create saga: definition
@@ -125,14 +117,7 @@ impl NexusSaga for SagaInstanceCreate {
     type Params = Params;
 
     fn register_actions(registry: &mut super::ActionRegistry) {
-        registry.register(Arc::clone(&*ALLOC_SERVER));
-        registry.register(Arc::clone(&*ALLOC_PROPOLIS_IP));
-        registry.register(Arc::clone(&*CREATE_INSTANCE_RECORD));
-        registry.register(Arc::clone(&*CREATE_NETWORK_INTERFACE));
-        registry.register(Arc::clone(&*CREATE_SNAT_IP));
-        registry.register(Arc::clone(&*CREATE_EXTERNAL_IP));
-        registry.register(Arc::clone(&*ATTACH_DISKS_TO_INSTANCE));
-        registry.register(Arc::clone(&*INSTANCE_ENSURE));
+        instance_create_register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -154,23 +139,10 @@ impl NexusSaga for SagaInstanceCreate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
-        builder.append(Node::action(
-            "server_id",
-            "AllocServer",
-            ALLOC_SERVER.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "propolis_ip",
-            "AllocatePropolisIp",
-            ALLOC_PROPOLIS_IP.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "instance_name",
-            "CreateInstanceRecord",
-            CREATE_INSTANCE_RECORD.as_ref(),
-        ));
+        builder.append(alloc_server_action());
+        builder.append(resources_account_action());
+        builder.append(alloc_propolis_ip_action());
+        builder.append(create_instance_record_action());
 
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
@@ -252,11 +224,7 @@ impl NexusSaga for SagaInstanceCreate {
             "CreateSnatIpId",
             ACTION_GENERATE_ID.as_ref(),
         ));
-        builder.append(Node::action(
-            "snat_ip",
-            "CreateSnatIp",
-            CREATE_SNAT_IP.as_ref(),
-        ));
+        builder.append(create_snat_ip_action());
 
         // See the comment above where we add nodes for creating NICs.  We use
         // the same pattern here.
@@ -331,12 +299,7 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        builder.append(Node::action(
-            "instance_ensure",
-            "InstanceEnsure",
-            INSTANCE_ENSURE.as_ref(),
-        ));
-
+        builder.append(instance_ensure_action());
         Ok(builder.build()?)
     }
 }
@@ -396,7 +359,7 @@ async fn sic_create_network_interface(
     match interface_params {
         params::InstanceNetworkInterfaceAttachment::None => Ok(()),
         params::InstanceNetworkInterfaceAttachment::Default => {
-            sic_create_default_primary_network_interface(
+            create_default_primary_network_interface(
                 &sagactx,
                 &saga_params,
                 nic_index,
@@ -410,7 +373,7 @@ async fn sic_create_network_interface(
         ) => match create_params.get(nic_index) {
             None => Ok(()),
             Some(ref prs) => {
-                sic_create_custom_network_interface(
+                create_custom_network_interface(
                     &sagactx,
                     &saga_params,
                     instance_id,
@@ -475,7 +438,7 @@ async fn sic_create_network_interface_undo(
 }
 
 /// Create one custom (non-default) network interface for the provided instance.
-async fn sic_create_custom_network_interface(
+async fn create_custom_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
     instance_id: Uuid,
@@ -530,13 +493,22 @@ async fn sic_create_custom_network_interface(
             interface,
         )
         .await
-        .map_err(|e| ActionError::action_failed(e.into_external()))?;
+        .map(|_| ())
+        .or_else(|err| {
+            match err {
+                // Necessary for idempotency
+                InsertNicError::InterfaceAlreadyExists(_) => Ok(()),
+                _ => Err(err),
+            }
+        })
+        .map_err(InsertNicError::into_external)
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
 /// Create a default primary network interface for an instance during the create
 /// saga.
-async fn sic_create_default_primary_network_interface(
+async fn create_default_primary_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
     nic_index: usize,
@@ -612,6 +584,14 @@ async fn sic_create_default_primary_network_interface(
             interface,
         )
         .await
+        .map(|_| ())
+        .or_else(|err| {
+            match err {
+                // Necessary for idempotency
+                InsertNicError::InterfaceAlreadyExists(_) => Ok(()),
+                _ => Err(err),
+            }
+        })
         .map_err(InsertNicError::into_external)
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -628,13 +608,15 @@ async fn sic_allocate_instance_snat_ip(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+
+    let (.., pool) = datastore
+        .ip_pools_fetch_default_for(&opctx, authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let pool_id = pool.identity.id;
+
     datastore
-        .allocate_instance_snat_ip(
-            &opctx,
-            ip_id,
-            saga_params.project_id,
-            instance_id,
-        )
+        .allocate_instance_snat_ip(&opctx, ip_id, instance_id, pool_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -650,10 +632,7 @@ async fn sic_allocate_instance_snat_ip_undo(
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
-    datastore
-        .deallocate_external_ip(&opctx, ip_id)
-        .await
-        .map_err(ActionError::action_failed)?;
+    datastore.deallocate_external_ip(&opctx, ip_id).await?;
     Ok(())
 }
 
@@ -686,13 +665,7 @@ async fn sic_allocate_instance_external_ip(
         }
     };
     datastore
-        .allocate_instance_ephemeral_ip(
-            &opctx,
-            ip_id,
-            saga_params.project_id,
-            instance_id,
-            pool_name,
-        )
+        .allocate_instance_ephemeral_ip(&opctx, ip_id, instance_id, pool_name)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -713,10 +686,7 @@ async fn sic_allocate_instance_external_ip_undo(
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let ip_id = repeat_saga_params.new_id;
-    datastore
-        .deallocate_external_ip(&opctx, ip_id)
-        .await
-        .map_err(ActionError::action_failed)?;
+    datastore.deallocate_external_ip(&opctx, ip_id).await?;
     Ok(())
 }
 
@@ -807,6 +777,50 @@ pub(super) async fn allocate_sled_ipv6(
         .map_err(ActionError::action_failed)
 }
 
+async fn sic_account_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_insert_instance(
+            &opctx,
+            instance_id,
+            params.project_id,
+            i64::from(params.create_params.ncpus.0),
+            DbByteCount(params.create_params.memory),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sic_account_resources_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_instance(
+            &opctx,
+            instance_id,
+            params.project_id,
+            i64::from(params.create_params.ncpus.0),
+            DbByteCount(params.create_params.memory),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
 // Allocate an IP address on the destination sled for the Propolis server
 async fn sic_allocate_propolis_ip(
     sagactx: NexusActionContext,
@@ -821,6 +835,7 @@ async fn sic_create_instance_record(
 ) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id")?;
@@ -850,9 +865,15 @@ async fn sic_create_instance_record(
         runtime.into(),
     );
 
+    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     let instance = osagactx
         .datastore()
-        .project_create_instance(new_instance)
+        .project_create_instance(&opctx, &authz_project, new_instance)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -873,12 +894,23 @@ async fn sic_delete_instance_record(
     // failed, so update the state accordingly to allow deletion.
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // instance name now.  See oxidecomputer/omicron#1536.
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+    let result = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
         .instance_name(&instance_name)
         .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
+        .await;
+    // Although, as mentioned in the comment above, we should not be doing the
+    // lookup by name here, we do want this operation to be idempotent.
+    //
+    // As such, if the instance has already been deleted, we should return with
+    // a no-op.
+    let (authz_instance, db_instance) = match result {
+        Ok((.., authz_instance, db_instance)) => (authz_instance, db_instance),
+        Err(err) => match err {
+            Error::ObjectNotFound { .. } => return Ok(()),
+            _ => return Err(err.into()),
+        },
+    };
 
     let runtime_state = db::model::InstanceRuntimeState {
         state: db::model::InstanceState::new(InstanceState::Failed),
@@ -892,10 +924,8 @@ async fn sic_delete_instance_record(
         ..db_instance.runtime_state
     };
 
-    let updated = datastore
-        .instance_update_runtime(&instance_id, &runtime_state)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let updated =
+        datastore.instance_update_runtime(&instance_id, &runtime_state).await?;
 
     if !updated {
         warn!(
@@ -905,10 +935,7 @@ async fn sic_delete_instance_record(
     }
 
     // Actually delete the record.
-    datastore
-        .project_delete_instance(&opctx, &authz_instance)
-        .await
-        .map_err(ActionError::action_failed)?;
+    datastore.project_delete_instance(&opctx, &authz_instance).await?;
 
     Ok(())
 }
@@ -983,37 +1010,44 @@ async fn sic_instance_ensure(
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
         authn::saga::Serialized, context::OpContext, db::datastore::DataStore,
         external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use async_bb8_diesel::{
+        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        OptionalExtension,
+    };
+    use diesel::{
+        BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use omicron_sled_agent::sim::SledAgent;
+    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
+    const INSTANCE_NAME: &str = "my-instance";
     const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
+        populate_ip_pool(&client, "default", None).await;
         create_organization(&client, ORG_NAME).await;
         let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
         create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
@@ -1024,12 +1058,10 @@ mod test {
     fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            organization_name: ORG_NAME.parse().unwrap(),
-            project_name: PROJECT_NAME.parse().unwrap(),
             project_id,
             create_params: params::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
-                    name: "my-instance".parse().unwrap(),
+                    name: INSTANCE_NAME.parse().unwrap(),
                     description: "My instance".to_string(),
                 },
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -1046,7 +1078,7 @@ mod test {
                         name: DISK_NAME.parse().unwrap(),
                     },
                 )],
-                start: true,
+                start: false,
             },
         }
     }
@@ -1054,7 +1086,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.apictx().nexus.datastore().clone(),
         )
     }
 
@@ -1064,7 +1096,7 @@ mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1074,7 +1106,10 @@ mod test {
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
 
         // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus
+            .run_saga(runnable_saga)
+            .await
+            .expect("Saga should have succeeded");
     }
 
     async fn no_instance_records_exist(datastore: &DataStore) -> bool {
@@ -1123,6 +1158,67 @@ mod test {
             .is_none()
     }
 
+    async fn no_virtual_provisioning_resource_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningResource;
+        use crate::db::schema::virtual_provisioning_resource::dsl;
+
+        datastore.pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn
+                    .batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_resource
+                        .filter(dsl::resource_type.eq(crate::db::model::ResourceTypeProvisioned::Instance.to_string()))
+                        .select(VirtualProvisioningResource::as_select())
+                        .get_results_async::<VirtualProvisioningResource>(&conn)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                )
+            }).await.unwrap()
+    }
+
+    async fn no_virtual_provisioning_collection_records_using_instances(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::VirtualProvisioningCollection;
+        use crate::db::schema::virtual_provisioning_collection::dsl;
+
+        datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::virtual_provisioning_collection
+                        .filter(
+                            dsl::cpus_provisioned
+                                .ne(0)
+                                .or(dsl::ram_provisioned.ne(0)),
+                        )
+                        .select(VirtualProvisioningCollection::as_select())
+                        .get_results_async::<VirtualProvisioningCollection>(
+                            &conn,
+                        )
+                        .await
+                        .unwrap()
+                        .is_empty(),
+                )
+            })
+            .await
+            .unwrap()
+    }
+
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use crate::db::model::Disk;
         use crate::db::schema::disk::dsl;
@@ -1144,6 +1240,29 @@ mod test {
             && sled_agent.disk_count().await == 0
     }
 
+    pub(crate) async fn verify_clean_slate(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let datastore = cptestctx.server.apictx().nexus.datastore();
+
+        // Check that no partial artifacts of instance creation exist
+        assert!(no_instance_records_exist(datastore).await);
+        assert!(no_network_interface_records_exist(datastore).await);
+        assert!(no_external_ip_records_exist(datastore).await);
+        assert!(
+            no_virtual_provisioning_resource_records_exist(datastore).await
+        );
+        assert!(
+            no_virtual_provisioning_collection_records_using_instances(
+                datastore
+            )
+            .await
+        );
+        assert!(disk_is_detached(datastore).await);
+        assert!(no_instances_or_disks_on_sled(&sled_agent).await);
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
@@ -1152,7 +1271,7 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1186,17 +1305,136 @@ mod test {
                 .await
                 .expect_err("Saga should have failed");
 
-            let datastore = nexus.datastore();
-
-            // Check that no partial artifacts of instance creation exist
-            assert!(no_instance_records_exist(datastore).await);
-            assert!(no_network_interface_records_exist(datastore).await);
-            assert!(no_external_ip_records_exist(datastore).await);
-            assert!(disk_is_detached(datastore).await);
-            assert!(
-                no_instances_or_disks_on_sled(&cptestctx.sled_agent.sled_agent)
-                    .await
-            );
+            verify_clean_slate(&cptestctx).await;
         }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx().nexus;
+        let project_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
+
+        // The "undo_node" should always be immediately preceding the
+        // "error_node".
+        for (undo_node, error_node) in
+            dag.get_nodes().zip(dag.get_nodes().skip(1))
+        {
+            // Create a new saga for this node.
+            info!(
+                log,
+                "Creating new saga which will fail at index {:?}", error_node.index();
+                "node_name" => error_node.name().as_ref(),
+                "label" => error_node.label(),
+            );
+
+            let runnable_saga =
+                nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+            // Inject an error instead of running the node.
+            //
+            // This should cause the saga to unwind.
+            nexus
+                .sec()
+                .saga_inject_error(runnable_saga.id(), error_node.index())
+                .await
+                .unwrap();
+
+            // Inject a repetition for the node being undone.
+            //
+            // This means it is executing twice while unwinding.
+            nexus
+                .sec()
+                .saga_inject_repeat(
+                    runnable_saga.id(),
+                    undo_node.index(),
+                    steno::RepeatInjected {
+                        action: NonZeroU32::new(1).unwrap(),
+                        undo: NonZeroU32::new(2).unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+
+            nexus
+                .run_saga(runnable_saga)
+                .await
+                .expect_err("Saga should have failed");
+
+            verify_clean_slate(&cptestctx).await;
+        }
+    }
+
+    async fn destroy_instance(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let opctx = test_opctx(&cptestctx);
+
+        let instance_selector = params::InstanceSelector::new(
+            Some(ORG_NAME.to_string().try_into().unwrap()),
+            Some(PROJECT_NAME.to_string().try_into().unwrap()),
+            INSTANCE_NAME.to_string().try_into().unwrap(),
+        );
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, &instance_selector).unwrap();
+        nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx().nexus;
+        let project_id = create_org_project_and_disk(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
+
+        let runnable_saga =
+            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+        // Cause all actions to run twice. The saga should succeed regardless!
+        for node in dag.get_nodes() {
+            nexus
+                .sec()
+                .saga_inject_repeat(
+                    runnable_saga.id(),
+                    node.index(),
+                    steno::RepeatInjected {
+                        action: NonZeroU32::new(2).unwrap(),
+                        undo: NonZeroU32::new(1).unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        // Verify that the saga's execution succeeded.
+        nexus
+            .run_saga(runnable_saga)
+            .await
+            .expect("Saga should have succeeded");
+
+        // Verify that if the instance is destroyed, no detritus remains.
+        // This is important to ensure that our original saga didn't
+        // double-allocate during repeated actions.
+        destroy_instance(&cptestctx).await;
+        verify_clean_slate(&cptestctx).await;
     }
 }

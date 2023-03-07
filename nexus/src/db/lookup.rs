@@ -16,8 +16,8 @@ use crate::{
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use nexus_db_model::KnownArtifactKind;
 use nexus_db_model::Name;
-use nexus_db_model::UpdateArtifactKind;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
@@ -378,20 +378,30 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type PhysicalDisk, identified by its id
+    pub fn physical_disk_id(self, id: Uuid) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type UpdateAvailableArtifact, identified by its
     /// `(name, version, kind)` tuple
     pub fn update_available_artifact_tuple(
         self,
         name: &str,
-        version: i64,
-        kind: UpdateArtifactKind,
+        version: &str,
+        kind: KnownArtifactKind,
     ) -> UpdateAvailableArtifact<'a> {
         UpdateAvailableArtifact::PrimaryKey(
             Root { lookup_root: self },
             name.to_string(),
-            version,
+            version.to_string(),
             kind,
         )
+    }
+
+    /// Select a resource of type UpdateDeployment, identified by its id
+    pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
+        UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -418,6 +428,34 @@ impl<'a> LookupPath<'a> {
         'a: 'b,
     {
         GlobalImage::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type Certificate, identified by its name
+    pub fn certificate_name<'b, 'c>(self, name: &'b Name) -> Certificate<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Certificate::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type Certificate, identified by its id
+    pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
+    where
+        'a: 'b,
+    {
+        Certificate::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type SamlIdentityProvider, identified by its id
+    pub fn saml_identity_provider_id<'b>(
+        self,
+        id: Uuid,
+    ) -> SamlIdentityProvider<'b>
+    where
+        'a: 'b,
+    {
+        SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
 
@@ -674,6 +712,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "PhysicalDisk",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "UpdateAvailableArtifact",
     ancestors = [],
     children = [],
@@ -681,9 +728,27 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "name", rust_type = String },
-        { column_name = "version", rust_type = i64 },
-        { column_name = "kind", rust_type = UpdateArtifactKind }
+        { column_name = "version", rust_type = String },
+        { column_name = "kind", rust_type = KnownArtifactKind }
     ]
+}
+
+lookup_resource! {
+    name = "SystemUpdate",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "UpdateDeployment",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
@@ -697,6 +762,15 @@ lookup_resource! {
 
 lookup_resource! {
     name = "GlobalImage",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Certificate",
     ancestors = [],
     children = [],
     lookup_by_name = true,

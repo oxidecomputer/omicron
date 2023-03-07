@@ -151,6 +151,14 @@ pub enum UserProvisionType {
     Jit,
 }
 
+/// The service intended to use this certificate.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceUsingCertificate {
+    /// This certificate is intended for access to the external API.
+    ExternalApi,
+}
+
 /// An IP Range is a contiguous range of IP addresses, usually within an IP
 /// Pool.
 ///
@@ -211,6 +219,15 @@ impl IpRange {
     }
 }
 
+impl From<IpAddr> for IpRange {
+    fn from(addr: IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(addr) => IpRange::V4(Ipv4Range::from(addr)),
+            IpAddr::V6(addr) => IpRange::V6(Ipv6Range::from(addr)),
+        }
+    }
+}
+
 impl TryFrom<(Ipv4Addr, Ipv4Addr)> for IpRange {
     type Error = String;
 
@@ -252,6 +269,12 @@ impl Ipv4Range {
 
     pub fn last_address(&self) -> Ipv4Addr {
         self.last
+    }
+}
+
+impl From<Ipv4Addr> for Ipv4Range {
+    fn from(addr: Ipv4Addr) -> Self {
+        Self { first: addr, last: addr }
     }
 }
 
@@ -297,6 +320,12 @@ impl Ipv6Range {
     }
 }
 
+impl From<Ipv6Addr> for Ipv6Range {
+    fn from(addr: Ipv6Addr) -> Self {
+        Self { first: addr, last: addr }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize)]
 struct AnyIpv6Range {
     first: Ipv6Addr,
@@ -317,6 +346,23 @@ impl TryFrom<AnyIpv6Range> for Ipv6Range {
 pub enum IpKind {
     Ephemeral,
     Floating,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateableComponentType {
+    BootloaderForRot,
+    BootloaderForSp,
+    BootloaderForHostProc,
+    HubrisForPscRot,
+    HubrisForPscSp,
+    HubrisForSidecarRot,
+    HubrisForSidecarSp,
+    HubrisForGimletRot,
+    HubrisForGimletSp,
+    HeliosHostPhase1,
+    HeliosHostPhase2,
+    HostOmicron,
 }
 
 #[cfg(test)]

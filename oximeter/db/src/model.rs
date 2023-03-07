@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Models for timeseries data in ClickHouse
-// Copyright 2021 Oxide Computer Company
+// Copyright 2022 Oxide Computer Company
 
 use crate::{
     DbFieldSource, FieldSchema, FieldSource, Metric, Target, TimeseriesKey,
@@ -661,7 +661,7 @@ where
 {
     fn from(sample: DbTimeseriesScalarGaugeSample<T>) -> Measurement {
         let datum = Datum::from(sample.datum);
-        Measurement::with_timestamp(sample.timestamp, datum)
+        Measurement::new(sample.timestamp, datum)
     }
 }
 
@@ -674,7 +674,7 @@ where
         let cumulative =
             Cumulative::with_start_time(sample.start_time, sample.datum);
         let datum = Datum::from(cumulative);
-        Measurement::with_timestamp(sample.timestamp, datum)
+        Measurement::new(sample.timestamp, datum)
     }
 }
 
@@ -692,7 +692,7 @@ where
             )
             .unwrap(),
         );
-        Measurement::with_timestamp(sample.timestamp, datum)
+        Measurement::new(sample.timestamp, datum)
     }
 }
 
@@ -876,6 +876,7 @@ pub(crate) fn parse_field_select_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
     use oximeter::test_util;
     use oximeter::Datum;
 
@@ -1010,7 +1011,11 @@ mod tests {
     #[test]
     fn test_parse_timeseries_scalar_gauge_measurement() {
         use chrono::TimeZone;
-        let timestamp = Utc.ymd(2021, 1, 1).and_hms_nano(0, 0, 0, 123456789);
+        let timestamp = Utc
+            .with_ymd_and_hms(2021, 1, 1, 0, 0, 0)
+            .unwrap()
+            .with_nanosecond(123_456_789)
+            .unwrap();
 
         fn run_test(line: &str, datum: &Datum, timestamp: DateTime<Utc>) {
             let (key, measurement) =
@@ -1037,8 +1042,16 @@ mod tests {
     #[test]
     fn test_parse_timeseries_scalar_cumulative_measurement() {
         use chrono::TimeZone;
-        let start_time = Utc.ymd(2021, 1, 1).and_hms_nano(0, 0, 0, 123456789);
-        let timestamp = Utc.ymd(2021, 1, 1).and_hms_nano(1, 0, 0, 123456789);
+        let start_time = Utc
+            .with_ymd_and_hms(2021, 1, 1, 0, 0, 0)
+            .unwrap()
+            .with_nanosecond(123_456_789)
+            .unwrap();
+        let timestamp = Utc
+            .with_ymd_and_hms(2021, 1, 1, 1, 0, 0)
+            .unwrap()
+            .with_nanosecond(123_456_789)
+            .unwrap();
 
         fn run_test(
             line: &str,
@@ -1076,8 +1089,16 @@ mod tests {
     #[test]
     fn test_parse_timeseries_histogram_measurement() {
         use chrono::TimeZone;
-        let start_time = Utc.ymd(2021, 1, 1).and_hms_nano(0, 0, 0, 123456789);
-        let timestamp = Utc.ymd(2021, 1, 1).and_hms_nano(1, 0, 0, 123456789);
+        let start_time = Utc
+            .with_ymd_and_hms(2021, 1, 1, 0, 0, 0)
+            .unwrap()
+            .with_nanosecond(123_456_789)
+            .unwrap();
+        let timestamp = Utc
+            .with_ymd_and_hms(2021, 1, 1, 1, 0, 0)
+            .unwrap()
+            .with_nanosecond(123_456_789)
+            .unwrap();
 
         let line = r#"{"timeseries_key": 12, "start_time": "2021-01-01 00:00:00.123456789", "timestamp": "2021-01-01 01:00:00.123456789", "bins": [0, 1], "counts": [1, 1] }"#;
         let (key, measurement) =

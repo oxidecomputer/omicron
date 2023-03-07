@@ -2,20 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod artifacts;
 mod config;
 mod context;
 mod http_entrypoints;
+mod installinator_progress;
 mod inventory;
 mod mgs;
+mod update_events;
+mod update_tracker;
 
+use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 pub use config::Config;
 pub(crate) use context::ServerContext;
-pub use inventory::{RackV1Inventory, SpId, SpInventory};
+pub use inventory::{RackV1Inventory, SpInventory};
+use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 
 use dropshot::ConfigDropshot;
 use slog::{debug, error, o, Drain};
 use std::net::{SocketAddr, SocketAddrV6};
+use update_tracker::UpdateTracker;
 
 /// Run the OpenAPI generator for the API; which emits the OpenAPI spec
 /// to stdout.
@@ -32,9 +39,11 @@ pub fn run_openapi() -> Result<(), String> {
 /// Command line arguments for wicketd
 pub struct Args {
     pub address: SocketAddrV6,
+    pub artifact_address: SocketAddrV6,
+    pub mgs_address: SocketAddrV6,
 }
 
-/// Run an instance of the wicketd [Server]
+/// Run an instance of the wicketd server
 pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
     let (drain, registration) = slog_dtrace::with_drain(
         config
@@ -54,24 +63,67 @@ pub async fn run_server(config: Config, args: Args) -> Result<(), String> {
 
     let dropshot_config = ConfigDropshot {
         bind_address: SocketAddr::V6(args.address),
-        request_body_max_bytes: 8 << 20, // 8 MiB
+        // The maximum request size is set to 4 GB -- artifacts can be large and there's currently
+        // no way to set a larger request size for some endpoints.
+        request_body_max_bytes: 4 << 30,
         ..Default::default()
     };
 
-    let mgs_manager = MgsManager::new(&log, config.mgs_addr);
+    let mgs_manager = MgsManager::new(&log, args.mgs_address);
     let mgs_handle = mgs_manager.get_handle();
     tokio::spawn(async move {
         mgs_manager.run().await;
     });
 
-    let server = dropshot::HttpServerStarter::new(
-        &dropshot_config,
-        http_entrypoints::api(),
-        ServerContext { mgs_handle },
-        &log.new(o!("component" => "dropshot (wicketd)")),
+    let (ipr_artifact, ipr_update_tracker) =
+        crate::installinator_progress::new(&log);
+
+    let store = WicketdArtifactStore::new(&log);
+    let update_tracker =
+        UpdateTracker::new(args.mgs_address, &log, ipr_update_tracker);
+
+    let wicketd_server_fut = {
+        let log = log.new(o!("component" => "dropshot (wicketd)"));
+        let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
+        dropshot::HttpServerStarter::new(
+            &dropshot_config,
+            http_entrypoints::api(),
+            ServerContext {
+                mgs_handle,
+                mgs_client,
+                artifact_store: store.clone(),
+                update_tracker,
+            },
+            &log,
+        )
+        .map_err(|err| format!("initializing http server: {}", err))?
+        .start()
+    };
+
+    let server = WicketdArtifactServer::new(&log, store, ipr_artifact);
+    let artifact_server_fut = installinator_artifactd::ArtifactServer::new(
+        server,
+        args.artifact_address,
+        &log,
     )
-    .map_err(|err| format!("initializing http server: {}", err))?
     .start();
 
-    server.await
+    // Both servers should keep running indefinitely. Bail if either server exits, whether as Ok or
+    // as Err.
+    tokio::select! {
+        res = wicketd_server_fut => {
+            match res {
+                Ok(()) => Err("wicketd server exited unexpectedly".to_owned()),
+                Err(err) => Err(format!("running wicketd server: {err}")),
+            }
+        }
+        res = artifact_server_fut => {
+            match res {
+                Ok(()) => Err("artifact server exited unexpectedly".to_owned()),
+                // The artifact server returns an anyhow::Error, which has a `Debug` impl that
+                // prints out the chain of errors.
+                Err(err) => Err(format!("running artifact server: {err:?}")),
+            }
+        }
+    }
 }

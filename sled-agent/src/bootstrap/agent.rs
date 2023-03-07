@@ -7,6 +7,7 @@
 use super::client::Client as BootstrapAgentClient;
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
+use super::hardware::HardwareMonitor;
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::server::TrustQuorumMembership;
@@ -16,16 +17,22 @@ use super::trust_quorum::{
 };
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
-use crate::illumos::dladm::{self, Dladm, PhysicalLink};
-use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
+use crate::services::ServiceManager;
 use crate::sp::SpHandle;
+use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::dladm::{self, Dladm, GetMacError, PhysicalLink};
+use illumos_utils::zfs::{
+    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+};
+use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
+use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -51,8 +58,14 @@ pub enum BootstrapError {
         err: std::io::Error,
     },
 
+    #[error("Error cleaning up old state: {0}")]
+    Cleanup(anyhow::Error),
+
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
+
+    #[error("Error monitoring hardware: {0}")]
+    Hardware(#[from] crate::bootstrap::hardware::Error),
 
     #[error("Error starting sled agent: {0}")]
     SledError(String),
@@ -67,13 +80,43 @@ pub enum BootstrapError {
     PeerAddresses(String),
 
     #[error("Failed to initialize bootstrap address: {err}")]
-    BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
+    BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
+
+    #[error(transparent)]
+    GetMacError(#[from] GetMacError),
+
+    #[error("Failed to lookup VNICs on boot: {0}")]
+    GetVnics(#[from] illumos_utils::dladm::GetVnicError),
+
+    #[error("Failed to delete VNIC on boot: {0}")]
+    DeleteVnic(#[from] illumos_utils::dladm::DeleteVnicError),
+
+    #[error("Failed to ensure ZFS filesystem: {0}")]
+    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
+
+    #[error("Failed to perform Zone operation: {0}")]
+    ZoneOperation(#[from] illumos_utils::zone::AdmError),
+
+    #[error("Error managing guest networking: {0}")]
+    Opte(#[from] illumos_utils::opte::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
     fn from(err: BootstrapError) -> Self {
         Self::internal_error(&err.to_string())
     }
+}
+
+// Describes the view of the sled agent from the perspective of the bootstrap
+// agent.
+enum SledAgentState {
+    // Either we're in the "before" stage, and we're monitoring for hardware,
+    // waiting for the sled agent to be requested...
+    Before(Option<HardwareMonitor>),
+    // ... or we're in the "after" stage, and the sled agent is running. In this
+    // case, the responsibility for monitoring hardware should be transferred to
+    // the sled agent.
+    After(SledServer),
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
@@ -83,13 +126,13 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    address: Ipv6Addr,
+    address: SocketAddrV6,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
 
     rss: Mutex<Option<RssHandle>>,
-    sled_agent: Mutex<Option<SledServer>>,
+    sled_state: Mutex<SledAgentState>,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
@@ -100,44 +143,118 @@ fn get_sled_agent_request_path() -> PathBuf {
         .join("sled-agent-request.toml")
 }
 
-fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
+fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
     let mac_bytes = mac.into_array();
     assert_eq!(6, mac_bytes.len());
 
-    let address = Ipv6Addr::new(
+    Ipv6Addr::new(
         BOOTSTRAP_PREFIX,
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
         ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
-        0,
-        0,
-        0,
-        1,
-    );
+        (interface_id >> 48 & 0xffff).try_into().unwrap(),
+        (interface_id >> 32 & 0xffff).try_into().unwrap(),
+        (interface_id >> 16 & 0xffff).try_into().unwrap(),
+        (interface_id & 0xfff).try_into().unwrap(),
+    )
+}
 
-    SocketAddrV6::new(address, BOOTSTRAP_AGENT_PORT, 0, 0)
+fn bootstrap_ip(
+    link: PhysicalLink,
+    interface_id: u64,
+) -> Result<Ipv6Addr, dladm::GetMacError> {
+    let mac = Dladm::get_mac(link)?;
+    Ok(mac_to_bootstrap_ip(mac, interface_id))
 }
 
 // TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
 // could be randomly generated when it no longer needs to be durable.
-pub fn bootstrap_address(
+fn bootstrap_address(
     link: PhysicalLink,
+    interface_id: u64,
+    port: u16,
 ) -> Result<SocketAddrV6, dladm::GetMacError> {
-    let mac = Dladm::get_mac(link)?;
-    Ok(mac_to_socket_addr(mac))
+    let ip = bootstrap_ip(link, interface_id)?;
+    Ok(SocketAddrV6::new(ip, port, 0, 0))
+}
+
+// Deletes all state which may be left-over from a previous execution of the
+// Sled Agent.
+//
+// This may re-establish contact in the future, and re-construct a picture of
+// the expected state of each service. However, at the moment, "starting from a
+// known clean slate" is easier to work with.
+async fn cleanup_all_old_global_state(
+    log: &Logger,
+) -> Result<(), BootstrapError> {
+    // Identify all existing zones which should be managed by the Sled
+    // Agent.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+    // Currently, we're removing these zones. In the future, we should
+    // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
+    // to leave the running Zones intact).
+    let zones = Zones::get().await?;
+    stream::iter(zones)
+        .zip(stream::iter(std::iter::repeat(log.clone())))
+        .map(Ok::<_, illumos_utils::zone::AdmError>)
+        .try_for_each_concurrent(None, |(zone, log)| async move {
+            warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
+            Zones::halt_and_remove_logged(&log, zone.name()).await
+        })
+        .await?;
+
+    // Identify all VNICs which should be managed by the Sled Agent.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/725)
+    // Currently, we're removing these VNICs. In the future, we should
+    // identify if they're being used by the aforementioned existing zones,
+    // and track them once more.
+    //
+    // This should be accessible via:
+    // $ dladm show-linkprop -c -p zone -o LINK,VALUE
+    //
+    // Note that we don't currently delete the VNICs in any particular
+    // order. That should be OK, since we're definitely deleting the guest
+    // VNICs before the xde devices, which is the main constraint.
+    sled_hardware::cleanup::delete_omicron_vnics(&log)
+        .await
+        .map_err(|err| BootstrapError::Cleanup(err))?;
+
+    // Also delete any extant xde devices. These should also eventually be
+    // recovered / tracked, to avoid interruption of any guests that are
+    // still running. That's currently irrelevant, since we're deleting the
+    // zones anyway.
+    //
+    // This is also tracked by
+    // https://github.com/oxidecomputer/omicron/issues/725.
+    illumos_utils::opte::delete_all_xde_devices(&log)?;
+
+    Ok(())
 }
 
 impl Agent {
     pub async fn new(
         log: Logger,
         sled_config: SledConfig,
-        address: Ipv6Addr,
+        link: PhysicalLink,
         sp: Option<SpHandle>,
     ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
-            "server" => sled_config.id.to_string(),
         ));
+
+        let address = bootstrap_address(link.clone(), 1, BOOTSTRAP_AGENT_PORT)?;
+
+        // The only zone with a bootstrap ip address besides the global zone,
+        // is the switch zone. We allocate this address here since we have
+        // access to the physical link. This also allows us to keep bootstrap
+        // address allocation in one place.
+        //
+        // If other zones end up needing bootstrap addresses, we'll have to
+        // rethink this strategy, and plumb bootstrap adresses similar to
+        // underlay addresses.
+        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -155,24 +272,29 @@ impl Agent {
                 err,
             })?;
 
-        let etherstub = Dladm::ensure_etherstub().map_err(|e| {
+        let bootstrap_etherstub = Dladm::ensure_etherstub(
+            illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME,
+        )
+        .map_err(|e| {
             BootstrapError::SledError(format!(
                 "Can't access etherstub device: {}",
                 e
             ))
         })?;
 
-        let etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&etherstub).map_err(|e| {
-                BootstrapError::SledError(format!(
-                    "Can't access etherstub VNIC device: {}",
-                    e
-                ))
-            })?;
+        let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
+            &bootstrap_etherstub,
+        )
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub VNIC device: {}",
+                e
+            ))
+        })?;
 
         Zones::ensure_has_global_zone_v6_address(
-            etherstub_vnic,
-            address,
+            bootstrap_etherstub_vnic.clone(),
+            *address.ip(),
             "bootstrap6",
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
@@ -180,7 +302,60 @@ impl Agent {
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::new(log.clone())?;
-        ddmd_client.advertise_prefix(Ipv6Subnet::new(address));
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(*address.ip()));
+
+        // Before we start creating zones, we need to ensure that the
+        // necessary ZFS and Zone resources are ready.
+        //
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1934):
+        // We should carefully consider which dataset this is using; it's
+        // currently part of the ramdisk.
+        Zfs::ensure_zoned_filesystem(
+            ZONE_ZFS_DATASET,
+            Mountpoint::Path(std::path::PathBuf::from(
+                ZONE_ZFS_DATASET_MOUNTPOINT,
+            )),
+            // do_format=
+            true,
+        )?;
+
+        // HardwareMonitor must be on the underlay network like all services
+        let underlay_etherstub = Dladm::ensure_etherstub(
+            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
+        )
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })?;
+
+        let underlay_etherstub_vnic =
+            Dladm::ensure_etherstub_vnic(&underlay_etherstub).map_err(|e| {
+                BootstrapError::SledError(format!(
+                    "Can't access etherstub VNIC device: {}",
+                    e
+                ))
+            })?;
+
+        // Before we start monitoring for hardware, ensure we're running from a
+        // predictable state.
+        //
+        // This means all VNICs, zones, etc.
+        cleanup_all_old_global_state(&log).await?;
+
+        // Begin monitoring for hardware to handle tasks like initialization of
+        // the switch zone.
+        info!(log, "Bootstrap Agent monitoring for hardware");
+        let hardware_monitor = HardwareMonitor::new(
+            &ba_log,
+            &sled_config,
+            underlay_etherstub,
+            underlay_etherstub_vnic,
+            bootstrap_etherstub,
+            switch_zone_bootstrap_address,
+        )
+        .await?;
 
         let agent = Agent {
             log: ba_log,
@@ -188,7 +363,9 @@ impl Agent {
             address,
             share: Mutex::new(None),
             rss: Mutex::new(None),
-            sled_agent: Mutex::new(None),
+            sled_state: Mutex::new(SledAgentState::Before(Some(
+                hardware_monitor,
+            ))),
             sled_config,
             sp,
             ddmd_client,
@@ -236,91 +413,163 @@ impl Agent {
 
         let sled_address = request.sled_address();
 
-        let mut maybe_agent = self.sled_agent.lock().await;
-        if let Some(server) = &*maybe_agent {
-            // Server already exists, return it.
-            info!(&self.log, "Sled Agent already loaded");
+        let mut state = self.sled_state.lock().await;
 
-            if &server.address().ip() != sled_address.ip() {
-                let err_str = format!(
-                    "Sled Agent already running on address {}, but {} was requested",
-                    server.address().ip(),
-                    sled_address.ip(),
-                );
-                return Err(BootstrapError::SledError(err_str));
-            }
+        match &mut *state {
+            // We have not previously initialized a sled agent.
+            SledAgentState::Before(hardware_monitor) => {
+                if let Some(share) = trust_quorum_share.clone() {
+                    self.establish_sled_quorum(share.clone()).await?;
+                    *self.share.lock().await = Some(share);
+                }
 
-            // Bail out if this request includes a trust quorum share that
-            // doesn't match ours. TODO-correctness Do we need to handle a
-            // partially-initialized rack where we may have a share from a
-            // previously-started-but-not-completed init process? If rerunning
-            // it produces different shares this check will fail.
-            if *trust_quorum_share != *self.share.lock().await {
-                let err_str = concat!(
-                    "Sled Agent already running with",
-                    " a different trust quorum share"
+                // Stop the bootstrap agent from monitoring for hardware, and
+                // pass control of service management to the sled agent.
+                //
+                // NOTE: If we fail at any point in the body of this function,
+                // we should restart the hardware monitor, so we can react to
+                // changes in the switch regardless of the success or failure of
+                // this sled agent.
+                let (hardware, services) = hardware_monitor
+                    .take()
+                    .expect("Hardware Monitor does not exist")
+                    .stop()
+                    .await
+                    .expect("Failed to stop hardware monitor");
+
+                // This acts like a "run-on-drop" closure, to restart the
+                // hardware monitor in the bootstrap agent if we fail to
+                // initialize the Sled Agent.
+                //
+                // In the "healthy" case, we can "cancel" and this is
+                // effectively a no-op.
+                struct RestartMonitor<'a> {
+                    run: bool,
+                    log: Logger,
+                    hardware: Option<HardwareManager>,
+                    services: Option<ServiceManager>,
+                    monitor: &'a mut Option<HardwareMonitor>,
+                }
+                impl<'a> RestartMonitor<'a> {
+                    fn cancel(mut self) {
+                        self.run = false;
+                    }
+                }
+                impl<'a> Drop for RestartMonitor<'a> {
+                    fn drop(&mut self) {
+                        if self.run {
+                            *self.monitor = Some(HardwareMonitor::start(
+                                &self.log,
+                                self.hardware.take().unwrap(),
+                                self.services.take().unwrap(),
+                            ));
+                        }
+                    }
+                }
+                let restarter = RestartMonitor {
+                    run: true,
+                    log: self.log.clone(),
+                    hardware: Some(hardware),
+                    services: Some(services.clone()),
+                    monitor: hardware_monitor,
+                };
+
+                // Server does not exist, initialize it.
+                let server = SledServer::start(
+                    &self.sled_config,
+                    self.parent_log.clone(),
+                    request.clone(),
+                    services.clone(),
                 )
-                .to_string();
-                return Err(BootstrapError::SledError(err_str));
+                .await
+                .map_err(|e| {
+                    BootstrapError::SledError(format!(
+                        "Could not start sled agent server: {e}"
+                    ))
+                })?;
+                info!(&self.log, "Sled Agent loaded; recording configuration");
+
+                // Record this request so the sled agent can be automatically
+                // initialized on the next boot.
+                //
+                // danger handling: `serialized_request` contains our trust quorum
+                // share; we do not log it and only write it to the designated path.
+                let serialized_request = PersistentSledAgentRequest {
+                    request: Cow::Borrowed(request),
+                    trust_quorum_share: trust_quorum_share
+                        .clone()
+                        .map(Into::into),
+                }
+                .danger_serialize_as_toml()
+                .expect("Cannot serialize request");
+
+                let path = get_sled_agent_request_path();
+                tokio::fs::write(&path, &serialized_request).await.map_err(
+                    |err| BootstrapError::Io {
+                        message: format!(
+                            "Recording Sled Agent request to {path:?}"
+                        ),
+                        err,
+                    },
+                )?;
+
+                // This is the point-of-no-return, where we're committed to the
+                // sled agent starting.
+                restarter.cancel();
+                *state = SledAgentState::After(server);
+
+                // Start trying to notify ddmd of our sled prefix so it can
+                // advertise it to other sleds.
+                //
+                // TODO-security This ddmd_client is used to advertise both this
+                // (underlay) address and our bootstrap address. Bootstrap addresses are
+                // unauthenticated (connections made on them are auth'd via sprockets),
+                // but underlay addresses should be exchanged via authenticated channels
+                // between ddmd instances. It's TBD how that will work, but presumably
+                // we'll need to do something different here for underlay vs bootstrap
+                // addrs (either talk to a differently-configured ddmd, or include info
+                // indicating which kind of address we're advertising).
+                self.ddmd_client.advertise_prefix(request.subnet);
+
+                Ok(SledAgentResponse { id: request.id })
             }
+            // We have previously initialized a sled agent.
+            SledAgentState::After(server) => {
+                info!(&self.log, "Sled Agent already loaded");
 
-            return Ok(SledAgentResponse { id: server.id() });
-        }
+                if server.id() != request.id {
+                    let err_str = format!(
+                        "Sled Agent already running with UUID {}, but {} was requested",
+                        server.id(),
+                        request.id,
+                    );
+                    return Err(BootstrapError::SledError(err_str));
+                } else if &server.address().ip() != sled_address.ip() {
+                    let err_str = format!(
+                        "Sled Agent already running on address {}, but {} was requested",
+                        server.address().ip(),
+                        sled_address.ip(),
+                    );
+                    return Err(BootstrapError::SledError(err_str));
+                }
 
-        if let Some(share) = trust_quorum_share.clone() {
-            self.establish_sled_quorum(share.clone()).await?;
-            *self.share.lock().await = Some(share);
-        }
+                // Bail out if this request includes a trust quorum share that
+                // doesn't match ours. TODO-correctness Do we need to handle a
+                // partially-initialized rack where we may have a share from a
+                // previously-started-but-not-completed init process? If rerunning
+                // it produces different shares this check will fail.
+                if *trust_quorum_share != *self.share.lock().await {
+                    let err_str = concat!(
+                        "Sled Agent already running with",
+                        " a different trust quorum share"
+                    )
+                    .to_string();
+                    return Err(BootstrapError::SledError(err_str));
+                }
 
-        // Server does not exist, initialize it.
-        let server = SledServer::start(
-            &self.sled_config,
-            self.parent_log.clone(),
-            request.clone(),
-        )
-        .await
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Could not start sled agent server: {e}"
-            ))
-        })?;
-        maybe_agent.replace(server);
-        info!(&self.log, "Sled Agent loaded; recording configuration");
-
-        // Record this request so the sled agent can be automatically
-        // initialized on the next boot.
-        //
-        // danger handling: `serialized_request` contains our trust quorum
-        // share; we do not log it and only write it to the designated path.
-        let serialized_request = PersistentSledAgentRequest {
-            request: Cow::Borrowed(request),
-            trust_quorum_share: trust_quorum_share.clone().map(Into::into),
-        }
-        .danger_serialize_as_toml()
-        .expect("Cannot serialize request");
-
-        let path = get_sled_agent_request_path();
-        tokio::fs::write(&path, &serialized_request).await.map_err(|err| {
-            BootstrapError::Io {
-                message: format!("Recording Sled Agent request to {path:?}"),
-                err,
+                return Ok(SledAgentResponse { id: server.id() });
             }
-        })?;
-
-        // Start trying to notify ddmd of our sled prefix so it can
-        // advertise it to other sleds.
-        //
-        // TODO-security This ddmd_client is used to advertise both this
-        // (underlay) address and our bootstrap address. Bootstrap addresses are
-        // unauthenticated (connections made on them are auth'd via sprockets),
-        // but underlay addresses should be exchanged via authenticated channels
-        // between ddmd instances. It's TBD how that will work, but presumably
-        // we'll need to do something different here for underlay vs bootstrap
-        // addrs (either talk to a differently-configured ddmd, or include info
-        // indicating which kind of address we're advertising).
-        self.ddmd_client.advertise_prefix(request.subnet);
-
-        Ok(SledAgentResponse { id: self.sled_config.id })
+        }
     }
 
     /// Communicates with peers, sharing secrets, until the rack has been
@@ -331,7 +580,7 @@ impl Agent {
     ) -> Result<RackSecret, BootstrapError> {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let rack_secret = retry_notify(
-            internal_service_policy(),
+            retry_policy_internal_service_aggressive(),
             || async {
                 let other_agents = {
                     // Manually build up a `HashSet` instead of `.collect()`ing
@@ -465,7 +714,7 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                self.address,
+                *self.address.ip(),
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.
@@ -478,6 +727,11 @@ impl Agent {
             self.rss.lock().await.replace(rss);
         }
         Ok(())
+    }
+
+    /// Return the global zone address that the bootstrap agent binds to.
+    pub fn address(&self) -> SocketAddrV6 {
+        self.address
     }
 }
 
@@ -502,8 +756,8 @@ impl PersistentSledAgentRequest<'_> {
         }
 
         let mut out = String::with_capacity(128);
-        let mut serializer = toml::Serializer::new(&mut out);
-        PersistentSledAgentRequestDef::serialize(self, &mut serializer)?;
+        let serializer = toml::Serializer::new(&mut out);
+        PersistentSledAgentRequestDef::serialize(self, serializer)?;
         Ok(out)
     }
 }
@@ -515,12 +769,12 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn test_mac_to_socket_addr() {
+    fn test_mac_to_bootstrap_ip() {
         let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
 
         assert_eq!(
-            mac_to_socket_addr(mac).ip(),
-            &"fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
+            mac_to_bootstrap_ip(mac, 1),
+            "fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
         );
     }
 
@@ -552,7 +806,7 @@ mod tests {
 
         let serialized = request.danger_serialize_as_toml().unwrap();
         let deserialized: PersistentSledAgentRequest =
-            toml::from_slice(serialized.as_bytes()).unwrap();
+            toml::from_str(&serialized).unwrap();
 
         assert!(request == deserialized, "serialization round trip failed");
     }

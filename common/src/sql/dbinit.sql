@@ -81,6 +81,11 @@ CREATE TABLE omicron.public.sled (
     /* Idenfities if this Sled is a Scrimlet */
     is_scrimlet BOOL NOT NULL,
 
+    /* Baseboard information about the sled */
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+    revision INT8 NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -106,7 +111,10 @@ CREATE INDEX ON omicron.public.sled (
 CREATE TYPE omicron.public.service_kind AS ENUM (
   'internal_dns',
   'nexus',
-  'oximeter'
+  'oximeter',
+  'dendrite',
+  'tfport',
+  'crucible_pantry'
 );
 
 CREATE TABLE omicron.public.service (
@@ -126,6 +134,148 @@ CREATE TABLE omicron.public.service (
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
     sled_id
+);
+
+-- Extended information for services where "service.kind = nexus"
+-- The "id" columng of this table should match "id" column of the
+-- "omicron.public.service" table exactly.
+CREATE TABLE omicron.public.nexus_service (
+    id UUID PRIMARY KEY,
+    -- The external IP address used for Nexus' external interface.
+    external_ip_id UUID NOT NULL
+);
+
+CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
+  'm2',
+  'u2'
+);
+
+-- A physical disk which exists inside the rack.
+CREATE TABLE omicron.public.physical_disk (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    vendor STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
+    -- FK into the Sled table
+    sled_id UUID NOT NULL,
+
+    -- This constraint should be upheld, even for deleted disks
+    -- in the fleet.
+    CONSTRAINT vendor_serial_model_unique UNIQUE (
+      vendor, serial, model
+    )
+);
+
+CREATE INDEX ON omicron.public.physical_disk (
+    variant,
+    id
+) WHERE time_deleted IS NULL;
+
+-- Make it efficient to look up physical disks by Sled.
+CREATE INDEX ON omicron.public.physical_disk (
+    sled_id,
+    id
+) WHERE time_deleted IS NULL;
+
+-- x509 certificates which may be used by services
+CREATE TABLE omicron.public.certificate (
+    -- Identity metadata (resource)
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The service type which should use this certificate
+    service omicron.public.service_kind NOT NULL,
+
+    -- cert.pem file as a binary blob
+    cert BYTES NOT NULL,
+
+    -- key.pem file as a binary blob
+    key BYTES NOT NULL
+);
+
+-- Add an index which lets us look up certificates for a particular service
+-- class.
+CREATE INDEX ON omicron.public.certificate (
+    service,
+    id
+) WHERE
+    time_deleted IS NULL;
+
+-- Add an index which enforces that certificates have unique names, and which
+-- allows pagination-by-name.
+CREATE UNIQUE INDEX ON omicron.public.certificate (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+-- A table describing virtual resource provisioning which may be associated
+-- with a collection of objects, including:
+-- - Projects
+-- - Organizations
+-- - Silos
+-- - Fleet
+CREATE TABLE omicron.public.virtual_provisioning_collection (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the collection.
+    collection_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the collection.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned by VMs.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned by VMs.
+    ram_provisioned INT8 NOT NULL
+);
+
+-- A table describing a single virtual resource which has been provisioned.
+-- This may include:
+-- - Disks
+-- - Instances
+-- - Snapshots
+--
+-- NOTE: You might think to yourself: "This table looks an awful lot like
+-- the 'virtual_provisioning_collection' table, could they be condensed into
+-- a single table?"
+-- The answer to this question is unfortunately: "No". We use CTEs to both
+-- UPDATE the collection table while INSERTing rows in the resource table, and
+-- this would not be allowed if they came from the same table due to:
+-- https://www.cockroachlabs.com/docs/v22.2/known-limitations#statements-containing-multiple-modification-subqueries-of-the-same-table-are-disallowed
+-- However, by using separate tables, the CTE is able to function correctly.
+CREATE TABLE omicron.public.virtual_provisioning_resource (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the resource.
+    resource_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the resource.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned.
+    ram_provisioned INT8 NOT NULL
 );
 
 /*
@@ -537,6 +687,9 @@ CREATE TABLE omicron.public.project (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
+    /* child resource generation number, per RFD 192 */
+    rcgen INT NOT NULL,
+
     /* Which organization this project belongs to */
     organization_id UUID NOT NULL /* foreign key into "Organization" table */
 );
@@ -789,7 +942,7 @@ CREATE TABLE omicron.public.snapshot (
     volume_id UUID NOT NULL,
 
     /* Where will the scrubbed blocks eventually land? */
-    destination_volume_id UUID,
+    destination_volume_id UUID NOT NULL,
 
     gen INT NOT NULL,
     state omicron.public.snapshot_state NOT NULL,
@@ -1109,16 +1262,9 @@ CREATE TABLE omicron.public.ip_pool (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Optional ID of the project for which this pool is reserved. */
-    project_id UUID,
 
-    /*
-     * Optional rack ID, indicating this is a reserved pool for internal
-     * services on a specific rack.
-     * TODO(https://github.com/oxidecomputer/omicron/issues/1276): This
-     * should probably point to an AZ or fleet, not a rack.
-     */
-    rack_id UUID,
+    /* Identifies if the IP Pool is dedicated to Control Plane services */
+    internal BOOL NOT NULL,
 
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL
@@ -1130,15 +1276,6 @@ CREATE TABLE omicron.public.ip_pool (
 CREATE UNIQUE INDEX ON omicron.public.ip_pool (
     name
 ) WHERE
-    time_deleted IS NULL;
-
-/*
- * Index ensuring uniqueness of IP pools by rack ID
- */
-CREATE UNIQUE INDEX ON omicron.public.ip_pool (
-    rack_id
-) WHERE
-    rack_id IS NOT NULL AND
     time_deleted IS NULL;
 
 /*
@@ -1155,20 +1292,11 @@ CREATE TABLE omicron.public.ip_pool_range (
     /* The range is inclusive of the last address. */
     last_address INET NOT NULL,
     ip_pool_id UUID NOT NULL,
-    /* Optional ID of the project for which this range is reserved.
-     *
-     * NOTE: This denormalizes the tables a bit, since the project_id is
-     * duplicated here and in the parent `ip_pool` table. We're allowing this
-     * for now, since it reduces the complexity of the already-bad IP allocation
-     * query, but we may want to revisit that, and JOIN with the parent table
-     * instead.
-     */
-    project_id UUID,
     /* Tracks child resources, IP addresses allocated out of this range. */
     rcgen INT8 NOT NULL
 );
 
-/* 
+/*
  * These help Nexus enforce that the ranges within an IP Pool do not overlap
  * with any other ranges. See `nexus/src/db/queries/ip_pool.rs` for the actual
  * query which does that.
@@ -1183,14 +1311,6 @@ CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
 )
 STORING (first_address)
 WHERE time_deleted IS NULL;
-
-/*
- * Index supporting allocation of IPs out of a Pool reserved for a project.
- */
-CREATE INDEX ON omicron.public.ip_pool_range (
-    project_id
-) WHERE
-    time_deleted IS NULL;
 
 
 /* The kind of external IP address. */
@@ -1242,9 +1362,6 @@ CREATE TABLE omicron.public.external_ip (
     /* FK to the `ip_pool_range` table. */
     ip_pool_range_id UUID NOT NULL,
 
-    /* FK to the `project` table. */
-    project_id UUID,
-
     /* FK to the `instance` table. See the constraints below. */
     instance_id UUID,
 
@@ -1259,15 +1376,6 @@ CREATE TABLE omicron.public.external_ip (
 
     /* The last port in the allowed range, also inclusive. */
     last_port INT4 NOT NULL,
-
-    /*
-     * The project can only be NULL for service IPs.
-     * Additionally, the project MUST be NULL for service IPs.
-     */
-    CONSTRAINT null_project CHECK(
-        (kind != 'service' AND project_id IS NOT NULL) OR
-        (kind = 'service' AND project_id IS NULL)
-    ),
 
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
@@ -1434,12 +1542,25 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
-    'zone'
+    -- Sled artifacts
+    'gimlet_sp',
+    'gimlet_rot',
+    'host',
+    'trampoline',
+    'control_plane',
+
+    -- PSC artifacts
+    'psc_sp',
+    'psc_rot',
+
+    -- Switch artifacts
+    'switch_sp',
+    'switch_rot'
 );
 
 CREATE TABLE omicron.public.update_available_artifact (
-    name STRING(40) NOT NULL,
-    version INT NOT NULL,
+    name STRING(63) NOT NULL,
+    version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
 
     /* the version of the targets.json role this came from */
@@ -1459,6 +1580,145 @@ CREATE TABLE omicron.public.update_available_artifact (
 /* This index is used to quickly find outdated artifacts. */
 CREATE INDEX ON omicron.public.update_available_artifact (
     targets_role_version
+);
+
+/*
+ * System updates
+ */
+CREATE TABLE omicron.public.system_update (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Because the version is unique, it could be the PK, but that would make
+    -- this resource different from every other resource for little benefit.
+
+    -- Unique semver version
+    version STRING(64) NOT NULL -- TODO: length
+);
+
+CREATE UNIQUE INDEX ON omicron.public.system_update (
+    version
+);
+
+ 
+CREATE TYPE omicron.public.updateable_component_type AS ENUM (
+    'bootloader_for_rot',
+    'bootloader_for_sp',
+    'bootloader_for_host_proc',
+    'hubris_for_psc_rot',
+    'hubris_for_psc_sp',
+    'hubris_for_sidecar_rot',
+    'hubris_for_sidecar_sp',
+    'hubris_for_gimlet_rot',
+    'hubris_for_gimlet_sp',
+    'helios_host_phase_1',
+    'helios_host_phase_2',
+    'host_omicron'
+);
+
+/*
+ * Component updates. Associated with at least one system_update through
+ * system_update_component_update.
+ */
+CREATE TABLE omicron.public.component_update (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- On component updates there's no device ID because the update can apply to
+    -- multiple instances of a given device kind
+
+    -- The *system* update version associated with this version (this is confusing, will rename)
+    version STRING(64) NOT NULL, -- TODO: length
+    -- TODO: add component update version to component_update
+
+    component_type omicron.public.updateable_component_type NOT NULL
+);
+
+-- version is unique per component type
+CREATE UNIQUE INDEX ON omicron.public.component_update (
+    component_type, version
+);
+
+/*
+ * Associate system updates with component updates. Not done with a
+ * system_update_id field on component_update because the same component update
+ * may be part of more than one system update.
+ */
+CREATE TABLE omicron.public.system_update_component_update (
+    system_update_id UUID NOT NULL,
+    component_update_id UUID NOT NULL,
+
+    PRIMARY KEY (system_update_id, component_update_id)
+);
+
+-- For now, the plan is to treat stopped, failed, completed as sub-cases of
+-- "steady" described by a "reason". But reason is not implemented yet.
+-- Obviously this could be a boolean, but boolean status fields never stay
+-- boolean for long.
+CREATE TYPE omicron.public.update_status AS ENUM (
+    'updating',
+    'steady'
+);
+
+/*
+ * Updateable components and their update status
+ */
+CREATE TABLE omicron.public.updateable_component (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Free-form string that comes from the device
+    device_id STRING(40) NOT NULL,
+
+    component_type omicron.public.updateable_component_type NOT NULL,
+
+    -- The semver version of this component's own software
+    version STRING(64) NOT NULL, -- TODO: length
+
+    -- The version of the system update this component's software came from.
+    -- This may need to be nullable if we are registering components before we
+    -- know about system versions at all
+    system_version STRING(64) NOT NULL, -- TODO: length
+
+    status omicron.public.update_status NOT NULL
+    -- TODO: status reason for updateable_component
+);
+
+-- can't have two components of the same type with the same device ID
+CREATE UNIQUE INDEX ON omicron.public.updateable_component (
+    component_type, device_id
+);
+
+CREATE INDEX ON omicron.public.updateable_component (
+    system_version
+);
+
+/*
+ * System updates
+ */
+CREATE TABLE omicron.public.update_deployment (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- semver version of corresponding system update
+    -- TODO: this makes sense while version is the PK of system_update, but
+    -- if/when I change that back to ID, this needs to be the ID too
+    version STRING(64) NOT NULL,
+
+    status omicron.public.update_status NOT NULL
+    -- TODO: status reason for update_deployment
+);
+
+CREATE INDEX on omicron.public.update_deployment (
+    time_created
 );
 
 /*******************************************************************/
@@ -1528,7 +1788,6 @@ CREATE TABLE omicron.public.device_auth_request (
 );
 
 -- Access tokens granted in response to successful device authorization flows.
--- TODO-security: expire tokens.
 CREATE TABLE omicron.public.device_access_token (
     token STRING(40) PRIMARY KEY,
     client_id UUID NOT NULL,

@@ -4,7 +4,7 @@
 
 use crate::schema::rack;
 use db_macros::Asset;
-use nexus_types::external_api::views;
+use nexus_types::{external_api::views, identity::Asset};
 use uuid::Uuid;
 
 /// Information about a local rack.
@@ -13,7 +13,6 @@ use uuid::Uuid;
 pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
-
     pub initialized: bool,
     pub tuf_base_url: Option<String>,
 }
@@ -30,6 +29,6 @@ impl Rack {
 
 impl From<Rack> for views::Rack {
     fn from(rack: Rack) -> Self {
-        Self { identity: views::AssetIdentityMetadata::from(&rack) }
+        Self { identity: rack.identity() }
     }
 }

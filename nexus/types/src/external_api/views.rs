@@ -4,47 +4,22 @@
 
 //! Views are response bodies, most of which are public lenses onto DB models.
 
-use crate::external_api::shared::{self, IpKind, IpRange};
-use crate::identity::Asset;
+use crate::external_api::shared::{
+    self, IpKind, IpRange, ServiceUsingCertificate,
+};
+use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName,
+    ObjectIdentity, RoleName, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
-
-// IDENTITY METADATA
-
-/// Identity-related metadata that's included in "asset" public API objects
-/// (which generally have no name or description)
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
-pub struct AssetIdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
-    pub id: Uuid,
-    /// timestamp when this resource was created
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    /// timestamp when this resource was last modified
-    pub time_modified: chrono::DateTime<chrono::Utc>,
-}
-
-impl<T> From<&T> for AssetIdentityMetadata
-where
-    T: Asset,
-{
-    fn from(t: &T) -> Self {
-        AssetIdentityMetadata {
-            id: t.id(),
-            time_created: t.time_created(),
-            time_modified: t.time_modified(),
-        }
-    }
-}
 
 // SILOS
 
@@ -125,6 +100,16 @@ pub struct Project {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub organization_id: Uuid,
+}
+
+// CERTIFICATES
+
+/// Client view of a [`Certificate`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Certificate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub service: ServiceUsingCertificate,
 }
 
 // IMAGES
@@ -271,7 +256,6 @@ pub struct VpcRouter {
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub project_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
@@ -301,12 +285,47 @@ pub struct Rack {
 
 // SLEDS
 
-/// Client view of an [`Sled`]
+/// Describes properties that should uniquely identify a Gimlet.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Baseboard {
+    pub serial: String,
+    pub part: String,
+    pub revision: i64,
+}
+
+/// Client view of a [`Sled`]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
+}
+
+// PHYSICAL DISKS
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskType {
+    Internal,
+    External,
+}
+
+/// Client view of a [`PhysicalDisk`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PhysicalDisk {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    /// The sled to which this disk is attached, if any.
+    pub sled_id: Option<Uuid>,
+
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub disk_type: PhysicalDiskType,
 }
 
 // SILO USERS
@@ -397,7 +416,6 @@ pub struct DeviceAuthResponse {
 }
 
 /// Successful access token grant. See RFC 6749 §5.1.
-/// TODO-security: `expires_in`, `refresh_token`, etc.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAccessTokenGrant {
     /// The access token issued to the client.
@@ -412,4 +430,63 @@ pub struct DeviceAccessTokenGrant {
 #[serde(rename_all = "snake_case")]
 pub enum DeviceAccessTokenType {
     Bearer,
+}
+
+// SYSTEM UPDATES
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct VersionRange {
+    pub low: SemverVersion,
+    pub high: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum UpdateStatus {
+    Updating,
+    Steady,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct SystemVersion {
+    pub version_range: VersionRange,
+    pub status: UpdateStatus,
+    // TODO: time_released? time_last_applied? I got a fever and the only
+    // prescription is more timestamps
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SystemUpdate {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ComponentUpdate {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    pub component_type: shared::UpdateableComponentType,
+    pub version: SemverVersion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateableComponent {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+
+    pub device_id: String,
+    pub component_type: shared::UpdateableComponentType,
+    pub version: SemverVersion,
+    pub system_version: SemverVersion,
+    pub status: UpdateStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateDeployment {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub version: SemverVersion,
+    pub status: UpdateStatus,
 }

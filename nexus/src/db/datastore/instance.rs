@@ -11,6 +11,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_detach_many::DatastoreDetachManyTarget;
 use crate::db::collection_detach_many::DetachManyError;
+use crate::db::collection_insert::AsyncInsertError;
+use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -18,6 +20,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
+use crate::db::model::Project;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
@@ -25,8 +28,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -34,6 +37,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -60,20 +64,31 @@ impl DataStore {
     // what this function does under the hood).
     pub async fn project_create_instance(
         &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
         instance: Instance,
     ) -> CreateResult<Instance> {
         use db::schema::instance::dsl;
 
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
         let gen = instance.runtime().gen;
         let name = instance.name().clone();
-        let instance: Instance = diesel::insert_into(dsl::instance)
-            .values(instance)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .returning(Instance::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+        let project_id = instance.project_id;
+
+        let instance: Instance = Project::insert_resource(
+            project_id,
+            diesel::insert_into(dsl::instance)
+                .values(instance)
+                .on_conflict(dsl::id)
+                .do_update()
+                .set(dsl::time_modified.eq(dsl::time_modified)),
+        )
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => authz_project.not_found(),
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(
@@ -81,7 +96,8 @@ impl DataStore {
                         name.as_str(),
                     ),
                 )
-            })?;
+            }
+        })?;
 
         bail_unless!(
             instance.runtime().state.state()
@@ -97,22 +113,31 @@ impl DataStore {
         Ok(instance)
     }
 
-    pub async fn project_list_instances(
+    pub async fn instance_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Instance> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::instance::dsl;
-        paginated(dsl::instance, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Instance::as_select())
-            .load_async::<Instance>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::instance, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::instance,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(Instance::as_select())
+        .load_async::<Instance>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously

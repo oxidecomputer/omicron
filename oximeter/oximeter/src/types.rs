@@ -355,13 +355,8 @@ impl PartialEq<&Measurement> for Measurement {
 
 impl Measurement {
     /// Construct a `Measurement` with the given timestamp.
-    pub fn with_timestamp(timestamp: DateTime<Utc>, datum: Datum) -> Self {
-        Self { timestamp, datum }
-    }
-
-    /// Generate a new measurement from a `Datum`, using the current time as the timestamp
-    pub fn new<D: Into<Datum>>(datum: D) -> Measurement {
-        Measurement { timestamp: Utc::now(), datum: datum.into() }
+    pub fn new<D: Into<Datum>>(timestamp: DateTime<Utc>, datum: D) -> Self {
+        Self { timestamp, datum: datum.into() }
     }
 
     /// Return the datum for this measurement
@@ -531,11 +526,15 @@ impl PartialEq for Sample {
 }
 
 impl Sample {
-    /// Construct a new sample.
+    /// Construct a new sample, recorded at the time of the supplied timestamp.
     ///
     /// This materializes the data from the target and metric, and stores that information along
     /// with the measurement data itself.
-    pub fn new<T, M, D>(target: &T, metric: &M) -> Self
+    pub fn new_with_timestamp<T, M, D>(
+        timestamp: DateTime<Utc>,
+        target: &T,
+        metric: &M,
+    ) -> Self
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
@@ -544,8 +543,20 @@ impl Sample {
             timeseries_name: format!("{}:{}", target.name(), metric.name()),
             target: FieldSet::from_target(target),
             metric: FieldSet::from_metric(metric),
-            measurement: metric.measure(),
+            measurement: metric.measure(timestamp),
         }
+    }
+
+    /// Construct a new sample, created at the time the function is called.
+    ///
+    /// This materializes the data from the target and metric, and stores that information along
+    /// with the measurement data itself.
+    pub fn new<T, M, D>(target: &T, metric: &M) -> Self
+    where
+        T: traits::Target,
+        M: traits::Metric<Datum = D>,
+    {
+        Self::new_with_timestamp(Utc::now(), target, metric)
     }
 
     /// Return the fields for this sample.
@@ -709,12 +720,12 @@ mod tests {
 
     #[test]
     fn test_measurement() {
-        let measurement = Measurement::new(0i64);
+        let measurement = Measurement::new(chrono::Utc::now(), 0i64);
         assert_eq!(measurement.datum_type(), DatumType::I64);
         assert_eq!(measurement.start_time(), None);
 
         let datum = Cumulative::new(0i64);
-        let measurement = Measurement::new(datum.clone());
+        let measurement = Measurement::new(chrono::Utc::now(), datum);
         assert_eq!(measurement.datum(), &Datum::from(datum));
         assert!(measurement.start_time().is_some());
         assert!(measurement.timestamp() >= measurement.start_time().unwrap());

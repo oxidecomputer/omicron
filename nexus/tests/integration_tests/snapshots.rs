@@ -4,6 +4,7 @@
 
 //! Tests basic snapshot support in the API
 
+use crate::integration_tests::instances::instance_simulate;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
@@ -11,15 +12,16 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
+use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
@@ -41,12 +43,8 @@ type ControlPlaneTestContext =
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
-fn get_project_url() -> String {
-    format!("/organizations/{}/projects/{}", ORG_NAME, PROJECT_NAME)
-}
-
 fn get_disks_url() -> String {
-    format!("{}/disks", get_project_url())
+    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -56,10 +54,10 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 }
 
 #[nexus_test]
-async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
+async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -133,12 +131,12 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     // Boot instance with disk
     let instances_url = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORG_NAME, PROJECT_NAME,
     );
     let instance_name = "base-instance";
 
-    let _instance: Instance = object_create(
+    let instance: Instance = object_create(
         client,
         &instances_url,
         &params::InstanceCreate {
@@ -163,9 +161,13 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
+    // cannot snapshot attached disk for instance in state starting
+    let nexus = &cptestctx.server.apictx().nexus;
+    instance_simulate(nexus, &instance.identity.id).await;
+
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -190,7 +192,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
 async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -262,9 +264,24 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    // Assert disk is detached
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
+    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk")
+        .parsed_body()
+        .unwrap();
+
+    assert_eq!(disk.state, DiskState::Detached);
+
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -276,21 +293,38 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.clone(),
         },
     )
     .await;
 
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
+
+    // Assert disk is still detached
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
+    let disk: Disk = NexusRequest::object_get(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk")
+        .parsed_body()
+        .unwrap();
+
+    assert_eq!(disk.state, DiskState::Detached);
 }
 
 #[nexus_test]
 async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
-    create_org_and_project(client).await;
+    populate_ip_pool(&client, "default", None).await;
+    let project_id = create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
     // Create a blank disk
@@ -319,9 +353,17 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
+
     // Issue snapshot request
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -333,13 +375,21 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.clone(),
         },
     )
     .await;
 
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        2 * disk_size.to_bytes()
+    );
 
     // Create a disk from this snapshot
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -367,10 +417,19 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        3 * disk_size.to_bytes()
+    );
+
     // Delete snapshot
     let snapshot_url = format!(
-        "/organizations/{}/projects/{}/snapshots/not-attached",
-        ORG_NAME, PROJECT_NAME,
+        "/v1/snapshots/not-attached?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
     );
 
     NexusRequest::new(
@@ -381,6 +440,47 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        provision.virtual_disk_bytes_provisioned.to_bytes(),
+        2 * disk_size.to_bytes()
+    );
+
+    // Delete the disk using the snapshot
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        snap_disk_name, ORG_NAME, PROJECT_NAME
+    );
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
+
+    // Delete the original base disk
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        base_disk_name, ORG_NAME, PROJECT_NAME
+    );
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+    let provision = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(provision.virtual_disk_bytes_provisioned.to_bytes(), 0);
 }
 
 // Test the various ways Nexus can reject a disk created from a snapshot
@@ -389,7 +489,7 @@ async fn test_reject_creating_disk_from_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -397,16 +497,16 @@ async fn test_reject_creating_disk_from_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     let snapshot = datastore
         .project_ensure_snapshot(
             &opctx,
-            &authz_silo,
+            &authz_project,
             db::model::Snapshot {
                 identity: db::model::SnapshotIdentity {
                     id: Uuid::new_v4(),
@@ -423,7 +523,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
-                destination_volume_id: None,
+                destination_volume_id: Uuid::new_v4(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -434,8 +534,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 )
                 .unwrap()
                 .into(),
-            }
-            .into(),
+            },
         )
         .await
         .unwrap();
@@ -487,8 +586,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     snapshot_id: snapshot.id(),
                 },
 
-                size: ByteCount::try_from(1 * params::MIN_DISK_SIZE_BYTES)
-                    .unwrap(),
+                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES).unwrap(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -502,7 +600,7 @@ async fn test_reject_creating_disk_from_snapshot(
         error.message,
         format!(
             "disk size {} must be greater than or equal to snapshot size {}",
-            1 * params::MIN_DISK_SIZE_BYTES,
+            params::MIN_DISK_SIZE_BYTES,
             2 * params::MIN_DISK_SIZE_BYTES,
         )
     );
@@ -546,7 +644,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -554,16 +652,16 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     let snapshot = datastore
         .project_ensure_snapshot(
             &opctx,
-            &authz_silo,
+            &authz_project,
             db::model::Snapshot {
                 identity: db::model::SnapshotIdentity {
                     id: Uuid::new_v4(),
@@ -580,7 +678,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
-                destination_volume_id: None,
+                destination_volume_id: Uuid::new_v4(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -591,8 +689,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 )
                 .unwrap()
                 .into(),
-            }
-            .into(),
+            },
         )
         .await
         .unwrap();
@@ -643,7 +740,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     // Test that snapshots cannot be created if there is no space for the blocks
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -675,7 +772,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
 
     // Issue snapshot request, expect it to fail
     let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
+        "/v1/snapshots?organization={}&project={}",
         ORG_NAME, PROJECT_NAME
     );
 
@@ -703,7 +800,7 @@ async fn test_create_snapshot_record_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
@@ -724,7 +821,7 @@ async fn test_create_snapshot_record_idempotent(
         project_id,
         disk_id: Uuid::new_v4(),
         volume_id: Uuid::new_v4(),
-        destination_volume_id: None,
+        destination_volume_id: Uuid::new_v4(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -735,21 +832,21 @@ async fn test_create_snapshot_record_idempotent(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(*db::fixed_data::silo::SILO_ID)
-        .fetch()
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
         .await
         .unwrap();
 
     // Test project_ensure_snapshot is idempotent
 
     let snapshot_created_1 = datastore
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot.clone())
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot.clone())
         .await
         .unwrap();
 
     let snapshot_created_2 = datastore
-        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
         .unwrap();
 
@@ -778,7 +875,7 @@ async fn test_create_snapshot_record_idempotent(
 async fn test_region_snapshot_create_idempotent(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let nexus = &cptestctx.server.apictx.nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let region_snapshot = db::model::RegionSnapshot {

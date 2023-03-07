@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 03d57827df840907097eb5c6aca92a53128239495b3fa5a5c83e2ed179a254f2 # shrinks to actions = [MouseMovement(8, 11), ScrollUp(1), MouseClick, ScrollDown(1)], initial_height = 3
+cc 8c5b7f07b70eabb6e5f152476e5ca27eed4e7a460009076ed8e9306005910c13 # shrinks to actions = [Resize(29), MouseMovement(8, 38), MouseClick], initial_height = 3
+cc eff96b7f46a8d8a0337f92e5aae5a5ad21a6bfd2e5cba671d1e7a0a4d4e61ee8 # shrinks to actions = [Resize(37), MouseMovement(8, 27), Resize(3), MouseClick], initial_height = 3

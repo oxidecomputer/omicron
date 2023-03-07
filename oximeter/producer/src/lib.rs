@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use slog::Drain;
 use slog::{debug, error, info, o};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -157,7 +156,7 @@ pub struct ProducerIdPathParams {
     path = "/collect/{producer_id}",
 }]
 async fn collect_endpoint(
-    request_context: Arc<RequestContext<ProducerRegistry>>,
+    request_context: RequestContext<ProducerRegistry>,
     path_params: Path<ProducerIdPathParams>,
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     let registry = request_context.context();

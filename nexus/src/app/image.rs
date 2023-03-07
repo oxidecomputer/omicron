@@ -40,6 +40,10 @@ impl super::Nexus {
             .project_name(project_name)
             .lookup_for(authz::Action::CreateChild)
             .await?;
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1482): When
+        // we implement this, remember to insert the image within a Project
+        // using "insert_resource".
         Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
     }
 

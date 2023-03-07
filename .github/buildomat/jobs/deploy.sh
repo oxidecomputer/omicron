@@ -2,10 +2,11 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-netdev"
+#: target = "lab-opte-0.21"
 #: output_rules = [
 #:	"%/var/svc/log/system-illumos-sled-agent:default.log",
-#:	"%/zone/oxz_nexus/root/var/svc/log/system-illumos-nexus:default.log",
+#:	"%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:	"!/zone/oxz_propolis-server_*/root/var/svc/log/*.log",
 #: ]
 #: skip_clone = true
 #:
@@ -109,6 +110,7 @@ pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
+cp /input/package/work/zones/* out/
 mkdir tests
 for p in /input/build-end-to-end-tests/work/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
@@ -147,7 +149,7 @@ pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
 # address for upstream connectivity.
 #
 tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
-sed -e '/\[gateway\]/,/\[request\]/ s/^.*address =.*$/address = "192.168.1.199"/' \
+sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
 	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
 	-i pkg/config-rss.toml
 tar rf out/omicron-sled-agent.tar pkg/config-rss.toml

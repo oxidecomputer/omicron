@@ -43,14 +43,11 @@
 //! each populator behaves as expected in the above ways.
 
 use crate::context::OpContext;
-use crate::db::{self, DataStore};
-use crate::external_api::params;
+use crate::db::DataStore;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Name;
 use omicron_common::backoff;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -100,7 +97,7 @@ async fn populate(
 ) -> Result<(), String> {
     for p in *ALL_POPULATORS {
         let db_result = backoff::retry_notify(
-            backoff::internal_service_policy(),
+            backoff::retry_policy_internal_service(),
             || async {
                 p.populate(opctx, datastore, args).await.map_err(|error| {
                     match &error {
@@ -267,6 +264,27 @@ impl Populator for PopulateSiloUserRoleAssignments {
 }
 
 #[derive(Debug)]
+struct PopulateFleet;
+impl Populator for PopulateFleet {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async {
+            datastore
+                .load_builtin_fleet_virtual_provisioning_collection(opctx)
+                .await
+        }
+        .boxed()
+    }
+}
+
+#[derive(Debug)]
 struct PopulateRack;
 impl Populator for PopulateRack {
     fn populate<'a, 'b>(
@@ -278,40 +296,20 @@ impl Populator for PopulateRack {
     where
         'a: 'b,
     {
-        async {
-            datastore
-                .rack_insert(opctx, &db::model::Rack::new(args.rack_id))
-                .await?;
-
-            let params = params::IpPoolCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "oxide-service-pool".parse::<Name>().unwrap(),
-                    description: String::from("IP Pool for Oxide Services"),
-                },
-                project: None,
-            };
-            datastore
-                .ip_pool_create(opctx, &params, Some(args.rack_id))
-                .await
-                .map(|_| ())
-                .or_else(|e| match e {
-                    Error::ObjectAlreadyExists { .. } => Ok(()),
-                    _ => Err(e),
-                })?;
-            Ok(())
-        }
-        .boxed()
+        async { datastore.load_builtin_rack_data(opctx, args.rack_id).await }
+            .boxed()
     }
 }
 
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 7] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 8] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
         &PopulateSiloUsers,
         &PopulateSiloUserRoleAssignments,
+        &PopulateFleet,
         &PopulateRack,
     ];
 }

@@ -8,9 +8,13 @@ use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
+use serde::Deserialize;
+use serde::Serialize;
 use std::convert::TryFrom;
 
-#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
+#[derive(
+    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+)]
 #[diesel(sql_type = sql_types::BigInt)]
 pub struct InstanceCpuCount(pub external::InstanceCpuCount);
 

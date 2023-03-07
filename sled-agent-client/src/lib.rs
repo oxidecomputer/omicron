@@ -157,6 +157,7 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
             Detaching(u) => Self::Detaching(u),
@@ -184,6 +185,7 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
             Detaching(u) => Self::Detaching(u),
@@ -203,6 +205,12 @@ impl From<&omicron_common::api::external::Name> for types::Name {
 impl From<omicron_common::api::external::Vni> for types::Vni {
     fn from(v: omicron_common::api::external::Vni) -> Self {
         Self(u32::from(v))
+    }
+}
+
+impl From<types::Vni> for omicron_common::api::external::Vni {
+    fn from(s: types::Vni) -> Self {
+        Self::try_from(s.0).unwrap()
     }
 }
 
@@ -287,11 +295,11 @@ impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::UpdateArtifact>
-    for types::UpdateArtifact
+impl From<omicron_common::api::internal::nexus::UpdateArtifactId>
+    for types::UpdateArtifactId
 {
-    fn from(s: omicron_common::api::internal::nexus::UpdateArtifact) -> Self {
-        types::UpdateArtifact {
+    fn from(s: omicron_common::api::internal::nexus::UpdateArtifactId) -> Self {
+        types::UpdateArtifactId {
             name: s.name,
             version: s.version,
             kind: s.kind.into(),
@@ -299,16 +307,40 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifact>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
-    for types::UpdateArtifactKind
+impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
+    for types::KnownArtifactKind
 {
     fn from(
-        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+        s: omicron_common::api::internal::nexus::KnownArtifactKind,
     ) -> Self {
-        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+        use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
-            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+            KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
+            KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
+            KnownArtifactKind::Host => types::KnownArtifactKind::Host,
+            KnownArtifactKind::Trampoline => {
+                types::KnownArtifactKind::Trampoline
+            }
+            KnownArtifactKind::ControlPlane => {
+                types::KnownArtifactKind::ControlPlane
+            }
+            KnownArtifactKind::PscSp => types::KnownArtifactKind::PscSp,
+            KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
+            KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
+            KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::HostIdentifier>
+    for types::HostIdentifier
+{
+    fn from(s: omicron_common::api::internal::nexus::HostIdentifier) -> Self {
+        use omicron_common::api::internal::nexus::HostIdentifier::*;
+        match s {
+            Ip(net) => Self::Ip(net.into()),
+            Vpc(vni) => Self::Vpc(vni.into()),
         }
     }
 }

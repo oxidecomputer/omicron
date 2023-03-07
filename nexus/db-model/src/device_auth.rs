@@ -75,7 +75,6 @@ fn generate_token() -> String {
 /// suggested in RFC 8628 §6.1 (User Code Recommendations); q.v. also for
 /// a discussion of entropy requirements. On input, use codes should be
 /// uppercased, and characters not in this alphabet should be stripped.
-// TODO-security: user code tries should be rate-limited
 const USER_CODE_ALPHABET: [char; 20] = [
     'B', 'C', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S',
     'T', 'V', 'W', 'X', 'Z',
@@ -184,9 +183,10 @@ mod test {
             assert!(
                 user_code.chars().nth(USER_CODE_WORD_LENGTH).unwrap() == '-'
             );
-            assert!(user_code.chars().filter(|x| *x != '-').all(|x| {
-                USER_CODE_ALPHABET.iter().find(|y| **y == x).is_some()
-            }));
+            assert!(user_code
+                .chars()
+                .filter(|x| *x != '-')
+                .all(|x| { USER_CODE_ALPHABET.iter().any(|y| *y == x) }));
             assert!(!codes_seen.contains(&user_code));
             codes_seen.insert(user_code);
         }

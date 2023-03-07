@@ -5,37 +5,45 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-api_identity = { path = "../api_identity" }
-backoff = { version = "0.4.0", features = [ "tokio" ] }
-chrono = { version = "0.4", features = [ "serde" ] }
-dropshot = {  git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.25"
-http = "0.2.7"
-hyper = "0.14"
-ipnetwork = "0.20"
-macaddr = { version = "1.0.1", features = [ "serde_std" ] }
-rand = "0.8.4"
-reqwest = { version = "0.11.12", default-features = false, features = ["rustls-tls", "stream"] }
-ring = "0.16"
-schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
-serde = { version = "1.0", features = [ "derive" ] }
-serde_derive = "1.0"
-serde_json = "1.0"
-serde_with = "2.0.1"
-slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
-smf = "0.2"
-steno = "0.3"
-thiserror = "1.0"
-tokio = { version = "1.21", features = [ "full" ] }
-tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
-toml = "0.5.9"
-uuid = { version = "1.2.1", features = [ "serde", "v4" ] }
-parse-display = "0.6.0"
-progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+anyhow.workspace = true
+api_identity.workspace = true
+backoff.workspace = true
+chrono.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+hex.workspace = true
+http.workspace = true
+hyper.workspace = true
+ipnetwork.workspace = true
+macaddr.workspace = true
+proptest = { workspace = true, optional = true }
+rand.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+ring.workspace = true
+schemars = { workspace = true, features = ["chrono", "uuid1"] }
+semver.workspace = true
+serde.workspace = true
+serde_derive.workspace = true
+serde_human_bytes.workspace = true
+serde_json.workspace = true
+serde_with.workspace = true
+slog.workspace = true
+steno.workspace = true
+strum.workspace = true
+test-strategy = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-postgres.workspace = true
+toml.workspace = true
+uuid.workspace = true
+parse-display.workspace = true
+progenitor.workspace = true
 
 [dev-dependencies]
-expectorate = "1.0.5"
-libc = "0.2.135"
-serde_urlencoded = "0.7.1"
-tokio = { version = "1.21", features = [ "test-util" ] }
+expectorate.workspace = true
+libc.workspace = true
+serde_urlencoded.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[features]
+testing = ["proptest", "test-strategy"]

@@ -4,11 +4,9 @@
 
 //! Interface to a (simulated or real) SP / RoT.
 
-use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
-use crate::illumos;
-use crate::illumos::dladm::CreateVnicError;
-use crate::zone::EnsureGzAddressError;
+use illumos_utils::dladm::CreateVnicError;
+use illumos_utils::zone::EnsureGzAddressError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
@@ -56,7 +54,7 @@ pub enum SpError {
     #[error("Simulated SP config specifies distinct IP addresses ({0}, {1})")]
     SimulatedSpMultipleIpAddresses(Ipv6Addr, Ipv6Addr),
     #[error("Could not access etherstub for simulated SP: {0}")]
-    CreateEtherstub(illumos::ExecutionError),
+    CreateEtherstub(illumos_utils::ExecutionError),
     #[error("Could not access etherstub VNIC device for simulated SP: {0}")]
     CreateEtherstubVnic(CreateVnicError),
     #[error("Could not ensure IP address {addr} in global zone for simulated SP: {err}")]
@@ -86,11 +84,10 @@ impl SpHandle {
     /// A return value of `Ok(None)` means no SP is available.
     pub async fn detect(
         sp_config: Option<&GimletConfig>,
-        sled_config: &SledConfig,
         log: &Logger,
     ) -> Result<Option<Self>, SpError> {
-        let inner = if let Some(config) = sp_config {
-            let sim_sp = SimulatedSp::start(config, sled_config, log).await?;
+        let inner = if let Some(config) = sp_config.as_ref() {
+            let sim_sp = SimulatedSp::start(config, log).await?;
             Some(Inner::SimulatedSp(sim_sp))
         } else {
             None

@@ -2,7 +2,7 @@
 
 use crate::helpers::{ctx::Context, generate_name};
 use anyhow::{ensure, Context as _, Result};
-use futures::future::Ready;
+use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, Distribution, ExternalIpCreate,
@@ -12,7 +12,7 @@ use oxide_client::types::{
 use oxide_client::{
     ClientDisksExt, ClientInstancesExt, ClientSessionExt, ClientSystemExt,
 };
-use russh::{client::Session, ChannelMsg, Disconnect};
+use russh::{ChannelMsg, Disconnect};
 use russh_keys::key::{KeyPair, PublicKey};
 use russh_keys::PublicKeyBase64;
 use std::sync::Arc;
@@ -61,13 +61,14 @@ async fn instance_launch() -> Result<()> {
         .id;
 
     eprintln!("create disk");
+    let disk_name = generate_name("disk")?;
     let disk_name = ctx
         .client
         .disk_create()
         .organization_name(ctx.org_name.clone())
         .project_name(ctx.project_name.clone())
         .body(DiskCreate {
-            name: generate_name("disk")?,
+            name: disk_name.clone(),
             description: String::new(),
             disk_source: DiskSource::GlobalImage { image_id },
             size: ByteCount(2048 * 1024 * 1024),
@@ -89,7 +90,9 @@ async fn instance_launch() -> Result<()> {
             hostname: "localshark".into(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
-            disks: vec![InstanceDiskAttachment::Attach { name: disk_name }],
+            disks: vec![InstanceDiskAttachment::Attach {
+                name: disk_name.clone(),
+            }],
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool_name: None }],
             user_data: String::new(),
@@ -133,7 +136,7 @@ async fn instance_launch() -> Result<()> {
                     .data,
             )
             .into_owned();
-            if data.contains("localshark login:") {
+            if data.contains("-----END SSH HOST KEY KEYS-----") {
                 Ok(data)
             } else {
                 Err(Error::NotYet)
@@ -153,13 +156,18 @@ async fn instance_launch() -> Result<()> {
         .and_then(|line| line.split_whitespace().nth(1))
         .context("failed to get SSH host key from serial console")?;
     eprintln!("host key: ssh-ed25519 {}", host_key);
-    let host_key =
-        PublicKey::parse(b"ssh-ed25519", &base64::decode(host_key)?)?;
+    let host_key = PublicKey::parse(
+        b"ssh-ed25519",
+        &base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            host_key,
+        )?,
+    )?;
 
     eprintln!("connecting ssh");
     let mut session = russh::client::connect(
         Default::default(),
-        (ip_addr, 22).into(),
+        (ip_addr, 22),
         SshClient { host_key },
     )
     .await?;
@@ -245,6 +253,23 @@ async fn instance_launch() -> Result<()> {
     )
     .await?;
 
+    eprintln!("deleting disk");
+    wait_for_condition(
+        || async {
+            ctx.client
+                .disk_delete()
+                .organization_name(ctx.org_name.clone())
+                .project_name(ctx.project_name.clone())
+                .disk_name(disk_name.clone())
+                .send()
+                .await
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await?;
+
     ctx.cleanup().await
 }
 
@@ -253,24 +278,15 @@ struct SshClient {
     host_key: PublicKey,
 }
 
+#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
-    type FutureUnit = Ready<Result<(Self, Session)>>;
-    type FutureBool = Ready<Result<(Self, bool)>>;
 
-    fn finished_bool(self, b: bool) -> Self::FutureBool {
-        futures::future::ready(Ok((self, b)))
-    }
-
-    fn finished(self, session: Session) -> Self::FutureUnit {
-        futures::future::ready(Ok((self, session)))
-    }
-
-    fn check_server_key(
+    async fn check_server_key(
         self,
         server_public_key: &PublicKey,
-    ) -> Self::FutureBool {
+    ) -> Result<(Self, bool), Self::Error> {
         let b = &self.host_key == server_public_key;
-        self.finished_bool(b)
+        Ok((self, b))
     }
 }

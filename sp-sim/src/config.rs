@@ -8,7 +8,6 @@
 use dropshot::ConfigLogging;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
-use gateway_messages::SerialNumber;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
@@ -27,8 +26,7 @@ pub struct SpCommonConfig {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub bind_addrs: Option<[SocketAddrV6; 2]>,
     /// Fake serial number
-    #[serde(with = "hex")]
-    pub serial_number: SerialNumber,
+    pub serial_number: String,
     /// 32-byte seed to create a manufacturing root certificate.
     #[serde(with = "hex")]
     pub manufacturing_root_cert_seed: [u8; 32],

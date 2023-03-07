@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`ExternalIp`]s.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
@@ -12,20 +13,21 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
-use crate::db::model::IpPool;
 use crate::db::model::Name;
+use crate::db::pool::DbConnection;
 use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
-use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::Name as ExternalName;
+use std::net::IpAddr;
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -34,14 +36,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        project_id: Uuid,
         instance_id: Uuid,
+        pool_id: Uuid,
     ) -> CreateResult<ExternalIp> {
         let data = IncompleteExternalIp::for_instance_source_nat(
             ip_id,
-            project_id,
             instance_id,
-            /* pool_id = */ None,
+            pool_id,
         );
         self.allocate_external_ip(opctx, data).await
     }
@@ -51,53 +52,19 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        project_id: Uuid,
         instance_id: Uuid,
         pool_name: Option<Name>,
     ) -> CreateResult<ExternalIp> {
-        let pool_id = if let Some(ref name) = pool_name {
-            // We'd like to add authz checks here, and use the `LookupPath`
-            // methods on the project-scoped view of this resource. It's not
-            // entirely clear how that'll work in the API, so see RFD 288 and
-            // https://github.com/oxidecomputer/omicron/issues/1470 for more
-            // details.
-            //
-            // For now, we just ensure that the pool is either unreserved, or
-            // reserved for the instance's project.
-            use db::schema::ip_pool::dsl;
-            Some(
-                dsl::ip_pool
-                    .filter(dsl::name.eq(name.clone()))
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(
-                        dsl::project_id
-                            .is_null()
-                            .or(dsl::project_id.eq(Some(project_id))),
-                    )
-                    .select(IpPool::as_select())
-                    .first_async::<IpPool>(self.pool_authorized(opctx).await?)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::IpPool,
-                                LookupType::ByName(name.to_string()),
-                            ),
-                        )
-                    })?
-                    .identity
-                    .id,
-            )
-        } else {
-            None
-        };
-        let data = IncompleteExternalIp::for_ephemeral(
-            ip_id,
-            project_id,
-            instance_id,
-            pool_id,
-        );
+        let name = pool_name.unwrap_or_else(|| {
+            Name(ExternalName::from_str("default").unwrap())
+        });
+        let (.., pool) = self
+            .ip_pools_fetch_for(opctx, authz::Action::CreateChild, &name)
+            .await?;
+        let pool_id = pool.identity.id;
+
+        let data =
+            IncompleteExternalIp::for_ephemeral(ip_id, instance_id, pool_id);
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -106,10 +73,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-        rack_id: Uuid,
     ) -> CreateResult<ExternalIp> {
-        let (.., pool) =
-            self.ip_pools_lookup_by_rack_id(opctx, rack_id).await?;
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
 
         let data = IncompleteExternalIp::for_service(ip_id, pool.id());
         self.allocate_external_ip(opctx, data).await
@@ -120,20 +85,58 @@ impl DataStore {
         opctx: &OpContext,
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
-        NextExternalIp::new(data)
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                use async_bb8_diesel::ConnectionError::Query;
-                use async_bb8_diesel::PoolError::Connection;
-                use diesel::result::Error::NotFound;
-                match e {
-                    Connection(Query(NotFound)) => Error::invalid_request(
-                        "No external IP addresses available",
-                    ),
-                    _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+        let conn = self.pool_authorized(opctx).await?;
+        Self::allocate_external_ip_on_connection(conn, data).await
+    }
+
+    /// Variant of [Self::allocate_external_ip] which may be called from a
+    /// transaction context.
+    pub(crate) async fn allocate_external_ip_on_connection<ConnErr>(
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
+        data: IncompleteExternalIp,
+    ) -> CreateResult<ExternalIp>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        let explicit_ip = data.explicit_ip().is_some();
+        NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use async_bb8_diesel::ConnectionError::Query;
+            use async_bb8_diesel::PoolError::Connection;
+            use diesel::result::Error::NotFound;
+            let e = PoolError::from(e);
+            match e {
+                Connection(Query(NotFound)) => {
+                    if explicit_ip {
+                        Error::invalid_request(
+                            "Requested external IP address not available",
+                        )
+                    } else {
+                        Error::invalid_request(
+                            "No external IP addresses available",
+                        )
+                    }
                 }
-            })
+                _ => crate::db::queries::external_ip::from_pool(e),
+            }
+        })
+    }
+
+    /// Allocates an explicit IP address for an internal service.
+    ///
+    /// Unlike the other IP allocation requests, this does not search for an
+    /// available IP address, it asks for one explicitly.
+    pub async fn allocate_explicit_service_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        ip: IpAddr,
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let data =
+            IncompleteExternalIp::for_service_explicit(ip_id, pool.id(), ip);
+        self.allocate_external_ip(opctx, data).await
     }
 
     /// Deallocate the external IP address with the provided ID.
@@ -141,7 +144,6 @@ impl DataStore {
     /// To support idempotency, such as in saga operations, this method returns
     /// an extra boolean, rather than the usual `DeleteResult`. The meaning of
     /// return values are:
-    ///
     /// - `Ok(true)`: The record was deleted during this call
     /// - `Ok(false)`: The record was already deleted, such as by a previous
     /// call

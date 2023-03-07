@@ -5,9 +5,8 @@
 //! Implementation of a simulated SP / RoT.
 
 use super::SpError;
-use crate::config::Config as SledConfig;
-use crate::illumos::dladm::Dladm;
-use crate::zone::Zones;
+use illumos_utils::dladm::{Dladm, UNDERLAY_ETHERSTUB_NAME};
+use illumos_utils::zone::Zones;
 use slog::Logger;
 use sp_sim::config::GimletConfig;
 use sp_sim::RotRequestV1;
@@ -36,7 +35,6 @@ pub(super) struct SimulatedSp {
 impl SimulatedSp {
     pub(super) async fn start(
         sp_config: &GimletConfig,
-        sled_config: &SledConfig,
         log: &Logger,
     ) -> Result<Self, SpError> {
         // Is our simulated SP going to bind to addresses (acting like
@@ -62,8 +60,8 @@ impl SimulatedSp {
             }
 
             // Ensure we have the global zone IP address we need for the SP.
-            let etherstub =
-                Dladm::ensure_etherstub().map_err(SpError::CreateEtherstub)?;
+            let etherstub = Dladm::ensure_etherstub(UNDERLAY_ETHERSTUB_NAME)
+                .map_err(SpError::CreateEtherstub)?;
             let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
                 .map_err(SpError::CreateEtherstubVnic)?;
             Zones::ensure_has_global_zone_v6_address(
@@ -80,7 +78,6 @@ impl SimulatedSp {
         info!(log, "starting simulated gimlet SP");
         let sp_log = log.new(o!(
             "component" => "sp-sim",
-            "server" => sled_config.id.clone().to_string(),
         ));
         let sp = Arc::new(
             sp_sim::Gimlet::spawn(&sp_config, sp_log)
@@ -92,7 +89,6 @@ impl SimulatedSp {
         info!(log, "starting simulated gimlet RoT");
         let rot_log = log.new(o!(
             "component" => "rot-sim",
-            "server" => sled_config.id.clone().to_string(),
         ));
         let transport =
             SimRotTransport { sp: Arc::clone(&sp), responses: VecDeque::new() };

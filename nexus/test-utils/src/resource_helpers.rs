@@ -11,6 +11,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use nexus_test_interface::NexusServer;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -23,12 +24,14 @@ use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::views;
+use omicron_nexus::external_api::views::Certificate;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
 use omicron_nexus::external_api::views::User;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
+use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -62,9 +65,61 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("failed to make \"create\" request")
+        .unwrap_or_else(|_| {
+            panic!("failed to make \"create\" request to {path}")
+        })
         .parsed_body()
         .unwrap()
+}
+
+pub async fn object_put<InputType, OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_put(client, path, Some(input))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|_| panic!("failed to make \"PUT\" request to {path}"))
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn object_delete(client: &ClientTestContext, path: &str) {
+    NexusRequest::object_delete(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("failed to make \"delete\" request to {path}")
+        });
+}
+
+pub async fn populate_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) -> IpPoolRange {
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
+    let range = object_create(
+        client,
+        format!("/system/ip-pools/{}/ranges/add", pool_name).as_str(),
+        &ip_range,
+    )
+    .await;
+    range
 }
 
 /// Create an IP pool with a single range for testing.
@@ -76,16 +131,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-    project_path: Option<params::ProjectPath>,
 ) -> (IpPool, IpPoolRange) {
-    let ip_range = ip_range.unwrap_or_else(|| {
-        use std::net::Ipv4Addr;
-        IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 0),
-            Ipv4Addr::new(10, 0, 255, 255),
-        ))
-        .unwrap()
-    });
     let pool = object_create(
         client,
         "/system/ip-pools",
@@ -94,17 +140,88 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
-            project: project_path,
         },
     )
     .await;
-    let range = object_create(
-        client,
-        format!("/system/ip-pools/{}/ranges/add", pool_name).as_str(),
-        &ip_range,
-    )
-    .await;
+    let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
+}
+
+pub async fn create_certificate(
+    client: &ClientTestContext,
+    cert_name: &str,
+    cert: Vec<u8>,
+    key: Vec<u8>,
+) -> Certificate {
+    let url = "/system/certificates".to_string();
+    object_create(
+        client,
+        &url,
+        &params::CertificateCreate {
+            identity: IdentityMetadataCreateParams {
+                name: cert_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            cert,
+            key,
+            service: shared::ServiceUsingCertificate::ExternalApi,
+        },
+    )
+    .await
+}
+
+pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
+    let url = format!("/system/certificates/{}", cert_name);
+    object_delete(client, &url).await
+}
+
+pub async fn create_physical_disk(
+    client: &ClientTestContext,
+    vendor: &str,
+    serial: &str,
+    model: &str,
+    variant: internal_params::PhysicalDiskKind,
+    sled_id: Uuid,
+) -> internal_params::PhysicalDiskPutResponse {
+    object_put(
+        client,
+        "/physical-disk",
+        &internal_params::PhysicalDiskPutRequest {
+            vendor: vendor.to_string(),
+            serial: serial.to_string(),
+            model: model.to_string(),
+            variant,
+            sled_id,
+        },
+    )
+    .await
+}
+
+pub async fn delete_physical_disk(
+    client: &ClientTestContext,
+    vendor: &str,
+    serial: &str,
+    model: &str,
+    sled_id: Uuid,
+) {
+    let body = internal_params::PhysicalDiskDeleteRequest {
+        vendor: vendor.to_string(),
+        serial: serial.to_string(),
+        model: model.to_string(),
+        sled_id,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, "/physical-disk")
+            .body(Some(&body))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|_| {
+        panic!("failed to make \"delete\" request of physical disk")
+    });
 }
 
 pub async fn create_silo(
@@ -115,7 +232,7 @@ pub async fn create_silo(
 ) -> Silo {
     object_create(
         client,
-        "/system/silos",
+        "/v1/system/silos",
         &params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: silo_name.parse().unwrap(),
@@ -152,7 +269,7 @@ pub async fn create_organization(
 ) -> Organization {
     object_create(
         client,
-        "/organizations",
+        "/v1/organizations",
         &params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: organization_name.parse().unwrap(),
@@ -168,7 +285,7 @@ pub async fn create_project(
     organization_name: &str,
     project_name: &str,
 ) -> Project {
-    let url = format!("/organizations/{}/projects", &organization_name);
+    let url = format!("/v1/projects?organization={}", &organization_name);
     object_create(
         client,
         &url,
@@ -209,6 +326,19 @@ pub async fn create_disk(
     .await
 }
 
+pub async fn delete_disk(
+    client: &ClientTestContext,
+    organization_name: &str,
+    project_name: &str,
+    disk_name: &str,
+) {
+    let url = format!(
+        "/organizations/{}/projects/{}/disks/{}",
+        organization_name, project_name, disk_name
+    );
+    object_delete(client, &url).await
+}
+
 /// Creates an instance with a default NIC and no disks.
 ///
 /// Wrapper around [`create_instance_with`].
@@ -240,7 +370,7 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
 ) -> Instance {
     let url = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         organization_name, project_name
     );
     object_create(
@@ -434,7 +564,9 @@ impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
 
     // Creates fake physical storage, an organization, and a project.
-    pub async fn new<N>(cptestctx: &ControlPlaneTestContext<N>) -> Self {
+    pub async fn new<N: NexusServer>(
+        cptestctx: &ControlPlaneTestContext<N>,
+    ) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
 
         let mut disk_test = Self { sled_agent, zpools: vec![] };
@@ -442,14 +574,18 @@ impl DiskTest {
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
         for _ in 0..3 {
             disk_test
-                .add_zpool_with_dataset(Self::DEFAULT_ZPOOL_SIZE_GIB)
+                .add_zpool_with_dataset(cptestctx, Self::DEFAULT_ZPOOL_SIZE_GIB)
                 .await;
         }
 
         disk_test
     }
 
-    pub async fn add_zpool_with_dataset(&mut self, gibibytes: u32) {
+    pub async fn add_zpool_with_dataset<N: NexusServer>(
+        &mut self,
+        cptestctx: &ControlPlaneTestContext<N>,
+        gibibytes: u32,
+    ) {
         let zpool = TestZpool {
             id: Uuid::new_v4(),
             size: ByteCount::from_gibibytes_u32(gibibytes),
@@ -459,7 +595,10 @@ impl DiskTest {
         self.sled_agent.create_zpool(zpool.id, zpool.size.to_bytes()).await;
 
         for dataset in &zpool.datasets {
-            self.sled_agent.create_crucible_dataset(zpool.id, dataset.id).await;
+            let address = self
+                .sled_agent
+                .create_crucible_dataset(zpool.id, dataset.id)
+                .await;
 
             // By default, regions are created immediately.
             let crucible = self
@@ -468,6 +607,16 @@ impl DiskTest {
                 .await;
             crucible
                 .set_create_callback(Box::new(|_| RegionState::Created))
+                .await;
+
+            let address = match address {
+                std::net::SocketAddr::V6(addr) => addr,
+                _ => panic!("Unsupported address type: {address} "),
+            };
+
+            cptestctx
+                .server
+                .upsert_crucible_dataset(dataset.id, zpool.id, address)
                 .await;
         }
 

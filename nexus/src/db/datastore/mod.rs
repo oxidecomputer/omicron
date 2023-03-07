@@ -26,6 +26,7 @@ use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler},
 };
+use ::oximeter::types::ProducerRegistry;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -40,6 +41,7 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod certificate;
 mod console_session;
 mod dataset;
 mod device_auth;
@@ -52,6 +54,7 @@ mod ip_pool;
 mod network_interface;
 mod organization;
 mod oximeter;
+mod physical_disk;
 mod project;
 mod rack;
 mod region;
@@ -66,15 +69,20 @@ mod sled;
 mod snapshot;
 mod ssh_key;
 mod update;
+mod virtual_provisioning_collection;
 mod volume;
 mod vpc;
 mod zpool;
 
+pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
 pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
+
+/// The name of the built-in IP pool for Oxide services.
+pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 
 // Represents a query that is ready to be executed.
 //
@@ -103,6 +111,8 @@ impl<U, T> RunnableQuery<U> for T where
 
 pub struct DataStore {
     pool: Arc<Pool>,
+    virtual_provisioning_collection_producer:
+        crate::app::provisioning::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -110,7 +120,19 @@ pub struct DataStore {
 // recompilation of that query's module instead of all queries on `DataStore`.
 impl DataStore {
     pub fn new(pool: Arc<Pool>) -> Self {
-        DataStore { pool }
+        DataStore {
+            pool,
+            virtual_provisioning_collection_producer:
+                crate::app::provisioning::Producer::new(),
+        }
+    }
+
+    pub fn register_producers(&self, registry: &ProducerRegistry) {
+        registry
+            .register_producer(
+                self.virtual_provisioning_collection_producer.clone(),
+            )
+            .unwrap();
     }
 
     // TODO-security This should be deprecated in favor of pool_authorized(),
@@ -217,12 +239,20 @@ pub async fn datastore_test(
         authn::Context::internal_db_init(),
         Arc::clone(&datastore),
     );
+
+    // TODO: Can we just call "Populate" instead of doing this?
+    let rack_id = Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap();
     datastore.load_builtin_users(&opctx).await.unwrap();
     datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
     datastore.load_builtin_silos(&opctx).await.unwrap();
     datastore.load_silo_users(&opctx).await.unwrap();
     datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
+    datastore
+        .load_builtin_fleet_virtual_provisioning_collection(&opctx)
+        .await
+        .unwrap();
+    datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
 
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
@@ -242,31 +272,24 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
-    use crate::db::model::BlockSize;
-    use crate::db::model::Dataset;
-    use crate::db::model::ExternalIp;
-    use crate::db::model::Rack;
-    use crate::db::model::Region;
-    use crate::db::model::Service;
-    use crate::db::model::SiloUser;
-    use crate::db::model::Sled;
-    use crate::db::model::SshKey;
-    use crate::db::model::VpcSubnet;
-    use crate::db::model::Zpool;
-    use crate::db::model::{ConsoleSession, DatasetKind, Project, ServiceKind};
+    use crate::db::model::{
+        BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
+        Dataset, DatasetKind, ExternalIp, Project, Rack, Region, Service,
+        ServiceKind, SiloUser, Sled, SshKey, SystemUpdate,
+        UpdateableComponentType, VpcSubnet, Zpool,
+    };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use crate::external_api::params;
+    use assert_matches::assert_matches;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::{
-        ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
+        self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
     use ref_cast::RefCast;
     use std::collections::HashSet;
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -457,7 +480,19 @@ mod test {
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
         let is_scrimlet = false;
-        let sled = Sled::new(sled_id, bogus_addr.clone(), is_scrimlet, rack_id);
+
+        let bb_identifier = String::from("identifier");
+        let bb_model = String::from("model");
+        let bb_revision = 0;
+        let sled = Sled::new(
+            sled_id,
+            bogus_addr,
+            is_scrimlet,
+            bb_identifier,
+            bb_model,
+            bb_revision,
+            rack_id,
+        );
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }
@@ -514,8 +549,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -614,8 +648,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -691,8 +724,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -748,8 +780,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -847,12 +878,34 @@ mod test {
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
         let is_scrimlet = false;
-        let sled1 = db::model::Sled::new(sled1_id, addr1, is_scrimlet, rack_id);
+        let bb_identifier = String::from("identifier");
+        let bb_model = String::from("model");
+        let bb_revision = 0;
+        let sled1 = db::model::Sled::new(
+            sled1_id,
+            addr1,
+            is_scrimlet,
+            bb_identifier,
+            bb_model,
+            bb_revision,
+            rack_id,
+        );
         datastore.sled_upsert(sled1).await.unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::Sled::new(sled2_id, addr2, is_scrimlet, rack_id);
+        let bb_identifier = String::from("other-identifier");
+        let bb_model = String::from("model");
+        let bb_revision = 0;
+        let sled2 = db::model::Sled::new(
+            sled2_id,
+            addr2,
+            is_scrimlet,
+            bb_identifier,
+            bb_model,
+            bb_revision,
+            rack_id,
+        );
         datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
@@ -1025,14 +1078,28 @@ mod test {
 
         // Initialize the Rack.
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .rack_set_initialized(
+                &opctx,
+                rack.id(),
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            )
             .await
             .unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .rack_set_initialized(
+                &opctx,
+                rack.id(),
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            )
             .await
             .unwrap();
         assert!(result.initialized);
@@ -1091,7 +1158,6 @@ mod test {
                 time_deleted: None,
                 ip_pool_id: Uuid::new_v4(),
                 ip_pool_range_id: Uuid::new_v4(),
-                project_id: Some(Uuid::new_v4()),
                 instance_id: Some(instance_id),
                 kind: IpKind::Ephemeral,
                 ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
@@ -1150,7 +1216,6 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            project_id: Some(Uuid::new_v4()),
             instance_id: Some(Uuid::new_v4()),
             kind: IpKind::SNat,
             ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
@@ -1221,7 +1286,6 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            project_id: Some(Uuid::new_v4()),
             instance_id: Some(Uuid::new_v4()),
             kind: IpKind::Floating,
             ip: addresses.next().unwrap().into(),
@@ -1343,6 +1407,104 @@ mod test {
                 }
             }
         }
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    /// Expect DB error if we try to insert a system update with a version or id
+    /// that already exists
+    #[tokio::test]
+    async fn test_system_update_conflict() {
+        let logctx = dev::test_setup_log("test_system_update_conflict");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let v1 = external::SemverVersion::new(1, 0, 0);
+        let update1 = SystemUpdate::new(v1.clone()).unwrap();
+        datastore
+            .create_system_update(&opctx, update1.clone())
+            .await
+            .expect("Failed to create system update");
+
+        // same version, but different ID (generated by constructor). should conflict
+        let update2 = SystemUpdate::new(v1).unwrap();
+        let conflict = datastore
+            .create_system_update(&opctx, update2.clone())
+            .await
+            .unwrap_err();
+        assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
+
+        // now let's do same ID, different version. should also conflict.
+        // using constructor first to get version_sort business for free
+        let update3 =
+            SystemUpdate::new(external::SemverVersion::new(2, 0, 0)).unwrap();
+        let update3 = SystemUpdate { identity: update1.identity, ..update3 };
+        let conflict =
+            datastore.create_system_update(&opctx, update3).await.unwrap_err();
+        assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    /// Expect DB error if we try to insert a component update with a (version,
+    /// component_type) that already exists
+    #[tokio::test]
+    async fn test_component_update_conflict() {
+        let logctx = dev::test_setup_log("test_component_update_conflict");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // we need a system update for the component updates to hang off of
+        let v1 = external::SemverVersion::new(1, 0, 0);
+        let system_update = SystemUpdate::new(v1.clone()).unwrap();
+        datastore
+            .create_system_update(&opctx, system_update.clone())
+            .await
+            .expect("Failed to create system update");
+
+        // create a component update, that's fine
+        let cu1 = ComponentUpdate {
+            identity: ComponentUpdateIdentity::new(Uuid::new_v4()),
+            component_type: UpdateableComponentType::HubrisForSidecarRot,
+            version: db::model::SemverVersion::new(1, 0, 0),
+        };
+        datastore
+            .create_component_update(
+                &opctx,
+                system_update.identity.id,
+                cu1.clone(),
+            )
+            .await
+            .expect("Failed to create component update");
+
+        // create a second component update with same version but different
+        // type, also fine
+        let cu2 = ComponentUpdate {
+            identity: ComponentUpdateIdentity::new(Uuid::new_v4()),
+            component_type: UpdateableComponentType::HubrisForSidecarSp,
+            version: db::model::SemverVersion::new(1, 0, 0),
+        };
+        datastore
+            .create_component_update(
+                &opctx,
+                system_update.identity.id,
+                cu2.clone(),
+            )
+            .await
+            .expect("Failed to create component update");
+
+        // but same type and version should fail
+        let cu3 = ComponentUpdate {
+            identity: ComponentUpdateIdentity::new(Uuid::new_v4()),
+            ..cu1
+        };
+        let conflict = datastore
+            .create_component_update(&opctx, system_update.identity.id, cu3)
+            .await
+            .unwrap_err();
+        assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

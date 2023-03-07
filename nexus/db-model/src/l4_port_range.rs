@@ -8,10 +8,14 @@ use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Newtype wrapper around [`external::L4PortRange`] so we can derive
 /// diesel traits for it
-#[derive(Clone, Copy, Debug, AsExpression, FromSqlRow)]
+#[derive(
+    Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+)]
 #[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 pub struct L4PortRange(pub external::L4PortRange);

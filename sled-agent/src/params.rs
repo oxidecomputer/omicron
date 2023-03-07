@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
+use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
-    DENDRITE_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
+    OXIMETER_PORT,
 };
-use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -16,48 +16,10 @@ use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
-/// Information required to construct a virtual network interface for a guest
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterface {
-    pub name: external::Name,
-    pub ip: IpAddr,
-    pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
-    pub vni: external::Vni,
-    pub primary: bool,
-    pub slot: u8,
-}
-
-/// An IP address and port range used for instance source NAT, i.e., making
-/// outbound network connections from guests.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
-pub struct SourceNatConfig {
-    /// The external address provided to the instance
-    pub ip: IpAddr,
-    /// The first port used for instance NAT, inclusive.
-    pub first_port: u16,
-    /// The last port used for instance NAT, also inclusive.
-    pub last_port: u16,
-}
-
-/// Update firewall rules for a VPC
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VpcFirewallRulesEnsureBody {
-    pub rules: Vec<VpcFirewallRule>,
-}
-
-/// VPC firewall rule after object name resolution has been performed by Nexus
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VpcFirewallRule {
-    pub status: external::VpcFirewallRuleStatus,
-    pub direction: external::VpcFirewallRuleDirection,
-    pub targets: Vec<NetworkInterface>,
-    pub filter_hosts: Option<Vec<external::IpNet>>,
-    pub filter_ports: Option<Vec<external::L4PortRange>>,
-    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
-    pub action: external::VpcFirewallRuleAction,
-    pub priority: external::VpcFirewallRulePriority,
-}
+pub use illumos_utils::opte::params::NetworkInterface;
+pub use illumos_utils::opte::params::SourceNatConfig;
+pub use illumos_utils::opte::params::VpcFirewallRule;
+pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -127,7 +89,7 @@ pub struct InstanceMigrateParams {
 
 /// Requestable running state of an Instance.
 ///
-/// A subset of [`external::InstanceState`].
+/// A subset of [`omicron_common::api::external::InstanceState`].
 #[derive(
     Copy,
     Clone,
@@ -228,6 +190,11 @@ pub struct InstanceSerialConsoleData {
     /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
     /// of the last byte returned in `data`.
     pub last_byte_offset: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct Zpool {
+    pub id: Uuid,
 }
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage
@@ -372,8 +339,11 @@ pub enum ServiceType {
     Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
+    ManagementGatewayService,
+    Wicketd,
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
+    CruciblePantry,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -382,8 +352,11 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Nexus { .. } => write!(f, "nexus"),
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
+            ServiceType::ManagementGatewayService => write!(f, "mgs"),
+            ServiceType::Wicketd => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
+            ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
         }
     }
 }
@@ -404,8 +377,11 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
                 }
             }
             St::Oximeter => AutoSt::Oximeter,
+            St::ManagementGatewayService => AutoSt::ManagementGatewayService,
+            St::Wicketd => AutoSt::Wicketd,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
+            St::CruciblePantry => AutoSt::CruciblePantry,
         }
     }
 }
@@ -423,6 +399,8 @@ pub enum ZoneType {
     Oximeter,
     #[serde(rename = "switch")]
     Switch,
+    #[serde(rename = "crucible_pantry")]
+    CruciblePantry,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
@@ -432,6 +410,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
         }
     }
 }
@@ -444,6 +423,7 @@ impl std::fmt::Display for ZoneType {
             Nexus => "nexus",
             Oximeter => "oximeter",
             Switch => "switch",
+            CruciblePantry => "crucible_pantry",
         };
         write!(f, "{name}")
     }
@@ -486,8 +466,15 @@ impl ServiceZoneRequest {
             }
             ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
             ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceType::ManagementGatewayService => {
+                SRV::Service(ServiceName::ManagementGatewayService)
+            }
+            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
             ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
             ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
+            ServiceType::CruciblePantry { .. } => {
+                SRV::Service(ServiceName::CruciblePantry)
+            }
         }
     }
 
@@ -502,10 +489,21 @@ impl ServiceZoneRequest {
             ServiceType::Oximeter => {
                 Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
             }
+            ServiceType::ManagementGatewayService => {
+                Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
+            }
+            // TODO: Is this correct?
+            ServiceType::Wicketd => None,
             ServiceType::Dendrite { .. } => {
                 Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
             }
             ServiceType::Tfport { .. } => None,
+            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
+                self.addresses[0],
+                CRUCIBLE_PANTRY_PORT,
+                0,
+                0,
+            )),
         }
     }
 }

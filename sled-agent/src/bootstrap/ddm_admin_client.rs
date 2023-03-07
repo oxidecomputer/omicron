@@ -8,8 +8,8 @@ use ddm_admin_client::types::Ipv6Prefix;
 use ddm_admin_client::Client;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
-use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -64,8 +64,8 @@ impl DdmAdminClient {
         let me = self.clone();
         tokio::spawn(async move {
             let prefix =
-                Ipv6Prefix { addr: address.net().network(), mask: SLED_PREFIX };
-            retry_notify(internal_service_policy(), || async {
+                Ipv6Prefix { addr: address.net().network(), len: SLED_PREFIX };
+            retry_notify(retry_policy_internal_service_aggressive(), || async {
                 info!(
                     me.log, "Sending prefix to ddmd for advertisement";
                     "prefix" => ?prefix,
@@ -100,7 +100,7 @@ impl DdmAdminClient {
             // authenticated via sprockets, which only needs one address.
             prefixes.into_iter().find_map(|prefix| {
                 let mut segments = prefix.addr.segments();
-                if prefix.mask == BOOTSTRAP_MASK
+                if prefix.len == BOOTSTRAP_MASK
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
                     // Bootstrap agent IPs always end in ::1; convert the

@@ -18,30 +18,29 @@
           {
             "in": "path",
             "name": "kind",
+            "description": "The kind of update artifact this is.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/UpdateArtifactKind"
-            },
-            "style": "simple"
+              "$ref": "#/components/schemas/KnownArtifactKind"
+            }
           },
           {
             "in": "path",
             "name": "name",
+            "description": "The artifact's name.",
             "required": true,
             "schema": {
               "type": "string"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
             "name": "version",
+            "description": "The artifact's version.",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int64"
-            },
-            "style": "simple"
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -52,6 +51,35 @@
                 "schema": {}
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/disk/{disk_id}/remove-read-only-parent": {
+      "post": {
+        "summary": "Request removal of a read_only_parent from a disk",
+        "description": "This is a thin wrapper around the volume_remove_read_only_parent saga. All we are doing here is, given a disk UUID, figure out what the volume_id is for that disk, then use that to call the volume_remove_read_only_parent saga on it.",
+        "operationId": "cpapi_disk_remove_read_only_parent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -74,8 +102,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -113,8 +140,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -152,8 +178,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
@@ -234,6 +259,65 @@
         }
       }
     },
+    "/physical-disk": {
+      "put": {
+        "summary": "Report that a physical disk for the specified sled has come online.",
+        "operationId": "physical_disk_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskPutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDiskPutResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Report that a physical disk for the specified sled has gone offline.",
+        "operationId": "physical_disk_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -247,19 +331,14 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "title": "Array_of_ServicePutRequest",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ServicePutRequest"
-                }
+                "$ref": "#/components/schemas/RackInitializationRequest"
               }
             }
           },
@@ -290,8 +369,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -329,8 +407,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           },
           {
             "in": "path",
@@ -339,8 +416,7 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "requestBody": {
@@ -386,69 +462,12 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            },
-            "style": "simple"
+            }
           }
         ],
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/zpools/{zpool_id}/dataset/{dataset_id}": {
-      "put": {
-        "summary": "Report that a dataset within a pool has come online.",
-        "operationId": "dataset_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetPutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetPutResponse"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -474,6 +493,27 @@
       }
     },
     "schemas": {
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "identifier",
+          "model",
+          "revision"
+        ]
+      },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
@@ -668,6 +708,31 @@
         "format": "uint64",
         "minimum": 0
       },
+      "Certificate": {
+        "type": "object",
+        "properties": {
+          "cert": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "key": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ]
+      },
       "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
         "type": "object",
@@ -704,6 +769,27 @@
           "value"
         ]
       },
+      "DatasetCreateRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request": {
+            "$ref": "#/components/schemas/DatasetPutRequest"
+          },
+          "zpool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "request",
+          "zpool_id"
+        ]
+      },
       "DatasetKind": {
         "description": "Describes the purpose of the dataset.",
         "type": "string",
@@ -734,30 +820,6 @@
           "address",
           "kind"
         ]
-      },
-      "DatasetPutResponse": {
-        "description": "Describes which ZFS properties should be set for a particular allocated dataset.",
-        "type": "object",
-        "properties": {
-          "quota": {
-            "nullable": true,
-            "description": "A maximum quota on filesystem usage. Refer to ZFS native properties for more detail.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          },
-          "reservation": {
-            "nullable": true,
-            "description": "A minimum reservation size for a filesystem. Refer to ZFS native properties for more detail.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          }
-        }
       },
       "Datum": {
         "description": "A `Datum` is a single sampled data point from a metric.",
@@ -991,6 +1053,21 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is undergoing maintenance",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "maintenance"
                 ]
               }
             },
@@ -1603,6 +1680,62 @@
           }
         ]
       },
+      "IpRange": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Range"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Range"
+              }
+            ]
+          }
+        ]
+      },
+      "Ipv4Range": {
+        "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "Ipv6Range": {
+        "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",
         "type": "object",
@@ -1732,6 +1865,94 @@
           "collector_id"
         ]
       },
+      "PhysicalDiskDeleteRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "sled_id",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskKind": {
+        "description": "Describes the type of physical disk.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "m2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PhysicalDiskPutRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/PhysicalDiskKind"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "sled_id",
+          "variant",
+          "vendor"
+        ]
+      },
+      "PhysicalDiskPutResponse": {
+        "type": "object"
+      },
       "ProducerEndpoint": {
         "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
         "type": "object",
@@ -1800,6 +2021,45 @@
           }
         ]
       },
+      "RackInitializationRequest": {
+        "type": "object",
+        "properties": {
+          "certs": {
+            "description": "x.509 Certificates used to encrypt communication with the external API.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Certificate"
+            }
+          },
+          "datasets": {
+            "description": "Datasets on the rack which have been provisioned by RSS.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetCreateRequest"
+            }
+          },
+          "internal_services_ip_pool_ranges": {
+            "description": "Ranges of the service IP pool which may be used for internal services, such as Nexus.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
+          "services": {
+            "description": "Services on the rack which have been created by RSS.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServicePutRequest"
+            }
+          }
+        },
+        "required": [
+          "certs",
+          "datasets",
+          "internal_services_ip_pool_ranges",
+          "services"
+        ]
+      },
       "Sample": {
         "description": "A concrete type representing a single, timestamped measurement from a timeseries.",
         "type": "object",
@@ -1832,13 +2092,104 @@
       },
       "ServiceKind": {
         "description": "Describes the purpose of the service.",
-        "type": "string",
-        "enum": [
-          "internal_d_n_s",
-          "nexus",
-          "oximeter",
-          "dendrite",
-          "tfport"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_d_n_s"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "external_address": {
+                    "type": "string",
+                    "format": "ip"
+                  }
+                },
+                "required": [
+                  "external_address"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dendrite"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tfport"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "ServicePutRequest": {
@@ -1878,6 +2229,14 @@
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
         "properties": {
+          "baseboard": {
+            "description": "Describes the sled's identity",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
           "role": {
             "description": "Describes the responsibilities of the sled",
             "allOf": [
@@ -1892,6 +2251,7 @@
           }
         },
         "required": [
+          "baseboard",
           "role",
           "sa_address"
         ]
@@ -1935,11 +2295,19 @@
       "ZpoolPutResponse": {
         "type": "object"
       },
-      "UpdateArtifactKind": {
+      "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
         "type": "string",
         "enum": [
-          "zone"
+          "gimlet_sp",
+          "gimlet_rot",
+          "host",
+          "trampoline",
+          "control_plane",
+          "psc_sp",
+          "psc_rot",
+          "switch_sp",
+          "switch_rot"
         ]
       }
     }

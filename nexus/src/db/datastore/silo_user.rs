@@ -192,20 +192,50 @@ impl DataStore {
             }))
     }
 
-    pub async fn silo_users_list_by_id(
+    pub async fn silo_users_list(
         &self,
         opctx: &OpContext,
         authz_silo_user_list: &authz::SiloUserList,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloUser> {
-        use db::schema::silo_user::dsl;
+        use db::schema::silo_user::dsl::*;
 
         opctx
             .authorize(authz::Action::ListChildren, authz_silo_user_list)
             .await?;
-        paginated(dsl::silo_user, dsl::id, pagparams)
-            .filter(dsl::silo_id.eq(authz_silo_user_list.silo().id()))
-            .filter(dsl::time_deleted.is_null())
+
+        paginated(silo_user, id, pagparams)
+            .filter(silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silo_group_users_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo_user_list: &authz::SiloUserList,
+        pagparams: &DataPageParams<'_, Uuid>,
+        // TODO: this should be an authz::SiloGroup probably
+        authz_silo_group: &authz::SiloGroup,
+    ) -> ListResultVec<SiloUser> {
+        use db::schema::silo_group_membership as user_to_group;
+        use db::schema::silo_user as user;
+
+        opctx
+            .authorize(authz::Action::ListChildren, authz_silo_user_list)
+            .await?;
+
+        paginated(user::table, user::id, pagparams)
+            .filter(user::silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(user::time_deleted.is_null())
+            .inner_join(user_to_group::table.on(
+                user_to_group::silo_user_id.eq(user::id).and(
+                    user_to_group::silo_group_id.eq(authz_silo_group.id()),
+                ),
+            ))
             .select(SiloUser::as_select())
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await

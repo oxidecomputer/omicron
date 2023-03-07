@@ -18,6 +18,7 @@ use crate::db::identity::Resource;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
+use crate::db::model::Project;
 use crate::db::model::RouterRoute;
 use crate::db::model::RouterRouteUpdate;
 use crate::db::model::Sled;
@@ -39,8 +40,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -48,26 +49,36 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn project_list_vpcs(
+    pub async fn vpc_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Vpc> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::vpc::dsl;
-        paginated(dsl::vpc, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Vpc::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::vpc, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::vpc,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .select(Vpc::as_select())
+        .load_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_vpc(
@@ -81,23 +92,28 @@ impl DataStore {
         assert_eq!(authz_project.id(), vpc.project_id);
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        // TODO-correctness Shouldn't this use "insert_resource"?
-        //
-        // Note that to do so requires adding an `rcgen` column to the project
-        // table.
         let name = vpc.identity.name.clone();
+        let project_id = vpc.project_id;
         let query = InsertVpcQuery::new(vpc);
-        let vpc = diesel::insert_into(dsl::vpc)
-            .values(query)
-            .returning(Vpc::as_returning())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| {
+
+        let vpc: Vpc = Project::insert_resource(
+            project_id,
+            diesel::insert_into(dsl::vpc).values(query),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Project,
+                lookup_type: LookupType::ById(project_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
                 )
-            })?;
+            }
+        })?;
         Ok((
             authz::Vpc::new(
                 authz_project.clone(),
@@ -277,6 +293,7 @@ impl DataStore {
             .filter(dsl::vpc_id.eq(authz_vpc.id()))
             .set(dsl::time_deleted.eq(now));
 
+        let rules_is_empty = rules.is_empty();
         let insert_new_query = Vpc::insert_resource(
             authz_vpc.id(),
             diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
@@ -300,6 +317,9 @@ impl DataStore {
                 // The generation count update on the vpc table row will take a
                 // write lock on the row, ensuring that the vpc was not deleted
                 // concurently.
+                if rules_is_empty {
+                    return Ok(vec![]);
+                }
                 insert_new_query
                     .insert_and_get_results_async(&conn)
                     .await
@@ -349,22 +369,31 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn vpc_list_subnets(
+    pub async fn vpc_subnet_list(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<VpcSubnet> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use db::schema::vpc_subnet::dsl;
-        paginated(dsl::vpc_subnet, dsl::name, &pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
-            .select(VpcSubnet::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::vpc_subnet, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::vpc_subnet,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::vpc_id.eq(authz_vpc.id()))
+        .select(VpcSubnet::as_select())
+        .load_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Insert a VPC Subnet, checking for unique IP address ranges.
@@ -373,14 +402,22 @@ impl DataStore {
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
         subnet: VpcSubnet,
-    ) -> Result<VpcSubnet, SubnetError> {
+    ) -> Result<(authz::VpcSubnet, VpcSubnet), SubnetError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_vpc)
             .await
             .map_err(SubnetError::External)?;
         assert_eq!(authz_vpc.id(), subnet.vpc_id);
 
-        self.vpc_create_subnet_raw(subnet).await
+        let db_subnet = self.vpc_create_subnet_raw(subnet).await?;
+        Ok((
+            authz::VpcSubnet::new(
+                authz_vpc.clone(),
+                db_subnet.id(),
+                LookupType::ById(db_subnet.id()),
+            ),
+            db_subnet,
+        ))
     }
 
     pub(crate) async fn vpc_create_subnet_raw(
@@ -483,40 +520,57 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
         use db::schema::network_interface::dsl;
-        paginated(dsl::network_interface, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::subnet_id.eq(authz_subnet.id()))
-            .select(NetworkInterface::as_select())
-            .load_async::<db::model::NetworkInterface>(
-                self.pool_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::network_interface, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::network_interface,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::subnet_id.eq(authz_subnet.id()))
+        .select(NetworkInterface::as_select())
+        .load_async::<db::model::NetworkInterface>(
+            self.pool_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn vpc_list_routers(
+    pub async fn vpc_router_list(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<VpcRouter> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use db::schema::vpc_router::dsl;
-        paginated(dsl::vpc_router, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_vpc.id()))
-            .select(VpcRouter::as_select())
-            .load_async::<db::model::VpcRouter>(
-                self.pool_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::vpc_router, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::vpc_router,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::vpc_id.eq(authz_vpc.id()))
+        .select(VpcRouter::as_select())
+        .load_async::<db::model::VpcRouter>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_create_router(
@@ -603,24 +657,33 @@ impl DataStore {
             })
     }
 
-    pub async fn router_list_routes(
+    pub async fn vpc_router_route_list(
         &self,
         opctx: &OpContext,
         authz_router: &authz::VpcRouter,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<RouterRoute> {
         opctx.authorize(authz::Action::ListChildren, authz_router).await?;
 
         use db::schema::router_route::dsl;
-        paginated(dsl::router_route, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_router_id.eq(authz_router.id()))
-            .select(RouterRoute::as_select())
-            .load_async::<db::model::RouterRoute>(
-                self.pool_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::router_route, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::router_route,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::vpc_router_id.eq(authz_router.id()))
+        .select(RouterRoute::as_select())
+        .load_async::<db::model::RouterRoute>(
+            self.pool_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn router_create_route(

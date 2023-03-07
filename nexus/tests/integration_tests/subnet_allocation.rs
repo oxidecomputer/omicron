@@ -14,8 +14,8 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance_with;
-use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
@@ -85,7 +85,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
-    create_ip_pool(&client, "p0", None, None).await;
+    populate_ip_pool(&client, "default", None).await;
     create_organization(&client, organization_name).await;
     create_project(&client, organization_name, project_name).await;
     let url_instances = format!(
@@ -96,7 +96,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // Create a new, small VPC Subnet, so we don't need to issue many requests
     // to test address exhaustion.
     let subnet_size =
-        cptestctx.server.apictx.nexus.tunables().max_vpc_ipv4_subnet_prefix;
+        cptestctx.server.apictx().nexus.tunables().max_vpc_ipv4_subnet_prefix;
     let url_subnets = format!(
         "/organizations/{}/projects/{}/vpcs/default/subnets",
         organization_name, project_name
@@ -169,13 +169,13 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         objects_list_page_authz::<NetworkInterface>(client, &url_ips)
             .await
             .items;
-    assert_eq!(network_interfaces.len(), subnet_size as usize);
+    assert_eq!(network_interfaces.len(), subnet_size);
 
     // Sort by IP address to simplify the checks
     network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
     for (iface, addr) in network_interfaces
         .iter()
-        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES as usize))
+        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
     {
         assert_eq!(
             iface.ip,

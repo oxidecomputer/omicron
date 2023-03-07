@@ -72,7 +72,7 @@ async fn bulk_sp_get_one_sp_powered_off() {
     assert!(expected.iter().all(|sp| sp.details.is_enabled()));
 
     // power off sled 0 (guaranteed to exist via the assertion above)
-    let url = format!("{}", client.url("/ignition/sled/0/power-off"));
+    let url = format!("{}", client.url("/ignition/sled/0/power_off"));
     client
         .make_request_no_body(Method::POST, &url, StatusCode::NO_CONTENT)
         .await
@@ -84,7 +84,9 @@ async fn bulk_sp_get_one_sp_powered_off() {
         if sp.info.id == (SpIdentifier { typ: SpType::Sled, slot: 0 }) {
             // TODO maybe extract into a `toggle_power()` helper?
             sp.info.details = match sp.info.details {
-                SpIgnition::Absent => panic!("bad ignition state"),
+                SpIgnition::Absent | SpIgnition::CommunicationFailed { .. } => {
+                    panic!("bad ignition state")
+                }
                 SpIgnition::Present {
                     id,
                     power: _power,
@@ -105,7 +107,6 @@ async fn bulk_sp_get_one_sp_powered_off() {
                     flt_sp,
                 },
             };
-            sp.details = SpState::Disabled;
         }
     }
 
@@ -137,12 +138,20 @@ async fn bulk_sp_get_one_sp_unresponsive() {
         .set_responsiveness(Responsiveness::Unresponsive)
         .await;
 
-    // Set sled 0 expected state to unresponsive
+    // What error message do we expect from MGS if an SP has previously been
+    // found but is no longer responsive? Hard coding the exact message here
+    // feels a little fragile, but (a) the number of attempts present in this
+    // string is in our test control (our test config file) and (b) should not
+    // change much.
+    let unresponsive_errmsg = "error communicating with SP: RPC call failed (gave up after 3 attempts)".to_string();
+
+    // Set sled 0 expected state to timeout
     expected
         .iter_mut()
         .find(|sp| sp.info.id == SpIdentifier { typ: SpType::Sled, slot: 0 })
         .unwrap()
-        .details = SpState::Unresponsive;
+        .details =
+        SpState::CommunicationFailed { message: unresponsive_errmsg };
 
     let url = format!("{}", client.url("/sp"));
     let sps: Vec<SpInfo> = test_util::object_get(client, &url).await;

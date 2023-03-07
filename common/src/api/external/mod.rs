@@ -9,6 +9,7 @@
 
 mod error;
 pub mod http_pagination;
+use dropshot::HttpError;
 pub use error::*;
 
 use anyhow::anyhow;
@@ -23,6 +24,7 @@ use futures::stream::StreamExt;
 use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
+use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -107,6 +109,56 @@ impl<'a, NameType> DataPageParams<'a, NameType> {
             marker: self.marker.map(f),
             direction: self.direction,
             limit: self.limit,
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Name> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Name(name)) => Ok(DataPageParams {
+                marker: Some(name),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Id(id)) => Ok(DataPageParams {
+                marker: Some(id),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
         }
     }
 }
@@ -233,13 +285,13 @@ impl JsonSchema for Name {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
-                min_length: None,
+                min_length: Some(1),
                 pattern: Some(
                     concat!(
                         r#"^"#,
                         // Cannot match a UUID
                         r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]"#,
+                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]*"#,
                         r#"$"#,
                     )
                     .to_string(),
@@ -265,6 +317,92 @@ impl Name {
     /// Return the `&str` representing the actual name.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Display, Clone, PartialEq)]
+#[display("{0}")]
+#[serde(untagged)]
+pub enum NameOrId {
+    Id(Uuid),
+    Name(Name),
+}
+
+impl TryFrom<String> for NameOrId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(NameOrId::Id(id))
+        } else {
+            Ok(NameOrId::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl From<Name> for NameOrId {
+    fn from(name: Name) -> Self {
+        NameOrId::Name(name)
+    }
+}
+
+impl From<Uuid> for NameOrId {
+    fn from(id: Uuid) -> Self {
+        NameOrId::Id(id)
+    }
+}
+
+impl JsonSchema for NameOrId {
+    fn schema_name() -> String {
+        "NameOrId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    label_schema("id", gen.subschema_for::<Uuid>()),
+                    label_schema("name", gen.subschema_for::<Name>()),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+// TODO: remove wrapper for semver::Version once this PR goes through
+// https://github.com/GREsau/schemars/pull/195
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[display("{0}")]
+pub struct SemverVersion(pub semver::Version);
+
+impl SemverVersion {
+    pub fn new(major: u64, minor: u64, patch: u64) -> Self {
+        Self(semver::Version::new(major, minor, patch))
+    }
+}
+
+impl JsonSchema for SemverVersion {
+    fn schema_name() -> String {
+        "SemverVersion".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(r"^\d+\.\d+\.\d+([\-\+].+)?$".to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
@@ -342,9 +480,6 @@ impl JsonSchema for RoleName {
 /// can fail (if the value is larger than i64::MAX).  We provide all of these for
 /// consumers' convenience.
 // TODO-cleanup This could benefit from a more complete implementation.
-// TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
-// need to write a validator for that.
-// /
 //
 // The maximum byte count of i64::MAX comes from the fact that this is stored in
 // the database as an i64.  Constraining it here ensures that we can't fail to
@@ -534,6 +669,7 @@ pub enum ResourceType {
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
+    Certificate,
     ConsoleSession,
     DeviceAuthRequest,
     DeviceAccessToken,
@@ -546,6 +682,7 @@ pub enum ResourceType {
     Instance,
     IpPool,
     NetworkInterface,
+    PhysicalDisk,
     Rack,
     Service,
     Sled,
@@ -561,6 +698,11 @@ pub enum ResourceType {
     MetricProducer,
     RoleBuiltin,
     UpdateAvailableArtifact,
+    SystemUpdate,
+    ComponentUpdate,
+    SystemUpdateComponentUpdate,
+    UpdateDeployment,
+    UpdateableComponent,
     UserBuiltin,
     Zpool,
 }
@@ -813,6 +955,8 @@ pub enum DiskState {
     Creating,
     /// Disk is ready but detached from any Instance
     Detached,
+    /// Disk is undergoing maintenance
+    Maintenance,
     /// Disk is being attached to the given Instance
     Attaching(Uuid), // attached Instance id
     /// Disk is attached to the given Instance
@@ -840,6 +984,7 @@ impl TryFrom<(&str, Option<Uuid>)> for DiskState {
         match (s, maybe_id) {
             ("creating", None) => Ok(DiskState::Creating),
             ("detached", None) => Ok(DiskState::Detached),
+            ("maintenance", None) => Ok(DiskState::Maintenance),
             ("destroyed", None) => Ok(DiskState::Destroyed),
             ("faulted", None) => Ok(DiskState::Faulted),
             ("attaching", Some(id)) => Ok(DiskState::Attaching(id)),
@@ -859,6 +1004,7 @@ impl DiskState {
         match self {
             DiskState::Creating => "creating",
             DiskState::Detached => "detached",
+            DiskState::Maintenance => "maintenance",
             DiskState::Attaching(_) => "attaching",
             DiskState::Attached(_) => "attached",
             DiskState::Detaching(_) => "detaching",
@@ -883,6 +1029,7 @@ impl DiskState {
 
             DiskState::Creating => None,
             DiskState::Detached => None,
+            DiskState::Maintenance => None,
             DiskState::Destroyed => None,
             DiskState::Faulted => None,
         }
@@ -1191,6 +1338,15 @@ impl From<Ipv6Addr> for IpNet {
     }
 }
 
+impl From<IpAddr> for IpNet {
+    fn from(n: IpAddr) -> IpNet {
+        match n {
+            IpAddr::V4(v4) => IpNet::from(v4),
+            IpAddr::V6(v6) => IpNet::from(v6),
+        }
+    }
+}
+
 impl std::fmt::Display for IpNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1403,24 +1559,6 @@ pub struct RouterRoute {
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
 
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
-/// Create-time parameters for a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
-/// Updateable properties of a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
     pub target: RouteTarget,
     pub destination: RouteDestination,
 }
@@ -2000,6 +2138,7 @@ mod test {
 
         // Success cases
         let valid_names: Vec<&str> = vec![
+            "a",
             "abc",
             "abc-123",
             "a123",
@@ -2158,7 +2297,7 @@ mod test {
         assert_eq!(2793, tb3.to_whole_gibibytes());
         assert_eq!(2, tb3.to_whole_tebibytes());
 
-        let three_tebibytes = (3u64 * 1024 * 1024 * 1024 * 1024) as u64;
+        let three_tebibytes = 3u64 * 1024 * 1024 * 1024 * 1024;
         let tib3 = ByteCount::try_from(three_tebibytes).unwrap();
         assert_eq!(three_tebibytes, tib3.to_bytes());
         assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
@@ -2390,7 +2529,7 @@ mod test {
             "vpc:foo".parse().unwrap()
         );
         assert_eq!(
-            RouteDestination::Subnet(name.clone()),
+            RouteDestination::Subnet(name),
             "subnet:foo".parse().unwrap()
         );
         assert_eq!(

@@ -77,7 +77,7 @@ table! {
         disk_id -> Uuid,
         volume_id -> Uuid,
 
-        destination_volume_id -> Nullable<Uuid>,
+        destination_volume_id -> Uuid,
 
         gen -> Int8,
         state -> crate::SnapshotStateEnum,
@@ -149,8 +149,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        project_id -> Nullable<Uuid>,
-        rack_id -> Nullable<Uuid>,
+        internal -> Bool,
         rcgen -> Int8,
     }
 }
@@ -164,7 +163,6 @@ table! {
         first_address -> Inet,
         last_address -> Inet,
         ip_pool_id -> Uuid,
-        project_id -> Nullable<Uuid>,
         rcgen -> Int8,
     }
 }
@@ -179,7 +177,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        project_id -> Nullable<Uuid>,
         instance_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
@@ -245,7 +242,11 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(silo_user, silo_user_password_hash);
-allow_tables_to_appear_in_same_query!(silo_group, silo_group_membership);
+allow_tables_to_appear_in_same_query!(
+    silo_group,
+    silo_group_membership,
+    silo_user,
+);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
@@ -330,6 +331,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
         organization_id -> Uuid,
     }
 }
@@ -388,6 +390,10 @@ table! {
 
         rack_id -> Uuid,
         is_scrimlet -> Bool,
+        serial_number -> Text,
+        part_number -> Text,
+        revision -> Int8,
+
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
@@ -403,6 +409,75 @@ table! {
         sled_id -> Uuid,
         ip -> Inet,
         kind -> crate::ServiceKindEnum,
+    }
+}
+
+table! {
+    nexus_service (id) {
+        id -> Uuid,
+        external_ip_id -> Uuid,
+    }
+}
+
+table! {
+    physical_disk (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        variant -> crate::PhysicalDiskKindEnum,
+        sled_id -> Uuid,
+    }
+}
+
+table! {
+    certificate (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        service -> crate::ServiceKindEnum,
+        cert -> Binary,
+        key -> Binary,
+    }
+}
+
+table! {
+    virtual_provisioning_collection {
+        id -> Uuid,
+        // This type isn't actually "Nullable" - it's just handy to use the
+        // same type for insertion and querying, and doing so requires this
+        // field to appear optional so we can let this (default) field appear
+        // optional.
+        time_modified -> Nullable<Timestamptz>,
+        collection_type -> Text,
+        virtual_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+    }
+}
+
+table! {
+    virtual_provisioning_resource {
+        id -> Uuid,
+        // This type isn't actually "Nullable" - it's just handy to use the
+        // same type for insertion and querying, and doing so requires this
+        // field to appear optional so we can let this (default) field appear
+        // optional.
+        time_modified -> Nullable<Timestamptz>,
+        resource_type -> Text,
+        virtual_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
     }
 }
 
@@ -625,8 +700,8 @@ table! {
 table! {
     update_available_artifact (name, version, kind) {
         name -> Text,
-        version -> Int8,
-        kind -> crate::UpdateArtifactKindEnum,
+        version -> Text,
+        kind -> crate::KnownArtifactKindEnum,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,
         target_name -> Text,
@@ -634,6 +709,68 @@ table! {
         target_length -> Int8,
     }
 }
+
+table! {
+    system_update (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+    }
+}
+
+table! {
+    update_deployment (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+        status -> crate::UpdateStatusEnum,
+        // TODO: status reason for updateable_component
+    }
+}
+
+table! {
+    component_update (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        version -> Text,
+        component_type -> crate::UpdateableComponentTypeEnum,
+    }
+}
+
+table! {
+    updateable_component (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        device_id -> Text,
+        version -> Text,
+        system_version -> Text,
+        component_type -> crate::UpdateableComponentTypeEnum,
+        status -> crate::UpdateStatusEnum,
+        // TODO: status reason for updateable_component
+    }
+}
+
+table! {
+    system_update_component_update (system_update_id, component_update_id) {
+        system_update_id -> Uuid,
+        component_update_id -> Uuid,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    system_update,
+    component_update,
+    system_update_component_update,
+);
+joinable!(system_update_component_update -> component_update (component_update_id));
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));

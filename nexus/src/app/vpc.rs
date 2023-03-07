@@ -4,253 +4,129 @@
 
 //! VPCs and firewall rules
 
+use crate::app::sagas;
+use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::identity::Resource;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
-use crate::db::model::VpcRouterKind;
-use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
 use nexus_defaults as defaults;
 use omicron_common::api::external;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::RouteDestination;
-use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteCreateParams;
-use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::Vni;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use sled_agent_client::types::IpNet;
+use omicron_common::api::internal::nexus::HostIdentifier;
+use ref_cast::RefCast;
 use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
 use ipnetwork::IpNetwork;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
+use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
     // VPCs
 
+    pub fn vpc_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        vpc_selector: &'a params::VpcSelector,
+    ) -> LookupResult<lookup::Vpc<'a>> {
+        match vpc_selector {
+            params::VpcSelector {
+                vpc: NameOrId::Id(id),
+                project_selector: None,
+            } => {
+                let vpc =
+                    LookupPath::new(opctx, &self.db_datastore).vpc_id(*id);
+                Ok(vpc)
+            }
+            params::VpcSelector {
+                vpc: NameOrId::Name(name),
+                project_selector: Some(selector),
+            } => {
+                let vpc = self
+                    .project_lookup(opctx, selector)?
+                    .vpc_name(Name::ref_cast(name));
+                Ok(vpc)
+            }
+            params::VpcSelector {
+                vpc: NameOrId::Id(_),
+                project_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing vpc as an ID, project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "vpc should either be an ID or project should be specified",
+            )),
+        }
+    }
+
     pub async fn project_create_vpc(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
+        project_lookup: &lookup::Project<'_>,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
-        let vpc_id = Uuid::new_v4();
-        let system_router_id = Uuid::new_v4();
-        let default_route_id = Uuid::new_v4();
-        let default_subnet_id = Uuid::new_v4();
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // TODO: This is both fake and utter nonsense. It should be eventually
-        // replaced with the proper behavior for creating the default route
-        // which may not even happen here. Creating the vpc, its system router,
-        // and that routers default route should all be a part of the same
-        // transaction.
-        let vpc = db::model::IncompleteVpc::new(
-            vpc_id,
-            authz_project.id(),
-            system_router_id,
-            params.clone(),
-        )?;
-        let (authz_vpc, db_vpc) = self
-            .db_datastore
-            .project_create_vpc(opctx, &authz_project, vpc)
+        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
+
+        let saga_params = sagas::vpc_create::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            vpc_create: params.clone(),
+            authz_project,
+        };
+
+        let saga_outputs = self
+            .execute_saga::<sagas::vpc_create::SagaVpcCreate>(saga_params)
             .await?;
 
-        // TODO: Ultimately when the VPC is created a system router w/ an
-        // appropriate setup should also be created.  Given that the underlying
-        // systems aren't wired up yet this is a naive implementation to
-        // populate the database with a starting router. Eventually this code
-        // should be replaced with a saga that'll handle creating the VPC and
-        // its underlying system
-        let router = db::model::VpcRouter::new(
-            system_router_id,
-            vpc_id,
-            VpcRouterKind::System,
-            params::VpcRouterCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "system".parse().unwrap(),
-                    description: "Routes are automatically added to this \
-                        router as vpc subnets are created"
-                        .into(),
-                },
-            },
-        );
-        let (authz_router, _) = self
-            .db_datastore
-            .vpc_create_router(&opctx, &authz_vpc, router)
-            .await?;
-        let route = db::model::RouterRoute::new(
-            default_route_id,
-            system_router_id,
-            RouterRouteKind::Default,
-            RouterRouteCreateParams {
-                identity: IdentityMetadataCreateParams {
-                    name: "default".parse().unwrap(),
-                    description: "The default route of a vpc".to_string(),
-                },
-                target: RouteTarget::InternetGateway(
-                    "outbound".parse().unwrap(),
-                ),
-                destination: RouteDestination::Vpc(
-                    params.identity.name.clone(),
-                ),
-            },
-        );
-
-        self.db_datastore
-            .router_create_route(opctx, &authz_router, route)
-            .await?;
-
-        // Allocate the first /64 sub-range from the requested or created
-        // prefix.
-        let ipv6_block = external::Ipv6Net(
-            ipnetwork::Ipv6Network::new(db_vpc.ipv6_prefix.network(), 64)
-                .map_err(|_| {
-                    external::Error::internal_error(
-                        "Failed to allocate default IPv6 subnet",
-                    )
-                })?,
-        );
-
-        // TODO: batch this up with everything above
-        let subnet = db::model::VpcSubnet::new(
-            default_subnet_id,
-            vpc_id,
-            IdentityMetadataCreateParams {
-                name: "default".parse().unwrap(),
-                description: format!(
-                    "The default subnet for {}",
-                    params.identity.name
-                ),
-            },
-            *defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
-            ipv6_block,
-        );
-
-        // Create the subnet record in the database. Overlapping IP ranges
-        // should be translated into an internal error. That implies that
-        // there's already an existing VPC Subnet, but we're explicitly creating
-        // the _first_ VPC in the project. Something is wrong, and likely a bug
-        // in our code.
-        self.db_datastore
-            .vpc_create_subnet(opctx, &authz_vpc, subnet)
-            .await
-            .map_err(|err| match err {
-                SubnetError::OverlappingIpRange(ip) => {
-                    let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
-                    error!(
-                        self.log,
-                        concat!(
-                            "failed to create default VPC Subnet, IP address ",
-                            "range '{}' overlaps with existing",
-                        ),
-                        ip;
-                        "vpc_id" => ?vpc_id,
-                        "subnet_id" => ?default_subnet_id,
-                        "ipv4_block" => ?**ipv4_block,
-                        "ipv6_block" => ?ipv6_block,
-                    );
-                    external::Error::internal_error(
-                        "Failed to create default VPC Subnet, \
-                            found overlapping IP address ranges",
-                    )
-                }
-                SubnetError::External(e) => e,
-            })?;
-
-        // Save and send the default firewall rules for the new VPC.
-        let rules = self
-            .default_firewall_rules_for_vpc(
-                authz_vpc.id(),
-                params.identity.name.clone().into(),
-            )
-            .await?;
-        self.db_datastore
-            .vpc_update_firewall_rules(opctx, &authz_vpc, rules.clone())
-            .await?;
-        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules).await?;
+        let (_, db_vpc) = saga_outputs
+            .lookup_node_output::<(authz::Vpc, db::model::Vpc)>("vpc")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from VPC create saga")?;
 
         Ok(db_vpc)
     }
 
-    pub async fn project_list_vpcs(
+    pub async fn vpc_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Vpc> {
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore
-            .project_list_vpcs(&opctx, &authz_project, pagparams)
-            .await
-    }
-
-    pub async fn vpc_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-    ) -> LookupResult<db::model::Vpc> {
-        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .fetch()
-            .await?;
-        Ok(db_vpc)
-    }
-
-    pub async fn vpc_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        vpc_id: &Uuid,
-    ) -> LookupResult<db::model::Vpc> {
-        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_id(*vpc_id)
-            .fetch()
-            .await?;
-        Ok(db_vpc)
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore.vpc_list(&opctx, &authz_project, pagparams).await
     }
 
     pub async fn project_update_vpc(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
         params: &params::VpcUpdate,
     ) -> UpdateResult<db::model::Vpc> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
             .await
@@ -259,17 +135,9 @@ impl super::Nexus {
     pub async fn project_delete_vpc(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
     ) -> DeleteResult {
-        let (.., authz_vpc, db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .fetch()
-                .await?;
+        let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),
@@ -306,16 +174,10 @@ impl super::Nexus {
     pub async fn vpc_list_firewall_rules(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
     ) -> ListResultVec<db::model::VpcFirewallRule> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::Read)
-            .await?;
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::Read).await?;
         let rules = self
             .db_datastore
             .vpc_list_firewall_rules(&opctx, &authz_vpc)
@@ -326,18 +188,11 @@ impl super::Nexus {
     pub async fn vpc_update_firewall_rules(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
         params: &VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
         let (.., authz_vpc, db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .fetch_for(authz::Action::Modify)
-                .await?;
+            vpc_lookup.fetch_for(authz::Action::Modify).await?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
             params.clone(),
@@ -352,7 +207,7 @@ impl super::Nexus {
 
     /// Customize the default firewall rules for a particular VPC
     /// by replacing the name `default` with the VPC's actual name.
-    async fn default_firewall_rules_for_vpc(
+    pub(crate) async fn default_firewall_rules_for_vpc(
         &self,
         vpc_id: Uuid,
         vpc_name: Name,
@@ -395,7 +250,7 @@ impl super::Nexus {
         Ok(rules)
     }
 
-    async fn send_sled_agents_firewall_rules(
+    pub(crate) async fn send_sled_agents_firewall_rules(
         &self,
         opctx: &OpContext,
         vpc: &db::model::Vpc,
@@ -666,10 +521,10 @@ impl super::Nexus {
                             .unwrap_or(&no_interfaces)
                             .iter()
                             .filter(|nic| match (net, nic.ip) {
-                                (external::IpNet::V4(net), IpAddr::V4(ip)) => {
+                                (IpNet::V4(net), IpAddr::V4(ip)) => {
                                     net.contains(ip)
                                 }
-                                (external::IpNet::V6(net), IpAddr::V6(ip)) => {
+                                (IpNet::V6(net), IpAddr::V6(ip)) => {
                                     net.contains(ip)
                                 }
                                 (_, _) => false,
@@ -696,7 +551,12 @@ impl super::Nexus {
                                     .get(&name)
                                     .unwrap_or(&no_interfaces)
                                 {
-                                    host_addrs.push(IpNet::from(interface.ip))
+                                    host_addrs.push(
+                                        HostIdentifier::Ip(IpNet::from(
+                                            interface.ip,
+                                        ))
+                                        .into(),
+                                    )
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Subnet(
@@ -706,21 +566,34 @@ impl super::Nexus {
                                     .get(&name)
                                     .unwrap_or(&no_networks)
                                 {
-                                    host_addrs.push(IpNet::from(*subnet));
+                                    host_addrs.push(
+                                        HostIdentifier::Ip(IpNet::from(
+                                            *subnet,
+                                        ))
+                                        .into(),
+                                    );
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Ip(addr) => {
-                                host_addrs.push(IpNet::from(*addr))
+                                host_addrs.push(
+                                    HostIdentifier::Ip(IpNet::from(*addr))
+                                        .into(),
+                                )
                             }
                             external::VpcFirewallRuleHostFilter::IpNet(net) => {
-                                host_addrs.push(IpNet::from(*net))
+                                host_addrs.push(HostIdentifier::Ip(*net).into())
                             }
                             external::VpcFirewallRuleHostFilter::Vpc(name) => {
                                 for interface in vpc_interfaces
                                     .get(&name)
                                     .unwrap_or(&no_interfaces)
                                 {
-                                    host_addrs.push(IpNet::from(interface.ip))
+                                    host_addrs.push(
+                                        HostIdentifier::Vpc(Vni::try_from(
+                                            *interface.vni,
+                                        )?)
+                                        .into(),
+                                    )
                                 }
                             }
                         }

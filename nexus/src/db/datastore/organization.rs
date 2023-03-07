@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -13,24 +14,28 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::identity::Resource;
+use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::OrganizationUpdate;
 use crate::db::model::Silo;
+use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -51,27 +56,48 @@ impl DataStore {
         let organization = Organization::new(organization.clone(), silo_id);
         let name = organization.name().as_str().to_string();
 
-        Silo::insert_resource(
-            silo_id,
-            diesel::insert_into(dsl::organization).values(organization),
-        )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::InternalError {
-                internal_message: format!(
-                    "attempting to create an \
-                    organization under non-existent silo {}",
-                    silo_id
-                ),
-            },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::Organization, &name),
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                let org = Silo::insert_resource(
+                    silo_id,
+                    diesel::insert_into(dsl::organization).values(organization),
                 )
-            }
-        })
+                .insert_and_get_result_async(&conn)
+                .await
+                .map_err(|e| match e {
+                    AsyncInsertError::CollectionNotFound => {
+                        authz_silo.not_found()
+                    }
+                    AsyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::Organization,
+                                &name,
+                            ),
+                        )
+                    }
+                })?;
+
+                self.virtual_provisioning_collection_create_on_connection(
+                    &conn,
+                    VirtualProvisioningCollection::new(
+                        org.id(),
+                        CollectionTypeProvisioned::Organization,
+                    ),
+                )
+                .await?;
+
+                Ok(org)
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
     }
 
     /// Delete a organization
@@ -105,69 +131,78 @@ impl DataStore {
         }
 
         let now = Utc::now();
-        let updated_rows = diesel::update(dsl::organization)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_org.id()))
-            .filter(dsl::rcgen.eq(db_org.rcgen))
-            .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_org),
+
+        type TxnError = TransactionError<Error>;
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                let updated_rows = diesel::update(dsl::organization)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(authz_org.id()))
+                    .filter(dsl::rcgen.eq(db_org.rcgen))
+                    .set(dsl::time_deleted.eq(now))
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel_pool(
+                            PoolError::from(e),
+                            ErrorHandler::NotFoundByResource(authz_org),
+                        )
+                    })?;
+
+                if updated_rows == 0 {
+                    return Err(TxnError::CustomError(Error::InvalidRequest {
+                        message:
+                            "deletion failed due to concurrent modification"
+                                .to_string(),
+                    }));
+                }
+
+                self.virtual_provisioning_collection_delete_on_connection(
+                    &conn,
+                    authz_org.id(),
                 )
-            })?;
+                .await?;
 
-        if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: "deletion failed due to concurrent modification"
-                    .to_string(),
-            });
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(e) => e,
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn organizations_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<Organization> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing Organizations")?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        use db::schema::organization::dsl;
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::organization, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::organization,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
         }
-        Ok(())
-    }
-
-    pub async fn organizations_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<Organization> {
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("listing Organizations")?;
-        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
-
-        use db::schema::organization::dsl;
-        paginated(dsl::organization, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .select(Organization::as_select())
-            .load_async::<Organization>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn organizations_list_by_name(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Organization> {
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("listing Organizations")?;
-        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
-
-        use db::schema::organization::dsl;
-        paginated(dsl::organization, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .select(Organization::as_select())
-            .load_async::<Organization>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::silo_id.eq(authz_silo.id()))
+        .select(Organization::as_select())
+        .load_async::<Organization>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Updates a organization by name (clobbering update -- no etag)

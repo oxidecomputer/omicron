@@ -31,6 +31,12 @@ PUBLISHERS=("on-nightly" "helios-netdev")
 HELIOS_PUBLISHER="helios-dev"
 STOCK_CONSOLIDATION="pkg://$HELIOS_PUBLISHER/consolidation/osnet/osnet-incorporation"
 
+# Saved list of publisher origins we've removed if we need to restore them
+REMOVED_PUBLISHERS=()
+
+# The version of OPTE currently installed, if any
+INSTALLED_OPTE_VER=""
+
 # Remove a publisher in $1, assuming it matches a few basic assumptions
 function remove_publisher {
     local PUBLISHER="$1"
@@ -52,6 +58,17 @@ function remove_publisher {
     # Unset the publisher, but do not do anything with the file.
     echo "Unsetting publisher \"$PUBLISHER\""
     pkg unset-publisher "$PUBLISHER"
+
+    # Add the publisher to the list of removed publishers
+    REMOVED_PUBLISHERS+=("$ORIGIN")
+}
+
+# Restores publishers removed by remove_publisher
+function restore_removed_publishers {
+    echo "Restoring previously removed publishers"
+    for ORIGIN in "${REMOVED_PUBLISHERS[@]}"; do
+        pkg set-publisher -p "$ORIGIN" --search-first
+    done
 }
 
 # Install stock incorporation from helios-dev, pushing the publisher to the top
@@ -62,8 +79,50 @@ function to_stock_helios {
     echo "\"$CONSOLIDATION\""
     echo "Note that this may entail an upgrade, depending on"
     echo "how your Helios system is configured."
+
+    # Some packages which don't exist in stock might've been pulled in and
+    # prevent us from installing the stock consolidation package. So, we'll
+    # do a dry-run and pick out any packages we need to reject.
+    local PKGS_TO_REJECT=($(\
+        LANG= LC_CTYPE= LC_NUMERIC= LC_TIME= LC_COLLATE= LC_MONETARY= LC_MESSAGES= LC_ALL=C.UTF-8 \
+        pkg install -n --no-refresh -v "$CONSOLIDATION" 2>&1 |\
+        grep -o "Package '.*' must be uninstalled or upgraded" |\
+        tr -d \' |\
+        cut -d ' ' -f 2
+    ))
+
+    local REJECT_ARGS=()
+
+    # If we have packages to reject, prompt the user to confirm.
+    if [[ ${#PKGS_TO_REJECT[@]} -gt 0 ]]; then
+        echo "These packages will be removed: ${PKGS_TO_REJECT[@]}"
+        read -p "Confirm (Y/n): " RESPONSE
+        case $(echo $RESPONSE | tr '[A-Z]' '[a-z]') in
+            n|no )
+                echo "Packages will NOT be removed"
+
+                # Undo the publisher removals
+                restore_removed_publishers
+                # Reinstall the packages we removed
+                restore_xde_and_opte
+
+                exit 1
+
+                ;;
+            * )
+                echo "Removing packages"
+                ;;
+        esac
+
+        for PKG in "${PKGS_TO_REJECT[@]}"; do
+            REJECT_ARGS+=("--reject $PKG")
+        done
+    fi
+
     pkg set-publisher --sticky --search-first "$HELIOS_PUBLISHER"
-    pkg install --no-refresh -v "$CONSOLIDATION"
+
+    # Now install stock consolidation but reject the packages we don't want.
+    pkg install --no-refresh -v ${REJECT_ARGS[@]} "$CONSOLIDATION"
 }
 
 # If helios-dev exists, echo the full osnet-incorporation package we'll be
@@ -80,15 +139,29 @@ function ensure_helios_publisher_exists {
         echo "available packages, with \"pkg refresh helios-dev\""
         exit 1
     fi
-    echo "$CONSOLIDATION" | tr -s ' ' | cut -d ' ' -f 1,3 | tr ' ' '@'
+    echo "$CONSOLIDATION" | tr -s ' ' | awk '{ print $1 "@" $(NF-1); }'
 }
 
 # Actually uninstall the opteadm tool and xde driver
 function uninstall_xde_and_opte {
     local RC=0
+
+    pkg info -lq driver/network/opte || RC=$?
+    if [[ "$RC" -eq 0 ]]; then
+        # Save currently installed version
+        INSTALLED_OPTE_VER="$(pkg info -l driver/network/opte | grep FMRI | awk '{ print $NF; }')"
+    fi
+
     pkg uninstall -v --ignore-missing pkg://helios-netdev/driver/network/opte || RC=$?
     if [[ $RC -ne 0 ]] && [[ $RC -ne 4 ]]; then
         exit $RC
+    fi
+}
+
+function restore_xde_and_opte {
+    if [[ -n "$INSTALLED_OPTE_VER" ]]; then
+        echo "Restoring previously installed opteadm and xde driver"
+        pkg install --no-refresh -v "$INSTALLED_OPTE_VER"
     fi
 }
 
@@ -97,14 +170,14 @@ function ensure_not_already_on_helios {
     pkg list "$STOCK_CONSOLIDATION"* || RC=$?
     if [[ $RC -eq 0 ]]; then
         echo "This system appears to already be running stock Helios"
-        exit 1
+        exit 0
     fi
 }
 
 CONSOLIDATION="$(ensure_helios_publisher_exists)"
-ensure_not_already_on_helios
 uninstall_xde_and_opte
 for PUBLISHER in "${PUBLISHERS[@]}"; do
     remove_publisher "$PUBLISHER"
 done
+ensure_not_already_on_helios
 to_stock_helios "$CONSOLIDATION"

@@ -38,7 +38,7 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::UpdateArtifactKind;
+use crate::db::model::KnownArtifactKind;
 use crate::db::DataStore;
 use anyhow::anyhow;
 use authz_macros::authz_resource;
@@ -150,7 +150,7 @@ impl<T: ApiResource + oso::PolarClass + Clone> AuthorizedResource for T {
 /// This object is used for authorization checks on a Fleet by passing it as the
 /// `resource` argument to [`crate::context::OpContext::authorize()`].  You
 /// don't construct a `Fleet` yourself -- use the global [`FLEET`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
@@ -956,9 +956,41 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "PhysicalDisk",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "UpdateAvailableArtifact",
     parent = "Fleet",
-    primary_key = (String, i64, UpdateArtifactKind),
+    primary_key = (String, String, KnownArtifactKind),
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Certificate",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "SystemUpdate",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "UpdateDeployment",
+    parent = "Fleet",
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

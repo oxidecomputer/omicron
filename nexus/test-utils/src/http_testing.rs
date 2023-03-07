@@ -653,13 +653,19 @@ impl<'a> NexusRequest<'a> {
         let mut next_token: Option<String> = None;
         const DEFAULT_PAGE_SIZE: usize = 10;
         let limit = limit.unwrap_or(DEFAULT_PAGE_SIZE);
-        let url_base = format!("{}?limit={}&", collection_url, limit);
+        let url_base = if collection_url.contains('?') {
+            format!("{}&limit={}", collection_url, limit)
+        } else {
+            format!("{}?limit={}", collection_url, limit)
+        };
 
         loop {
             let url = if let Some(next_token) = &next_token {
-                format!("{}page_token={}", url_base, next_token)
+                format!("{}&page_token={}", url_base, next_token)
+            } else if !initial_params.is_empty() {
+                format!("{}&{}", url_base, initial_params)
             } else {
-                format!("{}{}", url_base, initial_params)
+                url_base.clone()
             };
 
             let page = NexusRequest::object_get(testctx, &url)

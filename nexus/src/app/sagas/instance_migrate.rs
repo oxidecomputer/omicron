@@ -4,13 +4,12 @@
 
 use super::instance_create::allocate_sled_ipv6;
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
-use crate::app::sagas::NexusAction;
+use crate::app::sagas::declare_saga_actions;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::model::IpKind;
 use crate::external_api::params;
-use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
@@ -23,9 +22,8 @@ use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use std::net::Ipv6Addr;
-use std::sync::Arc;
 use steno::ActionError;
-use steno::{new_action_noop_undo, Node};
+use steno::Node;
 use uuid::Uuid;
 
 // instance migrate saga: input parameters
@@ -39,26 +37,23 @@ pub struct Params {
 
 // instance migrate saga: actions
 
-lazy_static! {
-    static ref ALLOCATE_PROPOLIS_IP: NexusAction = new_action_noop_undo(
-        "instance-migrate.allocate-propolis-ip",
-        sim_allocate_propolis_ip
-    );
-    static ref MIGRATE_PREP: NexusAction = new_action_noop_undo(
-        "instance-migrate.migrate-prep",
-        sim_migrate_prep,
-    );
-    static ref INSTANCE_MIGRATE: NexusAction = new_action_noop_undo(
-        "instance-migrate.instance-migrate",
+declare_saga_actions! {
+    instance_migrate;
+    ALLOCATE_PROPOLIS_IP -> "dst_propolis_ip" {
+        + sim_allocate_propolis_ip
+    }
+    MIGRATE_PREP -> "migrate_instance" {
+        + sim_migrate_prep
+    }
+    INSTANCE_MIGRATE -> "instance_migrate" {
         // TODO robustness: This needs an undo action
-        sim_instance_migrate,
-    );
-    static ref CLEANUP_SOURCE: NexusAction = new_action_noop_undo(
-        "instance-migrate.cleanup-source",
+        + sim_instance_migrate
+    }
+    CLEANUP_SOURCE -> "cleanup_source" {
         // TODO robustness: This needs an undo action. Is it even possible
         // to undo at this point?
-        sim_cleanup_source,
-    );
+        + sim_cleanup_source
+    }
 }
 
 // instance migrate saga: definition
@@ -70,10 +65,7 @@ impl NexusSaga for SagaInstanceMigrate {
     type Params = Params;
 
     fn register_actions(registry: &mut super::ActionRegistry) {
-        registry.register(Arc::clone(&*ALLOCATE_PROPOLIS_IP));
-        registry.register(Arc::clone(&*MIGRATE_PREP));
-        registry.register(Arc::clone(&*INSTANCE_MIGRATE));
-        registry.register(Arc::clone(&*CLEANUP_SOURCE));
+        instance_migrate_register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -92,29 +84,10 @@ impl NexusSaga for SagaInstanceMigrate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
-        builder.append(Node::action(
-            "dst_propolis_ip",
-            "AllocatePropolisIp",
-            ALLOCATE_PROPOLIS_IP.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "migrate_instance",
-            "MigratePrep",
-            MIGRATE_PREP.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "instance_migrate",
-            "InstanceMigrate",
-            INSTANCE_MIGRATE.as_ref(),
-        ));
-
-        builder.append(Node::action(
-            "cleanup_source",
-            "CleanupSource",
-            CLEANUP_SOURCE.as_ref(),
-        ));
+        builder.append(allocate_propolis_ip_action());
+        builder.append(migrate_prep_action());
+        builder.append(instance_migrate_action());
+        builder.append(cleanup_source_action());
 
         Ok(builder.build()?)
     }
@@ -221,7 +194,7 @@ async fn sim_instance_migrate(
     }
     let source_nat = SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
-    // The TODOs below are tracked in
+    // The TODO items below are tracked in
     //   https://github.com/oxidecomputer/omicron/issues/1783
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),

@@ -9,8 +9,6 @@
 #![allow(rustdoc::private_intra_doc_links)]
 // Clippy's style lints are useful, but not worth running automatically.
 #![allow(clippy::style)]
-// assert_matches! is pretty useful for tests so just enable it conditionally.
-#![cfg_attr(test, feature(assert_matches))]
 
 // Module for executing the simulated sled agent.
 pub mod sim;
@@ -21,13 +19,10 @@ pub mod common;
 // Modules for the non-simulated sled agent.
 pub mod bootstrap;
 pub mod config;
-mod hardware;
 mod http_entrypoints;
-pub mod illumos;
 mod instance;
 mod instance_manager;
 mod nexus;
-mod opte;
 pub mod params;
 mod profile;
 pub mod rack_setup;
@@ -35,14 +30,10 @@ mod serial;
 pub mod server;
 mod services;
 mod sled_agent;
+mod smf_helper;
 pub mod sp;
 mod storage_manager;
 mod updates;
-
-pub use illumos::zfs;
-pub use illumos::zone;
-pub use illumos::zpool;
-pub use sled_agent::cleanup_networking_resources;
 
 #[cfg(test)]
 mod mocks;

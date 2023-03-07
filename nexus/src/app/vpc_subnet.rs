@@ -8,39 +8,69 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcSubnet;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
 use omicron_common::api::external;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
+    pub fn vpc_subnet_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        subnet_selector: &'a params::SubnetSelector,
+    ) -> LookupResult<lookup::VpcSubnet<'a>> {
+        match subnet_selector {
+            params::SubnetSelector {
+                subnet: NameOrId::Id(id),
+                vpc_selector: None,
+            } => {
+                let subnet = LookupPath::new(opctx, &self.db_datastore)
+                    .vpc_subnet_id(*id);
+                Ok(subnet)
+            }
+            params::SubnetSelector {
+                subnet: NameOrId::Name(name),
+                vpc_selector: Some(selector),
+            } => {
+                let subnet = self
+                    .vpc_lookup(opctx, selector)?
+                    .vpc_subnet_name(Name::ref_cast(name));
+                Ok(subnet)
+            }
+            params::SubnetSelector {
+                subnet: NameOrId::Id(_),
+                vpc_selector: Some(_),
+            } => Err(Error::invalid_request(
+                "when providing subnet as an ID, vpc should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "subnet should either be an ID or vpc should be specified",
+            )),
+        }
+    }
     // TODO: When a subnet is created it should add a route entry into the VPC's
     // system router
     pub async fn vpc_create_subnet(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
+        vpc_lookup: &lookup::Vpc<'_>,
         params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
-        let (.., authz_vpc, db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .fetch()
-                .await?;
+        let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
 
         // Validate IPv4 range
         if !params.ipv4_block.network().is_private() {
@@ -155,7 +185,7 @@ impl super::Nexus {
                         Err(result.unwrap_err().into_external())
                     }
                     Err(SubnetError::External(e)) => Err(e),
-                    Ok(subnet) => Ok(subnet),
+                    Ok((.., subnet)) => Ok(subnet),
                 }
             }
             Some(ipv6_block) => {
@@ -178,74 +208,31 @@ impl super::Nexus {
                 self.db_datastore
                     .vpc_create_subnet(opctx, &authz_vpc, subnet)
                     .await
+                    .map(|(.., subnet)| subnet)
                     .map_err(SubnetError::into_external)
             }
         }
     }
 
-    pub async fn vpc_list_subnets(
+    pub async fn vpc_subnet_list(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        vpc_lookup: &lookup::Vpc<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::VpcSubnet> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        self.db_datastore.vpc_list_subnets(opctx, &authz_vpc, pagparams).await
-    }
-
-    pub async fn vpc_subnet_fetch(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-    ) -> LookupResult<db::model::VpcSubnet> {
-        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .fetch()
-            .await?;
-        Ok(db_vpc)
-    }
-
-    pub async fn vpc_subnet_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        vpc_subnet_id: &Uuid,
-    ) -> LookupResult<db::model::VpcSubnet> {
-        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_subnet_id(*vpc_subnet_id)
-            .fetch()
-            .await?;
-        Ok(db_vpc)
+        let (.., authz_vpc) =
+            vpc_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore.vpc_subnet_list(opctx, &authz_vpc, pagparams).await
     }
 
     pub async fn vpc_update_subnet(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
+        vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
         params: &params::VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
-        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_subnet) =
+            vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
             .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
             .await
@@ -256,19 +243,10 @@ impl super::Nexus {
     pub async fn vpc_delete_subnet(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
+        vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
     ) -> DeleteResult {
         let (.., authz_subnet, db_subnet) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .vpc_name(vpc_name)
-                .vpc_subnet_name(subnet_name)
-                .fetch_for(authz::Action::Delete)
-                .await?;
+            vpc_subnet_lookup.fetch_for(authz::Action::Delete).await?;
         self.db_datastore
             .vpc_delete_subnet(opctx, &db_subnet, &authz_subnet)
             .await
@@ -277,19 +255,11 @@ impl super::Nexus {
     pub async fn subnet_list_network_interfaces(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        vpc_name: &Name,
-        subnet_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        subnet_lookup: &lookup::VpcSubnet<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::NetworkInterface> {
-        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_subnet) =
+            subnet_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
             .subnet_list_network_interfaces(opctx, &authz_subnet, pagparams)
             .await

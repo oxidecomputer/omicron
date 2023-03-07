@@ -1,9 +1,10 @@
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result};
-use omicron_sled_agent::params::ServiceType;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use oxide_client::types::{Name, OrganizationCreate, ProjectCreate};
-use oxide_client::{Client, ClientOrganizationsExt, ClientProjectsExt};
+use oxide_client::{
+    Client, ClientOrganizationsExt, ClientProjectsExt, ClientVpcsExt,
+};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::Url;
 use std::net::SocketAddr;
@@ -50,6 +51,21 @@ impl Context {
     }
 
     pub async fn cleanup(self) -> Result<()> {
+        self.client
+            .vpc_subnet_delete()
+            .organization_name(self.org_name.clone())
+            .project_name(self.project_name.clone())
+            .vpc_name("default")
+            .subnet_name("default")
+            .send()
+            .await?;
+        self.client
+            .vpc_delete()
+            .organization_name(self.org_name.clone())
+            .project_name(self.project_name.clone())
+            .vpc_name("default")
+            .send()
+            .await?;
         self.client
             .project_delete()
             .organization_name(self.org_name.clone())
@@ -100,16 +116,7 @@ pub fn nexus_addr() -> SocketAddr {
         .join("../smf/sled-agent/config-rss.toml");
     if rss_config_path.exists() {
         if let Ok(config) = SetupServiceConfig::from_file(rss_config_path) {
-            for request in config.requests {
-                for zone in request.service_zones {
-                    for service in zone.services {
-                        if let ServiceType::Nexus { external_ip, .. } = service
-                        {
-                            return (external_ip, 80).into();
-                        }
-                    }
-                }
-            }
+            return (config.nexus_external_address, 80).into();
         }
     }
 

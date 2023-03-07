@@ -18,6 +18,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
 use std::convert::TryFrom;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -58,7 +59,6 @@ pub struct ExternalIp {
     pub time_deleted: Option<DateTime<Utc>>,
     pub ip_pool_id: Uuid,
     pub ip_pool_range_id: Uuid,
-    pub project_id: Option<Uuid>,
     // This is Some(_) for:
     //  - all instance SNAT IPs
     //  - all ephemeral IPs
@@ -80,18 +80,6 @@ impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {
     }
 }
 
-/// Describes where the IP candidates for allocation come from: either
-/// from an IP pool, or from a project.
-///
-/// This ensures that a source is always specified, and a caller cannot
-/// request an external IP allocation without providing at least one of
-/// these options.
-#[derive(Debug, Clone, Copy)]
-pub enum IpSource {
-    Instance { project_id: Uuid, pool_id: Option<Uuid> },
-    Service { pool_id: Uuid },
-}
-
 /// An incomplete external IP, used to store state required for issuing the
 /// database query that selects an available IP and stores the resulting record.
 #[derive(Debug, Clone)]
@@ -102,15 +90,16 @@ pub struct IncompleteExternalIp {
     time_created: DateTime<Utc>,
     kind: IpKind,
     instance_id: Option<Uuid>,
-    source: IpSource,
+    pool_id: Uuid,
+    // Optional address requesting that a specific IP address be allocated.
+    explicit_ip: Option<IpNetwork>,
 }
 
 impl IncompleteExternalIp {
     pub fn for_instance_source_nat(
         id: Uuid,
-        project_id: Uuid,
         instance_id: Uuid,
-        pool_id: Option<Uuid>,
+        pool_id: Uuid,
     ) -> Self {
         Self {
             id,
@@ -119,16 +108,12 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::SNat,
             instance_id: Some(instance_id),
-            source: IpSource::Instance { project_id, pool_id },
+            pool_id,
+            explicit_ip: None,
         }
     }
 
-    pub fn for_ephemeral(
-        id: Uuid,
-        project_id: Uuid,
-        instance_id: Uuid,
-        pool_id: Option<Uuid>,
-    ) -> Self {
+    pub fn for_ephemeral(id: Uuid, instance_id: Uuid, pool_id: Uuid) -> Self {
         Self {
             id,
             name: None,
@@ -136,7 +121,8 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
             instance_id: Some(instance_id),
-            source: IpSource::Instance { project_id, pool_id },
+            pool_id,
+            explicit_ip: None,
         }
     }
 
@@ -144,8 +130,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
-        project_id: Uuid,
-        pool_id: Option<Uuid>,
+        pool_id: Uuid,
     ) -> Self {
         Self {
             id,
@@ -154,7 +139,25 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Floating,
             instance_id: None,
-            source: IpSource::Instance { project_id, pool_id },
+            pool_id,
+            explicit_ip: None,
+        }
+    }
+
+    pub fn for_service_explicit(
+        id: Uuid,
+        pool_id: Uuid,
+        address: IpAddr,
+    ) -> Self {
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::Service,
+            instance_id: None,
+            pool_id,
+            explicit_ip: Some(IpNetwork::from(address)),
         }
     }
 
@@ -166,7 +169,8 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Service,
             instance_id: None,
-            source: IpSource::Service { pool_id },
+            pool_id,
+            explicit_ip: None,
         }
     }
 
@@ -194,8 +198,12 @@ impl IncompleteExternalIp {
         &self.instance_id
     }
 
-    pub fn source(&self) -> &IpSource {
-        &self.source
+    pub fn pool_id(&self) -> &Uuid {
+        &self.pool_id
+    }
+
+    pub fn explicit_ip(&self) -> &Option<IpNetwork> {
+        &self.explicit_ip
     }
 }
 

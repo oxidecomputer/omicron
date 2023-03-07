@@ -906,63 +906,51 @@ mod test {
     #[test]
     #[ignore]
     fn test_lookup_dump() {
-        let output = lookup_resource(
-            quote! {
-                name = "Organization",
-                ancestors = ["Silo"],
-                children = [ "Project" ],
-                lookup_by_name = true,
-                soft_deletes = true,
-                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-            }
-            .into(),
-        )
+        let output = lookup_resource(quote! {
+            name = "Organization",
+            ancestors = ["Silo"],
+            children = [ "Project" ],
+            lookup_by_name = true,
+            soft_deletes = true,
+            primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+        })
         .unwrap();
         println!("{}", rustfmt(output).unwrap());
 
-        let output = lookup_resource(
-            quote! {
-                name = "Project",
-                ancestors = ["Organization"],
-                children = [ "Disk", "Instance" ],
-                lookup_by_name = true,
-                soft_deletes = true,
-                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-            }
-            .into(),
-        )
+        let output = lookup_resource(quote! {
+            name = "Project",
+            ancestors = ["Organization"],
+            children = [ "Disk", "Instance" ],
+            lookup_by_name = true,
+            soft_deletes = true,
+            primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+        })
         .unwrap();
         println!("{}", rustfmt(output).unwrap());
 
-        let output = lookup_resource(
-            quote! {
-                name = "SiloUser",
-                ancestors = [],
-                children = [],
-                lookup_by_name = false,
-                soft_deletes = true,
-                primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-            }
-            .into(),
-        )
+        let output = lookup_resource(quote! {
+            name = "SiloUser",
+            ancestors = [],
+            children = [],
+            lookup_by_name = false,
+            soft_deletes = true,
+            primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+        })
         .unwrap();
         println!("{}", rustfmt(output).unwrap());
 
-        let output = lookup_resource(
-            quote! {
-                name = "UpdateAvailableArtifact",
-                ancestors = [],
-                children = [],
-                lookup_by_name = false,
-                soft_deletes = false,
-                primary_key_columns = [
-                    { column_name = "name", rust_type = String },
-                    { column_name = "version", rust_type = i64 },
-                    { column_name = "kind", rust_type = UpdateArtifactKind }
-                ]
-            }
-            .into(),
-        )
+        let output = lookup_resource(quote! {
+            name = "UpdateAvailableArtifact",
+            ancestors = [],
+            children = [],
+            lookup_by_name = false,
+            soft_deletes = false,
+            primary_key_columns = [
+                { column_name = "name", rust_type = String },
+                { column_name = "version", rust_type = i64 },
+                { column_name = "kind", rust_type = KnownArtifactKind }
+            ]
+        })
         .unwrap();
         println!("{}", rustfmt(output).unwrap());
     }

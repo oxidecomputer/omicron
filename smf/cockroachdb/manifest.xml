@@ -19,7 +19,13 @@
   </method_context>
   <exec_method type='method' name='start'
     exec='/var/svc/manifest/site/cockroachdb/method_script.sh'
-    timeout_seconds='0' />
+    timeout_seconds='0'>
+    <method_context>
+      <method_environment>
+        <envvar name="GOTRACEBACK" value="crash" />
+      </method_environment>
+    </method_context>
+  </exec_method>
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>

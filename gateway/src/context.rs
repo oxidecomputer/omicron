@@ -2,42 +2,33 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use gateway_sp_comms::Communicator;
-use gateway_sp_comms::{error::StartupError, SwitchConfig};
+use crate::error::StartupError;
+use crate::management_switch::ManagementSwitch;
+use crate::management_switch::SwitchConfig;
+use gateway_sp_comms::InMemoryHostPhase2Provider;
 use slog::Logger;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 /// Shared state used by API request handlers
 pub struct ServerContext {
-    pub sp_comms: Arc<Communicator>,
-    pub timeouts: Timeouts,
+    pub mgmt_switch: ManagementSwitch,
+    pub host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
     pub log: Logger,
-}
-
-pub struct Timeouts {
-    pub bulk_request_default: Duration,
-}
-
-impl From<&'_ crate::config::Timeouts> for Timeouts {
-    fn from(timeouts: &'_ crate::config::Timeouts) -> Self {
-        Self {
-            bulk_request_default: Duration::from_millis(
-                timeouts.bulk_request_default_millis,
-            ),
-        }
-    }
 }
 
 impl ServerContext {
     pub async fn new(
+        host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
         switch_config: SwitchConfig,
-        timeouts: crate::config::Timeouts,
         log: &Logger,
     ) -> Result<Arc<Self>, StartupError> {
-        let comms = Arc::new(Communicator::new(switch_config, log).await?);
+        let mgmt_switch =
+            ManagementSwitch::new(switch_config, &host_phase2_provider, log)
+                .await?;
+
         Ok(Arc::new(ServerContext {
-            sp_comms: Arc::clone(&comms),
-            timeouts: Timeouts::from(&timeouts),
+            mgmt_switch,
+            host_phase2_provider,
             log: log.clone(),
         }))
     }

@@ -43,20 +43,18 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Verify the list of IP pools is empty
-    assert_eq!(
-        NexusRequest::iter_collection_authn::<IpPool>(
-            client,
-            ip_pools_url,
-            "",
-            None
-        )
-        .await
-        .expect("Failed to list IP Pools")
-        .all_items
-        .len(),
-        0,
-        "Expected a list of zero IP pools"
-    );
+    let ip_pools = NexusRequest::iter_collection_authn::<IpPool>(
+        client,
+        ip_pools_url,
+        "",
+        None,
+    )
+    .await
+    .expect("Failed to list IP Pools")
+    .all_items;
+    assert_eq!(ip_pools.len(), 1, "Expected to see default IP pool");
+
+    assert_eq!(ip_pools[0].identity.name, "default",);
 
     // Verify 404 if the pool doesn't exist yet, both for creating or deleting
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
@@ -99,7 +97,6 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        project: None,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -121,8 +118,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("Failed to list IP Pools")
     .all_items;
-    assert_eq!(list.len(), 1, "Expected exactly one IP pool");
-    assert_pools_eq(&created_pool, &list[0]);
+    assert_eq!(list.len(), 2, "Expected exactly two IP pools");
+    assert_pools_eq(&created_pool, &list[1]);
 
     let fetched_pool: IpPool = NexusRequest::object_get(client, &ip_pool_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -295,7 +292,6 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        project: None,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -477,7 +473,6 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        project: None,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -563,34 +558,16 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx;
+    let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let ip_pools_url = "/system/ip-pools";
-    let pool_name = "p0";
-    let description = "an ip pool";
+    let pool_name = "default";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
     let ip_pool_rem_range_url = format!("{}/remove", ip_pool_ranges_url);
 
-    // Add a pool and range.
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: String::from(pool_name).parse().unwrap(),
-            description: String::from(description),
-        },
-        project: None,
-    };
-    let created_pool: IpPool =
-        NexusRequest::objects_post(client, ip_pools_url, &params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
-    assert_eq!(created_pool.identity.name, pool_name);
-    assert_eq!(created_pool.identity.description, description);
+    // Add an IP range to the default pool
     let range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 1),
@@ -684,8 +661,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 #[nexus_test]
 async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pool_url =
-        format!("/system/ip-pools-service/{}", nexus_test_utils::RACK_UUID);
+    let ip_pool_url = "/system/ip-pools-service".to_string();
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
     let ip_pool_remove_range_url = format!("{}/remove", ip_pool_ranges_url);
@@ -698,7 +674,10 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
         .unwrap()
         .parsed_body()
         .unwrap();
-    assert_eq!(fetched_pool.identity.name, "oxide-service-pool");
+    assert_eq!(
+        fetched_pool.identity.name,
+        omicron_nexus::db::datastore::SERVICE_IP_POOL_NAME
+    );
     assert_eq!(fetched_pool.identity.description, "IP Pool for Oxide Services");
 
     // Add some ranges. Pagination is tested more explicitly in the IP pool

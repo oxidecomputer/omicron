@@ -4,33 +4,40 @@ description = "Technician port TUI"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
+default-run = "wicket"
 
 [dependencies]
-anyhow = "1.0.65"
-clap = {version = "4.0", features = ["derive"]}
-crossterm = { version = "0.25.0", features = ["event-stream"] }
-futures = "0.3.25"
-hex = { version = "0.4", features = ["serde"] }
-semver = { version = "1.0.14", features = ["std", "serde"] }
-serde = { version = "1.0", features = [ "derive" ] }
-serde_json = "1.0"
-sha3 = "0.10.5"
-slog = { version = "2.7.0", features = [ "max_level_trace", "release_max_level_debug" ] }
-slog-async = "2.7.0"
-slog-term = "2.9.0"
-snafu = "0.7.3"
-tar = "0.4"
-tokio = { version = "1.21.1", features = ["full"] }
-toml = "0.5.9"
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+crossterm = { version = "0.26.1", features = ["event-stream"] }
+futures.workspace = true
+hex = { workspace = true, features = ["serde"] }
+lazy_static.workspace = true
+reqwest.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha3.workspace = true
+shell-words.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-envlogger.workspace = true
+slog-term.workspace = true
+snafu.workspace = true
+libsw.workspace = true
+tar.workspace = true
+tokio = { workspace = true, features = ["full"] }
+toml.workspace = true
 tui = "0.19.0"
 
+wicketd-client.workspace = true
+
 [dev-dependencies]
-tempfile = "3.3.0"
+assert_cmd.workspace = true
+tempfile.workspace = true
+proptest.workspace = true
 
 [[bin]]
 name = "wicket"
-doc = false
-
-[[bin]]
-name = "mupdate-pkg"
 doc = false

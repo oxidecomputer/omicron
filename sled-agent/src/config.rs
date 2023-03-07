@@ -4,24 +4,27 @@
 
 //! Interfaces for working with sled agent configuration
 
-use crate::common::vlan::VlanID;
-use crate::illumos::dladm::{self, Dladm, PhysicalLink};
-use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
+use illumos_utils::dladm::Dladm;
+use illumos_utils::dladm::FindPhysicalLinkError;
+use illumos_utils::dladm::PhysicalLink;
+use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
+use illumos_utils::zpool::ZpoolName;
+use omicron_common::vlan::VlanID;
 use serde::Deserialize;
+use sled_hardware::is_gimlet;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    /// Unique id for the sled
-    pub id: Uuid,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
     /// if set to false).
     pub stub_scrimlet: Option<bool>,
+    // TODO: Remove once this can be auto-detected.
+    pub sidecar_revision: String,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
@@ -29,7 +32,13 @@ pub struct Config {
 
     /// The data link on which we infer the bootstrap address.
     ///
-    /// If unsupplied, we default to the first physical device.
+    /// If unsupplied, we default to:
+    ///
+    /// - The first physical link on a non-Gimlet machine.
+    /// - The first Chelsio link on a Gimlet.
+    ///
+    /// This allows continued support for development and testing on emulated
+    /// systems.
     pub data_link: Option<PhysicalLink>,
 }
 
@@ -47,6 +56,10 @@ pub enum ConfigError {
         #[source]
         err: toml::de::Error,
     },
+    #[error("Could not determine if host is a Gimlet: {0}")]
+    SystemDetection(#[source] anyhow::Error),
+    #[error("Could not enumerate physical links")]
+    FindLinks(#[from] FindPhysicalLinkError),
 }
 
 impl Config {
@@ -59,14 +72,23 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_link(
-        &self,
-    ) -> Result<PhysicalLink, dladm::FindPhysicalLinkError> {
-        let link = if let Some(link) = self.data_link.clone() {
-            link
+    pub fn get_link(&self) -> Result<PhysicalLink, ConfigError> {
+        if let Some(link) = self.data_link.as_ref() {
+            Ok(link.clone())
         } else {
-            Dladm::find_physical()?
-        };
-        Ok(link)
+            if is_gimlet().map_err(ConfigError::SystemDetection)? {
+                Dladm::list_physical()
+                    .map_err(ConfigError::FindLinks)?
+                    .into_iter()
+                    .find(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
+                    .ok_or_else(|| {
+                        ConfigError::FindLinks(
+                            FindPhysicalLinkError::NoPhysicalLinkFound,
+                        )
+                    })
+            } else {
+                Dladm::find_physical().map_err(ConfigError::FindLinks)
+            }
+        }
     }
 }

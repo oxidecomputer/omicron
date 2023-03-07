@@ -8,11 +8,15 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
-use crate::internal_api::params::ServicePutRequest;
+use crate::external_api::params::CertificateCreate;
+use crate::external_api::shared::ServiceUsingCertificate;
+use crate::internal_api::params::RackInitializationRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::Name;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -57,27 +61,93 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        services: Vec<ServicePutRequest>,
+        request: RackInitializationRequest,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // Convert from parameter -> DB type.
-        let services: Vec<_> = services
+        let datasets: Vec<_> = request
+            .datasets
             .into_iter()
-            .map(|svc| {
-                db::model::Service::new(
-                    svc.service_id,
-                    svc.sled_id,
-                    svc.address,
-                    svc.kind.into(),
+            .map(|dataset| {
+                db::model::Dataset::new(
+                    dataset.dataset_id,
+                    dataset.zpool_id,
+                    dataset.request.address,
+                    dataset.request.kind.into(),
                 )
             })
             .collect();
 
+        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
+        let certificates: Vec<_> = request
+            .certs
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| {
+                // The indexes that appear in user-visible names for these
+                // certificates start from one (e.g., certificate names
+                // "default-1", "default-2", etc).
+                let i = i + 1;
+                db::model::Certificate::new(
+                    Uuid::new_v4(),
+                    db::model::ServiceKind::Nexus,
+                    CertificateCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: Name::try_from(format!("default-{i}")).unwrap(),
+                            description: format!("x.509 certificate #{i} initialized at rack install"),
+                        },
+                        cert: c.cert,
+                        key: c.key,
+                        service: ServiceUsingCertificate::ExternalApi,
+                    }
+                ).map_err(|e| Error::from(e))
+            })
+            .collect::<Result<_, Error>>()?;
+
+        // internally ignores ObjectAlreadyExists, so will not error on repeat runs
+        let _ = self.populate_mock_system_updates(&opctx).await?;
+
         self.db_datastore
-            .rack_set_initialized(opctx, rack_id, services)
+            .rack_set_initialized(
+                opctx,
+                rack_id,
+                request.services,
+                datasets,
+                service_ip_pool_ranges,
+                certificates,
+            )
             .await?;
 
         Ok(())
+    }
+
+    /// Awaits the initialization of the rack.
+    ///
+    /// This will occur by either:
+    /// 1. RSS invoking the internal API, handing off responsibility, or
+    /// 2. Re-reading a value from the DB, if the rack has already been
+    ///    initialized.
+    ///
+    /// See RFD 278 for additional context.
+    pub async fn await_rack_initialization(&self, opctx: &OpContext) {
+        loop {
+            let result = self.rack_lookup(&opctx, &self.rack_id).await;
+            match result {
+                Ok(rack) => {
+                    if rack.initialized {
+                        info!(self.log, "Rack initialized");
+                        return;
+                    }
+                    info!(
+                        self.log,
+                        "Still waiting for rack initialization: {:?}", rack
+                    );
+                }
+                Err(e) => {
+                    warn!(self.log, "Cannot look up rack: {}", e);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
     }
 }

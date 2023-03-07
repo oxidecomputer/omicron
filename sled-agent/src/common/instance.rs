@@ -357,13 +357,13 @@ mod test {
         InstanceRuntimeStateMigrateParams, InstanceRuntimeStateRequested,
         InstanceStateRequested as Requested,
     };
+    use assert_matches::assert_matches;
     use chrono::Utc;
     use omicron_common::api::external::{
         ByteCount, Error, Generation, InstanceCpuCount, InstanceState as State,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use propolis_client::api::InstanceState as Observed;
-    use std::assert_matches::assert_matches;
     use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {
@@ -589,7 +589,7 @@ mod test {
                 // state we failed on.
                 (state, instance.request_transition(&migrating_req())),
                 (_, Err(Error::InvalidRequest { message }))
-                    if message.contains("cannot migrate instance"),
+                    if message.contains("cannot migrate instance")
             );
         }
     }
@@ -611,7 +611,7 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let migrating_req = migrating_req();
-        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None));
         verify_state(&instance, State::Migrating, Some(Requested::Running));
         assert_eq!(
             migrating_req.migration_params.map(|m| m.migration_id),
@@ -640,11 +640,11 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let migrating_req = migrating_req();
-        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None));
         verify_state(&instance, State::Migrating, Some(Requested::Running));
 
         // A subsequent request for the same migration is a no-op
-        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None));
         verify_state(&instance, State::Migrating, Some(Requested::Running));
     }
 
@@ -667,7 +667,7 @@ mod test {
         assert_matches!(
             instance.request_transition(&runtime_state(Requested::Migrating)),
             Err(Error::InvalidRequest { message })
-                if message.contains("expected migration IDs to transition"),
+                if message.contains("expected migration IDs to transition")
         );
     }
 
@@ -688,7 +688,7 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let mut migrating_req = migrating_req();
-        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None));
         verify_state(&instance, State::Migrating, Some(Requested::Running));
 
         // We keep the Migration ID the same but pass a different
@@ -698,7 +698,7 @@ mod test {
         assert_matches!(
             instance.request_transition(&migrating_req),
             Err(Error::InvalidRequest { message })
-                if message.contains("already perfoming given migration to different propolis"),
+                if message.contains("already perfoming given migration to different propolis")
         );
     }
 
@@ -720,7 +720,7 @@ mod test {
 
         assert_matches!(
             instance.request_transition(&migrating_req()),
-            Ok(None),
+            Ok(None)
         );
         verify_state(&instance, State::Migrating, Some(Requested::Running));
 
@@ -728,7 +728,7 @@ mod test {
             // NOTE: different migration parameters given in subsequent request
             instance.request_transition(&migrating_req()),
             Err(Error::InvalidRequest { message })
-                if message.contains("migration already in progress"),
+                if message.contains("migration already in progress")
         );
     }
 
@@ -749,7 +749,7 @@ mod test {
         verify_state(&instance, State::Running, None);
 
         let migrating_req = migrating_req();
-        assert_matches!(instance.request_transition(&migrating_req), Ok(None),);
+        assert_matches!(instance.request_transition(&migrating_req), Ok(None));
         verify_state(&instance, State::Migrating, Some(Requested::Running));
 
         // This shouldn't happen during the normal course of operation
@@ -764,7 +764,7 @@ mod test {
         assert_matches!(
             instance.request_transition(&migrating_req),
             Err(Error::InternalError { internal_message })
-                if internal_message.contains("migrating but no dst propolis id present"),
+                if internal_message.contains("migrating but no dst propolis id present")
         );
 
         // Instance is still marked as 'Migrating' but we'll
@@ -776,7 +776,7 @@ mod test {
         assert_matches!(
             instance.request_transition(&migrating_req),
             Err(Error::InternalError { internal_message })
-                if internal_message.contains("migrating but no migration id present"),
+                if internal_message.contains("migrating but no migration id present")
         );
     }
 }
