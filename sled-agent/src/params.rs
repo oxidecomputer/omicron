@@ -198,9 +198,9 @@ pub enum DiskType {
     M2,
 }
 
-impl From<crate::hardware::DiskVariant> for DiskType {
-    fn from(v: crate::hardware::DiskVariant) -> Self {
-        use crate::hardware::DiskVariant::*;
+impl From<sled_hardware::DiskVariant> for DiskType {
+    fn from(v: sled_hardware::DiskVariant) -> Self {
+        use sled_hardware::DiskVariant::*;
         match v {
             U2 => Self::U2,
             M2 => Self::M2,
