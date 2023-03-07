@@ -6,7 +6,11 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
 use omicron_common::update::ArtifactKind;
-use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
+use slog::Drain;
+use tufaceous_lib::{
+    assemble::{ArtifactManifest, OmicronRepoAssembler},
+    AddArtifact, ArchiveExtractor, Key, OmicronRepo,
+};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -69,9 +73,30 @@ enum Command {
         /// The destination to extract the file to.
         dest: Utf8PathBuf,
     },
+    /// Assembles a repository from a provided manifest.
+    Assemble {
+        /// Path to artifact manifest.
+        manifest_path: Utf8PathBuf,
+
+        /// The path to write the archive to (must end with .zip).
+        output_path: Utf8PathBuf,
+
+        /// Directory to use for building artifacts [default: temporary directory]
+        #[clap(long)]
+        build_dir: Option<Utf8PathBuf>,
+
+        /// Disable random key generation and exit if no keys are provided
+        #[clap(long)]
+        no_generate_key: bool,
+
+        /// Skip checking to ensure all expected artifacts are present.
+        #[clap(long)]
+        skip_all_present: bool,
+    },
 }
 
 fn main() -> Result<()> {
+    let log = setup_log();
     let args = Args::parse();
     let repo_path = match args.repo {
         Some(repo) => repo,
@@ -80,16 +105,15 @@ fn main() -> Result<()> {
 
     match args.command {
         Command::Init { no_generate_key } => {
-            let keys = if !no_generate_key && args.keys.is_empty() {
-                let key = Key::generate_ed25519();
-                crate::hint::generated_key(&key);
-                vec![key]
-            } else {
-                args.keys
-            };
+            let keys = maybe_generate_keys(args.keys, no_generate_key);
 
-            let repo = OmicronRepo::initialize(&repo_path, keys, args.expiry)?;
-            println!("Initialized TUF repository in {}", repo.repo_path());
+            let repo =
+                OmicronRepo::initialize(&log, &repo_path, keys, args.expiry)?;
+            slog::info!(
+                log,
+                "Initialized TUF repository in {}",
+                repo.repo_path()
+            );
             Ok(())
         }
         Command::Add { kind, allow_unknown_kinds, path, name, version } => {
@@ -115,10 +139,11 @@ fn main() -> Result<()> {
                 }
             }
 
-            let repo = OmicronRepo::load_ignore_expiration(&repo_path)?;
+            let repo = OmicronRepo::load_ignore_expiration(&log, &repo_path)?;
             let mut editor = repo.into_editor()?;
 
-            let new_artifact = AddArtifact::new(kind, path, name, version)?;
+            let new_artifact =
+                AddArtifact::from_path(kind, name, version, path)?;
 
             editor
                 .add_artifact(&new_artifact)
@@ -138,7 +163,7 @@ fn main() -> Result<()> {
                 bail!("output path `{output_path}` must end with .zip");
             }
 
-            let repo = OmicronRepo::load_ignore_expiration(&repo_path)?;
+            let repo = OmicronRepo::load_ignore_expiration(&log, &repo_path)?;
             repo.archive(&output_path)?;
 
             Ok(())
@@ -148,7 +173,7 @@ fn main() -> Result<()> {
             extractor.extract(&dest)?;
 
             // Now load the repository and ensure it's valid.
-            let repo = OmicronRepo::load(&dest).with_context(|| {
+            let repo = OmicronRepo::load(&log, &dest).with_context(|| {
                 format!(
                     "error loading extracted repository at `{dest}` \
                      (extracted files are still available)"
@@ -163,5 +188,69 @@ fn main() -> Result<()> {
 
             Ok(())
         }
+        Command::Assemble {
+            manifest_path,
+            output_path,
+            build_dir,
+            no_generate_key,
+            skip_all_present,
+        } => {
+            // The filename must end with "zip".
+            if output_path.extension() != Some("zip") {
+                bail!("output path `{output_path}` must end with .zip");
+            }
+
+            let manifest = ArtifactManifest::from_path(&manifest_path)
+                .context("error reading manifest")?;
+            if !skip_all_present {
+                manifest.verify_all_present()?;
+            }
+
+            let keys = maybe_generate_keys(args.keys, no_generate_key);
+            let mut assembler = OmicronRepoAssembler::new(
+                &log,
+                manifest,
+                keys,
+                args.expiry,
+                output_path,
+            );
+            if let Some(dir) = build_dir {
+                assembler.set_build_dir(dir);
+            }
+
+            assembler.build()?;
+
+            Ok(())
+        }
     }
+}
+
+fn maybe_generate_keys(keys: Vec<Key>, no_generate_key: bool) -> Vec<Key> {
+    if !no_generate_key && keys.is_empty() {
+        let key = Key::generate_ed25519();
+        crate::hint::generated_key(&key);
+        vec![key]
+    } else {
+        keys
+    }
+}
+
+fn setup_log() -> slog::Logger {
+    let stderr_drain = stderr_env_drain("RUST_LOG");
+    let drain = slog_async::Async::new(stderr_drain).build().fuse();
+    slog::Logger::root(drain, slog::o!())
+}
+
+fn stderr_env_drain(env_var: &str) -> impl Drain<Ok = (), Err = slog::Never> {
+    let stderr_decorator = slog_term::TermDecorator::new().build();
+    let stderr_drain =
+        slog_term::FullFormat::new(stderr_decorator).build().fuse();
+    let mut builder = slog_envlogger::LogBuilder::new(stderr_drain);
+    if let Ok(s) = std::env::var(env_var) {
+        builder = builder.parse(&s);
+    } else {
+        // Log at the info level by default.
+        builder = builder.filter(None, slog::FilterLevel::Info);
+    }
+    builder.build()
 }
