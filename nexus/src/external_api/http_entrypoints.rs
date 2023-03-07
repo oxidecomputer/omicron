@@ -135,6 +135,15 @@ pub fn external_api() -> NexusApiDescription {
         // Variants for internal services
         api.register(ip_pool_service_view)?;
 
+        // Operator-Accessible IP Pools API
+        api.register(ip_pool_list_v1)?;
+        api.register(ip_pool_create_v1)?;
+        api.register(ip_pool_view_v1)?;
+        api.register(ip_pool_delete_v1)?;
+        api.register(ip_pool_update_v1)?;
+        // Variants for internal services
+        api.register(ip_pool_service_view_v1)?;
+
         // Operator-Accessible IP Pool Range API
         api.register(ip_pool_range_list)?;
         api.register(ip_pool_range_add)?;
@@ -143,6 +152,15 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_service_range_list)?;
         api.register(ip_pool_service_range_add)?;
         api.register(ip_pool_service_range_remove)?;
+
+        // Operator-Accessible IP Pool Range API
+        api.register(ip_pool_range_list_v1)?;
+        api.register(ip_pool_range_add_v1)?;
+        api.register(ip_pool_range_remove_v1)?;
+        // Variants for internal services
+        api.register(ip_pool_service_range_list_v1)?;
+        api.register(ip_pool_service_range_add_v1)?;
+        api.register(ip_pool_service_range_remove_v1)?;
 
         api.register(disk_list)?;
         api.register(disk_create)?;
@@ -2538,16 +2556,51 @@ async fn project_policy_update(
 
 // IP Pools
 
+/// List IP pools
+#[endpoint {
+    method = GET,
+    path = "/v1/system/ip-pools",
+    tags = ["system"],
+}]
+async fn ip_pool_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pools = nexus
+            .ip_pools_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(IpPool::from)
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct IpPoolPathParam {
     pub pool_name: Name,
 }
 
 /// List IP pools
+/// Use `GET /v1/system/ip-pools` instead
 #[endpoint {
     method = GET,
     path = "/system/ip-pools",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2579,10 +2632,10 @@ async fn ip_pool_list(
 /// Create an IP pool
 #[endpoint {
     method = POST,
-    path = "/system/ip-pools",
+    path = "/v1/system/ip-pools",
     tags = ["system"],
 }]
-async fn ip_pool_create(
+async fn ip_pool_create_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     pool_params: TypedBody<params::IpPoolCreate>,
 ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
@@ -2597,45 +2650,96 @@ async fn ip_pool_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create an IP pool
+/// Use `POST /v1/system/ip-pools` instead
+#[endpoint {
+    method = POST,
+    path = "/system/ip-pools",
+    tags = ["system"],
+    deprecated = true
+}]
+async fn ip_pool_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    pool_params: TypedBody<params::IpPoolCreate>,
+) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let pool_params = pool_params.into_inner();
+        let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
+        Ok(HttpResponseCreated(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Fetch an IP pool
+#[endpoint {
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}",
+    tags = ["system"],
+}]
+async fn ip_pool_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let pool_selector = path_params.into_inner().pool;
+        let (.., pool) =
+            nexus.ip_pool_lookup(&opctx, &pool_selector)?.fetch().await?;
+        Ok(HttpResponseOk(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch an IP pool
+/// Use `GET /v1/system/ip-pools/{pool}` instead
 #[endpoint {
     method = GET,
     path = "/system/ip-pools/{pool_name}",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let pool_name = &path.pool_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let pool = nexus.ip_pool_fetch(&opctx, pool_name).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let (.., pool) = nexus
+            .ip_pool_lookup(&opctx, &path.pool_name.into())?
+            .fetch()
+            .await?;
         Ok(HttpResponseOk(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch an IP pool by id
+/// Use `GET /v1/system/ip-pools/{pool}` instead
 #[endpoint {
     method = GET,
     path = "/system/by-id/ip-pools/{id}",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_view_by_id(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let pool = nexus.ip_pool_fetch_by_id(&opctx, id).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let (.., pool) =
+            nexus.ip_pool_lookup(&opctx, &path.id.into())?.fetch().await?;
         Ok(HttpResponseOk(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2644,20 +2748,45 @@ async fn ip_pool_view_by_id(
 /// Delete an IP Pool
 #[endpoint {
     method = DELETE,
+    path = "/v1/system/ip-pools/{pool}",
+    tags = ["system"],
+}]
+async fn ip_pool_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        nexus.ip_pool_delete(&opctx, &pool_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete an IP Pool
+/// Use `DELETE /v1/system/ip-pools/{pool}` instead
+#[endpoint {
+    method = DELETE,
     path = "/system/ip-pools/{pool_name}",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let pool_name = &path.pool_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus.ip_pool_delete(&opctx, pool_name).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let pool_selector = path.pool_name.into();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        nexus.ip_pool_delete(&opctx, &pool_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2666,8 +2795,34 @@ async fn ip_pool_delete(
 /// Update an IP Pool
 #[endpoint {
     method = PUT,
+    path = "/v1/system/ip-pools/{pool}",
+    tags = ["system"],
+}]
+async fn ip_pool_update_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    updates: TypedBody<params::IpPoolUpdate>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let updates = updates.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let pool = nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
+        Ok(HttpResponseOk(pool.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update an IP Pool
+/// Use `PUT /v1/system/ip-pools/{pool}` instead
+#[endpoint {
+    method = PUT,
     path = "/system/ip-pools/{pool_name}",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2675,13 +2830,14 @@ async fn ip_pool_update(
     updates: TypedBody<params::IpPoolUpdate>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let pool_name = &path.pool_name;
-    let updates = updates.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let pool = nexus.ip_pool_update(&opctx, pool_name, &updates).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let updates = updates.into_inner();
+        let pool_selector = &path.pool_name.into();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let pool = nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
         Ok(HttpResponseOk(pool.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2690,8 +2846,29 @@ async fn ip_pool_update(
 /// Fetch the IP pool used for Oxide services.
 #[endpoint {
     method = GET,
+    path = "/v1/system/ip-pools-service",
+    tags = ["system"],
+}]
+async fn ip_pool_service_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pool = nexus.ip_pool_service_fetch(&opctx).await?;
+        Ok(HttpResponseOk(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the IP pool used for Oxide services.
+/// Use `GET /v1/system/ip-pools-service` instead
+#[endpoint {
+    method = GET,
     path = "/system/ip-pools-service",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_service_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2713,8 +2890,57 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
+    path = "/v1/system/ip-pools/{pool}/ranges",
+    tags = ["system"],
+}]
+async fn ip_pool_range_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    query_params: Query<IpPoolRangePaginationParams>,
+) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let marker = match query.page {
+            WhichPage::First(_) => None,
+            WhichPage::Next(ref addr) => Some(addr),
+        };
+        let pag_params = DataPageParams {
+            limit: rqctx.page_limit(&query)?,
+            direction: PaginationOrder::Ascending,
+            marker,
+        };
+        let pool_selector = &path.pool.into();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let ranges = nexus
+            .ip_pool_list_ranges(&opctx, &pool_lookup, &pag_params)
+            .await?
+            .into_iter()
+            .map(|range| range.into())
+            .collect();
+        Ok(HttpResponseOk(ResultsPage::new(
+            ranges,
+            &EmptyScanParams {},
+            |range: &IpPoolRange, _| {
+                IpNetwork::from(range.range.first_address())
+            },
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List ranges for an IP pool
+///
+/// Ranges are ordered by their first address.
+/// Use `GET /v1/system/ip-pools/{pool}/ranges` instead
+#[endpoint {
+    method = GET,
     path = "/system/ip-pools/{pool_name}/ranges",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2725,7 +2951,6 @@ async fn ip_pool_range_list(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let path = path_params.into_inner();
-    let pool_name = &path.pool_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let marker = match query.page {
@@ -2737,8 +2962,10 @@ async fn ip_pool_range_list(
             direction: PaginationOrder::Ascending,
             marker,
         };
+        let pool_selector = &path.pool_name.into();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
         let ranges = nexus
-            .ip_pool_list_ranges(&opctx, pool_name, &pag_params)
+            .ip_pool_list_ranges(&opctx, &pool_lookup, &pag_params)
             .await?
             .into_iter()
             .map(|range| range.into())
@@ -2757,8 +2984,35 @@ async fn ip_pool_range_list(
 /// Add a range to an IP pool
 #[endpoint {
     method = POST,
+    path = "/v1/system/ip-pools/{pool}/ranges/add",
+    tags = ["system"],
+}]
+async fn ip_pool_range_add_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    range_params: TypedBody<shared::IpRange>,
+) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
+    let apictx = &rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let range = range_params.into_inner();
+        let pool_selector = path.pool.into();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let out = nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
+        Ok(HttpResponseCreated(out.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Add a range to an IP pool
+/// Use `POST /v1/system/ip-pools/{pool}/ranges/add` instead
+#[endpoint {
+    method = POST,
     path = "/system/ip-pools/{pool_name}/ranges/add",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2766,13 +3020,14 @@ async fn ip_pool_range_add(
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let pool_name = &path.pool_name;
-    let range = range_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let out = nexus.ip_pool_add_range(&opctx, pool_name, &range).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let range = range_params.into_inner();
+        let pool_selector = &path.pool_name.into();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let out = nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
         Ok(HttpResponseCreated(out.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2781,8 +3036,34 @@ async fn ip_pool_range_add(
 /// Remove a range from an IP pool
 #[endpoint {
     method = POST,
+    path = "/v1/system/ip-pools/{pool}/ranges/remove",
+    tags = ["system"],
+}]
+async fn ip_pool_range_remove_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    range_params: TypedBody<shared::IpRange>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = &rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let range = range_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        nexus.ip_pool_delete_range(&opctx, &pool_lookup, &range).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Remove a range from an IP pool
+/// Use `POST /v1/system/ip-pools/{pool}/ranges/remove` instead.
+#[endpoint {
+    method = POST,
     path = "/system/ip-pools/{pool_name}/ranges/remove",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2790,13 +3071,14 @@ async fn ip_pool_range_remove(
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = &rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let pool_name = &path.pool_name;
-    let range = range_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        nexus.ip_pool_delete_range(&opctx, pool_name, &range).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let range = range_params.into_inner();
+        let pool_selector = path.pool_name.into();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        nexus.ip_pool_delete_range(&opctx, &pool_lookup, &range).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2807,8 +3089,53 @@ async fn ip_pool_range_remove(
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
+    path = "/v1/system/ip-pools-service/ranges",
+    tags = ["system"],
+}]
+async fn ip_pool_service_range_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<IpPoolRangePaginationParams>,
+) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let marker = match query.page {
+            WhichPage::First(_) => None,
+            WhichPage::Next(ref addr) => Some(addr),
+        };
+        let pag_params = DataPageParams {
+            limit: rqctx.page_limit(&query)?,
+            direction: PaginationOrder::Ascending,
+            marker,
+        };
+        let ranges = nexus
+            .ip_pool_service_list_ranges(&opctx, &pag_params)
+            .await?
+            .into_iter()
+            .map(|range| range.into())
+            .collect();
+        Ok(HttpResponseOk(ResultsPage::new(
+            ranges,
+            &EmptyScanParams {},
+            |range: &IpPoolRange, _| {
+                IpNetwork::from(range.range.first_address())
+            },
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List ranges for the IP pool used for Oxide services.
+///
+/// Ranges are ordered by their first address.
+/// Use `GET /v1/system/ip-pools-service/ranges` instead.
+#[endpoint {
+    method = GET,
     path = "/system/ip-pools-service/ranges",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_service_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2848,8 +3175,31 @@ async fn ip_pool_service_range_list(
 /// Add a range to an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
+    path = "/v1/system/ip-pools-service/ranges/add",
+    tags = ["system"],
+}]
+async fn ip_pool_service_range_add_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    range_params: TypedBody<shared::IpRange>,
+) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
+    let apictx = &rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let range = range_params.into_inner();
+        let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
+        Ok(HttpResponseCreated(out.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Add a range to an IP pool used for Oxide services.
+/// Use `POST /v1/system/ip-pools-service/ranges/add` instead
+#[endpoint {
+    method = POST,
     path = "/system/ip-pools-service/ranges/add",
     tags = ["system"],
+    deprecated = true
 }]
 async fn ip_pool_service_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2869,10 +3219,10 @@ async fn ip_pool_service_range_add(
 /// Remove a range from an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
-    path = "/system/ip-pools-service/ranges/remove",
+    path = "/v1/system/ip-pools-service/ranges/remove",
     tags = ["system"],
 }]
-async fn ip_pool_service_range_remove(
+async fn ip_pool_service_range_remove_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -2881,6 +3231,29 @@ async fn ip_pool_service_range_remove(
     let range = range_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.ip_pool_service_delete_range(&opctx, &range).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Remove a range from an IP pool used for Oxide services.
+/// Use `POST /v1/system/ip-pools-service/ranges/remove` instead
+#[endpoint {
+    method = POST,
+    path = "/system/ip-pools-service/ranges/remove",
+    tags = ["system"],
+    deprecated = true
+}]
+async fn ip_pool_service_range_remove(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    range_params: TypedBody<shared::IpRange>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = &rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let range = range_params.into_inner();
         nexus.ip_pool_service_delete_range(&opctx, &range).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
