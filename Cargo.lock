@@ -582,6 +582,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytesize"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38fcc2979eff34a4b84e1cf9a1e3da42a7d44b3b690a40cdcb23e3d556cfb2e5"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bzip2"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1383,6 +1392,17 @@ name = "data-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
+
+[[package]]
+name = "datatest-stable"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4eaf86e44e9f0a21f6e42d8e7f83c9ee049f081745eeed1c6f47a613c76e5977"
+dependencies = [
+ "libtest-mimic",
+ "regex",
+ "walkdir",
+]
 
 [[package]]
 name = "db-macros"
@@ -3181,6 +3201,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9021b9cc0f078fba93f59d6e6f1fce89682171107a21fc421eb130efd2048189"
 dependencies = [
  "tokio",
+]
+
+[[package]]
+name = "libtest-mimic"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79529479c298f5af41375b0c1a77ef670d450b4c9cd7949d2b43af08121b20ec"
+dependencies = [
+ "clap 3.2.23",
+ "termcolor",
+ "threadpool",
 ]
 
 [[package]]
@@ -5980,6 +6011,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_path_to_error"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db0969fff533976baadd92e08b1d102c5a3d8a8049eadfd69d4d1e3c5b2ed189"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_plain"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6883,6 +6923,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
+]
+
+[[package]]
 name = "time"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7331,10 +7380,16 @@ dependencies = [
  "chrono",
  "clap 4.1.8",
  "console",
+ "datatest-stable",
  "fs-err",
  "humantime",
  "omicron-common",
+ "omicron-test-utils",
  "predicates",
+ "slog",
+ "slog-async",
+ "slog-envlogger",
+ "slog-term",
  "tempfile",
  "tufaceous-lib",
 ]
@@ -7344,18 +7399,26 @@ name = "tufaceous-lib"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "buf-list",
  "bytes",
+ "bytesize",
  "camino",
  "chrono",
  "debug-ignore",
  "fs-err",
  "hex",
+ "itertools",
  "omicron-common",
  "rand 0.8.5",
  "ring",
+ "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2 0.10.6",
+ "slog",
+ "tar",
  "tempfile",
+ "toml 0.7.2",
  "tough",
  "url",
  "zip",
