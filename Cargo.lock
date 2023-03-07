@@ -7869,6 +7869,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "libsw",
+ "omicron-common",
  "proptest",
  "reqwest",
  "semver 1.0.16",
