@@ -9,16 +9,17 @@ use std::net::Ipv6Addr;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfig {
-    generation: u64,
+    pub generation: u64,
     // XXX-dap add time_created
-    zones: Vec<DnsConfigZone>,
+    pub zones: Vec<DnsConfigZone>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfigZone {
-    zone_name: String,
-    records: Vec<DnsKV>,
+    pub zone_name: String,
+    pub records: Vec<DnsKV>,
 }
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename = "DnsKv")]
 pub struct DnsKV {
