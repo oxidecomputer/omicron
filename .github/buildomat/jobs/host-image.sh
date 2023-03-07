@@ -11,6 +11,7 @@
 #: skip_clone = true
 #: access_repos = [
 #:	"oxidecomputer/amd-apcb",
+#:	"oxidecomputer/amd-efs",
 #:	"oxidecomputer/amd-firmware",
 #:	"oxidecomputer/amd-host-image-builder",
 #:	"oxidecomputer/boot-image-tools",
