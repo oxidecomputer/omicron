@@ -16,10 +16,7 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
-use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
-use omicron_nexus::authz;
-use omicron_nexus::db::identity::Asset;
-use omicron_nexus::external_api::{params, shared, views};
+use omicron_nexus::external_api::{params, views};
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
@@ -99,11 +96,10 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
         url: server.url("/image.raw").to_string(),
     });
 
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
-            .await;
+    NexusRequest::objects_post(client, &images_url, &image_create_params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
 
     // one image in the project
     let images = NexusRequest::object_get(client, &images_url)
@@ -128,25 +124,8 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
         .items;
     assert_eq!(images.len(), 0);
 
-    // promote image to global
-    let promote_image_url = format!("/v1/images/{}/promote", image.identity.id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_image_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to promote image");
-
-    // now the image shows up in the other project
-    let images = NexusRequest::object_get(client, &project_2_images_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-        .await
-        .items;
-    assert_eq!(images.len(), 1);
-    assert_eq!(images[0].identity.name, "alpine-edge");
+    // TODO: once we reimplement promote, promote image to global and check that
+    // it shows up in the other project
 }
 
 #[nexus_test]
@@ -427,216 +406,4 @@ async fn test_make_disk_from_image_too_small(
             4096 * 1000,
         )
     );
-}
-
-/// Similar to the basic image create test, but focused on a user who does not
-/// have access to the project a promoted image belongs to.
-#[nexus_test]
-async fn test_unpriv_use_global_image_from_other_project(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // two orgs, two projects
-    create_organization(&client, ORG_NAME).await;
-    create_project(client, ORG_NAME, PROJECT_NAME).await;
-
-    create_organization(&client, ORG_NAME_2).await;
-    create_project(client, ORG_NAME_2, PROJECT_NAME_2).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/alpine/edge.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
-    let images_url_project_1 = get_images_url(ORG_NAME, PROJECT_NAME);
-    let images_url_project_2 = get_images_url(ORG_NAME_2, PROJECT_NAME_2);
-
-    // Create image in project 1
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/alpine/edge.raw").to_string(),
-    });
-    let image = NexusRequest::objects_post(
-        client,
-        &images_url_project_1,
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
-    .await;
-
-    // unpriv user can't see anything in either project
-
-    for images_url in [&images_url_project_1, &images_url_project_2] {
-        NexusRequest::expect_failure(
-            client,
-            StatusCode::NOT_FOUND,
-            Method::GET,
-            images_url,
-        )
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute()
-        .await
-        .expect("Expected 404");
-    }
-
-    // TODO: this block will probably not end up sticking around
-    //
-    // in order to have access to the image in the other project, unpriv user
-    // must have silo read. asserts to follow show that this is not sufficient
-    //
-    // let silo_policy = shared::Policy::<authz::SiloRole> {
-    //     role_assignments: vec![
-    //         // priv has admin, needs to keep it
-    //         shared::RoleAssignment {
-    //             identity_type: shared::IdentityType::SiloUser,
-    //             identity_id: USER_TEST_PRIVILEGED.id(),
-    //             role_name: authz::SiloRole::Admin,
-    //         },
-    //         shared::RoleAssignment {
-    //             identity_type: shared::IdentityType::SiloUser,
-    //             identity_id: USER_TEST_UNPRIVILEGED.id(),
-    //             role_name: authz::SiloRole::Viewer,
-    //         },
-    //     ],
-    // };
-    //
-    // NexusRequest::object_put(client, &"/v1/policy", Some(&silo_policy))
-    //     .authn_as(AuthnMode::PrivilegedUser)
-    //     .execute()
-    //     .await
-    //     .expect("Failed to give unpriv user silo read");
-
-    // give unpriv user write role on project 2
-
-    let project_2_policy_url = format!(
-        "/v1/projects/{}/policy?organization={}",
-        PROJECT_NAME_2, ORG_NAME_2
-    );
-
-    let policy = shared::Policy::<authz::ProjectRole> {
-        role_assignments: vec![shared::RoleAssignment {
-            identity_type: shared::IdentityType::SiloUser,
-            identity_id: USER_TEST_UNPRIVILEGED.id(),
-            role_name: authz::ProjectRole::Collaborator,
-        }],
-    };
-
-    NexusRequest::object_put(client, &project_2_policy_url, Some(&policy))
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("Failed to give unpriv user access to project 2");
-
-    // project 1 images still 404s
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &images_url_project_1,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("Expected 404");
-
-    // can now list project 2 images but the list is empty
-
-    let project_2_images =
-        NexusRequest::object_get(client, &images_url_project_2)
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-            .await
-            .items;
-    assert_eq!(project_2_images.len(), 0);
-
-    // user cannot fetch image by ID either
-
-    let image_url = format!("/v1/images/{}", image.identity.id);
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &image_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("Expected 404");
-
-    // promote image in project 1 to global
-
-    let promote_image_url = format!("/v1/images/{}/promote", image.identity.id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_image_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to promote image");
-
-    // user can now see image in project 2
-
-    let project_2_images =
-        NexusRequest::object_get(client, &images_url_project_2)
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-            .await
-            .items;
-    assert_eq!(project_2_images.len(), 1);
-    assert_eq!(project_2_images[0].identity.id, image.identity.id);
-
-    // TODO: should unpriv user be able to fetch promoted image by ID?
-    // user can also fetch image directly
-    // NexusRequest::object_get(client, &image_url)
-    //     .authn_as(AuthnMode::UnprivilegedUser)
-    //     .execute_and_parse_unwrap::<views::Image>()
-    //     .await;
-
-    // still can't list images from project 1
-
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &images_url_project_1,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("Expected 404");
-
-    // user can create a disk in project 2 with the image from project 1
-
-    // TODO: unpriv disk create with image from other project once perms are fixed
-
-    // let new_disk = params::DiskCreate {
-    //     identity: IdentityMetadataCreateParams {
-    //         name: "disk".parse().unwrap(),
-    //         description: String::from("sells rainsticks"),
-    //     },
-    //     disk_source: params::DiskSource::Image { image_id: image.identity.id },
-    //     size: ByteCount::from_gibibytes_u32(1),
-    // };
-
-    // // TODO: this fails because it can't find the image. what the frick
-    // let disks_url = format!(
-    //     "/v1/disks?organization={}&project={}",
-    //     ORG_NAME_2, PROJECT_NAME_2
-    // );
-    // NexusRequest::objects_post(client, &disks_url, &new_disk)
-    //     .authn_as(AuthnMode::UnprivilegedUser)
-    //     .execute_and_parse_unwrap::<external::Disk>()
-    //     .await;
-
-    // user can create an instance in project 2 with the image from project 1
 }

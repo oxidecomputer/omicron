@@ -30,7 +30,6 @@ image_delete                             /organizations/{organization_name}/proj
 image_delete_v1                          /v1/images/{image}
 image_list                               /organizations/{organization_name}/projects/{project_name}/images
 image_list_v1                            /v1/images
-image_promote_v1                         /v1/images/{image}/promote
 image_view                               /organizations/{organization_name}/projects/{project_name}/images/{image_name}
 image_view_by_id                         /by-id/images/{id}
 image_view_v1                            /v1/images/{image}

@@ -37,7 +37,6 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
-        is_global -> Bool,
         volume_id -> Uuid,
         url -> Nullable<Text>,
         os -> Text,

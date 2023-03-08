@@ -875,7 +875,6 @@ CREATE TABLE omicron.public.image (
     time_deleted TIMESTAMPTZ,
 
     project_id UUID NOT NULL,
-    is_global BOOL NOT NULL,
     volume_id UUID NOT NULL,
 
     url STRING(8192),

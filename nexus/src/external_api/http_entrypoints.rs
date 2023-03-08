@@ -216,7 +216,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_create_v1)?;
         api.register(image_view_v1)?;
         api.register(image_delete_v1)?;
-        api.register(image_promote_v1)?;
 
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
@@ -5250,36 +5249,6 @@ async fn image_delete(
         let image_lookup = nexus.image_lookup(&opctx, &image_selector)?;
         nexus.image_delete(&opctx, &image_lookup).await?;
         Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Promote an image
-///
-/// Makes an image available to all other projects
-#[endpoint {
-    method = POST,
-    path = "/v1/images/{image}/promote",
-    tags = ["images"],
-}]
-async fn image_promote_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::ImagePath>,
-    query_params: Query<params::OptionalProjectSelector>,
-) -> Result<HttpResponseAccepted<Image>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let image_selector = params::ImageSelector {
-            image: path.image,
-            project_selector: query.project_selector,
-        };
-        let image_lookup = nexus.image_lookup(&opctx, &image_selector)?;
-        let image = nexus.image_promote(&opctx, &image_lookup).await?;
-        Ok(HttpResponseAccepted(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

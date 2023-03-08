@@ -27,7 +27,6 @@ pub struct Image {
     pub identity: ImageIdentity,
 
     pub project_id: Uuid,
-    pub is_global: bool,
     pub volume_id: Uuid,
     pub url: Option<String>,
     pub os: String,
@@ -44,7 +43,6 @@ impl From<Image> for views::Image {
         Self {
             identity: image.identity(),
             project_id: image.project_id,
-            is_global: image.is_global,
             url: image.url,
             os: image.os,
             version: image.version,

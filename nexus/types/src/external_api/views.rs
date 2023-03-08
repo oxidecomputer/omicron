@@ -148,9 +148,6 @@ pub struct Image {
     /// The project the image belongs to
     pub project_id: Uuid,
 
-    /// If the image is visible to all projects
-    pub is_global: bool,
-
     /// URL source of this image, if any
     pub url: Option<String>,
 

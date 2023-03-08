@@ -8486,58 +8486,6 @@
         }
       }
     },
-    "/v1/images/{image}/promote": {
-      "post": {
-        "tags": [
-          "images"
-        ],
-        "summary": "Promote an image",
-        "description": "Makes an image available to all other projects",
-        "operationId": "image_promote_v1",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "image",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Image"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/instances": {
       "get": {
         "tags": [
@@ -15908,10 +15856,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "is_global": {
-            "description": "If the image is visible to all projects",
-            "type": "boolean"
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -15961,7 +15905,6 @@
           "block_size",
           "description",
           "id",
-          "is_global",
           "name",
           "os",
           "project_id",
