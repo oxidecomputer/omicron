@@ -287,8 +287,8 @@ impl Store {
         // it with the data from the config.
         // XXX-dap this is probably a lot faster with a batch?
         for zone_config in &config.zones {
-            let zone_name = &zone_config.zone_name;
-            let tree_name = Self::tree_name_for_zone(zone_name, generation);
+            let zone_name = zone_config.zone_name.to_lowercase();
+            let tree_name = Self::tree_name_for_zone(&zone_name, generation);
             debug!(&log, "creating tree"; "tree_name" => &tree_name);
             let tree = self
                 .db
@@ -297,6 +297,7 @@ impl Store {
 
             for record in &zone_config.records {
                 let DnsRecordKey { name } = &record.key;
+                let name = name.to_lowercase();
                 let records_json = serde_json::to_vec(&record.records)
                     .with_context(|| {
                         format!(
@@ -455,10 +456,8 @@ impl Store {
         // Sort by each tree's generation number and take the first "keep".
         trees_older.sort_by_key(|(k, _)| *k);
         let ntake = trees_older.len() - keep;
-        let trees_to_prune = trees_older
-            .into_iter()
-            .take(ntake)
-            .map(|(_, n)| n);
+        let trees_to_prune =
+            trees_older.into_iter().take(ntake).map(|(_, n)| n);
         self.prune_trees(trees_to_prune, "too old");
     }
 
@@ -473,8 +472,6 @@ impl Store {
             .zones
             .iter()
             .find(|z| {
-                // XXX-dap does this require that zones all be lowercase?  If so
-                // we should enforce that.
                 let zone_name = LowerName::from(Name::from_str(&z).unwrap());
                 zone_name.zone_of(name)
             })
@@ -487,27 +484,41 @@ impl Store {
             .with_context(|| format!("open tree {:?}", tree_name))
             .map_err(QueryError::QueryFail)?;
 
-        let name = mr.query().original().name().to_string();
-        // XXX-dap this lookup presumes that the key in this tree has the zone
-        // part appended to it.  I'm not sure if it's better or not, but it's
-        // not what I had assumed we would be have built at update-time.
-        let key = name.trim_end_matches('.');
+        // The name tree stores just the part of each name that doesn't include
+        // the zone.  So we need to trim the zone part from the name provided in
+        // the request.  (This basically duplicates work in `zone_of` above.)
+        let name_str = name.to_string();
+        let key = {
+            let orig_name = mr.query().original().name();
+            let zone_name = Name::from_str(zone_name).unwrap();
+            // This is implied by passing the `zone_of()` check above.
+            assert!(zone_name.num_labels() >= orig_name.num_labels());
+            let name_only_labels =
+                usize::from(zone_name.num_labels() - orig_name.num_labels());
+            let name_only =
+                Name::from_labels(orig_name.iter().take(name_only_labels))
+                    .unwrap();
+            let key = name_only.to_string().to_lowercase();
+            assert!(!key.ends_with('.'));
+            key
+        };
+
         let bits = tree
             .get(key.as_bytes())
             .with_context(|| format!("query tree {:?}", tree_name))
             .map_err(QueryError::QueryFail)?
-            .ok_or_else(|| QueryError::NoName(name.clone()))?;
+            .ok_or_else(|| QueryError::NoName(name_str.clone()))?;
 
         let records: Vec<DnsRecord> = serde_json::from_slice(&bits)
             .with_context(|| {
-                format!("deserialize record for key {:?}", name.clone())
+                format!("deserialize record for key {:?}", name_str.clone())
             })
             .map_err(QueryError::ParseFail)?;
 
         if records.is_empty() {
             // XXX-dap we should make this illegal (by not inserting these) and
             // then warn here.
-            return Err(QueryError::NoName(name.clone()));
+            return Err(QueryError::NoName(name_str.clone()));
         }
 
         Ok(records)
