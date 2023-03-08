@@ -232,6 +232,366 @@
           "version"
         ]
       },
+      "CompletionEventKind": {
+        "description": "An individual kind of completion event.\n\nForms part of [`CompletionEvent`].",
+        "oneOf": [
+          {
+            "description": "The download of an artifact failed.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The download attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "downloaded_bytes": {
+                "description": "The number of bytes downloaded before failure.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the download took before failing.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being downloaded.",
+                "type": "string"
+              },
+              "message": {
+                "description": "A message indicating the reason for failure.",
+                "type": "string"
+              },
+              "peer": {
+                "description": "The peer the artifact was being downloaded from, if any.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "download_failed"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "downloaded_bytes",
+              "elapsed",
+              "kind",
+              "message",
+              "peer",
+              "reason"
+            ]
+          },
+          {
+            "description": "An artifact download was completed.",
+            "type": "object",
+            "properties": {
+              "artifact_size": {
+                "description": "The number of bytes downloaded.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "attempt": {
+                "description": "The download attempt that completed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the download took.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The artifact downloaded.",
+                "type": "string"
+              },
+              "peer": {
+                "description": "The peer the artifact was downloaded from.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "download_completed"
+                ]
+              }
+            },
+            "required": [
+              "artifact_size",
+              "attempt",
+              "elapsed",
+              "kind",
+              "peer",
+              "reason"
+            ]
+          },
+          {
+            "description": "Failed to format a disk.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The format attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the format attempt took.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "message": {
+                "description": "A message indicating the reason for failure.",
+                "type": "string"
+              },
+              "path": {
+                "description": "The path to the disk.",
+                "type": "string",
+                "format": "Utf8PathBuf"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "format_failed"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "elapsed",
+              "message",
+              "path",
+              "reason"
+            ]
+          },
+          {
+            "description": "Completed formatting a disk.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The format attempt.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "elapsed": {
+                "description": "How long the format attempt took.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "path": {
+                "description": "The path to the disk.",
+                "type": "string",
+                "format": "Utf8PathBuf"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "format_completed"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "elapsed",
+              "path",
+              "reason"
+            ]
+          },
+          {
+            "description": "Failed to write an artifact.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The write attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "destination": {
+                "description": "The destination the artifact is being written out to.",
+                "type": "string",
+                "format": "Utf8PathBuf"
+              },
+              "elapsed": {
+                "description": "How long the write took before it failed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact being written out.",
+                "type": "string"
+              },
+              "message": {
+                "description": "A message indicating why the write failed.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "write_failed"
+                ]
+              },
+              "total_bytes": {
+                "description": "The total number of bytes that should have been written out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "written_bytes": {
+                "description": "The number of bytes written out before failure.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "attempt",
+              "destination",
+              "elapsed",
+              "kind",
+              "message",
+              "reason",
+              "total_bytes",
+              "written_bytes"
+            ]
+          },
+          {
+            "description": "Completed writing an artifact.",
+            "type": "object",
+            "properties": {
+              "artifact_size": {
+                "description": "The number of bytes written out.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "attempt": {
+                "description": "The write attempt that completed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "destination": {
+                "description": "The destination for the artifact.",
+                "type": "string",
+                "format": "Utf8PathBuf"
+              },
+              "elapsed": {
+                "description": "How long the write took to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "description": "The kind of artifact that was written out.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "write_completed"
+                ]
+              }
+            },
+            "required": [
+              "artifact_size",
+              "attempt",
+              "destination",
+              "elapsed",
+              "kind",
+              "reason"
+            ]
+          },
+          {
+            "description": "A miscellaneous error occurred.\n\nThis is a catch-all for errors that aren't described by any of the variants.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt that failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "data": {
+                "description": "Data about the operation, serialized as JSON."
+              },
+              "elapsed": {
+                "description": "How long the operation took before it failed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "is_fatal": {
+                "description": "Whether this operation is fatal, i.e. will not be retried.",
+                "type": "boolean"
+              },
+              "message": {
+                "description": "A message indicating why the operation failed.",
+                "type": "string"
+              },
+              "operation": {
+                "description": "The name of the operation that failed.",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "misc_error"
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "data",
+              "elapsed",
+              "is_fatal",
+              "message",
+              "operation",
+              "reason"
+            ]
+          },
+          {
+            "description": "Completed the entire operation.",
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          }
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -927,7 +1287,47 @@
           "kind"
         ]
       },
-      "UpdateEventFailureKind": {
+      "UpdateEventKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/UpdateNormalEventKind"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "normal_event"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/UpdateEventTerminalFailureKind"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "terminal_failure"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "UpdateEventTerminalFailureKind": {
         "oneOf": [
           {
             "type": "object",
@@ -987,47 +1387,47 @@
           }
         ]
       },
-      "UpdateEventKind": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "$ref": "#/components/schemas/UpdateEventSuccessKind"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "success"
-                ]
+      "UpdateLog": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateState"
               }
-            },
-            "required": [
-              "data",
-              "kind"
             ]
           },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "$ref": "#/components/schemas/UpdateEventFailureKind"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "failure"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "kind"
-            ]
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateEvent"
+            }
           }
+        },
+        "required": [
+          "events"
         ]
       },
-      "UpdateEventSuccessKind": {
+      "UpdateLogAll": {
+        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
+        "type": "object",
+        "properties": {
+          "sps": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/UpdateLog"
+              }
+            }
+          }
+        },
+        "required": [
+          "sps"
+        ]
+      },
+      "UpdateNormalEventKind": {
         "oneOf": [
           {
             "type": "object",
@@ -1068,47 +1468,25 @@
               "data",
               "kind"
             ]
-          }
-        ]
-      },
-      "UpdateLog": {
-        "type": "object",
-        "properties": {
-          "current": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UpdateState"
-              }
-            ]
           },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateEvent"
-            }
-          }
-        },
-        "required": [
-          "events"
-        ]
-      },
-      "UpdateLogAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
-        "type": "object",
-        "properties": {
-          "sps": {
+          {
             "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/UpdateLog"
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/CompletionEventKind"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "installinator_event"
+                ]
               }
-            }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
           }
-        },
-        "required": [
-          "sps"
         ]
       },
       "UpdatePreparationProgress": {
