@@ -354,7 +354,7 @@ has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 # Fleet.  None of these resources defines their own roles.
 #
 
-# Describes the policy for accessing "/system/ip-pools" in the API
+# Describes the policy for accessing "/v1/system/ip-pools" in the API
 resource IpPoolList {
 	permissions = [
 	    "list_children",

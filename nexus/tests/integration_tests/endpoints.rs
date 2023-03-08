@@ -348,7 +348,7 @@ lazy_static! {
         };
 
     // IP Pools
-    pub static ref DEMO_IP_POOLS_URL: &'static str = "/system/ip-pools";
+    pub static ref DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
     pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
         params::IpPoolCreate {
@@ -357,7 +357,7 @@ lazy_static! {
                 description: String::from("an IP pool"),
             },
         };
-    pub static ref DEMO_IP_POOL_URL: String = format!("/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
+    pub static ref DEMO_IP_POOL_URL: String = format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
         params::IpPoolUpdate {
             identity: IdentityMetadataUpdateParams {
@@ -374,7 +374,7 @@ lazy_static! {
     pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
     // IP Pools (Services)
-    pub static ref DEMO_IP_POOL_SERVICE_URL: &'static str = "/system/ip-pools-service";
+    pub static ref DEMO_IP_POOL_SERVICE_URL: &'static str = "/v1/system/ip-pools-service";
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_SERVICE_URL);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_SERVICE_RANGES_URL);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL);
@@ -1562,17 +1562,6 @@ lazy_static! {
         VerifyEndpoint {
             url: &DEMO_SYSTEM_METRICS_URL,
             visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        /* IP pools */
-
-        VerifyEndpoint {
-            url: "/system/by-id/ip-pools/{id}",
-            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,

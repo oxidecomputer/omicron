@@ -5471,6 +5471,7 @@
           "system"
         ],
         "summary": "Fetch an IP pool by id",
+        "description": "Use `GET /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_view_by_id",
         "parameters": [
           {
@@ -5500,7 +5501,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/by-id/silos/{id}": {
@@ -6206,6 +6208,7 @@
           "system"
         ],
         "summary": "List IP pools",
+        "description": "Use `GET /v1/system/ip-pools` instead",
         "operationId": "ip_pool_list",
         "parameters": [
           {
@@ -6254,6 +6257,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -6261,6 +6265,7 @@
           "system"
         ],
         "summary": "Create an IP pool",
+        "description": "Use `POST /v1/system/ip-pools` instead",
         "operationId": "ip_pool_create",
         "requestBody": {
           "content": {
@@ -6289,7 +6294,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools/{pool_name}": {
@@ -6298,6 +6304,7 @@
           "system"
         ],
         "summary": "Fetch an IP pool",
+        "description": "Use `GET /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_view",
         "parameters": [
           {
@@ -6326,13 +6333,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "system"
         ],
         "summary": "Update an IP Pool",
+        "description": "Use `PUT /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_update",
         "parameters": [
           {
@@ -6371,13 +6380,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "system"
         ],
         "summary": "Delete an IP Pool",
+        "description": "Use `DELETE /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_delete",
         "parameters": [
           {
@@ -6399,7 +6410,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools/{pool_name}/ranges": {
@@ -6408,7 +6420,7 @@
           "system"
         ],
         "summary": "List ranges for an IP pool",
-        "description": "Ranges are ordered by their first address.",
+        "description": "Ranges are ordered by their first address. Use `GET /v1/system/ip-pools/{pool}/ranges` instead",
         "operationId": "ip_pool_range_list",
         "parameters": [
           {
@@ -6458,6 +6470,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -6467,6 +6480,7 @@
           "system"
         ],
         "summary": "Add a range to an IP pool",
+        "description": "Use `POST /v1/system/ip-pools/{pool}/ranges/add` instead",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -6505,7 +6519,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools/{pool_name}/ranges/remove": {
@@ -6514,6 +6529,7 @@
           "system"
         ],
         "summary": "Remove a range from an IP pool",
+        "description": "Use `POST /v1/system/ip-pools/{pool}/ranges/remove` instead.",
         "operationId": "ip_pool_range_remove",
         "parameters": [
           {
@@ -6545,7 +6561,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools-service": {
@@ -6554,6 +6571,7 @@
           "system"
         ],
         "summary": "Fetch the IP pool used for Oxide services.",
+        "description": "Use `GET /v1/system/ip-pools-service` instead",
         "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
@@ -6572,7 +6590,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools-service/ranges": {
@@ -6581,7 +6600,7 @@
           "system"
         ],
         "summary": "List ranges for the IP pool used for Oxide services.",
-        "description": "Ranges are ordered by their first address.",
+        "description": "Ranges are ordered by their first address. Use `GET /v1/system/ip-pools-service/ranges` instead.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
           {
@@ -6623,6 +6642,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -6632,6 +6652,7 @@
           "system"
         ],
         "summary": "Add a range to an IP pool used for Oxide services.",
+        "description": "Use `POST /v1/system/ip-pools-service/ranges/add` instead",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -6660,7 +6681,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools-service/ranges/remove": {
@@ -6669,6 +6691,7 @@
           "system"
         ],
         "summary": "Remove a range from an IP pool used for Oxide services.",
+        "description": "Use `POST /v1/system/ip-pools-service/ranges/remove` instead",
         "operationId": "ip_pool_service_range_remove",
         "requestBody": {
           "content": {
@@ -6690,7 +6713,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/metrics/{metric_name}": {
@@ -11297,6 +11321,499 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List IP pools",
+        "operationId": "ip_pool_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create an IP pool",
+        "operationId": "ip_pool_create_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch an IP pool",
+        "operationId": "ip_pool_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Update an IP Pool",
+        "operationId": "ip_pool_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete an IP Pool",
+        "operationId": "ip_pool_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/ranges": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List ranges for an IP pool",
+        "description": "Ranges are ordered by their first address.",
+        "operationId": "ip_pool_range_list_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/ip-pools/{pool}/ranges/add": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Add a range to an IP pool",
+        "operationId": "ip_pool_range_add_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRange"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/ranges/remove": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Remove a range from an IP pool",
+        "operationId": "ip_pool_range_remove_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools-service": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch the IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_view_v1",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools-service/ranges": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List ranges for the IP pool used for Oxide services.",
+        "description": "Ranges are ordered by their first address.",
+        "operationId": "ip_pool_service_range_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/ip-pools-service/ranges/add": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Add a range to an IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_range_add_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRange"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools-service/ranges/remove": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Remove a range from an IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_range_remove_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
