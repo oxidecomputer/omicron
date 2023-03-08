@@ -98,13 +98,16 @@
 use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
+use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
+use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
+use trust_dns_client::rr::LowerName;
+use trust_dns_client::rr::Name;
 
 // XXX-dap
 use crate::dns_types::*;
-use sled::transaction::ConflictableTransactionError;
 
 /// Configuration for persistent storage of DNS data
 #[derive(Deserialize, Debug)]
@@ -451,62 +454,59 @@ impl Store {
 
     pub(crate) async fn query(
         &self,
-        query: &trust_dns_server::authority::MessageRequest,
+        mr: &trust_dns_server::authority::MessageRequest,
     ) -> Result<Vec<DnsRecord>, QueryError> {
-        // XXX-dap
-        todo!();
+        let config = self.read_config().map_err(QueryError::QueryFail)?;
+        let name = mr.query().name();
 
-        //    // Ensure the query is for one of the zones that we're operating.
-        //    // Otherwise, bail with servfail. This will cause resolvers to look to other
-        //    // DNS servers for this query.
-        //    let name = mr.query().name();
-        //    if !zone.zone_of(name) {
-        //        nack(&log, &mr, &socket, &header, &src).await;
-        //        return;
-        //    }
-        //
-        //    let name = mr.query().original().name().clone();
-        //    let key = name.to_string();
-        //    let key = key.trim_end_matches('.');
-        //
-        //    let bits = match db.get(key.as_bytes()) {
-        //        Ok(Some(bits)) => bits,
-        //
-        //        // If no record is found bail with NXDOMAIN.
-        //        Ok(None) => {
-        //            respond_nxdomain(&log, socket, src, rb, header, &mr).await;
-        //            return;
-        //        }
-        //
-        //        // If we encountered an error bail with SERVFAIL.
-        //        Err(e) => {
-        //            error!(log, "db get: {}", e);
-        //            nack(&log, &mr, &socket, &header, &src).await;
-        //            return;
-        //        }
-        //    };
-        //
-        //    let records: Vec<crate::dns_types::DnsRecord> =
-        //        match serde_json::from_slice(bits.as_ref()) {
-        //            Ok(r) => r,
-        //            Err(e) => {
-        //                error!(log, "deserialize record: {}", e);
-        //                nack(&log, &mr, &socket, &header, &src).await;
-        //                return;
-        //            }
-        //        };
-        //
-        //    if records.is_empty() {
-        //        error!(log, "No records found for {}", key);
-        //        respond_nxdomain(&log, socket, src, rb, header, &mr).await;
-        //        return;
-        //    }
+        let zone_name = config
+            .zones
+            .iter()
+            .find(|z| {
+                // XXX-dap does this require that zones all be lowercase?  If so
+                // we should enforce that.
+                let zone_name = LowerName::from(Name::from_str(&z).unwrap());
+                zone_name.zone_of(name)
+            })
+            .ok_or_else(|| QueryError::NoZone(name.to_string()))?;
+
+        let tree_name = Self::tree_name_for_zone(zone_name, config.generation);
+        let tree = self
+            .db
+            .open_tree(&tree_name)
+            .with_context(|| format!("open tree {:?}", tree_name))
+            .map_err(QueryError::QueryFail)?;
+
+        let name = mr.query().original().name().to_string();
+        // XXX-dap this lookup presumes that the key in this tree has the zone
+        // part appended to it.  I'm not sure if it's better or not, but it's
+        // not what I had assumed we would be have built at update-time.
+        let key = name.trim_end_matches('.');
+        let bits = tree
+            .get(key.as_bytes())
+            .with_context(|| format!("query tree {:?}", tree_name))
+            .map_err(QueryError::QueryFail)?
+            .ok_or_else(|| QueryError::NoName(name.clone()))?;
+
+        let records: Vec<DnsRecord> = serde_json::from_slice(&bits)
+            .with_context(|| {
+                format!("deserialize record for key {:?}", name.clone())
+            })
+            .map_err(QueryError::ParseFail)?;
+
+        if records.is_empty() {
+            // XXX-dap we should make this illegal (by not inserting these) and
+            // then warn here.
+            return Err(QueryError::NoName(name.clone()));
+        }
+
+        Ok(records)
     }
 }
 
 #[derive(Debug, Error)]
 pub(crate) enum QueryError {
-    #[error("server is not authoritative for zone: {0:?}")]
+    #[error("server is not authoritative for name: {0:?}")]
     NoZone(String),
 
     #[error("no records found for name: {0:?}")]

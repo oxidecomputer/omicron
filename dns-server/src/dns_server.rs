@@ -182,6 +182,9 @@ impl From<QueryError> for RequestError {
     fn from(source: QueryError) -> Self {
         match &source {
             QueryError::NoName(_) => RequestError::NxDomain(source),
+            // Bail with servfail when this query is for a zone that we don't
+            // own (and other server-side failures) so that resolvers will look
+            // to other DNS servers for this query.
             QueryError::NoZone(_)
             | QueryError::QueryFail(_)
             | QueryError::ParseFail(_) => RequestError::ServFail(source.into()),
