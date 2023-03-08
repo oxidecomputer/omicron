@@ -207,7 +207,7 @@ impl ArtifactsWithPlan {
         //
         // XXX we aren't checking against a root of trust at this point --
         // anyone can sign the repositories and this code will accept that.
-        let repository = OmicronRepo::load_ignore_expiration(temp_path)
+        let repository = OmicronRepo::load_ignore_expiration(log, temp_path)
             .map_err(RepositoryError::LoadRepository)?;
 
         let artifacts = repository
