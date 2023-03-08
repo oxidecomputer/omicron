@@ -150,16 +150,18 @@ impl Store {
     }
 
     fn read_config(&self) -> anyhow::Result<CurrentConfig> {
-        Self::parse_config(
-            self.db.get(KEY_CONFIG).context("fetching current config")?,
-        )
+        self.read_config_optional()?.ok_or_else(|| anyhow!("no config found"))
     }
 
-    fn parse_config(
-        value: Option<sled::IVec>,
-    ) -> anyhow::Result<CurrentConfig> {
-        let config_bytes = value.ok_or_else(|| anyhow!("no config found"))?;
-        serde_json::from_slice(&config_bytes).context("parsing current config")
+    fn read_config_optional(&self) -> anyhow::Result<Option<CurrentConfig>> {
+        self.db
+            .get(KEY_CONFIG)
+            .context("fetching current config")?
+            .map(|config_bytes| {
+                serde_json::from_slice(&config_bytes)
+                    .context("parsing current config")
+            })
+            .transpose()
     }
 
     fn tree_name_for_zone(zone_name: &str, generation: u64) -> String {
@@ -269,13 +271,17 @@ impl Store {
         // requested.  Because we should have exclusive access to updates right
         // now, it shouldn't be possible for this to change after we've checked
         // it.
-        let old_config = self.read_config()?;
-        if old_config.generation >= generation {
-            bail!("already at generation {}", generation);
-        }
+        if let Some(old_config) = self.read_config_optional()? {
+            if old_config.generation >= generation {
+                bail!("already at generation {}", generation);
+            }
 
-        // Prune any trees in the db that are newer than the current generation.
-        self.prune_newer(&old_config).await;
+            // Prune any trees in the db that are newer than the current
+            // generation.
+            self.prune_newer(&old_config).await;
+        } else {
+            self.prune_all().await;
+        }
 
         // For each zone in the config, create the corresponding tree.  Populate
         // it with the data from the config.
@@ -322,18 +328,28 @@ impl Store {
         debug!(&log, "updating current config");
         let result = self.db.transaction(move |t| {
             // Double-check that the generation we're replacing is older.
-            let old_config = Self::parse_config(t.get(&KEY_CONFIG)?)
-                .map_err(ConflictableTransactionError::Abort)?;
-            if old_config.generation >= generation {
-                return Err(ConflictableTransactionError::Abort(anyhow!(
-                    "unexpectedly found newer generation {}",
-                    old_config.generation
-                )));
+            if let Some(old_config_bytes) = t.get(&KEY_CONFIG)? {
+                let old_config: CurrentConfig = serde_json::from_slice(
+                    &old_config_bytes,
+                )
+                .map_err(|error| {
+                    ConflictableTransactionError::Abort(anyhow!(
+                        "parsing config: {:#}",
+                        error
+                    ))
+                })?;
+                if old_config.generation >= generation {
+                    return Err(ConflictableTransactionError::Abort(anyhow!(
+                        "unexpectedly found newer generation {}",
+                        old_config.generation
+                    )));
+                }
             }
 
             t.insert(KEY_CONFIG, new_config_bytes.clone())?;
             Ok(())
         });
+
         if let Err(error) = result {
             bail!("final update: {:#}", error);
         }
@@ -353,40 +369,54 @@ impl Store {
             "pruning trees for generations newer than {}", current_generation
         );
 
-        let trees_to_prune = self
-            .db
-            .tree_names()
-            .iter()
-            .filter_map(|tree_name_bytes| {
-                let tree_name = std::str::from_utf8(tree_name_bytes).ok()?;
-                let parts = tree_name.splitn(4, '_').collect::<Vec<_>>();
-                if parts.len() != 4
-                    || parts[0] != "generation"
-                    || parts[2] != "zone"
-                {
-                    return None;
-                }
-
-                let gen_num = parts[1].parse::<u64>().ok()?;
+        let trees_to_prune =
+            self.all_name_trees().filter_map(|(gen_num, tree_name)| {
                 if gen_num > current_generation {
-                    Some(tree_name.to_owned())
+                    Some(tree_name)
                 } else {
                     None
                 }
-            })
-            .collect::<Vec<_>>();
+            });
 
-        self.prune_trees(&trees_to_prune, "too new");
+        self.prune_trees(trees_to_prune, "too new");
     }
 
-    fn prune_trees(&self, trees_to_prune: &[String], reason: &'static str) {
+    async fn prune_all(&self) {
+        let log = &self.log;
+        info!(log, "pruning all name trees");
+        self.prune_trees(
+            self.all_name_trees().map(|(_, n)| n),
+            "too new (no config yet)",
+        );
+    }
+
+    fn all_name_trees(&self) -> impl Iterator<Item = (u64, String)> {
+        self.db.tree_names().into_iter().filter_map(|tree_name_bytes| {
+            let tree_name = std::str::from_utf8(&tree_name_bytes).ok()?;
+            let parts = tree_name.splitn(4, '_').collect::<Vec<_>>();
+            if parts.len() != 4
+                || parts[0] != "generation"
+                || parts[2] != "zone"
+            {
+                return None;
+            }
+
+            let gen_num = parts[1].parse::<u64>().ok()?;
+            Some((gen_num, tree_name.to_owned()))
+        })
+    }
+
+    fn prune_trees<I>(&self, trees_to_prune: I, reason: &'static str)
+    where
+        I: Iterator<Item = String>,
+    {
         let log = &self.log;
 
         for tree_name in trees_to_prune {
             info!(
                 log,
                 "pruning tree";
-                "tree_name" => tree_name,
+                "tree_name" => &tree_name,
                 "reason" => reason
             );
 
@@ -394,7 +424,7 @@ impl Store {
                 warn!(
                     log,
                     "failed to remove tree";
-                    "tree_name" => tree_name,
+                    "tree_name" => &tree_name,
                     "error_message" => #%error,
                 );
             }
@@ -413,27 +443,8 @@ impl Store {
         );
 
         let mut trees_older = self
-            .db
-            .tree_names()
-            .iter()
-            .filter_map(|tree_name_bytes| {
-                // XXX-dap commonize parsing
-                let tree_name = std::str::from_utf8(tree_name_bytes).ok()?;
-                let parts = tree_name.splitn(4, '_').collect::<Vec<_>>();
-                if parts.len() != 4
-                    || parts[0] != "generation"
-                    || parts[2] != "zone"
-                {
-                    return None;
-                }
-
-                let gen_num = parts[1].parse::<u64>().ok()?;
-                if gen_num < current_generation {
-                    Some((gen_num, tree_name.to_owned()))
-                } else {
-                    None
-                }
-            })
+            .all_name_trees()
+            .filter(|(gen_num, _)| *gen_num < current_generation)
             .collect::<Vec<_>>();
 
         // Now remove all but the last "keep" items.
@@ -447,9 +458,8 @@ impl Store {
         let trees_to_prune = trees_older
             .into_iter()
             .take(ntake)
-            .map(|(_, n)| n)
-            .collect::<Vec<_>>();
-        self.prune_trees(&trees_to_prune, "too old");
+            .map(|(_, n)| n);
+        self.prune_trees(trees_to_prune, "too old");
     }
 
     pub(crate) async fn query(
