@@ -81,6 +81,11 @@ pub struct ProviderPath {
     pub provider: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct IpPoolPath {
+    pub pool: NameOrId,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
     pub silo: NameOrId,
