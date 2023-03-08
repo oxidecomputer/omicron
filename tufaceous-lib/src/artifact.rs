@@ -121,12 +121,13 @@ fn write_generic_fake_artifact<W: Write>(
     size: u64,
     writer: &mut W,
 ) -> io::Result<()> {
-    // Don't try and get the size exactly right
-    let times = (size as usize) % FILLER_TEXT.len();
+    let mut buf_writer = BufWriter::new(writer);
+    // Don't need to get the size exactly right, capping to the nearest 16 is fine.
+    let times = size as usize % FILLER_TEXT.len();
     for _ in 0..times {
-        writer.write_all(FILLER_TEXT)?;
+        buf_writer.write_all(FILLER_TEXT)?;
     }
-    Ok(())
+    buf_writer.flush()
 }
 
 /// Writes a fake artifact that looks like a host or trampoline tarball.
@@ -172,33 +173,45 @@ fn write_host_tarball_fake_artifact<W: Write>(
     Ok(())
 }
 
+/// A simple `Read` implementation used to generate filler text.
+///
+/// This is used by [`write_host_tarball_fake_artifact`] above. Ideally, we'd
+/// just be able to write the filler text directly to some sort of handle
+/// provided by tar. However, `tar::Builder` only exposes `append` methods that
+/// take a `Read` impl, so instead we hand-write a `Read` impl that achieves the
+/// same goal.
+///
+/// This is really a bug in upstream tar, since providing a writer is more
+/// generic than providing a reader (you can always use `std::io::copy` to copy
+/// data from a reader to a writer). The bug is tracked at
+/// https://github.com/alexcrichton/tar-rs/issues/304.
 struct FillerReader {
-    times: usize,
-    // Current position within the current
-    current: usize,
+    remaining_times: usize,
+    // Current position within the text.
+    pos: usize,
 }
 
 impl FillerReader {
     fn new(times: usize) -> Self {
-        Self { times, current: 0 }
+        Self { remaining_times: times, pos: 0 }
     }
 }
 
 impl io::Read for FillerReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.times == 0 {
-            // Signal the end of the write.
+        if self.remaining_times == 0 {
+            // Signal the end of the reader.
             return Ok(0);
         }
 
-        let bytes_to_write = (FILLER_TEXT.len() - self.current).min(buf.len());
+        let bytes_to_write = (FILLER_TEXT.len() - self.pos).min(buf.len());
         buf[..bytes_to_write].copy_from_slice(
-            &FILLER_TEXT[self.current..(self.current + bytes_to_write)],
+            &FILLER_TEXT[self.pos..(self.pos + bytes_to_write)],
         );
 
-        if self.current + bytes_to_write == FILLER_TEXT.len() {
-            self.times -= 1;
-            self.current = 0;
+        if self.pos + bytes_to_write == FILLER_TEXT.len() {
+            self.remaining_times -= 1;
+            self.pos = 0;
         }
 
         Ok(bytes_to_write)

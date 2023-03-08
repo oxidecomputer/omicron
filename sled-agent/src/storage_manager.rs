@@ -5,7 +5,7 @@
 //! Management of sled-local storage.
 
 use crate::nexus::LazyNexusClient;
-use crate::params::DatasetKind;
+use crate::params::{DatasetKind, DiskType};
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -133,18 +133,24 @@ struct Pool {
     info: ZpoolInfo,
     // ZFS filesytem UUID -> Zone.
     zones: HashMap<Uuid, RunningZone>,
+
+    // The devfs path to the disk where this zpool exists.
+    disk_path: Option<PathBuf>,
 }
 
 impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    fn new(name: &ZpoolName) -> Result<Pool, Error> {
+    fn new(
+        name: &ZpoolName,
+        disk_path: Option<PathBuf>,
+    ) -> Result<Pool, Error> {
         let info = Zpool::get_info(&name.to_string())?;
 
         // NOTE: This relies on the name being a UUID exactly.
         // We could be more flexible...
-        Ok(Pool { id: name.id(), info, zones: HashMap::new() })
+        Ok(Pool { id: name.id(), info, zones: HashMap::new(), disk_path })
     }
 
     /// Associate an already running zone with this pool object.
@@ -808,8 +814,9 @@ impl StorageWorker {
         disk: Disk,
     ) -> Result<(), Error> {
         let zpool_name = disk.zpool_name().clone();
-        disks.insert(disk.devfs_path().to_path_buf(), disk.clone());
-        self.upsert_zpool(&resources, &zpool_name).await?;
+        let disk_path = disk.devfs_path().to_path_buf();
+        disks.insert(disk_path.clone(), disk.clone());
+        self.upsert_zpool(&resources, Some(disk_path), &zpool_name).await?;
         self.physical_disk_notify(NotifyDiskRequest::Add(disk));
 
         Ok(())
@@ -905,10 +912,11 @@ impl StorageWorker {
     async fn upsert_zpool(
         &mut self,
         resources: &StorageResources,
+        disk_path: Option<PathBuf>,
         pool_name: &ZpoolName,
     ) -> Result<(), Error> {
         let mut pools = resources.pools.lock().await;
-        let zpool = Pool::new(pool_name)?;
+        let zpool = Pool::new(pool_name, disk_path)?;
 
         let pool = match pools.entry(pool_name.clone()) {
             hash_map::Entry::Occupied(mut entry) => {
@@ -1089,8 +1097,8 @@ impl StorageWorker {
                         RemoveDisk(disk) => {
                             self.delete_disk(&resources, disk).await?;
                         },
-                        NewPool(pool_name) => {
-                            self.upsert_zpool(&resources, &pool_name).await?;
+                        NewPool { pool_name, disk_path }  => {
+                            self.upsert_zpool(&resources, disk_path, &pool_name).await?;
                         },
                         NewFilesystem(request) => {
                             let result = self.add_dataset(&resources, &request).await;
@@ -1111,7 +1119,7 @@ enum StorageWorkerRequest {
     AddDisk(UnparsedDisk),
     RemoveDisk(UnparsedDisk),
     DisksChanged(Vec<UnparsedDisk>),
-    NewPool(ZpoolName),
+    NewPool { pool_name: ZpoolName, disk_path: Option<PathBuf> },
     NewFilesystem(NewFilesystemRequest),
 }
 
@@ -1201,17 +1209,48 @@ impl StorageManager {
 
     /// Adds a zpool to the storage manager.
     // Receiver implemented by [StorageWorker::upsert_zpool].
-    pub async fn upsert_zpool(&self, name: ZpoolName) {
+    pub async fn upsert_zpool(
+        &self,
+        name: ZpoolName,
+        disk_path: Option<PathBuf>,
+    ) {
         info!(self.log, "Inserting zpool: {name:?}");
-        self.tx.send(StorageWorkerRequest::NewPool(name)).await.unwrap();
+        self.tx
+            .send(StorageWorkerRequest::NewPool { pool_name: name, disk_path })
+            .await
+            .unwrap();
     }
 
     pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
+        let disks = self.resources.disks.lock().await;
         let pools = self.resources.pools.lock().await;
-        Ok(pools
-            .keys()
-            .map(|zpool| crate::params::Zpool { id: zpool.id() })
-            .collect())
+
+        let mut zpools = Vec::with_capacity(pools.len());
+
+        for (name, pool) in pools.iter() {
+            let disk_type = if let Some(disk_path) = &pool.disk_path {
+                if let Some(disk) = disks.get(disk_path) {
+                    disk.variant().into()
+                } else {
+                    // If the zpool claims to be attached to a disk that we
+                    // don't know about, that's an error.
+                    return Err(Error::ZpoolNotFound(
+                        format!("zpool: {name} claims to be from unknown disk: {disk_path}",
+                            disk_path = disk_path.display()
+                        )
+                    ));
+                }
+            } else {
+                // If the pool does not have an associated disk, treat it like a
+                // U.2 device. This should only be the case for "disks attached
+                // via the sled agent config".
+                DiskType::U2
+            };
+
+            zpools.push(crate::params::Zpool { id: name.id(), disk_type });
+        }
+
+        Ok(zpools)
     }
 
     pub async fn upsert_filesystem(
