@@ -35,8 +35,10 @@ pub struct UpdatePane {
 
 impl UpdatePane {
     pub fn new() -> UpdatePane {
+        let mut tree_state = TreeState::default();
+        tree_state.select_first();
         UpdatePane {
-            tree_state: Default::default(),
+            tree_state,
             items: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| TreeItem::new(*id, vec![]))
@@ -163,20 +165,25 @@ impl Control for UpdatePane {
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
                 KeyCode::Up => {
-                    // Keep the rack selection in sync across panes
-                    state.rack_state.prev();
                     self.tree_state.key_up(&self.items);
                     Some(Action::Redraw)
                 }
                 KeyCode::Down => {
-                    // Keep the rack selection in sync across panes
-                    state.rack_state.next();
                     self.tree_state.key_down(&self.items);
                     Some(Action::Redraw)
                 }
                 KeyCode::Left => {
+                    // We always want something selected. If we close the root,
+                    // we want to re-open it. This is the only API currently provided
+                    // that allows this.
+                    let selected = self.tree_state.selected();
                     self.tree_state.key_left();
-                    Some(Action::Redraw)
+                    if self.tree_state.selected().is_empty() {
+                        self.tree_state.select(selected);
+                        None
+                    } else {
+                        Some(Action::Redraw)
+                    }
                 }
                 KeyCode::Right => {
                     self.tree_state.key_right();
