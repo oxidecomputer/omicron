@@ -76,38 +76,43 @@ async fn main() -> Result<()> {
 
     match opt.subcommand {
         SubCommand::ListRecords => {
-            let records = client.dns_records_list().await?;
-            println!("{:#?}", records);
+            todo!(); // XXX-dap
+            // let records = client.dns_records_list().await?;
+            // println!("{:#?}", records);
         }
         SubCommand::AddAAAA(cmd) => {
-            client
-                .dns_records_create(&vec![DnsKv {
-                    key: DnsRecordKey { name: cmd.name },
-                    records: vec![DnsRecord::Aaaa(cmd.addr)],
-                }])
-                .await?;
+            todo!(); // XXX-dap
+            //client
+            //    .dns_records_create(&vec![DnsKv {
+            //        key: DnsRecordKey { name: cmd.name },
+            //        records: vec![DnsRecord::Aaaa(cmd.addr)],
+            //    }])
+            //    .await?;
         }
         SubCommand::AddSRV(cmd) => {
-            client
-                .dns_records_create(&vec![DnsKv {
-                    key: DnsRecordKey { name: cmd.name },
-                    records: vec![DnsRecord::Srv(Srv {
-                        prio: cmd.prio,
-                        weight: cmd.weight,
-                        port: cmd.port,
-                        target: cmd.target,
-                    })],
-                }])
-                .await?;
+            todo!(); // XXX-dap
+            //client
+            //    .dns_records_create(&vec![DnsKv {
+            //        key: DnsRecordKey { name: cmd.name },
+            //        records: vec![DnsRecord::Srv(Srv {
+            //            prio: cmd.prio,
+            //            weight: cmd.weight,
+            //            port: cmd.port,
+            //            target: cmd.target,
+            //        })],
+            //    }])
+            //    .await?;
         }
         SubCommand::DeleteRecord(cmd) => {
-            client
-                .dns_records_delete(&vec![DnsRecordKey { name: cmd.name }])
-                .await?;
+            todo!();
+            //client
+            //    .dns_records_delete(&vec![DnsRecordKey { name: cmd.name }])
+            //    .await?;
         }
     }
 
-    Ok(())
+    // XXX-dap
+    // Ok(())
 }
 
 fn init_logger() -> Logger {

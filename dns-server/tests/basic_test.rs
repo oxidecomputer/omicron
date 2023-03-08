@@ -2,16 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::Ipv6Addr;
-use std::sync::Arc;
-
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use dns_service_client::{
-    types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
+    types::{DnsConfig, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
 use dropshot::test_util::LogContext;
 use omicron_test_utils::dev::test_setup_log;
+use slog::o;
+use std::net::Ipv6Addr;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
@@ -19,30 +18,31 @@ use trust_dns_resolver::{
     proto::op::ResponseCode,
 };
 
+const TEST_ZONE: &'static str = "oxide.internal";
+
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
-    let test_ctx =
-        init_client_server("aaaa_crud", "oxide.internal".into()).await?;
+    let test_ctx = init_client_server("aaaa_crud").await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert!(records.is_empty());
 
     // add an aaaa record
-    let name = DnsRecordKey { name: "devron.oxide.internal".into() };
+    let name = DnsRecordKey { name: "devron".into() };
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let aaaa = DnsRecord::Aaaa(addr);
-    client
-        .dns_records_create(&vec![DnsKv {
-            key: name.clone(),
-            records: vec![aaaa.clone()],
-        }])
-        .await?;
+    dns_records_create(
+        client,
+        TEST_ZONE,
+        vec![DnsKv { key: name.clone(), records: vec![aaaa.clone()] }],
+    )
+    .await?;
 
     // read back the aaaa record
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
 
@@ -57,7 +57,8 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     }
 
     // resolve the name
-    let response = resolver.lookup_ip(name.name + ".").await?;
+    let response =
+        resolver.lookup_ip(name.name + "." + TEST_ZONE + ".").await?;
     let address = response.iter().next().expect("no addresses returned!");
     assert_eq!(address, addr);
 
@@ -67,29 +68,28 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn srv_crud() -> Result<(), anyhow::Error> {
-    let test_ctx =
-        init_client_server("srv_crud", "oxide.internal".into()).await?;
+    let test_ctx = init_client_server("srv_crud").await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert!(records.is_empty());
 
     // add a srv record
-    let name = DnsRecordKey { name: "hromi.oxide.internal".into() };
+    let name = DnsRecordKey { name: "hromi".into() };
     let srv =
         Srv { prio: 47, weight: 74, port: 99, target: "outpost47".into() };
     let rec = DnsRecord::Srv(srv.clone());
-    client
-        .dns_records_create(&vec![DnsKv {
-            key: name.clone(),
-            records: vec![rec.clone()],
-        }])
-        .await?;
+    dns_records_create(
+        client,
+        TEST_ZONE,
+        vec![DnsKv { key: name.clone(), records: vec![rec.clone()] }],
+    )
+    .await?;
 
     // read back the srv record
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
 
@@ -107,7 +107,8 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     }
 
     // resolve the srv
-    let response = resolver.srv_lookup(name.name).await?;
+    let response =
+        resolver.srv_lookup(name.name + "." + TEST_ZONE + ".").await?;
     let srvr = response.iter().next().expect("no addresses returned!");
     assert_eq!(srvr.priority(), srv.prio);
     assert_eq!(srvr.weight(), srv.weight);
@@ -120,31 +121,29 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
-    let test_ctx =
-        init_client_server("multi_record_crud", "oxide.internal".into())
-            .await?;
+    let test_ctx = init_client_server("multi_record_crud").await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert!(records.is_empty());
 
     // Add multiple AAAA records
-    let name = DnsRecordKey { name: "devron.oxide.internal".into() };
+    let name = DnsRecordKey { name: "devron".into() };
     let addr1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let addr2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
     let aaaa1 = DnsRecord::Aaaa(addr1);
     let aaaa2 = DnsRecord::Aaaa(addr2);
-    client
-        .dns_records_create(&vec![DnsKv {
-            key: name.clone(),
-            records: vec![aaaa1, aaaa2],
-        }])
-        .await?;
+    dns_records_create(
+        client,
+        TEST_ZONE,
+        vec![DnsKv { key: name.clone(), records: vec![aaaa1, aaaa2] }],
+    )
+    .await?;
 
     // read back the aaaa records
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
 
@@ -167,7 +166,8 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
     }
 
     // resolve the name
-    let response = resolver.lookup_ip(name.name + ".").await?;
+    let response =
+        resolver.lookup_ip(name.name + "." + TEST_ZONE + ".").await?;
     let mut iter = response.iter();
     let address = iter.next().expect("no addresses returned!");
     assert_eq!(address, addr1);
@@ -206,45 +206,67 @@ async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
     };
 }
 
+// XXX-dap ask ry: why does this test exist instead of just not inserting it?
 #[tokio::test]
 pub async fn empty_record() -> Result<(), anyhow::Error> {
-    let test_ctx =
-        init_client_server("empty_record", "oxide.internal".into()).await?;
+    let test_ctx = init_client_server("empty_record").await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert!(records.is_empty());
 
     // Add an empty DNS record
-    let name = DnsRecordKey { name: "devron.oxide.internal".into() };
-    client
-        .dns_records_create(&vec![DnsKv { key: name.clone(), records: vec![] }])
-        .await?;
+    let name = DnsRecordKey { name: "devron".into() };
+    dns_records_create(
+        client,
+        TEST_ZONE,
+        vec![DnsKv { key: name.clone(), records: vec![] }],
+    )
+    .await?;
 
     // read back the aaaa record
-    let records = client.dns_records_list().await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
     assert_eq!(0, records[0].records.len());
 
     // resolve the name
-    lookup_ip_expect_nxdomain(&resolver, "devron.oxide.internal").await;
+    lookup_ip_expect_nxdomain(&resolver, &(name.name + "." + TEST_ZONE + "."))
+        .await;
 
     test_ctx.cleanup().await;
     Ok(())
 }
 
+// XXX-dap TODO-coverage add a test where the name contains the zone name in it
+
 #[tokio::test]
 pub async fn nxdomain() -> Result<(), anyhow::Error> {
-    let test_ctx =
-        init_client_server("nxdomain", "oxide.internal".into()).await?;
+    let test_ctx = init_client_server("nxdomain").await?;
     let resolver = &test_ctx.resolver;
+    let client = &test_ctx.client;
+
+    // records should initially be empty
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert!(records.is_empty());
+
+    // add a record, just to create a zone
+    let name = DnsRecordKey { name: "devron".into() };
+    let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+    let aaaa = DnsRecord::Aaaa(addr);
+    dns_records_create(
+        client,
+        TEST_ZONE,
+        vec![DnsKv { key: name.clone(), records: vec![aaaa.clone()] }],
+    )
+    .await?;
 
     // asking for a nonexistent record within the domain of the internal DNS
     // server should result in an NXDOMAIN
-    lookup_ip_expect_nxdomain(&resolver, "unicorn.oxide.internal").await;
+    lookup_ip_expect_nxdomain(&resolver, &format!("unicorn.{}.", TEST_ZONE))
+        .await;
 
     test_ctx.cleanup().await;
     Ok(())
@@ -252,13 +274,13 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn servfail() -> Result<(), anyhow::Error> {
-    let test_ctx =
-        init_client_server("servfail", "oxide.internal".into()).await?;
+    let test_ctx = init_client_server("servfail").await?;
     let resolver = &test_ctx.resolver;
 
-    // asking for a record outside the domain of the internal DNS
-    // server should result in a SERVFAIL.
-    match resolver.lookup_ip("oxide.computer").await {
+    // In this case, we haven't defined any zones yet, so any request should be
+    // outside the server's authoritative zones.  That should result in a
+    // SERVFAIL.
+    match resolver.lookup_ip("unicorn.oxide.internal").await {
         Ok(unexpected) => {
             panic!("Expected SERVFAIL, got record {:?}", unexpected);
         }
@@ -291,9 +313,8 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
 struct TestContext {
     client: Client,
     resolver: TokioAsyncResolver,
-    dns_server: dns_server::dns_server::Server,
-    dropshot_server:
-        dropshot::HttpServer<Arc<dns_server::http_server::Context>>,
+    dns_server: dns_server::dns_server::ServerHandle,
+    dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
     tmp: tempdir::TempDir,
     logctx: LogContext,
 }
@@ -309,31 +330,36 @@ impl TestContext {
 
 async fn init_client_server(
     test_name: &str,
-    zone: String,
 ) -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
     let (tmp, config, logctx) = test_config(test_name)?;
     let log = logctx.log.clone();
 
     // initialize dns server db
-    let db = Arc::new(sled::open(&config.data.storage_path)?);
-    db.clear()?;
+    let store = dns_server::storage::Store::new(
+        log.new(o!("component" => "store")),
+        &config.storage,
+    )
+    .context("initializing storage")?;
+    // XXX-dap clear it?
 
     // launch a dns server
     let dns_server = {
-        let db = db.clone();
-        let log = log.clone();
-        let dns_config = dns_server::dns_server::Config {
-            bind_address: "[::1]:0".into(),
-            zone,
-        };
+        let dns_config =
+            dns_server::dns_server::Config { bind_address: "[::1]:0".into() };
 
-        dns_server::dns_server::run(log, db, dns_config).await?
+        dns_server::dns_server::Server::start(
+            log.new(o!("component" => "dns")),
+            store.clone(),
+            dns_config,
+        )
+        .await
+        .context("starting DNS server")?
     };
 
     let mut rc = ResolverConfig::new();
     rc.add_name_server(NameServerConfig {
-        socket_addr: dns_server.address,
+        socket_addr: *dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
         trust_nx_responses: false,
@@ -344,8 +370,19 @@ async fn init_client_server(
         TokioAsyncResolver::tokio(rc, ResolverOpts::default()).unwrap();
 
     // launch a dropshot server
-    let dropshot_server =
-        dns_server::start_dropshot_server(config, log.clone(), db).await?;
+    let dropshot_server = {
+        let http_api = dns_server::http_server::api();
+        let http_api_context = dns_server::http_server::Context::new(store);
+
+        dropshot::HttpServerStarter::new(
+            &config.dropshot,
+            http_api,
+            http_api_context,
+            &log.new(o!("component" => "http")),
+        )
+        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
+        .start()
+    };
 
     // wait for server to start
     // XXX-dap wait_for_condition
@@ -382,8 +419,59 @@ fn test_config(
             request_body_max_bytes: 1024,
             ..Default::default()
         },
-        data: dns_server::storage::Config { nmax_messages: 16, storage_path },
+        storage: dns_server::storage::Config { storage_path },
     };
 
     Ok((tmp_dir, config, logctx))
+}
+
+async fn dns_records_create(
+    client: &Client,
+    zone_name: &str,
+    records: Vec<DnsKv>,
+) -> anyhow::Result<()> {
+    let before = client
+        .dns_config_get()
+        .await
+        .context("fetch current generation")?
+        .into_inner();
+
+    let (our_zones, other_zones) = before
+        .zones
+        .into_iter()
+        .partition::<Vec<_>, _>(|z| z.zone_name == zone_name);
+
+    assert!(our_zones.len() <= 1);
+    let zone_records = if let Some(our_zone) = our_zones.into_iter().next() {
+        our_zone.records.into_iter().chain(records.into_iter()).collect()
+    } else {
+        records
+    };
+
+    let new_zone = DnsConfigZone {
+        zone_name: zone_name.to_owned(),
+        records: zone_records,
+    };
+
+    let zones =
+        other_zones.into_iter().chain(std::iter::once(new_zone)).collect();
+    let after = DnsConfig { generation: before.generation + 1, zones };
+    client.dns_config_put(&after).await.context("updating generation")?;
+    Ok(())
+}
+
+async fn dns_records_list(
+    client: &Client,
+    zone_name: &str,
+) -> anyhow::Result<Vec<DnsKv>> {
+    Ok(client
+        .dns_config_get()
+        .await
+        .context("fetch current generation")?
+        .into_inner()
+        .zones
+        .into_iter()
+        .find(|z| z.zone_name == zone_name)
+        .map(|z| z.records)
+        .unwrap_or_else(Vec::new))
 }

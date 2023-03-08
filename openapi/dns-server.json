@@ -5,20 +5,16 @@
     "version": "v0.1.0"
   },
   "paths": {
-    "/records": {
+    "/config": {
       "get": {
-        "operationId": "dns_records_list",
+        "operationId": "dns_config_get",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_DnsKv",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DnsKv"
-                  }
+                  "$ref": "#/components/schemas/DnsConfig"
                 }
               }
             }
@@ -31,17 +27,13 @@
           }
         }
       },
-      "post": {
-        "operationId": "dns_records_create",
+      "put": {
+        "operationId": "dns_config_put",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "title": "Array_of_DnsKv",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/DnsKv"
-                }
+                "$ref": "#/components/schemas/DnsConfig"
               }
             }
           },
@@ -50,34 +42,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "dns_records_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "Array_of_DnsRecordKey",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/DnsRecordKey"
-                }
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -103,6 +67,44 @@
       }
     },
     "schemas": {
+      "DnsConfig": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsConfigZone"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "zones"
+        ]
+      },
+      "DnsConfigZone": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsKv"
+            }
+          },
+          "zone_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "records",
+          "zone_name"
+        ]
+      },
       "DnsKv": {
         "type": "object",
         "properties": {

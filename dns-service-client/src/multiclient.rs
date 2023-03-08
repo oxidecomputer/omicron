@@ -149,11 +149,13 @@ impl Updater {
         &'a self,
         body: &'a Vec<crate::types::DnsKv>,
     ) -> Result<(), DnsError> {
+
         stream::iter(&self.clients)
             .map(Ok::<_, DnsError>)
             .try_for_each_concurrent(None, |client| async move {
-                client.dns_records_create(body).await?;
-                Ok(())
+                todo!(); // XXX-dap
+                // client.dns_records_create(body).await?;
+                // Ok(())
             })
             .await?;
 
@@ -163,6 +165,7 @@ impl Updater {
     /// Deletes records in all DNS servers.
     ///
     /// Returns an error if deleting the record fails on any server.
+    #[cfg(test)]
     pub async fn dns_records_delete<'a>(
         &'a self,
         body: &'a Vec<crate::types::DnsRecordKey>,

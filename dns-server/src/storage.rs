@@ -142,11 +142,30 @@ impl Store {
             format!("open DNS database {:?}", &config.storage_path)
         })?;
 
-        Ok(Self::new_with_db(log, Arc::new(db)))
+        Self::new_with_db(log, Arc::new(db))
     }
 
-    pub fn new_with_db(log: slog::Logger, db: Arc<sled::Db>) -> Store {
-        Store { log, db, keep: KEEP_OLD_TREES }
+    pub fn new_with_db(
+        log: slog::Logger,
+        db: Arc<sled::Db>,
+    ) -> Result<Self, anyhow::Error> {
+        let store = Store { log, db, keep: KEEP_OLD_TREES };
+        if store.read_config_optional()?.is_none() {
+            let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
+                generation: 0,
+                zones: vec![],
+            })
+            .context("serializing initial config")?;
+            store
+                .db
+                .insert(&KEY_CONFIG, initial_config_bytes)
+                .context("inserting initial config")?;
+        }
+
+        let config = store.read_config()?;
+        store.prune_newer(&config);
+        store.prune_older(&config);
+        Ok(store)
     }
 
     fn read_config(&self) -> anyhow::Result<CurrentConfig> {
@@ -271,17 +290,14 @@ impl Store {
         // requested.  Because we should have exclusive access to updates right
         // now, it shouldn't be possible for this to change after we've checked
         // it.
-        if let Some(old_config) = self.read_config_optional()? {
-            if old_config.generation >= generation {
-                bail!("already at generation {}", generation);
-            }
-
-            // Prune any trees in the db that are newer than the current
-            // generation.
-            self.prune_newer(&old_config).await;
-        } else {
-            self.prune_all().await;
+        let old_config = self.read_config()?;
+        if old_config.generation >= generation {
+            bail!("already at generation {}", generation);
         }
+
+        // Prune any trees in the db that are newer than the current
+        // generation.
+        self.prune_newer(&old_config);
 
         // For each zone in the config, create the corresponding tree.  Populate
         // it with the data from the config.
@@ -329,22 +345,25 @@ impl Store {
         debug!(&log, "updating current config");
         let result = self.db.transaction(move |t| {
             // Double-check that the generation we're replacing is older.
-            if let Some(old_config_bytes) = t.get(&KEY_CONFIG)? {
-                let old_config: CurrentConfig = serde_json::from_slice(
-                    &old_config_bytes,
-                )
-                .map_err(|error| {
+            let old_config_bytes = t.get(&KEY_CONFIG)?.ok_or_else(|| {
+                ConflictableTransactionError::Abort(anyhow!(
+                    "found no config during update",
+                ))
+            })?;
+
+            let old_config: CurrentConfig =
+                serde_json::from_slice(&old_config_bytes).map_err(|error| {
                     ConflictableTransactionError::Abort(anyhow!(
                         "parsing config: {:#}",
                         error
                     ))
                 })?;
-                if old_config.generation >= generation {
-                    return Err(ConflictableTransactionError::Abort(anyhow!(
-                        "unexpectedly found newer generation {}",
-                        old_config.generation
-                    )));
-                }
+
+            if old_config.generation >= generation {
+                return Err(ConflictableTransactionError::Abort(anyhow!(
+                    "unexpectedly found newer generation {}",
+                    old_config.generation
+                )));
             }
 
             t.insert(KEY_CONFIG, new_config_bytes.clone())?;
@@ -357,11 +376,11 @@ impl Store {
 
         self.db.flush_async().await.context("flush")?;
 
-        self.prune_older(&new_config).await;
+        self.prune_older(&new_config);
         Ok(())
     }
 
-    async fn prune_newer(&self, config: &CurrentConfig) {
+    fn prune_newer(&self, config: &CurrentConfig) {
         let log = &self.log;
         let current_generation = config.generation;
 
@@ -380,15 +399,6 @@ impl Store {
             });
 
         self.prune_trees(trees_to_prune, "too new");
-    }
-
-    async fn prune_all(&self) {
-        let log = &self.log;
-        info!(log, "pruning all name trees");
-        self.prune_trees(
-            self.all_name_trees().map(|(_, n)| n),
-            "too new (no config yet)",
-        );
     }
 
     fn all_name_trees(&self) -> impl Iterator<Item = (u64, String)> {
@@ -432,7 +442,7 @@ impl Store {
         }
     }
 
-    async fn prune_older(&self, config: &CurrentConfig) {
+    fn prune_older(&self, config: &CurrentConfig) {
         let log = &self.log;
         let keep = self.keep;
         let current_generation = config.generation;
@@ -492,16 +502,19 @@ impl Store {
             let orig_name = mr.query().original().name();
             let zone_name = Name::from_str(zone_name).unwrap();
             // This is implied by passing the `zone_of()` check above.
-            assert!(zone_name.num_labels() >= orig_name.num_labels());
+            assert!(zone_name.num_labels() <= orig_name.num_labels());
             let name_only_labels =
-                usize::from(zone_name.num_labels() - orig_name.num_labels());
-            let name_only =
+                usize::from(orig_name.num_labels() - zone_name.num_labels());
+            let mut name_only =
                 Name::from_labels(orig_name.iter().take(name_only_labels))
                     .unwrap();
+            name_only.set_fqdn(false);
             let key = name_only.to_string().to_lowercase();
             assert!(!key.ends_with('.'));
             key
         };
+
+        debug!(&self.log, "query key"; "key" => &key);
 
         let bits = tree
             .get(key.as_bytes())
