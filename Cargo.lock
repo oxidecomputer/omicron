@@ -7969,6 +7969,7 @@ dependencies = [
  "display-error-chain",
  "dropshot",
  "expectorate",
+ "fs-err",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -7995,6 +7996,7 @@ dependencies = [
  "tokio",
  "toml 0.7.2",
  "tough",
+ "tufaceous",
  "tufaceous-lib",
  "uuid",
 ]

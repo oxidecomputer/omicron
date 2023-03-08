@@ -2,10 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::io::{self, BufWriter, Write};
+use std::{
+    io::{self, BufReader, BufWriter, Read, Write},
+    path::Path,
+};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use buf_list::BufList;
+use bytes::Bytes;
 use camino::Utf8PathBuf;
 use fs_err::File;
 use omicron_common::{
@@ -212,6 +216,70 @@ impl io::Read for FillerReader {
 
         Ok(bytes_to_write)
     }
+}
+
+/// Represents host phase images.
+///
+/// The host and trampoline artifacts are actually tarballs, with phase 1 and
+/// phase 2 images inside them. This code extracts those images out of the
+/// tarballs.
+#[derive(Clone, Debug)]
+pub struct HostPhaseImages {
+    pub phase_1: Bytes,
+    pub phase_2: Bytes,
+}
+
+impl HostPhaseImages {
+    pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
+        let mut archive = tar::Archive::new(BufReader::new(reader));
+
+        let mut phase_1 = None;
+        let mut phase_2 = None;
+        for entry in archive
+            .entries()
+            .context("error building list of entries from archive")?
+        {
+            let entry = entry.context("error reading entry from archive")?;
+            let path = entry
+                .header()
+                .path()
+                .context("error reading path from archive")?;
+            if path == Path::new(PHASE_1_FILE_NAME) {
+                phase_1 = Some(read_entry(entry, PHASE_1_FILE_NAME)?);
+            } else if path == Path::new(PHASE_2_FILE_NAME) {
+                phase_2 = Some(read_entry(entry, PHASE_2_FILE_NAME)?);
+            }
+
+            if phase_1.is_some() && phase_2.is_some() {
+                break;
+            }
+        }
+
+        let mut not_found = Vec::new();
+        if phase_1.is_none() {
+            not_found.push(PHASE_1_FILE_NAME);
+        }
+        if phase_2.is_none() {
+            not_found.push(PHASE_2_FILE_NAME);
+        }
+        if !not_found.is_empty() {
+            bail!("required files not found: {}", not_found.join(", "))
+        }
+
+        Ok(Self { phase_1: phase_1.unwrap(), phase_2: phase_2.unwrap() })
+    }
+}
+
+fn read_entry<R: io::Read>(
+    mut entry: tar::Entry<R>,
+    file_name: &str,
+) -> Result<Bytes> {
+    let size = entry.size();
+    let mut buf = Vec::with_capacity(size as usize);
+    entry
+        .read_to_end(&mut buf)
+        .with_context(|| format!("error reading {file_name} from archive"))?;
+    Ok(buf.into())
 }
 
 static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";

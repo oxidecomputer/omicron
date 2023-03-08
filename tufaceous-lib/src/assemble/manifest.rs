@@ -64,6 +64,15 @@ impl ArtifactManifest {
         })
     }
 
+    /// Returns a fake manifest. Useful for testing.
+    pub fn new_fake() -> Self {
+        static FAKE_MANIFEST_TOML: &str =
+            include_str!("../../../tufaceous/manifests/fake.toml");
+        // The base directory doesn't matter for fake manifests.
+        Self::from_str(".".into(), FAKE_MANIFEST_TOML)
+            .expect("the fake manifest is a valid manifest")
+    }
+
     /// Checks that all expected artifacts are present, returning an error with
     /// details if any artifacts are missing.
     pub fn verify_all_present(&self) -> Result<()> {
