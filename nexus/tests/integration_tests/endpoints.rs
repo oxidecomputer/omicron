@@ -114,7 +114,7 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("/v1/disks?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
-        format!("/organizations/{}/projects/{}/images", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/images?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
         format!("/v1/snapshots?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
@@ -329,8 +329,10 @@ lazy_static! {
 lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
+    pub static ref DEMO_PROJECT_IMAGES_URL: String =
+        format!("/v1/images?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
-        format!("{}/{}", *DEMO_PROJECT_URL_IMAGES, *DEMO_IMAGE_NAME);
+        format!("/v1/images/{}?organization={}&project={}", *DEMO_IMAGE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
         params::ImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -339,24 +341,8 @@ lazy_static! {
             },
             source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
             block_size: params::BlockSize::try_from(4096).unwrap(),
-        };
-
-    // Global Images
-    pub static ref DEMO_GLOBAL_IMAGE_NAME: Name = "alpine-edge".parse().unwrap();
-    pub static ref DEMO_GLOBAL_IMAGE_URL: String =
-        format!("/system/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
-    pub static ref DEMO_GLOBAL_IMAGE_CREATE: params::GlobalImageCreate =
-        params::GlobalImageCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_GLOBAL_IMAGE_NAME.clone(),
-                description: String::from(""),
-            },
-            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
-            distribution: params::Distribution {
-                name: "alpine".parse().unwrap(),
-                version: String::from("edge"),
-            },
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+            os: "fake-os".to_string(),
+            version: "1.0".to_string()
         };
 
     // IP Pools
@@ -562,6 +548,7 @@ pub enum AllowedMethod {
     /// to configure the test's expectation for *privileged* requests.  For the
     /// other HTTP methods, we only make unprivileged requests, and they should
     /// always fail in the correct way.
+    #[allow(dead_code)]
     GetUnimplemented,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
@@ -1231,19 +1218,10 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
                 ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/by-id/images/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
             ],
         },
 
@@ -1252,7 +1230,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Delete,
             ],
         },
@@ -1576,39 +1554,6 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
-            ],
-        },
-
-        /* Global Images */
-
-        VerifyEndpoint {
-            url: "/system/images",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/system/by-id/images/{id}",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_GLOBAL_IMAGE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
             ],
         },
 
