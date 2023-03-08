@@ -40,7 +40,13 @@ only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["sled-agent"]
 source.rust.release = true
-source.paths = [ { from = "smf/sled-agent", to = "pkg" } ]
+source.paths = [
+  { from = "smf/sled-agent/manifest.xml", to = "pkg/manifest.xml" },
+  # Valid options for "machine_type" include:
+  # - gimlet: Assumes control of real hardware, does not emulate hardware
+  # - nongimlet: Used for testing on development illumos machines
+  { from = "smf/sled-agent/{{machine_type}}", to = "pkg" }
+]
 output.type = "tarball"
 
 # Installinator is a service which should run in the Global Zone for the

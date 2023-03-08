@@ -139,7 +139,7 @@ pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 # on a canned subnet.  We need to create an address in the global zone such
 # that we can, in the test below, reach Nexus.
 #
-# This must be kept in sync with the IP in "smf/sled-agent/config-rss.toml" and
+# This must be kept in sync with the IP in "smf/sled-agent/nongimlet/config-rss.toml" and
 # the prefix length which apparently defaults (in the Rust code) to /24.
 #
 pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch

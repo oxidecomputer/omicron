@@ -1,0 +1,19 @@
+# Sled Agent Configuration
+
+# Identifies the revision of the sidecar that is attached, if one is attached.
+# TODO: This field should be removed once Gimlets have the ability to auto-detect
+# this information.
+sidecar_revision = "rev_a"
+
+# An optional data link from which we extract a MAC address.
+# This is used as a unique identifier for the bootstrap address.
+#
+# If empty, this will be equivalent to the first result from:
+# $ dladm show-phys -p -o LINK
+data_link = "cxgbe0"
+
+[log]
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"
