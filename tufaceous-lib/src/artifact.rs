@@ -118,8 +118,10 @@ fn write_generic_fake_artifact<W: Write>(
     writer: &mut W,
 ) -> io::Result<()> {
     let mut buf_writer = BufWriter::new(writer);
-    for b in std::iter::repeat(FILLER_TEXT).flatten().take(size as usize) {
-        buf_writer.write(&[*b])?;
+    // Don't need to get the size exactly right, capping to the nearest 16 is fine.
+    let times = size as usize % FILLER_TEXT.len();
+    for _ in 0..times {
+        buf_writer.write_all(FILLER_TEXT)?;
     }
     buf_writer.flush()
 }
