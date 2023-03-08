@@ -49,11 +49,27 @@ impl DataStore {
             .authn
             .silo_required()
             .internal_context("creating an Organization")?;
+        self.organization_create_in_silo(opctx, None, organization, authz_silo)
+            .await
+    }
+
+    /// Create a organization in the given silo
+    pub(super) async fn organization_create_in_silo(
+        &self,
+        opctx: &OpContext,
+        org_id: Option<Uuid>,
+        organization: &params::OrganizationCreate,
+        authz_silo: authz::Silo,
+    ) -> CreateResult<Organization> {
         opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
 
         use db::schema::organization::dsl;
         let silo_id = authz_silo.id();
-        let organization = Organization::new(organization.clone(), silo_id);
+        let organization = if let Some(org_id) = org_id {
+            Organization::with_id(org_id, organization.clone(), silo_id)
+        } else {
+            Organization::new(organization.clone(), silo_id)
+        };
         let name = organization.name().as_str().to_string();
 
         self.pool_authorized(opctx)

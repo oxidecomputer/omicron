@@ -41,6 +41,20 @@ impl InsertVpcQuery {
         let vni_subquery = NextVni::new(vpc.vni);
         Self { vpc, vni_subquery }
     }
+
+    pub fn new_system(mut vpc: IncompleteVpc, vni: Option<Vni>) -> Self {
+        // Override the VPC's VNI with the one provided by the caller
+        // or a random one if none was provided.
+        vpc.vni = vni.unwrap_or_else(|| Vni::random_system());
+        let vni_subquery = match vni {
+            // If an explicit VNI was provided, we want to use it.
+            Some(_) => NextVni::new_fixed(vpc.vni),
+            // Otherwise, starting from the VNI we just generated, find
+            // the next available system VNI.
+            None => NextVni::new_system(vpc.vni),
+        };
+        Self { vpc, vni_subquery }
+    }
 }
 
 impl QueryId for InsertVpcQuery {
@@ -210,6 +224,7 @@ struct NextVni {
 }
 
 impl NextVni {
+    /// Returns a query fragment to select an available VNI for a guest.
     fn new(vni: Vni) -> Self {
         let base_u32 = u32::from(vni.0);
         // The valid range is [0, 1 << 24], so the maximum shift is whatever
@@ -222,6 +237,30 @@ impl NextVni {
         );
         let generator =
             DefaultShiftGenerator { base: vni, max_shift, min_shift };
+        let inner = NextItem::new_unscoped(generator);
+        Self { inner }
+    }
+
+    /// Returns a query fragment to select an available VNI from the Oxide-reserved space.
+    fn new_system(vni: Vni) -> Self {
+        let base_u32 = u32::from(vni.0);
+        // System VNI's are in the range [0, 1024) so adjust appropriately.
+        let max_shift =
+            i64::from((external::Vni::MIN_GUEST_VNI - 1) - base_u32);
+        let min_shift = i64::from(
+            -i32::try_from(base_u32)
+                .expect("Expected a valid VNI at this point"),
+        );
+        let generator =
+            DefaultShiftGenerator { base: vni, max_shift, min_shift };
+        let inner = NextItem::new_unscoped(generator);
+        Self { inner }
+    }
+
+    /// Returns a query fragment that will only select the given VNI.
+    fn new_fixed(vni: Vni) -> Self {
+        let generator =
+            DefaultShiftGenerator { base: vni, max_shift: 0, min_shift: 0 };
         let inner = NextItem::new_unscoped(generator);
         Self { inner }
     }

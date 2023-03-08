@@ -20,6 +20,12 @@ use serde::Serialize;
 #[diesel(sql_type = sql_types::Int4)]
 pub struct Vni(pub external::Vni);
 
+impl Vni {
+    pub fn random_system() -> Self {
+        Self(external::Vni::random_system())
+    }
+}
+
 impl<DB> ToSql<sql_types::Int4, DB> for Vni
 where
     DB: Backend<BindCollector = RawBytesBindCollector<DB>>,

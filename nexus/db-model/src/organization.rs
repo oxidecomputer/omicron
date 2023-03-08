@@ -28,7 +28,14 @@ pub struct Organization {
 impl Organization {
     /// Creates a new database Organization object.
     pub fn new(params: params::OrganizationCreate, silo_id: Uuid) -> Self {
-        let id = Uuid::new_v4();
+        Self::with_id(Uuid::new_v4(), params, silo_id)
+    }
+
+    pub fn with_id(
+        id: Uuid,
+        params: params::OrganizationCreate,
+        silo_id: Uuid,
+    ) -> Self {
         Self {
             identity: OrganizationIdentity::new(id, params.identity),
             silo_id,

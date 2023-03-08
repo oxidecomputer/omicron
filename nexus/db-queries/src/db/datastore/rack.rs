@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use super::SERVICE_IP_POOL_NAME;
+use super::SERVICE_ORG_NAME;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -14,32 +15,213 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::fixed_data;
 use crate::db::identity::Asset;
 use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::NexusService;
+use crate::db::model::Organization;
+use crate::db::model::Project;
 use crate::db::model::Rack;
 use crate::db::model::Service;
 use crate::db::model::Sled;
+use crate::db::model::Vni;
+use crate::db::model::Vpc;
+use crate::db::model::VpcSubnet;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
+use crate::db::queries;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
+
+#[derive(Debug)]
+enum RackInitError {
+    AddingIp(Error),
+    ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+    ProjectInsert { err: AsyncInsertError, org_id: Uuid, proj_id: Uuid },
+    VpcCreate(Error),
+    VpcInsert { err: AsyncInsertError, proj_id: Uuid, vpc_id: Uuid },
+    VpcRouterInsert { err: PoolError, router: String },
+    VpcRouteInsert { err: AsyncInsertError, router_id: Uuid, route: String },
+    VpcSubnetInsert { err: AsyncInsertError, vpc_id: Uuid, subnet_id: Uuid },
+    VpcFwRuleInsert { err: AsyncInsertError, vpc_id: Uuid },
+    DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    RackUpdate { err: PoolError, rack_id: Uuid },
+}
+
+type TxnError = TransactionError<RackInitError>;
+
+impl From<TxnError> for Error {
+    fn from(e: TxnError) -> Self {
+        match e {
+            TxnError::CustomError(RackInitError::AddingIp(err)) => err,
+            TxnError::CustomError(RackInitError::DatasetInsert {
+                err,
+                zpool_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Zpool,
+                    lookup_type: LookupType::ById(zpool_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            },
+            TxnError::CustomError(RackInitError::ServiceInsert {
+                err,
+                sled_id,
+                svc_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Sled,
+                    lookup_type: LookupType::ById(sled_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::Service,
+                            &svc_id.to_string(),
+                        ),
+                    )
+                }
+            },
+            TxnError::CustomError(RackInitError::ProjectInsert {
+                err,
+                org_id,
+                proj_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Organization,
+                    lookup_type: LookupType::ById(org_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::Project,
+                            &proj_id.to_string(),
+                        ),
+                    )
+                }
+            },
+            TxnError::CustomError(RackInitError::VpcCreate(err)) => err,
+            TxnError::CustomError(RackInitError::VpcInsert {
+                err,
+                proj_id,
+                vpc_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Project,
+                    lookup_type: LookupType::ById(proj_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::Vpc,
+                            &vpc_id.to_string(),
+                        ),
+                    )
+                }
+            },
+            TxnError::CustomError(RackInitError::VpcRouterInsert {
+                err,
+                router,
+            }) => public_error_from_diesel_pool(
+                err,
+                ErrorHandler::Conflict(ResourceType::VpcRouter, &router),
+            ),
+            TxnError::CustomError(RackInitError::VpcRouteInsert {
+                err,
+                router_id,
+                route,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::VpcRouter,
+                    lookup_type: LookupType::ById(router_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::RouterRoute,
+                            &route,
+                        ),
+                    )
+                }
+            },
+            TxnError::CustomError(RackInitError::VpcSubnetInsert {
+                err,
+                vpc_id,
+                subnet_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Vpc,
+                    lookup_type: LookupType::ById(vpc_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::VpcSubnet,
+                            &subnet_id.to_string(),
+                        ),
+                    )
+                }
+            },
+            TxnError::CustomError(RackInitError::VpcFwRuleInsert {
+                err,
+                vpc_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Vpc,
+                    lookup_type: LookupType::ById(vpc_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::VpcFirewallRule,
+                            &vpc_id.to_string(),
+                        ),
+                    )
+                }
+            },
+            TxnError::CustomError(RackInitError::RackUpdate {
+                err,
+                rack_id,
+            }) => public_error_from_diesel_pool(
+                err,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Rack,
+                    LookupType::ById(rack_id),
+                ),
+            ),
+            TxnError::Pool(e) => {
+                Error::internal_error(&format!("Transaction error: {}", e))
+            }
+        }
+    }
+}
 
 impl DataStore {
     pub async fn rack_list(
@@ -86,6 +268,343 @@ impl DataStore {
             })
     }
 
+    /// Create the database record for the given service.
+    async fn create_service_record<ConnErr>(
+        service: &internal_params::ServicePutRequest,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        log: &slog::Logger,
+    ) -> Result<(), TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::schema::service::dsl;
+
+        let service_db = db::model::Service::new(
+            service.service_id,
+            service.sled_id,
+            service.address,
+            service.kind.into(),
+        );
+        <Sled as DatastoreCollection<Service>>::insert_resource(
+            service.sled_id,
+            diesel::insert_into(dsl::service)
+                .values(service_db)
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result_async(conn)
+        .await
+        .map_err(|err| {
+            warn!(log, "Initializing Rack: Failed to insert service");
+            TxnError::CustomError(RackInitError::ServiceInsert {
+                err,
+                sled_id: service.sled_id,
+                svc_id: service.service_id,
+            })
+        })?;
+
+        Ok(())
+    }
+
+    /// Create a project for the given service within the built-in services org.
+    async fn create_service_project<ConnErr>(
+        log: &slog::Logger,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        service: &internal_params::ServicePutRequest,
+    ) -> Result<Project, TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::schema::project::dsl;
+
+        let org_id = *fixed_data::ORGANIZATION_ID;
+
+        let proj_name =
+            format!("{}-{}", service.kind, service.service_id).parse().unwrap();
+        let project_db = db::model::Project::new(
+            org_id,
+            external_params::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: proj_name,
+                    description: format!(
+                        "Project for internal service ({}).",
+                        service.kind
+                    ),
+                },
+            },
+        );
+        let proj_id = project_db.id();
+        <Organization as DatastoreCollection<Project>>::insert_resource(
+            org_id,
+            diesel::insert_into(dsl::project)
+                .values(project_db)
+                .on_conflict(dsl::id)
+                .do_nothing(),
+        )
+        .insert_and_get_result_async(conn)
+        .await
+        .map_err(|err| {
+            warn!(log, "Initializing Rack: Failed to insert service Project");
+            TxnError::CustomError(RackInitError::ProjectInsert {
+                err,
+                org_id,
+                proj_id,
+            })
+        })
+    }
+
+    /// Create a VPC in the given project for the given service.
+    async fn create_service_vpc<ConnErr>(
+        log: &slog::Logger,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        service: &internal_params::ServicePutRequest,
+        project: &Project,
+    ) -> Result<Vpc, TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::schema::vpc::dsl;
+        use queries::vpc::InsertVpcQuery;
+
+        let vpc_id = Uuid::new_v4();
+        let system_router_id = Uuid::new_v4();
+
+        let vpc_db = db::model::IncompleteVpc::new(
+            vpc_id,
+            project.id(),
+            system_router_id,
+            external_params::VpcCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: project.name().clone(),
+                    description: format!(
+                        "VPC for internal service ({}).",
+                        service.kind
+                    ),
+                },
+                ipv6_prefix: None,
+                dns_name: project.name().clone(), // TODO: should this tie in with internal-dns?
+            },
+        )
+        .map_err(|err| {
+            warn!(log, "Initializing Rack: Failed to create service VPC");
+            TxnError::CustomError(RackInitError::VpcCreate(err))
+        })?;
+
+        let vni = match service.kind {
+            // Nexus gets a fixed VNI which must match the VNI used to allocate
+            // the OPTE port in sled-agent.
+            // TODO: use const somewhere
+            internal_params::ServiceKind::Nexus { .. } => {
+                Some(Vni(100.try_into().unwrap()))
+            }
+            // For any other service, we'll get a random VNI from the Oxide-reserved range.
+            _ => None,
+        };
+
+        let vpc = <Project as DatastoreCollection<Vpc>>::insert_resource(
+            project.id(),
+            diesel::insert_into(dsl::vpc)
+                .values(InsertVpcQuery::new_system(vpc_db, vni)),
+        )
+        .insert_and_get_result_async(conn)
+        .await
+        .map_err(|err| {
+            warn!(log, "Initializing Rack: Failed to insert service VPC");
+            TxnError::CustomError(RackInitError::VpcInsert {
+                err,
+                proj_id: project.id(),
+                vpc_id,
+            })
+        })?;
+
+        // Populate some default VPC resources.
+        Self::create_default_vpc_router(log, conn, &vpc).await?;
+        Self::create_service_vpc_subnet(log, conn, service, &vpc).await?;
+
+        Ok(vpc)
+    }
+
+    /// Create default system router and routes for the given VPC.
+    async fn create_default_vpc_router<ConnErr>(
+        log: &slog::Logger,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        vpc: &Vpc,
+    ) -> Result<(), TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::model::RouterRoute;
+        use db::model::VpcRouter;
+        use db::schema::router_route;
+        use db::schema::vpc_router;
+        use omicron_common::api::external::RouteDestination;
+        use omicron_common::api::external::RouteTarget;
+        use omicron_common::api::external::RouterRouteKind;
+
+        let router_id = vpc.system_router_id;
+        let router_db = VpcRouter::new(
+            router_id,
+            vpc.id(),
+            db::model::VpcRouterKind::System,
+            external_params::VpcRouterCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "system".parse().unwrap(),
+                    description: "Routes are automatically added to this \
+                        router as vpc subnets are created"
+                        .into(),
+                },
+            },
+        );
+
+        diesel::insert_into(vpc_router::dsl::vpc_router)
+            .values(router_db)
+            .on_conflict(vpc_router::dsl::id)
+            .do_nothing()
+            .returning(VpcRouter::as_returning())
+            .get_result_async(conn)
+            .await
+            .map_err(|err| {
+                warn!(log, "Initializing Rack: Failed to insert service VPC system router");
+                TxnError::CustomError(RackInitError::VpcRouterInsert {
+                    err: err.into(),
+                    router: "system".to_string(),
+                })
+            })?;
+
+        // Populate the router with a default internet gateway route.
+        let route_id = Uuid::new_v4();
+        let route_db = RouterRoute::new(
+            route_id,
+            router_id,
+            RouterRouteKind::Default,
+            external_params::RouterRouteCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: "The default route of a vpc".to_string(),
+                },
+                target: RouteTarget::InternetGateway(
+                    "outbound".parse().unwrap(),
+                ),
+                destination: RouteDestination::Vpc(vpc.name().clone()),
+            },
+        );
+        <VpcRouter as DatastoreCollection<RouterRoute>>::insert_resource(
+            router_id,
+            diesel::insert_into(router_route::dsl::router_route)
+                .values(route_db),
+        )
+        .insert_and_get_result_async(conn)
+        .await
+        .map_err(|err| {
+            warn!(
+                log,
+                "Initializing Rack: Failed to insert service VPC default route"
+            );
+            TxnError::CustomError(RackInitError::VpcRouteInsert {
+                err,
+                router_id,
+                route: "default".to_string(),
+            })
+        })?;
+
+        Ok(())
+    }
+
+    /// Create default VPC subnet for the given service.
+    async fn create_service_vpc_subnet<ConnErr>(
+        log: &slog::Logger,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        service: &internal_params::ServicePutRequest,
+        vpc: &Vpc,
+    ) -> Result<VpcSubnet, TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::schema::vpc_subnet::dsl;
+        use omicron_common::api::external::Ipv6Net;
+        use queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
+
+        let subnet_id = Uuid::new_v4();
+        let subnet_db = db::model::VpcSubnet::new(
+            subnet_id,
+            vpc.id(),
+            IdentityMetadataCreateParams {
+                name: "default".parse().unwrap(),
+                description: format!(
+                    "The default VPC subnet for internal service ({})",
+                    service.kind
+                ),
+            },
+            *nexus_defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
+            Ipv6Net(
+                ipnetwork::Ipv6Network::new(vpc.ipv6_prefix.network(), 64)
+                    .unwrap(),
+            ),
+        );
+        <Vpc as DatastoreCollection<VpcSubnet>>::insert_resource(
+            vpc.id(),
+            diesel::insert_into(dsl::vpc_subnet)
+                .values(FilterConflictingVpcSubnetRangesQuery::new(subnet_db)),
+        )
+        .insert_and_get_result_async(conn)
+        .await
+        .map_err(|err| {
+            warn!(log, "Initializing Rack: Failed to insert service default VPC subnet");
+            TxnError::CustomError(RackInitError::VpcSubnetInsert {
+                err,
+                vpc_id: vpc.id(),
+                subnet_id,
+            })
+        })
+    }
+
+    /// Create the default firewall rules for the Nexus service in the given VPC.
+    async fn populate_nexus_default_fw_rules<ConnErr>(
+        log: &slog::Logger,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        vpc: &Vpc,
+    ) -> Result<(), TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::model::VpcFirewallRule;
+        use db::schema::vpc_firewall_rule::dsl;
+
+        let vpc_id = vpc.id();
+        let rules_db = VpcFirewallRule::vec_from_params(
+            vpc_id,
+            nexus_defaults::nexus_firewall_rules(vpc.name().as_str()),
+        );
+        <Vpc as DatastoreCollection<VpcFirewallRule>>::insert_resource(
+            vpc_id,
+            diesel::insert_into(dsl::vpc_firewall_rule)
+                .values(rules_db),
+        )
+        .insert_and_get_results_async(conn)
+        .await
+        .map_err(|err| {
+            warn!(log, "Initializing Rack: Failed to insert default firewall rules for Nexus");
+            TxnError::CustomError(RackInitError::VpcFwRuleInsert {
+                err,
+                vpc_id,
+            })
+        })?;
+
+        Ok(())
+    }
+
     /// Update a rack to mark that it has been initialized
     pub async fn rack_set_initialized(
         &self,
@@ -100,22 +619,13 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        #[derive(Debug)]
-        enum RackInitError {
-            AddingIp(Error),
-            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
-            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-            RackUpdate(PoolError),
-        }
-        type TxnError = TransactionError<RackInitError>;
-
         let (authz_service_pool, service_pool) =
             self.ip_pools_service_lookup(&opctx).await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
-        self.pool_authorized(opctx)
+        let rack = self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Early exit if the rack has already been initialized.
@@ -126,9 +636,10 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         warn!(log, "Initializing Rack: Rack UUID not found");
-                        TxnError::CustomError(RackInitError::RackUpdate(
-                            PoolError::from(e),
-                        ))
+                        TxnError::CustomError(RackInitError::RackUpdate {
+                            err: PoolError::from(e),
+                            rack_id,
+                        })
                     })?;
                 if rack.initialized {
                     info!(log, "Early exit: Rack already initialized");
@@ -150,40 +661,14 @@ impl DataStore {
                     })?;
                 }
 
-                // Allocate records for all services.
+                // Allocate resources for all services.
                 for service in services {
-                    let service_db = db::model::Service::new(
-                        service.service_id,
-                        service.sled_id,
-                        service.address,
-                        service.kind.into(),
-                    );
+                    // Create "Service" record in database.
+                    Self::create_service_record(&service, &conn, &log).await?;
 
-                    use db::schema::service::dsl;
-                    let sled_id = service.sled_id;
-                    <Sled as DatastoreCollection<Service>>::insert_resource(
-                        sled_id,
-                        diesel::insert_into(dsl::service)
-                            .values(service_db.clone())
-                            .on_conflict(dsl::id)
-                            .do_update()
-                            .set((
-                                dsl::time_modified.eq(Utc::now()),
-                                dsl::sled_id.eq(excluded(dsl::sled_id)),
-                                dsl::ip.eq(excluded(dsl::ip)),
-                                dsl::kind.eq(excluded(dsl::kind)),
-                            )),
-                    )
-                    .insert_and_get_result_async(&conn)
-                    .await
-                    .map_err(|err| {
-                        warn!(log, "Initializing Rack: Failed to insert service");
-                        TxnError::CustomError(RackInitError::ServiceInsert {
-                            err,
-                            sled_id,
-                            svc_id: service.service_id,
-                        })
-                    })?;
+                    // Create project/vpc for this service within the built-in services org.
+                    let project = Self::create_service_project(&log, &conn, &service).await?;
+                    let vpc = Self::create_service_vpc(&log, &conn, &service, &project).await?;
 
                     if let internal_params::ServiceKind::Nexus { external_address } = service.kind {
                         // Allocate the explicit IP address that is currently
@@ -214,6 +699,9 @@ impl DataStore {
                                 warn!(log, "Initializing Rack: Failed to insert Nexus Service record");
                                 e
                             })?;
+
+                        // Populate the Nexus firewall rules.
+                        Self::populate_nexus_default_fw_rules(&log, &conn, &vpc).await?;
                     }
                 }
                 info!(log, "Inserted services");
@@ -267,79 +755,56 @@ impl DataStore {
                     .get_result_async::<Rack>(&conn)
                     .await
                     .map_err(|e| {
-                        TxnError::CustomError(RackInitError::RackUpdate(
-                            PoolError::from(e),
-                        ))
+                        TxnError::CustomError(RackInitError::RackUpdate {
+                            err: PoolError::from(e),
+                            rack_id,
+                        })
                     })?;
-                Ok(rack)
+                Ok::<_, TxnError>(rack)
             })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(RackInitError::AddingIp(err)) => err,
-                TxnError::CustomError(RackInitError::DatasetInsert {
-                    err,
-                    zpool_id,
-                }) => match err {
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Zpool,
-                            lookup_type: LookupType::ById(zpool_id),
-                        }
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_pool(e, ErrorHandler::Server)
-                    }
-                },
-                TxnError::CustomError(RackInitError::ServiceInsert {
-                    err,
-                    sled_id,
-                    svc_id,
-                }) => match err {
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Sled,
-                            lookup_type: LookupType::ById(sled_id),
-                        }
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::Conflict(
-                                ResourceType::Service,
-                                &svc_id.to_string(),
-                            ),
-                        )
-                    }
-                },
-                TxnError::CustomError(RackInitError::RackUpdate(err)) => {
-                    public_error_from_diesel_pool(
-                        err,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::Rack,
-                            LookupType::ById(rack_id),
-                        ),
-                    )
-                }
-                TxnError::Pool(e) => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
-                }
-            })
+            .await?;
+        Ok(rack)
     }
 
-    pub async fn load_builtin_rack_data(
+    async fn load_builtin_service_org(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
     ) -> Result<(), Error> {
-        use nexus_types::external_api::params;
-        use omicron_common::api::external::IdentityMetadataCreateParams;
-        use omicron_common::api::external::Name;
+        use omicron_common::api::external::InternalContext;
 
-        self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
-
-        let params = params::IpPoolCreate {
+        let params = external_params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
-                name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
+                name: SERVICE_ORG_NAME.parse().unwrap(),
+                description: String::from("Organization for Oxide Services"),
+            },
+        };
+
+        // Create the service org within the built-in silo.
+        let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
+            .silo_id(*fixed_data::silo::SILO_ID)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .internal_context("lookup built-in silo")?;
+
+        let org_id = Some(*fixed_data::ORGANIZATION_ID);
+        self.organization_create_in_silo(opctx, org_id, &params, authz_silo)
+            .await
+            .map(|_| ())
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            })?;
+
+        Ok(())
+    }
+
+    async fn load_builtin_ip_pool(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        let params = external_params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: SERVICE_IP_POOL_NAME.parse().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
             },
         };
@@ -351,9 +816,9 @@ impl DataStore {
                 _ => Err(e),
             })?;
 
-        let params = params::IpPoolCreate {
+        let params = external_params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
-                name: "default".parse::<Name>().unwrap(),
+                name: "default".parse().unwrap(),
                 description: String::from("default IP pool"),
             },
         };
@@ -364,6 +829,19 @@ impl DataStore {
                 Error::ObjectAlreadyExists { .. } => Ok(()),
                 _ => Err(e),
             })?;
+
+        Ok(())
+    }
+
+    pub async fn load_builtin_rack_data(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<(), Error> {
+        self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
+
+        self.load_builtin_service_org(opctx).await?;
+        self.load_builtin_ip_pool(opctx).await?;
 
         Ok(())
     }

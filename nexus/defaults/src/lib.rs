@@ -25,42 +25,62 @@ lazy_static! {
         Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap());
 }
 
-lazy_static! {
-    pub static ref DEFAULT_FIREWALL_RULES: external::VpcFirewallRuleUpdateParams =
-        serde_json::from_str(r#"{
-            "rules": [
-                {
-                    "name": "allow-internal-inbound",
-                    "status": "enabled",
-                    "direction": "inbound",
-                    "targets": [ { "type": "vpc", "value": "default" } ],
-                    "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
-                    "action": "allow",
-                    "priority": 65534,
-                    "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
-                },
-                {
-                    "name": "allow-ssh",
-                    "status": "enabled",
-                    "direction": "inbound",
-                    "targets": [ { "type": "vpc", "value": "default" } ],
-                    "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
-                    "action": "allow",
-                    "priority": 65534,
-                    "description": "allow inbound TCP connections on port 22 from anywhere"
-                },
-                {
-                    "name": "allow-icmp",
-                    "status": "enabled",
-                    "direction": "inbound",
-                    "targets": [ { "type": "vpc", "value": "default" } ],
-                    "filters": { "protocols": [ "ICMP" ] },
-                    "action": "allow",
-                    "priority": 65534,
-                    "description": "allow inbound ICMP traffic from anywhere"
-                }
+/// Returns the default (instance) firewall rules for a VPC with the given name.
+pub fn firewall_rules(vpc_name: &str) -> external::VpcFirewallRuleUpdateParams {
+    serde_json::from_value(serde_json::json!({
+        "rules": [
+            {
+                "name": "allow-internal-inbound",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": vpc_name } ],
+                "filters": { "hosts": [ { "type": "vpc", "value": vpc_name } ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
+            },
+            {
+                "name": "allow-ssh",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": vpc_name } ],
+                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 22 from anywhere"
+            },
+            {
+                "name": "allow-icmp",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": vpc_name } ],
+                "filters": { "protocols": [ "ICMP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound ICMP traffic from anywhere"
+            }
+        ]
+    })).unwrap()
+}
+
+/// Returns the default (nexus) firewall rules for a VPC with the given name.
+pub fn nexus_firewall_rules(
+    vpc_name: &str,
+) -> external::VpcFirewallRuleUpdateParams {
+    serde_json::from_value(serde_json::json!({
+        "rules": [
+            {
+                "name": "allow-external-inbound",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": vpc_name } ],
+                "filters": { "ports": [ "80", "443" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound connections for HTTP and HTTPS from anywhere"
+            }
             ]
-        }"#).unwrap();
+    })).unwrap()
 }
 
 /// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.

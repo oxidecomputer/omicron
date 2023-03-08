@@ -169,12 +169,12 @@ impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
-            InternalDNS => "internal_dns",
+            InternalDNS => "internal-dns",
             Nexus { .. } => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
-            CruciblePantry => "crucible_pantry",
+            CruciblePantry => "crucible-pantry",
         };
         write!(f, "{}", s)
     }

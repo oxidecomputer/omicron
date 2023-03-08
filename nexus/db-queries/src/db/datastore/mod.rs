@@ -85,6 +85,8 @@ pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 /// The name of the built-in IP pool for Oxide services.
 pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 
+pub const SERVICE_ORG_NAME: &str = "oxide-services";
+
 // Represents a query that is ready to be executed.
 //
 // This helper trait lets the statement either be executed or explained.

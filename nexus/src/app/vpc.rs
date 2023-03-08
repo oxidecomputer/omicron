@@ -212,40 +212,10 @@ impl super::Nexus {
         vpc_id: Uuid,
         vpc_name: Name,
     ) -> Result<Vec<db::model::VpcFirewallRule>, Error> {
-        let mut rules = db::model::VpcFirewallRule::vec_from_params(
+        let rules = db::model::VpcFirewallRule::vec_from_params(
             vpc_id,
-            defaults::DEFAULT_FIREWALL_RULES.clone(),
+            defaults::firewall_rules(vpc_name.as_str()),
         );
-        for rule in rules.iter_mut() {
-            for target in rule.targets.iter_mut() {
-                match target.0 {
-                    external::VpcFirewallRuleTarget::Vpc(ref mut name)
-                        if name.as_str() == "default" =>
-                    {
-                        *name = vpc_name.clone().into()
-                    }
-                    _ => {
-                        return Err(external::Error::internal_error(
-                            "unexpected target in default firewall rule",
-                        ))
-                    }
-                }
-                if let Some(ref mut filter_hosts) = rule.filter_hosts {
-                    for host in filter_hosts.iter_mut() {
-                        match host.0 {
-                            external::VpcFirewallRuleHostFilter::Vpc(
-                                ref mut name,
-                            ) if name.as_str() == "default" => {
-                                *name = vpc_name.clone().into()
-                            }
-                            _ => return Err(external::Error::internal_error(
-                                "unexpected host filter in default firewall rule"
-                            )),
-                        }
-                    }
-                }
-            }
-        }
         debug!(self.log, "default firewall rules for vpc {}", vpc_name; "rules" => ?&rules);
         Ok(rules)
     }

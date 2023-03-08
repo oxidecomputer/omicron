@@ -27,6 +27,7 @@
 //    001de000-05e4   built-in users ("05e4" looks a bit like "user")
 //    001de000-1334   built-in fleet ("1334" looks like the "leet" in "fleet")
 //    001de000-5110   built-in silo ("5110" looks like "silo")
+//    001de000-0046   built-in organization ("046" looks a bit like "ORG")
 
 use lazy_static::lazy_static;
 
@@ -37,11 +38,17 @@ pub mod silo_user;
 pub mod user_builtin;
 
 lazy_static! {
-    /* See above for where this uuid comes from. */
+    /* See above for where these UUIDs come from. */
+
     pub static ref FLEET_ID: uuid::Uuid =
         "001de000-1334-4000-8000-000000000000"
             .parse()
             .expect("invalid uuid for builtin fleet id");
+
+    pub static ref ORGANIZATION_ID: uuid::Uuid =
+        "001de000-0046-4000-8000-000000000000"
+            .parse()
+            .expect("invalid uuid for builtin organization id");
 }
 
 #[cfg(test)]
@@ -61,9 +68,15 @@ fn assert_valid_uuid(id: &uuid::Uuid) {
 mod test {
     use super::assert_valid_uuid;
     use super::FLEET_ID;
+    use super::ORGANIZATION_ID;
 
     #[test]
     fn test_builtin_fleet_id_is_valid() {
         assert_valid_uuid(&FLEET_ID);
+    }
+
+    #[test]
+    fn test_builtin_organization_id_is_valid() {
+        assert_valid_uuid(&ORGANIZATION_ID);
     }
 }
