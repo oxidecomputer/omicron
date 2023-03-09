@@ -397,12 +397,10 @@ impl SemverVersion {
         Self(semver::Version::new(major, minor, patch))
     }
 
-    /// This is a permissive version of the official validation regex for
+    /// This is the official ECMAScript-compatible validation regex for
     /// semver:
     /// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
-    /// It accepts some inputs that are not valid semver. See
-    /// test::test_semver_validation for an example.
-    const VALIDATION_REGEX: &str = r"^\d+\.\d+\.\d+([\-\+].+)?$";
+    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
 impl JsonSchema for SemverVersion {
@@ -2134,13 +2132,14 @@ mod test {
             "1.1.0-beta-10",
         ];
         let invalid = [
+            // These examples are rejected by the validation regex.
             "",
             "1",
             "1.2",
             "1.2.3-",
             "a.b.c",
             "1.2.3 abc",
-            // "1.2.3-01" -- the validation regex does not match this invalid input
+            "1.2.3-01",
         ];
 
         let r = regress::Regex::new(SemverVersion::VALIDATION_REGEX)

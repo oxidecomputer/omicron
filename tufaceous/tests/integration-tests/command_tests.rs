@@ -21,7 +21,7 @@ fn test_init_and_add() -> Result<()> {
     let key = Key::generate_ed25519();
 
     let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
-    cmd.args(["init"]);
+    cmd.args(["init", "0.0.0"]);
     cmd.assert().success();
 
     // Create a couple of stub files on disk.
