@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Result;
+use clap::Parser;
+use wicket::WicketApp;
 
 fn main() -> Result<()> {
-    wicket::exec()
+    let app: WicketApp = Parser::parse();
+    app.exec()
 }
