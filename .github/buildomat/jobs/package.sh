@@ -43,7 +43,7 @@ tarball_src_dir="$(pwd)/out"
 files=(
 	out/*.tar
 	package-manifest.toml
-	smf/sled-agent/config.toml
+	smf/sled-agent/nongimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
 )
