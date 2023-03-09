@@ -347,18 +347,21 @@ impl UpdateDriver {
         self.update_log.lock().unwrap().current = Some(state);
     }
 
-    fn push_update_event_at(
+    // While the update log is held:
+    //
+    // * Push all the completion events described by `events` (possibly none)
+    // * Set the current state to `new_current` (also possibly `None`, if this
+    //   update is complete).
+    fn push_update_events(
         &self,
-        kind: UpdateEventKind,
-        new_current: Option<UpdateStateKind>,
-        timestamp: Instant,
+        events: &mut impl Iterator<Item = (Instant, UpdateEventKind)>,
+        new_current: Option<UpdateState>,
     ) {
-        let event = UpdateEvent { timestamp, kind };
-        let new_current =
-            new_current.map(|kind| UpdateState { timestamp, kind });
-
         let mut update_log = self.update_log.lock().unwrap();
-        update_log.events.push(event);
+        for (timestamp, kind) in events {
+            let event = UpdateEvent { timestamp, kind };
+            update_log.events.push(event);
+        }
         update_log.current = new_current;
     }
 
@@ -367,7 +370,11 @@ impl UpdateDriver {
         kind: UpdateEventKind,
         new_current: Option<UpdateStateKind>,
     ) {
-        self.push_update_event_at(kind, new_current, Instant::now());
+        let timestamp = Instant::now();
+        let new_current =
+            new_current.map(|kind| UpdateState { timestamp, kind });
+        let events = [(timestamp, kind)];
+        self.push_update_events(&mut events.into_iter(), new_current);
     }
 
     fn push_update_normal_event_now(
@@ -606,12 +613,20 @@ impl UpdateDriver {
         &mut self,
         mut report: ProgressReport,
     ) {
+        let now = Instant::now();
+
         // Currently, progress reports have zero or one progress events. Don't
         // assert that here, in case this version of wicketd is updating a
         // future installinator which reports multiple progress events.
-        let progress_kind =
+        let new_state =
             if let Some(event) = report.progress_events.drain(..).next() {
-                match event.kind {
+                let timestamp = report
+                    .total_elapsed
+                    .checked_sub(event.total_elapsed)
+                    .and_then(|age| now.checked_sub(age))
+                    .unwrap_or(now);
+
+                let kind = match event.kind {
                     ProgressEventKind::DownloadProgress {
                         attempt,
                         kind,
@@ -652,37 +667,34 @@ impl UpdateDriver {
                         total_bytes,
                         elapsed,
                     },
-                }
+                };
+                UpdateState { timestamp, kind }
             } else {
-                UpdateStateKind::WaitingForProgress {
-                    component: "installinator".to_owned(),
+                UpdateState {
+                    timestamp: now,
+                    kind: UpdateStateKind::WaitingForProgress {
+                        component: "installinator".to_owned(),
+                    },
                 }
             };
 
-        if report.completion_events.is_empty() {
-            self.set_current_update_state(progress_kind);
-        } else {
-            for event in report.completion_events {
-                let event_kind =
-                    UpdateNormalEventKind::InstallinatorEvent(event.kind);
+        let mut events = report.completion_events.into_iter().map(|event| {
+            let event_kind =
+                UpdateNormalEventKind::InstallinatorEvent(event.kind);
 
-                // Convert the agent of this event from installinator into an
-                // `Instant`; if we can't, log it and lie that the event
-                // occurred "now".
-                let now = Instant::now();
-                let timestamp = report
-                    .total_elapsed
-                    .checked_sub(event.total_elapsed)
-                    .and_then(|age| now.checked_sub(age))
-                    .unwrap_or(now);
+            // Convert the agent of this event from installinator into
+            // an `Instant`; if we can't, log it and lie that the event
+            // occurred "now".
+            let timestamp = report
+                .total_elapsed
+                .checked_sub(event.total_elapsed)
+                .and_then(|age| now.checked_sub(age))
+                .unwrap_or(now);
 
-                self.push_update_event_at(
-                    UpdateEventKind::Normal(event_kind),
-                    Some(progress_kind.clone()),
-                    timestamp,
-                );
-            }
-        }
+            (timestamp, UpdateEventKind::Normal(event_kind))
+        });
+
+        self.push_update_events(&mut events, Some(new_state));
     }
 
     // Installs the installinator phase 1 and configures the host to fetch phase
