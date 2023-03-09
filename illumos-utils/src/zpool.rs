@@ -4,7 +4,7 @@
 
 //! Utilities for managing Zpools.
 
-use crate::{execute, PFEXEC};
+use crate::{execute, ExecutionError, PFEXEC};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::path::Path;
@@ -19,7 +19,7 @@ const ZPOOL: &str = "/usr/sbin/zpool";
 pub struct ParseError(String);
 
 #[derive(thiserror::Error, Debug)]
-enum Error {
+pub enum Error {
     #[error("Zpool execution error: {0}")]
     Execution(#[from] crate::ExecutionError),
 
@@ -171,6 +171,30 @@ impl Zpool {
         cmd.arg(vdev);
         execute(&mut cmd).map_err(Error::from)?;
         Ok(())
+    }
+
+    pub fn import(name: ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("import").arg("-f");
+        cmd.arg(&name.to_string());
+        match execute(&mut cmd) {
+            Ok(_) => Ok(()),
+            Err(ExecutionError::CommandFailure(err_info)) => {
+                // I'd really prefer to match on a specific error code, but the
+                // command always returns "1" on failure.
+                if err_info
+                    .stderr
+                    .contains("a pool with that name is already created")
+                {
+                    Ok(())
+                } else {
+                    Err(ExecutionError::CommandFailure(err_info).into())
+                }
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
