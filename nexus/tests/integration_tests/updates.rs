@@ -228,6 +228,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
 
     // artifacts.json, which describes all available artifacts.
     let artifacts = ArtifactsDocument {
+        system_version: "1.0.0".parse().unwrap(),
         artifacts: vec![Artifact {
             name: UPDATE_COMPONENT.into(),
             version: "0.0.0".parse().unwrap(),

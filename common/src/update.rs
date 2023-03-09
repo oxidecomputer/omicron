@@ -15,13 +15,18 @@ use serde::{Deserialize, Serialize};
 
 /// Description of the `artifacts.json` target found in rack update
 /// repositories.
-///
-/// Currently, this has a single top-level field; this gives us an escape hatch
-/// in the future if we need to change the schema in a non-backwards-compatible
-/// way.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ArtifactsDocument {
+    pub system_version: SemverVersion,
     pub artifacts: Vec<Artifact>,
+}
+
+impl ArtifactsDocument {
+    /// Creates an artifacts document with the provided system version and an
+    /// empty list of artifacts.
+    pub fn empty(system_version: SemverVersion) -> Self {
+        Self { system_version, artifacts: Vec::new() }
+    }
 }
 
 /// Describes an artifact available in the repository.

@@ -20,7 +20,7 @@ use crate::ArtifactSource;
 /// A list of components in a TUF repo representing a single update.
 #[derive(Clone, Debug)]
 pub struct ArtifactManifest {
-    pub system_version: String,
+    pub system_version: SemverVersion,
     pub artifacts: BTreeMap<KnownArtifactKind, ArtifactData>,
 }
 
@@ -111,7 +111,7 @@ pub struct ArtifactData {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct DeserializedManifest {
-    system_version: String,
+    system_version: SemverVersion,
     #[serde(rename = "artifact")]
     artifacts: BTreeMap<KnownArtifactKind, DeserializedArtifactData>,
 }

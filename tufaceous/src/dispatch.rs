@@ -43,12 +43,13 @@ impl Args {
         };
 
         match self.command {
-            Command::Init { no_generate_key } => {
+            Command::Init { system_version, no_generate_key } => {
                 let keys = maybe_generate_keys(self.keys, no_generate_key);
 
                 let repo = OmicronRepo::initialize(
                     &log,
                     &repo_path,
+                    system_version,
                     keys,
                     self.expiry,
                 )?;
@@ -178,6 +179,9 @@ impl Args {
 enum Command {
     /// Create a new rack update TUF repository
     Init {
+        /// The system version.
+        system_version: SemverVersion,
+
         /// Disable random key generation and exit if no keys are provided
         #[clap(long)]
         no_generate_key: bool,

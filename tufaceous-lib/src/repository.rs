@@ -7,7 +7,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use fs_err::{self as fs, File};
-use omicron_common::update::{Artifact, ArtifactsDocument};
+use omicron_common::{
+    api::external::SemverVersion,
+    update::{Artifact, ArtifactsDocument},
+};
 use std::num::NonZeroU64;
 use tough::{
     editor::{signed::SignedRole, RepositoryEditor},
@@ -28,11 +31,16 @@ impl OmicronRepo {
     pub fn initialize(
         log: &slog::Logger,
         repo_path: &Utf8Path,
+        system_version: SemverVersion,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
     ) -> Result<Self> {
         let root = crate::root::new_root(keys.clone(), expiry)?;
-        let editor = OmicronRepoEditor::initialize(repo_path.to_owned(), root)?;
+        let editor = OmicronRepoEditor::initialize(
+            repo_path.to_owned(),
+            root,
+            system_version,
+        )?;
 
         editor
             .sign_and_finish(keys, expiry)
@@ -222,6 +230,7 @@ impl OmicronRepoEditor {
     fn initialize(
         repo_path: Utf8PathBuf,
         root: SignedRole<Root>,
+        system_version: SemverVersion,
     ) -> Result<Self> {
         let metadata_dir = repo_path.join("metadata");
         let targets_dir = repo_path.join("targets");
@@ -237,7 +246,7 @@ impl OmicronRepoEditor {
         Ok(Self {
             editor,
             repo_path,
-            artifacts: ArtifactsDocument::default(),
+            artifacts: ArtifactsDocument::empty(system_version),
             existing_targets: vec![],
         })
     }
