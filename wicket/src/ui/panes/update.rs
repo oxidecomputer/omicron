@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use super::{align_by, help_text, Control};
-use crate::state::{artifact_title, ALL_COMPONENT_IDS};
+use crate::state::{artifact_title, ComponentId, Inventory, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup};
 use crate::{Action, Event, Frame, State};
@@ -101,6 +101,7 @@ impl UpdatePane {
 
     fn update_items(&mut self, state: &State) {
         let versions = state.update_state.artifact_versions.clone();
+        let inventory = &state.inventory;
 
         self.items = state
             .update_state
@@ -110,14 +111,20 @@ impl UpdatePane {
                 let children: Vec<_> = states
                     .iter()
                     .map(|(artifact, s)| {
-                        let version = artifact_version(artifact, &versions);
+                        let target_version =
+                            artifact_version(artifact, &versions);
+                        let installed_version =
+                            installed_version(id, artifact, inventory);
                         let spans = vec![
                             Span::styled(
                                 artifact_title(*artifact),
                                 style::selected(),
                             ),
-                            Span::styled("UNKNOWN", style::selected_line()),
-                            Span::styled(version, style::selected()),
+                            Span::styled(
+                                installed_version,
+                                style::selected_line(),
+                            ),
+                            Span::styled(target_version, style::selected()),
                             Span::styled(s.to_string(), s.style()),
                         ];
                         TreeItem::new_leaf(align_by(
@@ -131,6 +138,26 @@ impl UpdatePane {
                 TreeItem::new(*id, children)
             })
             .collect();
+    }
+}
+
+fn installed_version(
+    id: &ComponentId,
+    artifact: &KnownArtifactKind,
+    inventory: &Inventory,
+) -> String {
+    use KnownArtifactKind::*;
+    let component = inventory.get_inventory(id);
+    match artifact {
+        GimletSp | PscSp | SwitchSp => component.map_or_else(
+            || "UNKNOWN".to_string(),
+            |component| component.sp_version(),
+        ),
+        GimletRot | PscRot | SwitchRot => component.map_or_else(
+            || "UNKNOWN".to_string(),
+            |component| component.rot_version(),
+        ),
+        _ => "UNKNOWN".to_string(),
     }
 }
 
