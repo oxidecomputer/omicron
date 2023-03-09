@@ -2901,6 +2901,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "progenitor",
+ "regress",
  "reqwest",
  "schemars",
  "serde",
