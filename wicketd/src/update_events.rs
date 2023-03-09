@@ -90,8 +90,8 @@ pub struct UpdateEvent {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
 pub enum UpdateEventKind {
-    NormalEvent(UpdateNormalEventKind),
-    TerminalFailure(UpdateEventTerminalFailureKind),
+    Normal(UpdateNormalEventKind),
+    Terminal(UpdateTerminalEventKind),
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -104,7 +104,7 @@ pub enum UpdateNormalEventKind {
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
-pub enum UpdateEventTerminalFailureKind {
+pub enum UpdateTerminalEventKind {
     SpResetFailed { reason: String },
     ArtifactUpdateFailed { artifact: ArtifactId, reason: String },
 }

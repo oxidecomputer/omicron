@@ -1298,7 +1298,7 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "normal_event"
+                  "normal"
                 ]
               }
             },
@@ -1311,72 +1311,12 @@
             "type": "object",
             "properties": {
               "data": {
-                "$ref": "#/components/schemas/UpdateEventTerminalFailureKind"
+                "$ref": "#/components/schemas/UpdateTerminalEventKind"
               },
               "kind": {
                 "type": "string",
                 "enum": [
-                  "terminal_failure"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "kind"
-            ]
-          }
-        ]
-      },
-      "UpdateEventTerminalFailureKind": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ]
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "sp_reset_failed"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "kind"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "artifact": {
-                    "$ref": "#/components/schemas/ArtifactId"
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "artifact",
-                  "reason"
-                ]
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "artifact_update_failed"
+                  "terminal"
                 ]
               }
             },
@@ -1878,6 +1818,66 @@
             "required": [
               "data",
               "state"
+            ]
+          }
+        ]
+      },
+      "UpdateTerminalEventKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sp_reset_failed"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "$ref": "#/components/schemas/ArtifactId"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "artifact",
+                  "reason"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artifact_update_failed"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "kind"
             ]
           }
         ]

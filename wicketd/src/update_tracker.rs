@@ -10,7 +10,7 @@ use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
 use crate::update_events::UpdateEventKind;
-use crate::update_events::UpdateEventTerminalFailureKind;
+use crate::update_events::UpdateTerminalEventKind;
 use crate::update_events::UpdateNormalEventKind;
 use crate::update_events::UpdateStateKind;
 use anyhow::anyhow;
@@ -376,17 +376,17 @@ impl UpdateDriver {
         new_current: Option<UpdateStateKind>,
     ) {
         self.push_update_event_now(
-            UpdateEventKind::NormalEvent(kind),
+            UpdateEventKind::Normal(kind),
             new_current,
         );
     }
 
     fn push_update_terminal_failure(
         &self,
-        kind: UpdateEventTerminalFailureKind,
+        kind: UpdateTerminalEventKind,
     ) {
         self.push_update_event_now(
-            UpdateEventKind::TerminalFailure(kind),
+            UpdateEventKind::Terminal(kind),
             None,
         );
     }
@@ -395,7 +395,7 @@ impl UpdateDriver {
         &mut self,
         plan: UpdatePlan,
         ipr_start_receiver: IprStartReceiver,
-    ) -> Result<(), UpdateEventTerminalFailureKind> {
+    ) -> Result<(), UpdateTerminalEventKind> {
         // TODO-correctness Is the general order here correct? Host then SP then
         // RoT, then reboot the SP/RoT?
         if self.sp.type_ == SpType::Sled {
@@ -410,7 +410,7 @@ impl UpdateDriver {
 
         info!(self.log, "starting SP update"; "artifact" => ?sp_artifact.id);
         self.update_sp(sp_artifact).await.map_err(|err| {
-            UpdateEventTerminalFailureKind::ArtifactUpdateFailed {
+            UpdateTerminalEventKind::ArtifactUpdateFailed {
                 artifact: sp_artifact.id.clone(),
                 reason: format!("{err:#}"),
             }
@@ -424,7 +424,7 @@ impl UpdateDriver {
 
         info!(self.log, "all updates complete; resetting SP");
         self.reset_sp().await.map_err(|err| {
-            UpdateEventTerminalFailureKind::SpResetFailed {
+            UpdateTerminalEventKind::SpResetFailed {
                 reason: format!("{err:#}"),
             }
         })?;
@@ -440,12 +440,12 @@ impl UpdateDriver {
         &mut self,
         plan: &UpdatePlan,
         ipr_start_receiver: IprStartReceiver,
-    ) -> Result<(), UpdateEventTerminalFailureKind> {
+    ) -> Result<(), UpdateTerminalEventKind> {
         info!(self.log, "starting host recovery via trampoline image");
 
         let uploaded_trampoline_phase2_id =
             self.install_trampoline_image(plan).await.map_err(|err| {
-                UpdateEventTerminalFailureKind::ArtifactUpdateFailed {
+                UpdateTerminalEventKind::ArtifactUpdateFailed {
                     // `trampoline_phase_1` and `trampoline_phase_2` have the same
                     // artifact ID, so the choice here is arbitrary.
                     artifact: plan.trampoline_phase_1.id.clone(),
@@ -461,7 +461,7 @@ impl UpdateDriver {
             )
             .await
             .map_err(|err| {
-                UpdateEventTerminalFailureKind::ArtifactUpdateFailed {
+                UpdateTerminalEventKind::ArtifactUpdateFailed {
                     // `trampoline_phase_1` and `trampoline_phase_2` have the
                     // same artifact ID, so the choice here is arbitrary.
                     artifact: plan.trampoline_phase_1.id.clone(),
@@ -478,7 +478,7 @@ impl UpdateDriver {
         // Installinator is done: install the host phase 1 that matches the host
         // phase 2 it installed, and boot our newly-recovered sled.
         self.install_host_phase_1_and_boot(plan).await.map_err(|err| {
-            UpdateEventTerminalFailureKind::ArtifactUpdateFailed {
+            UpdateTerminalEventKind::ArtifactUpdateFailed {
                 artifact: plan.host_phase_1.id.clone(),
                 reason: format!("{err:#}"),
             }
@@ -686,7 +686,7 @@ impl UpdateDriver {
                     .unwrap_or(now);
 
                 self.push_update_event_at(
-                    UpdateEventKind::NormalEvent(event_kind),
+                    UpdateEventKind::Normal(event_kind),
                     Some(progress_kind.clone()),
                     timestamp,
                 );
