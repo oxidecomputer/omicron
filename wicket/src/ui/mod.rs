@@ -10,6 +10,7 @@ mod splash;
 mod widgets;
 
 use crate::{Action, Event, State, Term};
+use slog::{o, Logger};
 use tui::widgets::ListState;
 
 use main::MainScreen;
@@ -27,13 +28,20 @@ pub use panes::UpdatePane;
 // an option so we can `take` the inner value. This is unergomic, so we just go
 // with the simple solution.
 pub struct Screen {
+    #[allow(unused)]
+    log: slog::Logger,
     splash: Option<SplashScreen>,
     main: MainScreen,
 }
 
 impl Screen {
-    pub fn new() -> Screen {
-        Screen { splash: Some(SplashScreen::new()), main: MainScreen::new() }
+    pub fn new(log: &Logger) -> Screen {
+        let log = log.new(o!("component" => "Screen"));
+        Screen {
+            splash: Some(SplashScreen::new()),
+            main: MainScreen::new(&log),
+            log,
+        }
     }
 
     /// Compute the layout of the [`MainScreen`]
