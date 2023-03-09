@@ -12,7 +12,7 @@ use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use slog::{o, Logger};
+use slog::{info, o, Logger};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
@@ -20,6 +20,12 @@ use tui_tree_widget::{Tree, TreeItem, TreeState};
 use wicketd_client::types::SemverVersion;
 
 const MAX_COLUMN_WIDTH: u16 = 25;
+
+enum PopupKind {
+    MissingRepo,
+    StartUpdate,
+    Logs,
+}
 
 /// Overview of update status and ability to install updates
 /// from a single TUF repo uploaded to wicketd via wicket.
@@ -36,7 +42,7 @@ pub struct UpdatePane {
     table_headers_rect: Rect,
     contents_rect: Rect,
     help_rect: Rect,
-    popup_open: bool,
+    popup: Option<PopupKind>,
 }
 
 impl UpdatePane {
@@ -61,8 +67,67 @@ impl UpdatePane {
             table_headers_rect: Rect::default(),
             contents_rect: Rect::default(),
             help_rect: Rect::default(),
-            popup_open: false,
+            popup: None,
         }
+    }
+
+    pub fn draw_log_popup(&mut self, state: &State, frame: &mut Frame<'_>) {
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(
+                    " UPDATE LOGS: {}",
+                    state.rack_state.selected.to_string()
+                ),
+                style::header(true),
+            )])]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                " Some scrollable text",
+                style::plain_text(),
+            )])]),
+            buttons: vec![
+                ButtonText { instruction: "CLOSE", key: "ESC" },
+                ButtonText { instruction: "SCROLL", key: "UP/DOWN" },
+            ],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    pub fn draw_start_update_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(
+                    " START UPDATE: {}",
+                    state.rack_state.selected.to_string()
+                ),
+                style::header(true),
+            )])]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                " Would you like to start an update?",
+                style::plain_text(),
+            )])]),
+            buttons: vec![
+                ButtonText { instruction: "YES", key: "Y" },
+                ButtonText { instruction: "NO", key: "N" },
+                ButtonText { instruction: "LOGS", key: "L" },
+            ],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
     }
 
     pub fn draw_update_missing_popup(
@@ -140,6 +205,54 @@ impl UpdatePane {
             })
             .collect();
     }
+
+    fn handle_event_in_popup(
+        &mut self,
+        state: &mut State,
+        event: Event,
+    ) -> Option<Action> {
+        let key_code = match event {
+            Event::Term(TermEvent::Key(e)) => match e.code {
+                KeyCode::Esc => {
+                    self.popup = None;
+                    return Some(Action::Redraw);
+                }
+                key_code => key_code,
+            },
+            _ => return None,
+        };
+        match self.popup.as_ref().unwrap() {
+            PopupKind::Logs => None,
+            PopupKind::MissingRepo => None,
+            PopupKind::StartUpdate => {
+                match key_code {
+                    KeyCode::Char('Y') | KeyCode::Char('y') => {
+                        // Trigger the update
+                        let selected = state.rack_state.selected;
+                        info!(self.log, "Updating {}", selected);
+                        Some(Action::Update(selected))
+                    }
+                    KeyCode::Char('N') | KeyCode::Char('n') => {
+                        self.popup = None;
+                        Some(Action::Redraw)
+                    }
+                    KeyCode::Char('L') | KeyCode::Char('l') => {
+                        self.popup = Some(PopupKind::Logs);
+                        Some(Action::Redraw)
+                    }
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    fn open_popup(&mut self, state: &mut State) {
+        if state.update_state.artifacts.is_empty() {
+            self.popup = Some(PopupKind::MissingRepo);
+        } else {
+            self.popup = Some(PopupKind::StartUpdate);
+        }
+    }
 }
 
 fn installed_version(
@@ -174,7 +287,7 @@ fn artifact_version(
 
 impl Control for UpdatePane {
     fn is_modal_active(&self) -> bool {
-        self.popup_open
+        self.popup.is_some()
     }
 
     fn resize(&mut self, state: &mut State, rect: Rect) {
@@ -200,6 +313,9 @@ impl Control for UpdatePane {
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+        if self.popup.is_some() {
+            return self.handle_event_in_popup(state, event);
+        }
         match event {
             Event::Term(TermEvent::Key(e)) => match e.code {
                 KeyCode::Up => {
@@ -232,26 +348,8 @@ impl Control for UpdatePane {
                     Some(Action::Redraw)
                 }
                 KeyCode::Enter => {
-                    // Only open the warning popup if an upload is required
-                    if state.update_state.artifacts.is_empty() {
-                        if !self.popup_open {
-                            self.popup_open = true;
-                            Some(Action::Redraw)
-                        } else {
-                            None
-                        }
-                    } else {
-                        // Trigger the update
-                        Some(Action::Update(state.rack_state.selected))
-                    }
-                }
-                KeyCode::Esc => {
-                    if self.popup_open {
-                        self.popup_open = false;
-                        Some(Action::Redraw)
-                    } else {
-                        None
-                    }
+                    self.open_popup(state);
+                    Some(Action::Redraw)
                 }
                 _ => None,
             },
@@ -324,13 +422,15 @@ impl Control for UpdatePane {
             self.contents_rect,
         );
 
-        // TODO: Check to see which popup is open
-        if self.popup_open {
-            // TODO: Only open if an update has not been uploaded to wicketd
-            // Otherwise, prompt whether to update or not.
-            // We can also open the update logs inline once the update has been started
-            // or has completed.
-            self.draw_update_missing_popup(state, frame);
+        match self.popup {
+            Some(PopupKind::Logs) => self.draw_log_popup(state, frame),
+            Some(PopupKind::MissingRepo) => {
+                self.draw_update_missing_popup(state, frame)
+            }
+            Some(PopupKind::StartUpdate) => {
+                self.draw_start_update_popup(state, frame)
+            }
+            None => (),
         }
     }
 }

@@ -22,8 +22,7 @@ use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 use crate::ui::Screen;
-use crate::wicketd;
-use crate::wicketd::{WicketdHandle, WicketdManager};
+use crate::wicketd::{self, WicketdHandle, WicketdManager};
 use crate::{Action, Event, InventoryEvent, State};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
