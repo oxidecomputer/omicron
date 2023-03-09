@@ -85,6 +85,11 @@ oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 
+# OpenTelemetry dependencies
+opentelemetry = { version = "0.18.0", features = ["rt-tokio", "metrics"] }
+opentelemetry-otlp = { version = "0.11.0", features = ["tonic", "metrics"] }
+opentelemetry-semantic-conventions = { version = "0.10.0" }
+
 [dev-dependencies]
 assert_matches.workspace = true
 criterion.workspace = true

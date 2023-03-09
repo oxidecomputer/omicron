@@ -37,6 +37,7 @@ pub struct SelectQueryBuilder {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    order: Option<Order>,
 }
 
 impl SelectQueryBuilder {
@@ -48,6 +49,7 @@ impl SelectQueryBuilder {
             time_range: TimeRange { start: None, end: None },
             limit: None,
             offset: None,
+            order: None,
         }
     }
 
@@ -72,6 +74,12 @@ impl SelectQueryBuilder {
     /// Set the number of rows to skip in the result set.
     pub fn offset(mut self, offset: u32) -> Self {
         self.offset.replace(offset);
+        self
+    }
+
+    /// Set the order of the returned results as descending or ascending.
+    pub fn order(mut self, order: Order) -> Self {
+        self.order.replace(order);
         self
     }
 
@@ -253,6 +261,7 @@ impl SelectQueryBuilder {
             time_range: self.time_range,
             limit: self.limit,
             offset: self.offset,
+            order: self.order,
         }
     }
 }
@@ -472,6 +481,12 @@ pub enum Timestamp {
     Exclusive(DateTime<Utc>),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Order {
+    Ascending,
+    Descending,
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectQuery {
     timeseries_schema: TimeseriesSchema,
@@ -479,6 +494,7 @@ pub struct SelectQuery {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    order: Option<Order>,
 }
 
 fn create_join_on_condition(columns: &[&str], current: usize) -> String {
@@ -612,6 +628,17 @@ impl SelectQuery {
         };
         let pagination_clause = {
             let mut clause = String::new();
+            // TODO: Not entirely sure if this is the right place for
+            // setting the order of the results but will leave here for now
+            match self.order {
+                Some(Order::Descending) => {
+                    clause.push_str("DESC ");
+                }
+                Some(Order::Ascending) => {
+                    clause.push_str("ASC ");
+                }
+                None => clause.push_str(""),
+            }
             if let Some(limit) = self.limit {
                 clause.push_str(&format!("LIMIT {} ", limit));
             }

@@ -5016,6 +5016,63 @@
         "x-dropshot-pagination": true
       }
     },
+    "/otel/{disk_id}/metric/{metric_name}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "OTEL prototype endpoint",
+        "operationId": "disk_metrics_stream",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiskMetricName"
+            }
+          },
+          {
+            "in": "query",
+            "name": "seconds",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/policy": {
       "get": {
         "tags": [
@@ -5080,6 +5137,52 @@
           }
         },
         "deprecated": true
+      }
+    },
+    "/raw/{disk_id}/metric/{metric_name}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Raw metrics experimental endpoint, will be removed, for development only",
+        "operationId": "otel_raw_experiment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiskMetricName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Measurement"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/roles": {

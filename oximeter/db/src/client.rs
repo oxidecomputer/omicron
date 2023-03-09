@@ -67,6 +67,7 @@ impl Client {
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
         limit: Option<NonZeroU32>,
+        order: Option<query::Order>,
     ) -> Result<Vec<Timeseries>, Error> {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
@@ -88,8 +89,14 @@ impl Client {
             .start_time(start_time)
             .end_time(end_time);
 
-        let mut query_builder = if let Some(limit) = limit {
+        let query_builder = if let Some(limit) = limit {
             query_builder.limit(limit)
+        } else {
+            query_builder
+        };
+
+        let mut query_builder = if let Some(order) = order {
+            query_builder.order(order)
         } else {
             query_builder
         };
@@ -839,6 +846,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1004,6 +1012,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select test samples");
@@ -1092,6 +1101,7 @@ mod tests {
                 criteria,
                 start_time,
                 end_time,
+                None,
                 None,
             )
             .await
@@ -1350,6 +1360,7 @@ mod tests {
                 Some(query::Timestamp::Exclusive(start_time)),
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select timeseries");
@@ -1388,7 +1399,14 @@ mod tests {
 
         // First, query without a limit. We should see all the results.
         let all_measurements = &client
-            .select_timeseries_with(timeseries_name, &[], None, None, None)
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("Failed to select timeseries")[0]
             .measurements;
@@ -1412,6 +1430,7 @@ mod tests {
                 None,
                 None,
                 Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];
@@ -1431,6 +1450,7 @@ mod tests {
                 )),
                 None,
                 Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];
@@ -1439,6 +1459,8 @@ mod tests {
             all_measurements[all_measurements.len() / 2..],
             timeseries.measurements
         );
+
+        // TODO: Find a way to test order
 
         db.cleanup().await.expect("Failed to cleanup database");
     }

@@ -303,6 +303,15 @@ impl Datum {
             Datum::HistogramF64(ref inner) => Some(inner.start_time()),
         }
     }
+
+    // TODO: Fixme after prototype, this is quite nasty, ask for help with damn numeric generics
+    /// Return the value of the underlying data, if this is cumulativei64, or `None`
+    pub fn value_cumulative_i64(&self) -> Option<i64> {
+        match self {
+            Datum::CumulativeI64(ref inner) => Some(inner.value()),
+            _ => None,
+        }
+    }
 }
 
 // Helper macro to generate `From<T>` and `From<&T>` for the datum types.

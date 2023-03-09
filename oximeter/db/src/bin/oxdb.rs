@@ -288,6 +288,7 @@ async fn query(
             start,
             end,
             None,
+            None,
         )
         .await?;
     println!("{}", serde_json::to_string(&timeseries).unwrap());

@@ -21,7 +21,7 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::internal::nexus;
 use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
-use oximeter_db::query::Timestamp;
+use oximeter_db::query::{Order, Timestamp};
 use oximeter_db::Measurement;
 use oximeter_db::TimeseriesSchema;
 use oximeter_db::TimeseriesSchemaPaginationParams;
@@ -34,6 +34,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+use chrono::Utc;
 
 /// A client which knows how to connect to Clickhouse, but does so
 /// only when a request is actually made.
@@ -284,6 +286,7 @@ impl super::Nexus {
                 Some(start_time),
                 Some(end_time),
                 Some(limit),
+                None,
             )
             .await
             .or_else(|err| {
@@ -324,6 +327,88 @@ impl super::Nexus {
             },
         )
         .unwrap())
+    }
+
+    /// Returns last recorded datum from the timeseries DB based on the provided query
+    /// parameters.
+    ///
+    /// * `timeseries_name`: The "target:metric" name identifying the metric to
+    /// be queried.
+    /// * `criteria`: Any additional parameters to help narrow down the query
+    /// selection further. These parameters are passed directly to
+    /// [oximeter-db::client::select_timeseries_with].
+    pub async fn select_latest_datum(
+        &self,
+        timeseries_name: &str,
+        criteria: &[&str],
+    ) -> Result<Measurement, Error> {
+        let timeseries_list = self
+            .timeseries_client
+            .get()
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot access timeseries DB: {}",
+                    e
+                ))
+            })?
+            // TODO: I am not entirely sure if this method is the least expensive query
+            // for returning a timeseries with `limit: Some(1)`
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                Some(Timestamp::Inclusive(Utc::now())),
+                Some(NonZeroU32::new(1).unwrap()),
+                Some(Order::Descending),
+            )
+            .await
+            .or_else(|err| {
+                // If the timeseries name exists in the API, but not in Clickhouse,
+                // it might just not have been populated yet.
+                match err {
+                    oximeter_db::Error::TimeseriesNotFound(_) => Ok(vec![]),
+                    _ => Err(err),
+                }
+            })
+            .map_err(map_oximeter_err)?;
+
+        if timeseries_list.len() > 1 {
+            return Err(Error::internal_error(&format!(
+                "expected 1 timeseries but got {} ({:?} {:?})",
+                timeseries_list.len(),
+                timeseries_name,
+                criteria
+            )));
+        }
+
+        let timeseries =
+            if let Some(timeseries) = timeseries_list.into_iter().next() {
+                timeseries
+            } else {
+                return Err(Error::internal_error(&format!(
+                    "no timeseries data for: {:?}, {:?}",
+                    timeseries_name, criteria
+                )));
+            };
+
+        if timeseries.measurements.len() > 1 {
+            return Err(Error::internal_error(&format!(
+                "expected a single measurement but got {} ({:?} {:?})",
+                timeseries.measurements.len(),
+                timeseries_name,
+                criteria
+            )));
+        }
+
+        if let Some(datum) = timeseries.measurements.get(0) {
+            Ok(datum.clone())
+        } else {
+            Err(Error::internal_error(&format!(
+                "no measurements available for: {:?}, {:?}",
+                timeseries_name, criteria
+            )))
+        }
     }
 
     // Internal helper to build an Oximeter client from its ID and address (common data between

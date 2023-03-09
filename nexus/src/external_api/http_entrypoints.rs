@@ -74,6 +74,16 @@ use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use opentelemetry::global;
+use opentelemetry::metrics::Unit;
+use opentelemetry::runtime;
+use opentelemetry::sdk::export::metrics::aggregation::cumulative_temporality_selector;
+use opentelemetry::sdk::metrics::controllers::BasicController;
+use opentelemetry::sdk::metrics::selectors;
+use opentelemetry::{metrics, Context, KeyValue};
+use opentelemetry_otlp::{ExportConfig, WithExportConfig};
+use std::time::Duration;
+
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /// Returns a description of the external nexus API
@@ -363,6 +373,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_user_view)?;
         api.register(group_list)?;
         api.register(group_list_v1)?;
+
+        // TODO: Removeme after experimental feature is finished
+        api.register(disk_metrics_stream)?;
+        api.register(otel_raw_experiment)?;
 
         // Console API operations
         api.register(console_api::login_begin)?;
@@ -2747,6 +2761,186 @@ async fn disk_metrics_list(
                 &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// TODO: Change name of this struct for the actual implementation
+/// Path parameters for OTEL prototype requests
+#[derive(Deserialize, JsonSchema)]
+struct DiskMetricsPathParam {
+    disk_id: Uuid,
+}
+
+// TODO: Remove these query params as they are only being used for development.
+/// Query parameters for OTEL experiment requests
+#[derive(Deserialize, JsonSchema)]
+struct OtelQueryParam {
+    seconds: Option<u64>,
+}
+
+/// OTEL prototype endpoint
+#[endpoint {
+    method = GET,
+    // Prefixing with `/otel/` for now since using /v1/disks/ only gives me an error because I'm using ID :(
+    path = "/v1/otel/disks/{disk_id}/metric/{metric_name}",
+    tags = ["disks"],
+}]
+async fn disk_metrics_stream(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<MetricsPathParam<DiskMetricsPathParam, DiskMetricName>>,
+    query_params: Query<OtelQueryParam>,
+    // TODO: Temporary response. Eventually we'll want something similar to WebsocketChannelResult
+    // but that represents streaming has begun.
+) -> Result<HttpResponseAccepted<&'static str>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let disk_selector =
+            params::DiskSelector::new(None, None, path.inner.disk_id.into());
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., authz_disk) = nexus
+            .disk_lookup(&opctx, &disk_selector)?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let result = nexus
+            .select_latest_datum(
+                &format!("crucible_upstairs:{}", path.metric_name),
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
+            )
+            .await?;
+
+        let metrics_controller =
+            init_otel_metrics_pipeline().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot build OpenTelemetry pipeline: {}",
+                    e
+                ))
+            })?;
+        let cx = Context::new();
+
+        // Instrumentation scope
+        // TODO: Agree on a naming convention
+        let meter =
+            global::meter_with_version("omicron.disk", Some("v1"), None);
+
+        // TODO: The following settings are for "read_bytes" only. In a proper implementation, all of
+        // this code would be extracted out of here and values would not be hardcoded, but I will
+        // leave here for now just for readability purposes of this prototype.
+
+        // All attributes and names follow OpenTelemetry semantic conventions
+        // https://opentelemetry.io/docs/reference/specification/metrics/semantic_conventions/system-metrics/#systemdisk---disk-controller-metrics
+        let common_attributes: [KeyValue; 5] = [
+            KeyValue::new("device", authz_disk.id().to_string()),
+            KeyValue::new("direction", "read"),
+            KeyValue::new("resource.type", "disk"),
+            // TODO: Decide if version will make the MVP cut
+            KeyValue::new("version", "1.0"),
+            KeyValue::new("parent", authz_disk.parent().id().to_string()),
+        ];
+
+        // OpenTelemetry uses u64 as a convention for cumulative metrics.
+        // Might be worth it for us to use u64 as well
+        // TODO: Fix related value_cumulative_i64() method (safe to unwrap as it only returns this type)
+        let original_value = result.datum().value_cumulative_i64().unwrap();
+        let value = u64::try_from(original_value).unwrap();
+
+        // Example of metric that is recorded every second
+        // This is set above in the new pipeline with `.with_period(Duration::from_secs(1))`
+        let counter = meter
+            .u64_counter("system.disk.io")
+            .with_description("Total number of bytes read at a given time")
+            .with_unit(Unit::new("By"))
+            .init();
+        meter
+            .register_callback(move |cx| {
+                counter.add(cx, value, common_attributes.as_ref())
+            })
+            .unwrap();
+
+        // TODO: Remove this time limit on streaming for final implementation.
+        // Using now only for development.
+        // stream metrics only for a designated amount of seconds.
+        if let Some(seconds) = query.seconds {
+            tokio::time::sleep(Duration::from_secs(seconds)).await;
+
+            metrics_controller.stop(&cx).unwrap();
+
+            return Ok(HttpResponseAccepted(
+                "Metric streaming for testing stopped",
+            ));
+        }
+
+        Ok(HttpResponseAccepted(
+            "Metric streaming to OTEL collector at http://localhost:4317",
+        ))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// TODO: Move me to another location
+async fn init_otel_metrics_pipeline() -> metrics::Result<BasicController> {
+    // A customer may have different collectors for different team's observability setup
+    // It makes sense to be able to set the export config in each time the an API endpoint is called
+    let export_config = ExportConfig {
+        // TODO: Only allow users to set the collector address through environment variables
+        // or take the collector endpoint from the API endpoint as well.
+        endpoint: "http://localhost:4317".to_string(),
+        ..ExportConfig::default()
+    };
+    opentelemetry_otlp::new_pipeline()
+        .metrics(
+            selectors::simple::inexpensive(),
+            cumulative_temporality_selector(),
+            runtime::Tokio,
+        )
+        .with_exporter(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                // If we decide to allow only setting the config through environment variables
+                // the method to use is `.with_env()`
+                .with_export_config(export_config),
+        )
+        // Sets the metric sampling frequency
+        // TODO: Allow users to set sampling frequency?
+        .with_period(Duration::from_secs(1))
+        .build()
+}
+
+// TODO: Remove me after OTEL prototype is done
+/// Raw metrics experimental endpoint, will be removed, for development only
+#[endpoint {
+    method = GET,
+    path = "/v1/raw/disks/{disk_id}/metric/{metric_name}",
+    tags = ["disks"],
+}]
+async fn otel_raw_experiment(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<MetricsPathParam<DiskMetricsPathParam, DiskMetricName>>,
+) -> Result<HttpResponseOk<oximeter_db::Measurement>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let disk_selector =
+            params::DiskSelector::new(None, None, path.inner.disk_id.into());
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let (.., authz_disk) = nexus
+            .disk_lookup(&opctx, &disk_selector)?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let result = nexus
+            .select_latest_datum(
+                &format!("crucible_upstairs:{}", path.metric_name),
+                &[&format!("upstairs_uuid=={}", authz_disk.id())],
             )
             .await?;
 

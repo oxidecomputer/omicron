@@ -305,6 +305,10 @@ fn do_authz_resource(
                 self.key.clone()
             }
 
+            pub fn parent(&self) -> #parent_resource_name {
+                self.parent.clone()
+            }
+
             /// Describes how to register this type with Oso
             pub(super) fn init() -> Init {
                 use oso::PolarClass;
