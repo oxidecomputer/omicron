@@ -17,6 +17,7 @@ use splash::SplashScreen;
 
 pub use controls::Control;
 pub use panes::OverviewPane;
+pub use panes::UpdatePane;
 
 /// The primary display representation. It's sole purpose is to dispatch events
 /// to the underlying splash and main screens.
@@ -28,26 +29,19 @@ pub use panes::OverviewPane;
 pub struct Screen {
     splash: Option<SplashScreen>,
     main: MainScreen,
-    width: u16,
-    height: u16,
 }
 
 impl Screen {
     pub fn new() -> Screen {
-        Screen {
-            splash: Some(SplashScreen::new()),
-            main: MainScreen::new(),
-            width: 0,
-            height: 0,
-        }
+        Screen { splash: Some(SplashScreen::new()), main: MainScreen::new() }
     }
 
     /// Compute the layout of the [`MainScreen`]
     ///
     // A draw is issued after every resize, so no need to return an Action
     pub fn resize(&mut self, state: &mut State, width: u16, height: u16) {
-        self.width = width;
-        self.height = height;
+        state.screen_width = width;
+        state.screen_height = height;
 
         // Size the main screen
         self.main.resize(state, width, height);
