@@ -501,7 +501,6 @@ impl PortManager {
         mac: MacAddr6,
         external_ip: IpAddr,
         vni: u32,
-        firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
         // TODO: Assume each service zone has a single port.
         let port_name = format!("{}_{}0", XDE_LINK_PREFIX, svc_name);
@@ -572,7 +571,7 @@ impl PortManager {
             PortType::Service,
             Some(port_name),
             vpc_cfg,
-            firewall_rules,
+            &[],
             /* externally_visible= */ true,
         )
     }
@@ -583,7 +582,17 @@ impl PortManager {
     ) -> Result<(), Error> {
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
-            let rules = opte_firewall_rules(rules, &port.vni(), &port.mac());
+            let mut rules =
+                opte_firewall_rules(rules, &port.vni(), &port.mac());
+            // TODO-remove: This is part of the external IP hack.
+            //
+            // We need to allow incoming ARP packets past the firewall layer so
+            // that they may be handled properly at the gateway layer.
+            rules.push(
+                "dir=in priority=65534 protocol=arp action=allow"
+                    .parse()
+                    .unwrap(),
+            );
             let port_name = port_name.clone();
             info!(
                 self.inner.log,

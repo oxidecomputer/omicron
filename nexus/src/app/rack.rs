@@ -10,6 +10,8 @@ use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
+use crate::internal_api::params::ServiceKind;
+use crate::internal_api::params::ServicePutRequest;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -111,12 +113,15 @@ impl super::Nexus {
             .rack_set_initialized(
                 opctx,
                 rack_id,
-                request.services,
+                &request.services,
                 datasets,
                 service_ip_pool_ranges,
                 certificates,
             )
             .await?;
+
+        // Propogate firewall rules for any services that were initialized
+        self.plumb_fw_rules_for_services(&opctx, &request.services).await?;
 
         Ok(())
     }
@@ -149,5 +154,47 @@ impl super::Nexus {
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
+    }
+
+    async fn plumb_fw_rules_for_services(
+        &self,
+        opctx: &OpContext,
+        services: &[ServicePutRequest],
+    ) -> Result<(), Error> {
+        for service in services {
+            // Nexus is currently the only service that makes use of OPTE
+            if !matches!(&service.kind, ServiceKind::Nexus { .. }) {
+                continue;
+            }
+
+            // The Project and VPC names are derived from the service kind & ID.
+            // See `create_service_project/create_service_vpc`.
+            let name = format!("{}-{}", service.kind, service.service_id)
+                .parse::<Name>()
+                .unwrap()
+                .into();
+
+            // Lookup the VPC in the built-in services org
+            let vpc_lookup =
+                db::lookup::LookupPath::new(opctx, &self.db_datastore)
+                    .organization_id(*db::fixed_data::ORGANIZATION_ID)
+                    .project_name(&name)
+                    .vpc_name(&name);
+
+            let rules =
+                self.vpc_list_firewall_rules(opctx, &vpc_lookup).await?;
+            let (_, _, _, _, vpc) = vpc_lookup.fetch().await?;
+
+            let sled = self.sled_lookup(opctx, &service.sled_id).await?;
+            self.send_sled_agents_firewall_rules(
+                opctx,
+                &vpc,
+                &rules,
+                Some(&[sled]),
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 }

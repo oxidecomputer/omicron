@@ -478,20 +478,6 @@ impl ServiceManager {
                     let mac = [0xA8, 0x40, 0x25, 0xFF, 0x00, 0x01].into();
                     // TODO: Arbitrary VNI choice from Oxide-reserved range.
                     let vni = 100;
-                    // Allow incoming web traffic for nexus
-                    // TODO: Should come froma service VPC (along with the VNI).
-                    let firewall_rules = &[serde_json::from_str(
-                        r#"{
-                            "status": "enabled",
-                            "direction": "inbound",
-                            "targets": [],
-                            "filter_ports": [ "80", "443" ],
-                            "filter_protocol": [ "TCP" ],
-                            "action": "allow",
-                            "priority": 100
-                        }"#,
-                    )
-                    .unwrap()];
                     let port = port_manager
                         .create_svc_port(
                             req.id,
@@ -499,7 +485,6 @@ impl ServiceManager {
                             mac,
                             *external_ip,
                             vni,
-                            firewall_rules,
                         )
                         .map_err(Error::NexusOptePortCreation)?;
                     ports.push(port);

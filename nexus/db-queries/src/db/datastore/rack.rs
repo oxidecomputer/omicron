@@ -610,7 +610,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        services: Vec<internal_params::ServicePutRequest>,
+        services: &[internal_params::ServicePutRequest],
         datasets: Vec<Dataset>,
         service_ip_pool_ranges: Vec<IpRange>,
         certificates: Vec<Certificate>,
@@ -882,7 +882,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack_id(),
-                services.clone(),
+                &services,
                 datasets.clone(),
                 service_ip_pool_ranges.clone(),
                 certificates.clone(),
@@ -898,7 +898,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack_id(),
-                services,
+                &services,
                 datasets,
                 service_ip_pool_ranges,
                 certificates,
@@ -995,7 +995,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack_id(),
-                services.clone(),
+                &services,
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),
@@ -1098,7 +1098,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack_id(),
-                services.clone(),
+                &services,
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),
@@ -1208,7 +1208,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack_id(),
-                services.clone(),
+                &services,
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),
@@ -1268,7 +1268,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack_id(),
-                services.clone(),
+                &services,
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),

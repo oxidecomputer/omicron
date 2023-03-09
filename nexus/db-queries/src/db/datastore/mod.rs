@@ -1084,7 +1084,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack.id(),
-                vec![],
+                &[],
                 vec![],
                 vec![],
                 vec![],
@@ -1098,7 +1098,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 rack.id(),
-                vec![],
+                &[],
                 vec![],
                 vec![],
                 vec![],

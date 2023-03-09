@@ -212,7 +212,6 @@ impl PortManager {
         mac: MacAddr6,
         _external_ip: IpAddr,
         vni: u32,
-        firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
         // TODO: Assume each service zone has a single port.
         let port_name = format!("{}_{}0", XDE_LINK_PREFIX, svc_name);
@@ -232,7 +231,7 @@ impl PortManager {
             mac,
             vni,
             gateway,
-            firewall_rules,
+            &[],
             /* externally_visible= */ true,
         )
     }
