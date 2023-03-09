@@ -24,8 +24,8 @@ rustc --version
 
 # Build
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=asic' package
-ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=stub' package
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t 'image_type=standard machine_type=nongimlet switch_variant=stub' package
 
 tarball_src_dir="$(pwd)/out"
 
@@ -41,6 +41,9 @@ files=(
 )
 
 ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
+
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t 'image_type=standard machine_type=gimlet switch_variant=asic' package
 
 # Assemble global zone files in a temporary directory.
 if ! tmp=$(mktemp -d); then
