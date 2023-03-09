@@ -22,6 +22,7 @@ use slog::o;
 use slog::Drain;
 use slog::Logger;
 use slog::{info, warn};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
@@ -47,8 +48,18 @@ enum SubCommand {
 // involvement. If we choose to remove it, having users pick one of a few
 // "build profiles" (in other words, a curated list of target strings)
 // seems like a promising alternative.
-const DEFAULT_TARGET: &str =
-    "image_type=standard switch_variant=stub machine_type=nongimlet";
+fn default_target() -> Target {
+    let kvs = [
+        ("image_type", "standard"),
+        ("switch_variant", "stub"),
+        ("machine_type", "nongimlet"),
+    ];
+
+    let map = kvs.into_iter().map(|(k, v)| {
+        (k.to_string(), v.to_string())
+    }).collect::<BTreeMap<String, String>>();
+    Target(map)
+}
 
 #[derive(Debug, Parser)]
 #[clap(name = "packaging tool")]
@@ -69,7 +80,7 @@ struct Args {
         short,
         long,
         help = "Key Value pairs (of the form 'KEY=VALUE') describing the package",
-        default_value = DEFAULT_TARGET,
+        default_value_t = default_target(),
     )]
     target: Target,
 
