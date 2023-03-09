@@ -28,12 +28,12 @@ pub fn help_text<'a>(data: &'a [(&'a str, &'a str)]) -> Paragraph<'a> {
 
 /// Align a bunch of spans on a single line with with at most `column_width`
 /// length, and being left-aligned by `left_margin`
-pub fn align_by<'a>(
+pub fn align_by(
     left_margin: u16,
     column_width: u16,
     mut rect: Rect,
-    spans: Vec<Span<'a>>,
-) -> Text<'a> {
+    spans: Vec<Span>,
+) -> Text {
     rect.x += left_margin;
     rect.width -= left_margin;
     let constraints: Vec<_> = (0..spans.len())
@@ -47,7 +47,7 @@ pub fn align_by<'a>(
 
     let mut text =
         vec![Span::raw(format!("{:width$}", "", width = left_margin as usize))];
-    for (rect, span) in chunks.iter().zip(spans).into_iter() {
+    for (rect, span) in chunks.iter().zip(spans) {
         let spaces = rect.width.saturating_sub(span.width().try_into().unwrap())
             as usize;
         text.push(span);

@@ -50,7 +50,7 @@ pub trait Control {
     /// Return false by default so parent behavior does not change.
     ///
     /// If a control has a modal active, its parent should not switch away from
-    /// it. For example, in [`MainScreen`], the escape key should not allow
+    /// it. For example, in `crate::ui::MainScreen`, the escape key should not allow
     /// transferring control from a pane's modal to the side bar.
     fn is_modal_active(&self) -> bool {
         false

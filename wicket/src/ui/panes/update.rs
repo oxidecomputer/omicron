@@ -17,6 +17,8 @@ use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
+const MAX_COLUMN_WIDTH: u16 = 25;
+
 /// Overview of update status and ability to install updates
 /// from a single TUF repo uploaded to wicketd via wicket.
 pub struct UpdatePane {
@@ -115,7 +117,7 @@ impl UpdatePane {
                         ];
                         TreeItem::new_leaf(align_by(
                             0,
-                            25,
+                            MAX_COLUMN_WIDTH,
                             self.contents_rect,
                             spans,
                         ))
@@ -245,7 +247,7 @@ impl Control for UpdatePane {
         line_rect.width -= 2;
         let headers = Paragraph::new(align_by(
             4,
-            25,
+            MAX_COLUMN_WIDTH,
             line_rect,
             vec![
                 Span::styled("COMPONENT", header_style),
