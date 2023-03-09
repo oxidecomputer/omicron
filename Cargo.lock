@@ -2901,6 +2901,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "progenitor",
+ "regress",
  "reqwest",
  "schemars",
  "serde",
@@ -3494,6 +3495,7 @@ dependencies = [
  "chrono",
  "omicron-common",
  "progenitor",
+ "regress",
  "reqwest",
  "serde",
  "serde_json",
@@ -3820,6 +3822,7 @@ dependencies = [
  "progenitor",
  "proptest",
  "rand 0.8.5",
+ "regress",
  "reqwest",
  "ring",
  "schemars",
@@ -8018,6 +8021,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "progenitor",
+ "regress",
  "reqwest",
  "schemars",
  "serde",

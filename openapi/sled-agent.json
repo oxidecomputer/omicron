@@ -1395,6 +1395,10 @@
           "vni"
         ]
       },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
       "ServiceEnsureBody": {
         "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
         "type": "object",
@@ -1645,7 +1649,11 @@
           },
           "version": {
             "description": "The artifact's version.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SemverVersion"
+              }
+            ]
           }
         },
         "required": [

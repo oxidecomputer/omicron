@@ -223,7 +223,11 @@
           },
           "version": {
             "description": "The artifact's version.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SemverVersion"
+              }
+            ]
           }
         },
         "required": [
@@ -543,6 +547,10 @@
             ]
           }
         ]
+      },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "SpComponentInfo": {
         "description": "Overview of a single SP component.",
