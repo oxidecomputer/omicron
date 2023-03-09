@@ -9,8 +9,10 @@ use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
+use tui::text::Text;
 use wicketd_client::types::{
-    RackV1Inventory, SpComponentInfo, SpIgnition, SpState, SpType,
+    RackV1Inventory, RotSlot, RotState, SpComponentInfo, SpIgnition, SpState,
+    SpType,
 };
 
 lazy_static! {
@@ -109,6 +111,42 @@ pub enum Component {
     Psc(Sp),
 }
 
+impl Component {
+    pub fn sp(&self) -> &Sp {
+        match self {
+            Component::Sled(sp) => sp,
+            Component::Switch(sp) => sp,
+            Component::Psc(sp) => sp,
+        }
+    }
+
+    pub fn sp_version(&self) -> String {
+        match &self.sp().state {
+            SpState::Enabled { version, .. } => version.version.to_string(),
+            _ => "UNKNOWN".to_string(),
+        }
+    }
+
+    pub fn rot_version(&self) -> String {
+        match &self.sp().state {
+            SpState::Enabled { rot, .. } => match rot {
+                RotState::Enabled { active, slot_a, slot_b } => {
+                    let details = match active {
+                        RotSlot::A => slot_a,
+                        RotSlot::B => slot_b,
+                    };
+                    details.as_ref().map_or_else(
+                        || "UNKNOWN".to_string(),
+                        |d| d.version.version.to_string(),
+                    )
+                }
+                _ => "UNKNOWN".to_string(),
+            },
+            _ => "UNKNOWN".to_string(),
+        }
+    }
+}
+
 // The component type and its slot.
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ComponentId {
@@ -130,6 +168,12 @@ impl Display for ComponentId {
             ComponentId::Switch(i) => write!(f, "SWITCH {}", i),
             ComponentId::Psc(i) => write!(f, "PSC {}", i),
         }
+    }
+}
+
+impl From<ComponentId> for Text<'_> {
+    fn from(value: ComponentId) -> Self {
+        value.to_string().into()
     }
 }
 

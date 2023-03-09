@@ -5,8 +5,8 @@
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
-use slog::info;
 use slog::Logger;
+use slog::{info, warn};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -98,6 +98,8 @@ pub enum DiskError {
     NotFound { path: PathBuf, partition: Partition },
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
+    #[error("Cannot import zpool: {0}")]
+    ZpoolImport(illumos_utils::zpool::Error),
     #[error("Cannot format {path}: missing a '/dev' path")]
     CannotFormatMissingDevPath { path: PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
@@ -288,6 +290,11 @@ impl Disk {
                 zpool_name
             }
         };
+
+        Zpool::import(zpool_name.clone()).map_err(|e| {
+            warn!(log, "Failed to import zpool {zpool_name}: {e}");
+            DiskError::ZpoolImport(e)
+        })?;
 
         Ok(Self {
             paths: unparsed_disk.paths,
