@@ -354,7 +354,7 @@ impl UpdateDriver {
     //   update is complete).
     fn push_update_events(
         &self,
-        events: &mut impl Iterator<Item = (Instant, UpdateEventKind)>,
+        events: impl Iterator<Item = (Instant, UpdateEventKind)>,
         new_current: Option<UpdateState>,
     ) {
         let mut update_log = self.update_log.lock().unwrap();
@@ -374,7 +374,7 @@ impl UpdateDriver {
         let new_current =
             new_current.map(|kind| UpdateState { timestamp, kind });
         let events = [(timestamp, kind)];
-        self.push_update_events(&mut events.into_iter(), new_current);
+        self.push_update_events(events.into_iter(), new_current);
     }
 
     fn push_update_normal_event_now(
@@ -678,7 +678,7 @@ impl UpdateDriver {
                 }
             };
 
-        let mut events = report.completion_events.into_iter().map(|event| {
+        let events = report.completion_events.into_iter().map(|event| {
             let event_kind =
                 UpdateNormalEventKind::InstallinatorEvent(event.kind);
 
@@ -694,7 +694,7 @@ impl UpdateDriver {
             (timestamp, UpdateEventKind::Normal(event_kind))
         });
 
-        self.push_update_events(&mut events, Some(new_state));
+        self.push_update_events(events, Some(new_state));
     }
 
     // Installs the installinator phase 1 and configures the host to fetch phase
