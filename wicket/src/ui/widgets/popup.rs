@@ -92,19 +92,15 @@ pub fn draw_buttons(
     body_rect: Rect,
     buf: &mut Buffer,
 ) {
-    // Enough space at the bottom for buttons and margin
-    let button_and_margin_height = 4;
     let mut rect = body_rect;
-    rect.y = (body_rect.y + body_rect.height)
-        .saturating_sub(button_and_margin_height);
+    // Enough space at the bottom for buttons and margin
+    rect.y = body_rect.y + body_rect.height - 4;
     rect.height = 3;
 
     let brackets = 2;
     let margin = 2;
     let borders = 2;
 
-    // The first constraint right aligns the buttons
-    // The buttons themselves are sized according to their contents
     let constraints: Vec<_> = iter::once(Constraint::Min(0))
         .chain(buttons.iter().map(|b| {
             Constraint::Length(

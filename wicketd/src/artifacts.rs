@@ -40,7 +40,6 @@ use crate::installinator_progress::IprArtifactServer;
 struct ArtifactsWithPlan {
     // TODO: replace with BufList once it supports Read via a cursor (required
     // for host tarball extraction)
-    system_version: Option<SemverVersion>,
     by_id: DebugIgnore<HashMap<ArtifactId, Bytes>>,
     by_hash: DebugIgnore<HashMap<ArtifactHashId, Bytes>>,
     plan: Option<UpdatePlan>,
@@ -140,7 +139,8 @@ impl WicketdArtifactStore {
         &self,
     ) -> (Option<SemverVersion>, Vec<ArtifactId>) {
         let artifacts = self.artifacts_with_plan.lock().unwrap();
-        let system_version = artifacts.system_version.clone();
+        let system_version =
+            artifacts.plan.as_ref().map(|p| p.system_version.clone());
         let artifact_ids = artifacts.by_id.keys().cloned().collect();
         (system_version, artifact_ids)
     }
@@ -325,10 +325,14 @@ impl ArtifactsWithPlan {
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = UpdatePlan::new(&by_id, &mut by_hash, log)?;
+        let plan = UpdatePlan::new(
+            artifacts.system_version,
+            &by_id,
+            &mut by_hash,
+            log,
+        )?;
 
         Ok(Self {
-            system_version: Some(artifacts.system_version),
             by_id: by_id.into(),
             by_hash: by_hash.into(),
             plan: Some(plan),
@@ -462,6 +466,7 @@ pub(crate) struct ArtifactIdData {
 
 #[derive(Debug, Clone)]
 pub(crate) struct UpdatePlan {
+    pub(crate) system_version: SemverVersion,
     pub(crate) gimlet_sp: ArtifactIdData,
     pub(crate) psc_sp: ArtifactIdData,
     pub(crate) sidecar_sp: ArtifactIdData,
@@ -490,6 +495,7 @@ pub(crate) struct UpdatePlan {
 
 impl UpdatePlan {
     fn new(
+        system_version: SemverVersion,
         by_id: &HashMap<ArtifactId, Bytes>,
         by_hash: &mut HashMap<ArtifactHashId, Bytes>,
         log: &Logger,
@@ -614,6 +620,7 @@ impl UpdatePlan {
         }
 
         Ok(Self {
+            system_version,
             gimlet_sp: gimlet_sp.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::GimletSp,
