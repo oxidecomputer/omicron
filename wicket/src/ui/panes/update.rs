@@ -12,6 +12,7 @@ use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
+use slog::{o, Logger};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
@@ -22,6 +23,8 @@ const MAX_COLUMN_WIDTH: u16 = 25;
 /// Overview of update status and ability to install updates
 /// from a single TUF repo uploaded to wicketd via wicket.
 pub struct UpdatePane {
+    #[allow(unused)]
+    log: Logger,
     tree_state: TreeState,
     items: Vec<TreeItem<'static>>,
     help: Vec<(&'static str, &'static str)>,
@@ -36,10 +39,12 @@ pub struct UpdatePane {
 }
 
 impl UpdatePane {
-    pub fn new() -> UpdatePane {
+    pub fn new(log: &Logger) -> UpdatePane {
+        let log = log.new(o!("component" => "UpdatePane"));
         let mut tree_state = TreeState::default();
         tree_state.select_first();
         UpdatePane {
+            log,
             tree_state,
             items: ALL_COMPONENT_IDS
                 .iter()
@@ -168,10 +173,14 @@ impl Control for UpdatePane {
             Event::Term(TermEvent::Key(e)) => match e.code {
                 KeyCode::Up => {
                     self.tree_state.key_up(&self.items);
+                    let selected = self.tree_state.selected();
+                    state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                     Some(Action::Redraw)
                 }
                 KeyCode::Down => {
                     self.tree_state.key_down(&self.items);
+                    let selected = self.tree_state.selected();
+                    state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                     Some(Action::Redraw)
                 }
                 KeyCode::Left => {
@@ -201,7 +210,8 @@ impl Control for UpdatePane {
                             None
                         }
                     } else {
-                        None
+                        // Trigger the update
+                        Some(Action::Update(state.rack_state.selected))
                     }
                 }
                 KeyCode::Esc => {
