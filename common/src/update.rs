@@ -4,7 +4,7 @@
 
 use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
-use crate::api::internal::nexus::KnownArtifactKind;
+use crate::api::{external::SemverVersion, internal::nexus::KnownArtifactKind};
 use hex::FromHexError;
 use schemars::{
     gen::SchemaGenerator,
@@ -31,7 +31,7 @@ pub struct ArtifactsDocument {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
     pub name: String,
-    pub version: String,
+    pub version: SemverVersion,
     pub kind: ArtifactKind,
     pub target: String,
 }
@@ -68,7 +68,7 @@ pub struct ArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: String,
+    pub version: SemverVersion,
 
     /// The kind of artifact this is.
     pub kind: ArtifactKind,

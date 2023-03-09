@@ -230,7 +230,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
     let artifacts = ArtifactsDocument {
         artifacts: vec![Artifact {
             name: UPDATE_COMPONENT.into(),
-            version: "0.0.0".into(),
+            version: "0.0.0".parse().unwrap(),
             kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
             target: format!("{UPDATE_COMPONENT}-1"),
         }],

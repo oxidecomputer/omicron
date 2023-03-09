@@ -10,7 +10,9 @@ use std::{
 use anyhow::{bail, Context, Result};
 use bytesize::ByteSize;
 use camino::{Utf8Path, Utf8PathBuf};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::api::{
+    external::SemverVersion, internal::nexus::KnownArtifactKind,
+};
 use serde::{de::Visitor, Deserialize};
 
 use crate::ArtifactSource;
@@ -96,7 +98,7 @@ impl ArtifactManifest {
 #[derive(Clone, Debug)]
 pub struct ArtifactData {
     pub name: String,
-    pub version: String,
+    pub version: SemverVersion,
     pub source: ArtifactSource,
 }
 
@@ -118,7 +120,7 @@ struct DeserializedManifest {
 #[serde(rename_all = "snake_case")]
 struct DeserializedArtifactData {
     pub name: String,
-    pub version: String,
+    pub version: SemverVersion,
     pub source: DeserializedArtifactSource,
 }
 
