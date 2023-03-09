@@ -22,6 +22,7 @@ use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 use crate::ui::Screen;
+use crate::wicketd;
 use crate::wicketd::{WicketdHandle, WicketdManager};
 use crate::{Action, Event, InventoryEvent, State};
 
@@ -81,7 +82,7 @@ impl Runner {
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
         Runner {
-            screen: Screen::new(),
+            screen: Screen::new(&log),
             events_rx,
             events_tx,
             state,
@@ -205,7 +206,11 @@ impl Runner {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Action::Update(_component_id) => todo!(),
+            Action::Update(component_id) => {
+                self.wicketd.tx.blocking_send(
+                    wicketd::Request::StartUpdate(component_id),
+                )?;
+            }
         }
         Ok(())
     }
