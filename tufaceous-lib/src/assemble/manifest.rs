@@ -10,7 +10,9 @@ use std::{
 use anyhow::{bail, Context, Result};
 use bytesize::ByteSize;
 use camino::{Utf8Path, Utf8PathBuf};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::api::{
+    external::SemverVersion, internal::nexus::KnownArtifactKind,
+};
 use serde::{de::Visitor, Deserialize};
 
 use crate::ArtifactSource;
@@ -18,7 +20,7 @@ use crate::ArtifactSource;
 /// A list of components in a TUF repo representing a single update.
 #[derive(Clone, Debug)]
 pub struct ArtifactManifest {
-    pub system_version: String,
+    pub system_version: SemverVersion,
     pub artifacts: BTreeMap<KnownArtifactKind, ArtifactData>,
 }
 
@@ -96,7 +98,7 @@ impl ArtifactManifest {
 #[derive(Clone, Debug)]
 pub struct ArtifactData {
     pub name: String,
-    pub version: String,
+    pub version: SemverVersion,
     pub source: ArtifactSource,
 }
 
@@ -109,7 +111,7 @@ pub struct ArtifactData {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct DeserializedManifest {
-    system_version: String,
+    system_version: SemverVersion,
     #[serde(rename = "artifact")]
     artifacts: BTreeMap<KnownArtifactKind, DeserializedArtifactData>,
 }
@@ -118,7 +120,7 @@ struct DeserializedManifest {
 #[serde(rename_all = "snake_case")]
 struct DeserializedArtifactData {
     pub name: String,
-    pub version: String,
+    pub version: SemverVersion,
     pub source: DeserializedArtifactSource,
 }
 

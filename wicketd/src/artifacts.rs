@@ -46,6 +46,7 @@ struct ArtifactsWithPlan {
 /// The artifact server interface for wicketd.
 #[derive(Debug)]
 pub(crate) struct WicketdArtifactServer {
+    #[allow(dead_code)]
     log: Logger,
     store: WicketdArtifactStore,
     ipr_artifact: IprArtifactServer,
@@ -67,18 +68,8 @@ impl ArtifactGetter for WicketdArtifactServer {
     async fn get(&self, id: &ArtifactId) -> Option<(u64, Body)> {
         // This is a test artifact name used by the installinator.
         if id.name == "__installinator-test" {
-            // For testing, the version is the size of the artifact.
-            let size: u64 = id
-                        .version
-                        .parse()
-                        .map_err(|err| {
-                            slog::warn!(
-                                self.log,
-                                "for installinator-test, version should be a u64 indicating the size but found {}: {err}",
-                                id.version
-                            );
-                        })
-                        .ok()?;
+            // For testing, the major version is the size of the artifact.
+            let size: u64 = id.version.0.major;
             let mut bytes = BytesMut::with_capacity(size as usize);
             bytes.put_bytes(0, size as usize);
             return Some((size, Body::from(bytes.freeze())));
