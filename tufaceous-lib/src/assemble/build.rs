@@ -98,6 +98,7 @@ impl OmicronRepoAssembler {
         let mut repository = OmicronRepo::initialize(
             &self.log,
             build_dir,
+            self.manifest.system_version.clone(),
             self.keys.clone(),
             self.expiry,
         )?

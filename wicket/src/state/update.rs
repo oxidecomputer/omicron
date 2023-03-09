@@ -10,13 +10,13 @@ use super::{ComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::ArtifactId;
+use wicketd_client::types::{ArtifactId, SemverVersion};
 
 #[derive(Debug)]
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, BTreeMap<KnownArtifactKind, UpdateState>>,
     pub artifacts: Vec<ArtifactId>,
-    pub artifact_versions: BTreeMap<KnownArtifactKind, String>,
+    pub artifact_versions: BTreeMap<KnownArtifactKind, SemverVersion>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

@@ -20,7 +20,9 @@ use futures::stream;
 use hyper::Body;
 use installinator_artifactd::{ArtifactGetter, ProgressReportStatus};
 use installinator_common::ProgressReport;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::api::{
+    external::SemverVersion, internal::nexus::KnownArtifactKind,
+};
 use omicron_common::update::{
     ArtifactHash, ArtifactHashId, ArtifactId, ArtifactKind,
 };
@@ -38,6 +40,7 @@ use crate::installinator_progress::IprArtifactServer;
 struct ArtifactsWithPlan {
     // TODO: replace with BufList once it supports Read via a cursor (required
     // for host tarball extraction)
+    system_version: Option<SemverVersion>,
     by_id: DebugIgnore<HashMap<ArtifactId, Bytes>>,
     by_hash: DebugIgnore<HashMap<ArtifactHashId, Bytes>>,
     plan: Option<UpdatePlan>,
@@ -46,6 +49,7 @@ struct ArtifactsWithPlan {
 /// The artifact server interface for wicketd.
 #[derive(Debug)]
 pub(crate) struct WicketdArtifactServer {
+    #[allow(dead_code)]
     log: Logger,
     store: WicketdArtifactStore,
     ipr_artifact: IprArtifactServer,
@@ -67,18 +71,8 @@ impl ArtifactGetter for WicketdArtifactServer {
     async fn get(&self, id: &ArtifactId) -> Option<(u64, Body)> {
         // This is a test artifact name used by the installinator.
         if id.name == "__installinator-test" {
-            // For testing, the version is the size of the artifact.
-            let size: u64 = id
-                        .version
-                        .parse()
-                        .map_err(|err| {
-                            slog::warn!(
-                                self.log,
-                                "for installinator-test, version should be a u64 indicating the size but found {}: {err}",
-                                id.version
-                            );
-                        })
-                        .ok()?;
+            // For testing, the major version is the size of the artifact.
+            let size: u64 = id.version.0.major;
             let mut bytes = BytesMut::with_capacity(size as usize);
             bytes.put_bytes(0, size as usize);
             return Some((size, Body::from(bytes.freeze())));
@@ -142,8 +136,13 @@ impl WicketdArtifactStore {
         Ok(())
     }
 
-    pub(crate) fn artifact_ids(&self) -> Vec<ArtifactId> {
-        self.artifacts_with_plan.lock().unwrap().by_id.keys().cloned().collect()
+    pub(crate) fn system_version_and_artifact_ids(
+        &self,
+    ) -> (Option<SemverVersion>, Vec<ArtifactId>) {
+        let artifacts = self.artifacts_with_plan.lock().unwrap();
+        let system_version = artifacts.system_version.clone();
+        let artifact_ids = artifacts.by_id.keys().cloned().collect();
+        (system_version, artifact_ids)
     }
 
     pub(crate) fn current_plan(&self) -> Option<UpdatePlan> {
@@ -329,6 +328,7 @@ impl ArtifactsWithPlan {
         let plan = UpdatePlan::new(&by_id, &mut by_hash, log)?;
 
         Ok(Self {
+            system_version: Some(artifacts.system_version),
             by_id: by_id.into(),
             by_hash: by_hash.into(),
             plan: Some(plan),
