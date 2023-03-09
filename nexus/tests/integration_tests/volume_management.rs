@@ -1041,7 +1041,7 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let global_image = create_image(&client).await;
 
     // Create a disk from this image
     let _base_disk =
@@ -1110,7 +1110,7 @@ async fn test_create_image_from_snapshot_delete(
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let global_image = create_image(&client).await;
 
     // Create a disk from this image
     let _base_disk =
