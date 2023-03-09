@@ -4,7 +4,7 @@
 
 use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
-use crate::api::internal::nexus::KnownArtifactKind;
+use crate::api::{external::SemverVersion, internal::nexus::KnownArtifactKind};
 use hex::FromHexError;
 use schemars::{
     gen::SchemaGenerator,
@@ -15,13 +15,18 @@ use serde::{Deserialize, Serialize};
 
 /// Description of the `artifacts.json` target found in rack update
 /// repositories.
-///
-/// Currently, this has a single top-level field; this gives us an escape hatch
-/// in the future if we need to change the schema in a non-backwards-compatible
-/// way.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ArtifactsDocument {
+    pub system_version: SemverVersion,
     pub artifacts: Vec<Artifact>,
+}
+
+impl ArtifactsDocument {
+    /// Creates an artifacts document with the provided system version and an
+    /// empty list of artifacts.
+    pub fn empty(system_version: SemverVersion) -> Self {
+        Self { system_version, artifacts: Vec::new() }
+    }
 }
 
 /// Describes an artifact available in the repository.
@@ -31,7 +36,7 @@ pub struct ArtifactsDocument {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
     pub name: String,
-    pub version: String,
+    pub version: SemverVersion,
     pub kind: ArtifactKind,
     pub target: String,
 }
@@ -68,7 +73,7 @@ pub struct ArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: String,
+    pub version: SemverVersion,
 
     /// The kind of artifact this is.
     pub kind: ArtifactKind,

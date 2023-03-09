@@ -56,7 +56,7 @@ pub fn read_artifacts(
 
         v.push(db::model::UpdateAvailableArtifact {
             name: artifact.name,
-            version: artifact.version,
+            version: db::model::SemverVersion(artifact.version),
             kind: db::model::KnownArtifactKind(kind),
             targets_role_version: repository
                 .targets()

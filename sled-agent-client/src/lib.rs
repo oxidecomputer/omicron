@@ -301,9 +301,19 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactId>
     fn from(s: omicron_common::api::internal::nexus::UpdateArtifactId) -> Self {
         types::UpdateArtifactId {
             name: s.name,
-            version: s.version,
+            version: s.version.into(),
             kind: s.kind.into(),
         }
+    }
+}
+
+impl From<omicron_common::api::external::SemverVersion>
+    for types::SemverVersion
+{
+    fn from(s: omicron_common::api::external::SemverVersion) -> Self {
+        s.to_string().parse().expect(
+            "semver should generate output that matches validation regex",
+        )
     }
 }
 
