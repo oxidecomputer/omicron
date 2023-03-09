@@ -582,6 +582,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytesize"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38fcc2979eff34a4b84e1cf9a1e3da42a7d44b3b690a40cdcb23e3d556cfb2e5"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bzip2"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1385,6 +1394,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ee2393c4a91429dffb4bedf19f4d6abf27d8a732c8ce4980305d782e5426d57"
 
 [[package]]
+name = "datatest-stable"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4eaf86e44e9f0a21f6e42d8e7f83c9ee049f081745eeed1c6f47a613c76e5977"
+dependencies = [
+ "libtest-mimic",
+ "regex",
+ "walkdir",
+]
+
+[[package]]
 name = "db-macros"
 version = "0.1.0"
 dependencies = [
@@ -1688,7 +1708,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#53a603bae42faaa15331f70697895813e7d79948"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#77bb54b746275a5a2e1d9d97755b57ef6297c713"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1729,7 +1749,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#53a603bae42faaa15331f70697895813e7d79948"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#77bb54b746275a5a2e1d9d97755b57ef6297c713"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2847,6 +2867,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "http",
+ "illumos-utils",
  "installinator-artifact-client",
  "installinator-common",
  "ipcc-key-value",
@@ -2864,6 +2885,7 @@ dependencies = [
  "slog-async",
  "slog-envlogger",
  "slog-term",
+ "smf",
  "tempfile",
  "test-strategy",
  "thiserror",
@@ -3181,6 +3203,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9021b9cc0f078fba93f59d6e6f1fce89682171107a21fc421eb130efd2048189"
 dependencies = [
  "tokio",
+]
+
+[[package]]
+name = "libtest-mimic"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79529479c298f5af41375b0c1a77ef670d450b4c9cd7949d2b43af08121b20ec"
+dependencies = [
+ "clap 3.2.23",
+ "termcolor",
+ "threadpool",
 ]
 
 [[package]]
@@ -5991,6 +6024,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_path_to_error"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db0969fff533976baadd92e08b1d102c5a3d8a8049eadfd69d4d1e3c5b2ed189"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_plain"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6894,6 +6936,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
+]
+
+[[package]]
 name = "time"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7342,10 +7393,16 @@ dependencies = [
  "chrono",
  "clap 4.1.8",
  "console",
+ "datatest-stable",
  "fs-err",
  "humantime",
  "omicron-common",
+ "omicron-test-utils",
  "predicates",
+ "slog",
+ "slog-async",
+ "slog-envlogger",
+ "slog-term",
  "tempfile",
  "tufaceous-lib",
 ]
@@ -7355,18 +7412,26 @@ name = "tufaceous-lib"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "buf-list",
  "bytes",
+ "bytesize",
  "camino",
  "chrono",
  "debug-ignore",
  "fs-err",
  "hex",
+ "itertools",
  "omicron-common",
  "rand 0.8.5",
  "ring",
+ "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2 0.10.6",
+ "slog",
+ "tar",
  "tempfile",
+ "toml 0.7.2",
  "tough",
  "url",
  "zip",
@@ -7382,6 +7447,16 @@ dependencies = [
  "cassowary",
  "crossterm 0.25.0",
  "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
+name = "tui-tree-widget"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64cd64e2088f26dd5f7e5239cdd7ee234098d3bda4dc214e4bb58c2049ce5af3"
+dependencies = [
+ "tui",
  "unicode-width",
 ]
 
@@ -7869,6 +7944,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "libsw",
+ "omicron-common",
  "proptest",
  "reqwest",
  "semver 1.0.16",
@@ -7886,6 +7962,7 @@ dependencies = [
  "tokio",
  "toml 0.7.2",
  "tui",
+ "tui-tree-widget",
  "wicketd-client",
 ]
 
@@ -7903,6 +7980,7 @@ dependencies = [
  "display-error-chain",
  "dropshot",
  "expectorate",
+ "fs-err",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -7929,6 +8007,7 @@ dependencies = [
  "tokio",
  "toml 0.7.2",
  "tough",
+ "tufaceous",
  "tufaceous-lib",
  "uuid",
 ]

@@ -71,15 +71,13 @@ impl DataStore {
 
                 Ok(db_snapshot.block_size)
             }
-            params::DiskSource::Image { image_id: _ } => {
-                // Until we implement project images, do not allow disks to be
-                // created from a project image.
-                return Err(Error::InvalidValue {
-                    label: String::from("image"),
-                    message: String::from(
-                        "project image are not yet supported",
-                    ),
-                });
+            params::DiskSource::Image { image_id } => {
+                let (.., db_image) = LookupPath::new(opctx, &self)
+                    .image_id(*image_id)
+                    .fetch()
+                    .await?;
+
+                Ok(db_image.block_size)
             }
             params::DiskSource::GlobalImage { image_id } => {
                 let (.., db_global_image) = LookupPath::new(opctx, &self)

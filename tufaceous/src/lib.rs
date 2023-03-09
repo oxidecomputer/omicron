@@ -2,18 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod artifact;
-mod bootstrap;
-mod ddm_admin_client;
+mod date;
 mod dispatch;
-mod errors;
-mod hardware;
-#[cfg(test)]
-mod mock_peers;
-mod peers;
-mod reporter;
-#[cfg(test)]
-mod test_helpers;
-mod write;
+mod hint;
 
 pub use dispatch::*;
