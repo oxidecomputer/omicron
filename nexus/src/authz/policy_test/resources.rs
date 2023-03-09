@@ -287,6 +287,13 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-snapshot1", disk_name)),
     ));
+
+    let image_name = format!("{}-image1", project_name);
+    builder.new_resource(authz::Image::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(image_name),
+    ));
 }
 
 /// Returns the set of authz classes exempted from the coverage test
