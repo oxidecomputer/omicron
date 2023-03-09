@@ -3821,6 +3821,7 @@ dependencies = [
  "progenitor",
  "proptest",
  "rand 0.8.5",
+ "regress",
  "reqwest",
  "ring",
  "schemars",

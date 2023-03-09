@@ -7,19 +7,21 @@ use std::path::Path;
 use assert_cmd::Command;
 
 #[test]
-fn test_wicket_shell_like() {
+fn test_wicket_ssh_force_command_like() {
     let tempdir = tempfile::tempdir().unwrap();
 
     let mut cmd = make_cmd(tempdir.path());
-    cmd.args(["-c", "help"]);
+    cmd.env("SSH_ORIGINAL_COMMAND", "help");
     cmd.assert().success();
 
     let mut cmd = make_cmd(tempdir.path());
+    cmd.env("SSH_ORIGINAL_COMMAND", "--help");
     cmd.args(["-c", "--help"]);
     cmd.assert().success();
 
     let mut cmd = make_cmd(tempdir.path());
-    cmd.args(["-c", "upload --no-upload"]).write_stdin("upload-test");
+    cmd.env("SSH_ORIGINAL_COMMAND", "upload --no-upload")
+        .write_stdin("upload-test");
     cmd.assert().success();
 }
 
