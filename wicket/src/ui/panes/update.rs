@@ -118,7 +118,7 @@ impl UpdatePane {
             buttons: vec![
                 ButtonText { instruction: "YES", key: "Y" },
                 ButtonText { instruction: "NO", key: "N" },
-                ButtonText { instruction: "LOGS", key: "L" },
+                ButtonText { instruction: "VIEW LOGS", key: "L" },
             ],
         };
         let full_screen = Rect {

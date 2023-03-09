@@ -44,7 +44,27 @@ impl Popup<'_> {
     pub fn width(&self) -> u16 {
         let borders: u16 = 2;
         let right_margin: u16 = 3;
-        u16::try_from(self.body.width()).unwrap() + borders + right_margin
+        let body_width =
+            u16::try_from(self.body.width()).unwrap() + borders + right_margin;
+        let header_width = u16::try_from(self.header.width()).unwrap()
+            + borders
+            + right_margin;
+        let width = u16::max(body_width, header_width);
+        u16::max(width, self.button_width())
+    }
+
+    pub fn button_width(&self) -> u16 {
+        let space_between_buttons = 1;
+        let margins = 4;
+        // Margin + space + angle brackets
+        let button_extras = 6;
+        let width = self.buttons.iter().fold(margins, |acc, text| {
+            acc + text.instruction.len()
+                + text.key.len()
+                + button_extras
+                + space_between_buttons
+        });
+        u16::try_from(width).unwrap()
     }
 }
 
