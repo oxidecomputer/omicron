@@ -4,23 +4,19 @@
 
 //! Code that manages command dispatch from a shell for wicket.
 
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
+use omicron_common::address::WICKETD_PORT;
 use slog::Drain;
 
 use crate::{upload::UploadArgs, Runner};
 
 pub fn exec() -> Result<()> {
-    // TODO: make this configurable?
-    // To launch within the switch zone, and as part of a login shell,
-    // we likely have to store this in a config file, which may have to be written
-    // by sled-agent.
-    //
-    // We can't just use a command line-arg because we want to act as a login shells
-    let wicketd_addr: SocketAddrV6 = "[::1]:12226".parse().unwrap();
+    let wicketd_addr =
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_PORT, 0, 0);
 
     // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
     if let Ok(ssh_args) = std::env::var("SSH_ORIGINAL_COMMAND") {
