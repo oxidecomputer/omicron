@@ -8,10 +8,9 @@ use mockall::mock;
 use nexus_client::types::{
     DiskRuntimeState, InstanceRuntimeState, KnownArtifactKind,
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
-    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
-    ZpoolPutResponse,
+    RackInitializationRequest, SemverVersion, SledAgentStartupInfo,
+    ZpoolPutRequest, ZpoolPutResponse,
 };
-use omicron_common::api::external::SemverVersion;
 use slog::Logger;
 use uuid::Uuid;
 
