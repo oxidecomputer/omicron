@@ -91,6 +91,11 @@ pub struct IpPoolPath {
     pub pool: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SshKeyPath {
+    pub ssh_key: NameOrId,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
     pub silo: NameOrId,

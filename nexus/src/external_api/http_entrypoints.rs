@@ -335,7 +335,13 @@ pub fn external_api() -> NexusApiDescription {
         api.register(session_sshkey_list)?;
         api.register(session_sshkey_view)?;
         api.register(session_sshkey_create)?;
-        api.register(session_sshkey_delete)?;
+
+        api.register(current_user_view_v1)?;
+        api.register(current_user_groups_v1)?;
+        api.register(current_user_sshkey_list_v1)?;
+        api.register(current_user_sshkey_view_v1)?;
+        api.register(current_user_sshkey_create_v1)?;
+        api.register(current_user_sshkey_delete_v1)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -8884,6 +8890,66 @@ async fn role_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// Current user
+
+/// Fetch the user associated with the current session
+#[endpoint {
+   method = GET,
+   path = "/v1/current-user",
+   tags = ["hidden"],
+}]
+pub async fn current_user_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<views::User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        // We don't care about authentication method, as long as they are authed
+        // as _somebody_. We could restrict this to session auth only, but it's
+        // not clear what the advantage would be.
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus.silo_user_fetch_self(&opctx).await?;
+        Ok(HttpResponseOk(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the silo groups the current user belongs to
+#[endpoint {
+    method = GET,
+    path = "/v1/current-user/groups",
+    tags = ["hidden"],
+ }]
+pub async fn current_user_groups_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        // We don't care about authentication method, as long as they are authed
+        // as _somebody_. We could restrict this to session auth only, but it's
+        // not clear what the advantage would be.
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let groups = nexus
+            .silo_user_fetch_groups_for_self(
+                &opctx,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            groups,
+            &|_, group: &views::Group| group.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Per-user SSH public keys
 
 /// List SSH public keys
@@ -8899,18 +8965,20 @@ async fn session_sshkey_list(
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
         let &actor = opctx
             .authn
             .actor_required()
             .internal_context("listing current user's ssh keys")?;
-        let page_params =
-            data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
-            .ssh_keys_list(&opctx, actor.actor_id(), &page_params)
+            .ssh_keys_list(
+                &opctx,
+                actor.actor_id(),
+                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
+            )
             .await?
             .into_iter()
             .map(SshKey::from)
@@ -8919,6 +8987,45 @@ async fn session_sshkey_list(
             &query,
             ssh_keys,
             &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List SSH public keys
+///
+/// Lists SSH public keys for the currently authenticated user.
+#[endpoint {
+    method = GET,
+    path = "/v1/current-user/sshkeys",
+    tags = ["session"],
+}]
+async fn current_user_sshkey_list_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("listing current user's ssh keys")?;
+        let ssh_keys = nexus
+            .ssh_keys_list(&opctx, actor.actor_id(), &paginated_by)
+            .await?
+            .into_iter()
+            .map(SshKey::from)
+            .collect::<Vec<SshKey>>();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            ssh_keys,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -8952,6 +9059,34 @@ async fn session_sshkey_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create an SSH public key
+///
+/// Create an SSH public key for the currently authenticated user.
+#[endpoint {
+    method = POST,
+    path = "/v1/current-user/sshkeys",
+    tags = ["session"],
+}]
+async fn current_user_sshkey_create_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_key: TypedBody<params::SshKeyCreate>,
+) -> Result<HttpResponseCreated<SshKey>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("creating ssh key for current user")?;
+        let ssh_key = nexus
+            .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
+            .await?;
+        Ok(HttpResponseCreated(ssh_key.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Path parameters for SSH key requests by name
 #[derive(Deserialize, JsonSchema)]
 struct SshKeyPathParams {
@@ -8961,10 +9096,12 @@ struct SshKeyPathParams {
 /// Fetch an SSH public key
 ///
 /// Fetch an SSH public key associated with the currently authenticated user.
+/// Use `GET /v1/current-user/sshkeys` instead
 #[endpoint {
     method = GET,
     path = "/session/me/sshkeys/{ssh_key_name}",
     tags = ["session"],
+    deprecated = true,
 }]
 async fn session_sshkey_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -8987,6 +9124,35 @@ async fn session_sshkey_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an SSH public key
+///
+/// Fetch an SSH public key associated with the currently authenticated user.
+#[endpoint {
+    method = GET,
+    path = "/v1/current-user/sshkeys/{ssh_key}",
+    tags = ["session"],
+}]
+async fn current_user_sshkey_view_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SshKeyPath>,
+) -> Result<HttpResponseOk<SshKey>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let ssh_key = &path.ssh_key;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("fetching one of current user's ssh keys")?;
+        let ssh_key =
+            nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key).await?;
+        Ok(HttpResponseOk(ssh_key.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete an SSH public key
 ///
 /// Delete an SSH public key associated with the currently authenticated user.
@@ -8998,6 +9164,34 @@ async fn session_sshkey_view(
 async fn session_sshkey_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SshKeyPathParams>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let ssh_key_name = &path.ssh_key_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("deleting one of current user's ssh keys")?;
+        nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete an SSH public key
+///
+/// Delete an SSH public key associated with the currently authenticated user.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/current-user/sshkeys/{ssh_key}",
+    tags = ["session"],
+}]
+async fn current_user_sshkey_delete_v1(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

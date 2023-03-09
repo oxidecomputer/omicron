@@ -616,10 +616,12 @@ pub async fn login_begin(
 }
 
 /// Fetch the user associated with the current session
+/// Use `GET /v1/current-user` instead
 #[endpoint {
    method = GET,
    path = "/session/me",
    tags = ["hidden"],
+   deprecated = true
 }]
 pub async fn session_me(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -638,10 +640,12 @@ pub async fn session_me(
 }
 
 /// Fetch the silo groups the current user belongs to
+/// Use `GET /v1/current-user/groups` instead
 #[endpoint {
     method = GET,
     path = "/session/me/groups",
     tags = ["hidden"],
+    deprecated = true
  }]
 pub async fn session_me_groups(
     rqctx: RequestContext<Arc<ServerContext>>,

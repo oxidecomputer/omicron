@@ -558,7 +558,6 @@ impl super::Nexus {
     }
 
     // SSH Keys
-
     pub async fn ssh_key_create(
         &self,
         opctx: &OpContext,
@@ -578,7 +577,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-        page_params: &DataPageParams<'_, Name>,
+        page_params: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
         let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
             .silo_user_id(silo_user_id)
@@ -592,7 +591,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-        ssh_key_name: &Name,
+        ssh_key: &NameOrId,
     ) -> LookupResult<SshKey> {
         let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
             .silo_user_id(silo_user_id)
