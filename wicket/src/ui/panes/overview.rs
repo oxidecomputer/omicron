@@ -9,6 +9,7 @@ use super::Control;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
+use crate::ui::panes::compute_scroll_offset;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::{Action, Event, Frame, State};
 use crossterm::event::Event as TermEvent;
@@ -261,36 +262,13 @@ impl Control for InventoryView {
             None => Text::styled("Inventory Unavailable", inventory_style),
         };
 
-        // Scroll offset is in terms of lines of text.
-        // We must compute it to be in terms of the number of terminal rows.
-        //
-        // XXX: This whole paragraph scroll only allows length of less than
-        // 64k rows even though it shouldn't be limited. We can do our own
-        // scrolling instead to obviate this limit. we may want to anyway, as
-        // it's less data to be formatted for the Paragraph.
         let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
-
-        // Note that this check doesn't actually work with line wraps.
-        // See https://github.com/tui-rs-revival/ratatui/pull/7
-        if *scroll_offset > text.height() {
-            *scroll_offset = text.height();
-        }
-
-        let num_lines = chunks[1].height as usize;
-        if text.height() <= num_lines {
-            *scroll_offset = 0;
-        } else {
-            if text.height() - *scroll_offset < num_lines {
-                // Don't allow scrolling past bottom of content
-                //
-                // Reset the scroll_offset, so that an up arrow
-                // will scroll up on the next try.
-                *scroll_offset = text.height() - num_lines;
-            }
-        }
-        // This doesn't allow data more than 64k rows. We shouldn't need
-        // more than that for wicket, but who knows!
-        let y_offset = u16::try_from(*scroll_offset).unwrap();
+        let y_offset = compute_scroll_offset(
+            *scroll_offset,
+            text.height(),
+            chunks[1].height as usize,
+        );
+        *scroll_offset = y_offset as usize;
 
         let inventory = Paragraph::new(text)
             .block(contents_block.clone())
