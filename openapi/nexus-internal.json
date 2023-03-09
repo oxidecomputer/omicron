@@ -39,7 +39,7 @@
             "description": "The artifact's version.",
             "required": true,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/SemverVersion"
             }
           }
         ],
@@ -2309,6 +2309,10 @@
           "switch_sp",
           "switch_rot"
         ]
+      },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^\\d+\\.\\d+\\.\\d+([\\-\\+].+)?$"
       }
     }
   }

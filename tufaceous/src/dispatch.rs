@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
-use omicron_common::update::ArtifactKind;
+use omicron_common::{api::external::SemverVersion, update::ArtifactKind};
 use tufaceous_lib::{
     assemble::{ArtifactManifest, OmicronRepoAssembler},
     AddArtifact, ArchiveExtractor, Key, OmicronRepo,
@@ -198,7 +198,7 @@ enum Command {
         name: Option<String>,
 
         /// Artifact version.
-        version: String,
+        version: SemverVersion,
     },
     /// Archives this repository to a zip file.
     Archive {

@@ -254,7 +254,7 @@ impl OmicronRepoEditor {
         if let Some(artifact) =
             self.artifacts.artifacts.iter_mut().find(|artifact| {
                 artifact.name == new_artifact.name()
-                    && artifact.version == new_artifact.version()
+                    && &artifact.version == new_artifact.version()
                     && artifact.kind == new_artifact.kind().clone()
             })
         {
