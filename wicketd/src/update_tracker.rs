@@ -10,9 +10,9 @@ use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
 use crate::update_events::UpdateEventKind;
-use crate::update_events::UpdateTerminalEventKind;
 use crate::update_events::UpdateNormalEventKind;
 use crate::update_events::UpdateStateKind;
+use crate::update_events::UpdateTerminalEventKind;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
@@ -375,20 +375,11 @@ impl UpdateDriver {
         kind: UpdateNormalEventKind,
         new_current: Option<UpdateStateKind>,
     ) {
-        self.push_update_event_now(
-            UpdateEventKind::Normal(kind),
-            new_current,
-        );
+        self.push_update_event_now(UpdateEventKind::Normal(kind), new_current);
     }
 
-    fn push_update_terminal_failure(
-        &self,
-        kind: UpdateTerminalEventKind,
-    ) {
-        self.push_update_event_now(
-            UpdateEventKind::Terminal(kind),
-            None,
-        );
+    fn push_update_terminal_failure(&self, kind: UpdateTerminalEventKind) {
+        self.push_update_event_now(UpdateEventKind::Terminal(kind), None);
     }
 
     async fn run_impl(
