@@ -14,6 +14,7 @@ crossterm = { version = "0.26.1", features = ["event-stream"] }
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
 lazy_static.workspace = true
+omicron-common.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -30,6 +31,7 @@ tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 tui = "0.19.0"
+tui-tree-widget = "0.11.0"
 
 wicketd-client.workspace = true
 

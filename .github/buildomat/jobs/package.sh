@@ -14,12 +14,12 @@
 #: [[publish]]
 #: series = "image"
 #: name = "global-zone-packages"
-#: from_output = "/out/global-zone-packages.tar.gz"
+#: from_output = "/work/global-zone-packages.tar.gz"
 #:
 #: [[publish]]
 #: series = "image"
 #: name = "trampoline-global-zone-packages"
-#: from_output = "/out/trampoline-global-zone-packages.tar.gz"
+#: from_output = "/work/trampoline-global-zone-packages.tar.gz"
 
 set -o errexit
 set -o pipefail
