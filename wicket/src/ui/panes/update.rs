@@ -72,12 +72,11 @@ impl UpdatePane {
     }
 
     pub fn draw_log_popup(&mut self, state: &State, frame: &mut Frame<'_>) {
+        let selected = state.rack_state.selected;
+
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(
-                    " UPDATE LOGS: {}",
-                    state.rack_state.selected.to_string()
-                ),
+                format!(" UPDATE LOGS: {}", selected.to_string()),
                 style::header(true),
             )])]),
             body: Text::from(vec![Spans::from(vec![Span::styled(

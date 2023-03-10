@@ -143,6 +143,10 @@ impl Runner {
                     self.state.update_state.update_artifacts(artifacts);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
+                Event::UpdateLog(logs) => {
+                    self.state.update_state.update_logs(logs);
+                    self.screen.draw(&self.state, &mut self.terminal)?;
+                }
                 _ => {
                     let action = self.screen.on(&mut self.state, event);
                     self.handle_action(action)?;

@@ -10,13 +10,16 @@ use super::{ComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::{ArtifactId, SemverVersion};
+use wicketd_client::types::{
+    ArtifactId, SemverVersion, UpdateLog, UpdateLogAll,
+};
 
 #[derive(Debug)]
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, BTreeMap<KnownArtifactKind, UpdateState>>,
     pub artifacts: Vec<ArtifactId>,
     pub artifact_versions: BTreeMap<KnownArtifactKind, SemverVersion>,
+    pub logs: BTreeMap<ComponentId, UpdateLog>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -91,6 +94,19 @@ impl RackUpdateState {
                 .collect(),
             artifacts: vec![],
             artifact_versions: BTreeMap::default(),
+            logs: BTreeMap::default(),
+        }
+    }
+
+    pub fn update_logs(&mut self, logs: UpdateLogAll) {
+        for (sp_type, logs) in logs.sps {
+            if sp_type == "sled" {
+                for (i, log) in logs {
+                    // TODO: Sanity check slot number
+                    let id = ComponentId::Sled(i.parse().unwrap());
+                    self.logs.insert(id, log);
+                }
+            }
         }
     }
 
