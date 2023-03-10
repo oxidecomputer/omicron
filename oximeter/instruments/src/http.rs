@@ -14,7 +14,6 @@ use http::StatusCode;
 use oximeter::histogram::Histogram;
 use oximeter::{Metric, MetricsError, Producer, Sample, Target};
 use std::collections::BTreeMap;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
