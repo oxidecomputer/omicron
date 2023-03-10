@@ -18,6 +18,7 @@
 #:	"oxidecomputer/boot-image-tools",
 #:	"oxidecomputer/chelsio-t6-roms",
 #:	"oxidecomputer/compliance-pilot",
+#:	"oxidecomputer/facade",
 #:	"oxidecomputer/helios",
 #:	"oxidecomputer/helios-omnios-build",
 #:	"oxidecomputer/helios-omnios-extra",
