@@ -8,7 +8,6 @@
 #:	"=/work/helios/image/output/zfs.img",
 #:	"=/work/helios/image/output/rom",
 #: ]
-#: skip_clone = true
 #: access_repos = [
 #:	"oxidecomputer/amd-apcb",
 #:	"oxidecomputer/amd-efs",
@@ -17,6 +16,8 @@
 #:	"oxidecomputer/amd-host-image-builder",
 #:	"oxidecomputer/boot-image-tools",
 #:	"oxidecomputer/chelsio-t6-roms",
+#:	"oxidecomputer/compliance-pilot",
+#:	"oxidecomputer/facade",
 #:	"oxidecomputer/helios",
 #:	"oxidecomputer/helios-omnios-build",
 #:	"oxidecomputer/helios-omnios-extra",
@@ -34,7 +35,7 @@ set -o xtrace
 cargo --version
 rustc --version
 
-source "/work/oxidecomputer/omicron/tools/helios_version"
+source "$(pwd)/tools/helios_version"
 
 #
 # The token authentication mechanism that affords us access to other private
@@ -45,6 +46,7 @@ override_urls=(
     'git@github.com:'
     'ssh://github.com/'
     'ssh://git@github.com/'
+    'git+ssh://git@github.com/'
 )
 for (( i = 0; i < ${#override_urls[@]}; i++ )); do
 	git config --add --global url.https://github.com/.insteadOf \
