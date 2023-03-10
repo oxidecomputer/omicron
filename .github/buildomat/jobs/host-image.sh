@@ -34,6 +34,8 @@ set -o xtrace
 cargo --version
 rustc --version
 
+source "./tools/helios_version"
+
 #
 # The token authentication mechanism that affords us access to other private
 # repositories requires that we use HTTPS URLs for GitHub, rather than SSH.
@@ -73,7 +75,6 @@ cd -
 git clone https://github.com/oxidecomputer/helios.git
 cd helios
 
-source "./tools/helios_version"
 git checkout "$COMMIT"
 
 # Create the "./helios-build" command, which lets us build images
