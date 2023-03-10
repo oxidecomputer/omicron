@@ -122,6 +122,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Project::init(),
         Disk::init(),
         Snapshot::init(),
+        Image::init(),
         Instance::init(),
         IpPool::init(),
         NetworkInterface::init(),

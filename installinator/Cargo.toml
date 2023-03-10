@@ -16,6 +16,7 @@ display-error-chain.workspace = true
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
+illumos-utils.workspace = true
 installinator-artifact-client.workspace = true
 installinator-common.workspace = true
 ipcc-key-value.workspace = true
@@ -30,6 +31,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+smf.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true

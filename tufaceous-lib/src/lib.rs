@@ -4,6 +4,7 @@
 
 mod archive;
 mod artifact;
+pub mod assemble;
 mod key;
 mod repository;
 mod root;

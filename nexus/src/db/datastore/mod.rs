@@ -49,6 +49,7 @@ mod disk;
 mod external_ip;
 mod global_image;
 mod identity_provider;
+mod image;
 mod instance;
 mod ip_pool;
 mod network_interface;

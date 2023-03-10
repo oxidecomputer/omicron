@@ -16,6 +16,7 @@ use dropshot::RequestContext;
 use dropshot::UntypedBody;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -92,11 +93,12 @@ async fn put_repository(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// The response to a `get_artifacts` call: the list of all artifacts currently
-/// held by wicketd.
+/// The response to a `get_artifacts` call: the system version, and the list of
+/// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetArtifactsResponse {
+    pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
 }
 
@@ -111,8 +113,9 @@ pub struct GetArtifactsResponse {
 async fn get_artifacts(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<GetArtifactsResponse>, HttpError> {
-    let artifacts = rqctx.context().artifact_store.artifact_ids();
-    Ok(HttpResponseOk(GetArtifactsResponse { artifacts }))
+    let (system_version, artifacts) =
+        rqctx.context().artifact_store.system_version_and_artifact_ids();
+    Ok(HttpResponseOk(GetArtifactsResponse { system_version, artifacts }))
 }
 
 /// An endpoint to start updating a sled.
