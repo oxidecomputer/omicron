@@ -34,6 +34,8 @@ set -o xtrace
 cargo --version
 rustc --version
 
+source "./tools/helios_version"
+
 #
 # The token authentication mechanism that affords us access to other private
 # repositories requires that we use HTTPS URLs for GitHub, rather than SSH.
@@ -67,12 +69,11 @@ mkdir gz && cd gz
 ptime -m tar xvzf /input/package/work/trampoline-global-zone-packages.tar.gz
 cd -
 
-# TODO: Consider importing zones here too?
-
 # Checkout helios at a pinned commit
 git clone https://github.com/oxidecomputer/helios.git
 cd helios
-git checkout ac8a7e7ef9e9b5ef27334bc8016f5d123f852449
+
+git checkout "$COMMIT"
 
 # Create the "./helios-build" command, which lets us build images
 gmake setup
