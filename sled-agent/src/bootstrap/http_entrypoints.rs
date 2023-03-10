@@ -33,6 +33,10 @@ pub(crate) fn api() -> BootstrapApiDescription {
     api
 }
 
+/// Provides a list of components known to the bootstrap agent.
+///
+/// This API is inteneded to allow early boot services (such as Wicket)
+/// to query the underlying component versions installed on a sled.
 #[endpoint {
     method = GET,
     path = "/components",
