@@ -41,7 +41,6 @@
 ///    over the DNS protocol
 /// 3. A Dropshot server that serves HTTP endpoints for reading and modifying
 ///    the persistent DNS data
-
 use serde::Deserialize;
 
 pub mod dns_server;
@@ -49,10 +48,50 @@ pub mod dns_types;
 pub mod http_server;
 pub mod storage;
 
+use anyhow::{anyhow, Context};
+use slog::o;
+
 // XXX-dap where should this go?  depends on what uses it besides the CLI?
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub log: dropshot::ConfigLogging,
     pub dropshot: dropshot::ConfigDropshot,
     pub storage: storage::Config,
+}
+
+/// Starts both the HTTP and DNS servers over a given store.
+pub async fn start_servers(
+    log: slog::Logger,
+    store: storage::Store,
+    dns_server_config: &dns_server::Config,
+    dropshot_config: &dropshot::ConfigDropshot,
+) -> Result<
+    (dns_server::ServerHandle, dropshot::HttpServer<http_server::Context>),
+    anyhow::Error,
+> {
+    let dns_server = {
+        dns_server::Server::start(
+            log.new(o!("component" => "dns")),
+            store.clone(),
+            dns_server_config,
+        )
+        .await
+        .context("starting DNS server")?
+    };
+
+    let dropshot_server = {
+        let http_api = http_server::api();
+        let http_api_context = http_server::Context::new(store);
+
+        dropshot::HttpServerStarter::new(
+            dropshot_config,
+            http_api,
+            http_api_context,
+            &log.new(o!("component" => "http")),
+        )
+        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
+        .start()
+    };
+
+    Ok((dns_server, dropshot_server))
 }

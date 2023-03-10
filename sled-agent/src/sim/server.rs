@@ -177,18 +177,23 @@ impl Server {
 
         // XXX-dap need to update this code.  Probably should consider re-adding
         // an analog to dns_server::start?
-        let dns_server: dns_server::dns_server::ServerHandle = todo!();
-        let dns_dropshot_server: dropshot::HttpServer<
-            dns_server::http_server::Context,
-        > = todo!();
-        //let (dns_server, dns_dropshot_server) = dns_server::start(
-        //    dns_log,
-        //    dns_server_config,
-        //    zone,
-        //    dns_address.into(),
-        //)
-        //.await
-        //.map_err(|e| e.to_string())?;
+        let store = dns_server::storage::Store::new(
+            log.new(o!("component" => "store")),
+            &dns_server_config.storage,
+        )
+        .context("initializing DNS storage")
+        .map_err(|e| e.to_string())?;
+
+        let (dns_server, dns_dropshot_server) = dns_server::start_servers(
+            log.clone(),
+            store,
+            &dns_server::dns_server::Config {
+                bind_address: SocketAddr::from(dns_address).to_string(),
+            },
+            &dns_server_config.dropshot,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
 
         // Insert SRV and AAAA record for Crucible Pantry
         // XXX-dap

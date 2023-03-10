@@ -50,32 +50,16 @@ async fn main() -> Result<(), anyhow::Error> {
     )
     .context("initializing persistent storage")?;
 
-    let _dns_server = {
-        let dns_server_config = dns_server::dns_server::Config {
-            bind_address: args.dns_address.to_string(), // XXX-dap
-        };
-        dns_server::dns_server::Server::start(
-            log.new(o!("component" => "dns")),
-            store.clone(),
-            dns_server_config,
-        )
-        .await
-        .context("starting DNS server")?
+    let dns_server_config = dns_server::dns_server::Config {
+        bind_address: args.dns_address.to_string(), // XXX-dap
     };
-
-    let dropshot_server = {
-        let http_api = dns_server::http_server::api();
-        let http_api_context = dns_server::http_server::Context::new(store);
-
-        dropshot::HttpServerStarter::new(
-            &config.dropshot,
-            http_api,
-            http_api_context,
-            &log.new(o!("component" => "http")),
-        )
-        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
-        .start()
-    };
+    let (_, dropshot_server) = dns_server::start_servers(
+        log,
+        store,
+        &dns_server_config,
+        &config.dropshot,
+    )
+    .await?;
 
     dropshot_server
         .await

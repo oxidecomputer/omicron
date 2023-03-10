@@ -65,7 +65,7 @@ impl Server {
     pub async fn start(
         log: Logger,
         store: storage::Store,
-        config: Config,
+        config: &Config,
     ) -> anyhow::Result<ServerHandle> {
         let server_socket = Arc::new(
             UdpSocket::bind(config.bind_address.clone()).await.with_context(

@@ -344,18 +344,15 @@ async fn init_client_server(
     // XXX-dap clear it?
 
     // launch a dns server
-    let dns_server = {
-        let dns_config =
-            dns_server::dns_server::Config { bind_address: "[::1]:0".into() };
-
-        dns_server::dns_server::Server::start(
-            log.new(o!("component" => "dns")),
-            store.clone(),
-            dns_config,
-        )
-        .await
-        .context("starting DNS server")?
-    };
+    let dns_server_config =
+        dns_server::dns_server::Config { bind_address: "[::1]:0".into() };
+    let (dns_server, dropshot_server) = dns_server::start_servers(
+        log.clone(),
+        store,
+        &dns_server_config,
+        &config.dropshot,
+    )
+    .await?;
 
     let mut rc = ResolverConfig::new();
     rc.add_name_server(NameServerConfig {
@@ -368,21 +365,6 @@ async fn init_client_server(
 
     let resolver =
         TokioAsyncResolver::tokio(rc, ResolverOpts::default()).unwrap();
-
-    // launch a dropshot server
-    let dropshot_server = {
-        let http_api = dns_server::http_server::api();
-        let http_api_context = dns_server::http_server::Context::new(store);
-
-        dropshot::HttpServerStarter::new(
-            &config.dropshot,
-            http_api,
-            http_api_context,
-            &log.new(o!("component" => "http")),
-        )
-        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
-        .start()
-    };
 
     // wait for server to start
     // XXX-dap wait_for_condition

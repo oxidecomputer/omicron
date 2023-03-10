@@ -98,6 +98,7 @@ impl Updater {
         &'a self,
         body: &'a crate::types::DnsConfig,
     ) -> Result<(), DnsError> {
+        // XXX-dap log
         stream::iter(&self.clients)
             .map(Ok::<_, DnsError>)
             .try_for_each_concurrent(None, |client| async move {
