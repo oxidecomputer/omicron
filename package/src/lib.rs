@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 pub mod dot;
+pub mod target;
 
 /// Errors which may be returned when parsing the server configuration.
 #[derive(Error, Debug)]
@@ -29,22 +30,56 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
     Ok(cfg)
 }
 
+#[derive(Clone, Debug, Subcommand)]
+pub enum TargetCommand {
+    /// Creates a new build target, and sets it as "active".
+    Create {
+        #[clap(
+            short,
+            long,
+            default_value_t = crate::target::Image::Standard,
+        )]
+        image: crate::target::Image,
+
+        #[clap(
+            short,
+            long,
+            default_value_t = crate::target::Machine::NonGimlet,
+        )]
+        machine: crate::target::Machine,
+
+        #[clap(
+            short,
+            long,
+            default_value_t = crate::target::Switch::Stub,
+        )]
+        switch: crate::target::Switch,
+    },
+    /// List all existing targets
+    List,
+    /// Activates a build target, with a symlink named "active".
+    ///
+    /// This causes all subsequent commands to act on the build target
+    /// if the "--target" flag is omitted.
+    Set,
+    /// Delete an existing target
+    Delete,
+}
+
 /// Commands which should execute on a host building packages.
 #[derive(Debug, Subcommand)]
 pub enum BuildCommand {
+    /// Define the build configuration target for subsequent commands
+    Target {
+        #[command(subcommand)]
+        subcommand: TargetCommand,
+    },
+    /// Builds the packages specified in a manifest.
+    Package,
+    /// Checks the packages specified in a manifest without building them
+    Check,
     /// Make a `dot` graph to visualize the package tree
     Dot,
-    /// Builds the packages specified in a manifest, and places them into an
-    /// 'out' directory.
-    Package {
-        /// The output directory, where artifacts should be placed.
-        ///
-        /// Defaults to "out".
-        #[clap(long = "out", default_value = "out", action)]
-        artifact_dir: PathBuf,
-    },
-    /// Checks the packages specified in a manifest, without building them.
-    Check,
 }
 
 /// Commands which should execute on a host installing packages.
@@ -53,12 +88,6 @@ pub enum DeployCommand {
     /// Installs the packages and starts the sled-agent. Shortcut for `unpack`
     /// and `activate`.
     Install {
-        /// The directory from which artifacts will be pulled.
-        ///
-        /// Should match the format from the Package subcommand.
-        #[clap(long = "in", default_value = "out", action)]
-        artifact_dir: PathBuf,
-
         /// The directory to which artifacts will be installed.
         ///
         /// Defaults to "/opt/oxide".
@@ -77,12 +106,6 @@ pub enum DeployCommand {
     /// `unpack` does not actually start any services, but it prepares services
     /// to be launched with the `activate` command.
     Unpack {
-        /// The directory from which artifacts will be pulled.
-        ///
-        /// Should match the format from the Package subcommand.
-        #[clap(long = "in", default_value = "out", action)]
-        artifact_dir: PathBuf,
-
         /// The directory to which artifacts will be installed.
         ///
         /// Defaults to "/opt/oxide".
@@ -115,12 +138,6 @@ pub enum DeployCommand {
     /// Uninstalls packages and removes them from the installation directory.
     /// Issues the `uninstall` command.
     Clean {
-        /// The directory from which artifacts were be pulled.
-        ///
-        /// Should match the format from the Package subcommand.
-        #[clap(long = "in", default_value = "out", action)]
-        artifact_dir: PathBuf,
-
         /// The directory to which artifacts were installed.
         ///
         /// Defaults to "/opt/oxide".

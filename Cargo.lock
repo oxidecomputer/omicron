@@ -4031,6 +4031,7 @@ dependencies = [
  "slog-async",
  "slog-term",
  "smf",
+ "strum",
  "tar",
  "tempfile",
  "thiserror",
