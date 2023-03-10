@@ -253,6 +253,21 @@ impl UpdatePane {
             self.popup = Some(PopupKind::StartUpdate);
         }
     }
+
+    // When we switch panes, we may have moved around in the rack. We want to
+    // ensure that the currently selected rack component in the  update tree
+    // matches what was selected in the rack or inventory views. We already do
+    // the converse when on this pane and move around the tree.
+    fn ensure_selection_matches_rack_state(&mut self, state: &State) {
+        let selected = self.tree_state.selected();
+        if state.rack_state.selected != ALL_COMPONENT_IDS[selected[0]] {
+            let index = ALL_COMPONENT_IDS
+                .iter()
+                .position(|&id| id == state.rack_state.selected)
+                .unwrap();
+            self.tree_state.select(vec![index]);
+        }
+    }
 }
 
 fn installed_version(
@@ -313,6 +328,7 @@ impl Control for UpdatePane {
     }
 
     fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+        self.ensure_selection_matches_rack_state(state);
         if self.popup.is_some() {
             return self.handle_event_in_popup(state, event);
         }
@@ -364,6 +380,7 @@ impl Control for UpdatePane {
         _: Rect,
         active: bool,
     ) {
+        self.ensure_selection_matches_rack_state(state);
         let border_style = style::line(active);
         let header_style = style::header(active);
 
