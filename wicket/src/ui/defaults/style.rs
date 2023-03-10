@@ -47,3 +47,51 @@ pub fn service() -> Style {
 pub fn delayed() -> Style {
     Style::default().fg(OX_OFF_WHITE)
 }
+
+pub fn highlighted() -> Style {
+    Style::default().bg(TUI_PURPLE).fg(TUI_BLACK)
+}
+
+pub fn plain_text() -> Style {
+    Style::default().bg(TUI_BLACK).fg(OX_OFF_WHITE)
+}
+
+pub fn successful_update() -> Style {
+    selected()
+}
+
+pub fn failed_update() -> Style {
+    Style::default().fg(OX_RED)
+}
+
+pub fn start_update() -> Style {
+    Style::default().fg(OX_YELLOW)
+}
+
+pub fn line(active: bool) -> Style {
+    if active {
+        selected_line()
+    } else {
+        deselected()
+    }
+}
+
+pub fn warning() -> Style {
+    Style::default().fg(OX_YELLOW)
+}
+
+pub fn header(active: bool) -> Style {
+    if active {
+        selected()
+    } else {
+        deselected()
+    }
+}
+
+pub fn popup_highlight() -> Style {
+    Style::default().fg(TUI_PURPLE)
+}
+
+pub fn faded_background() -> Style {
+    Style::default().bg(TUI_BLACK).fg(TUI_GREY)
+}

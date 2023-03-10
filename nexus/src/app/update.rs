@@ -121,7 +121,7 @@ impl super::Nexus {
                     .update_artifact(
                         &sled_agent_client::types::UpdateArtifactId {
                             name: artifact.name.clone(),
-                            version: artifact.version.clone(),
+                            version: artifact.version.0.clone().into(),
                             kind: artifact.kind.0.into(),
                         },
                     )
@@ -153,7 +153,7 @@ impl super::Nexus {
         let (.., artifact_entry) = LookupPath::new(opctx, &self.db_datastore)
             .update_available_artifact_tuple(
                 &artifact.name,
-                &artifact.version,
+                db::model::SemverVersion(artifact.version.clone()),
                 KnownArtifactKind(artifact.kind),
             )
             .fetch()

@@ -42,7 +42,6 @@ use diesel::prelude::*;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -521,20 +520,30 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
         use db::schema::network_interface::dsl;
-        paginated(dsl::network_interface, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::subnet_id.eq(authz_subnet.id()))
-            .select(NetworkInterface::as_select())
-            .load_async::<db::model::NetworkInterface>(
-                self.pool_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::network_interface, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::network_interface,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::subnet_id.eq(authz_subnet.id()))
+        .select(NetworkInterface::as_select())
+        .load_async::<db::model::NetworkInterface>(
+            self.pool_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_router_list(

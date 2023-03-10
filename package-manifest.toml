@@ -36,14 +36,29 @@
 
 [package.omicron-sled-agent]
 service_name = "sled-agent"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["sled-agent"]
 source.rust.release = true
 source.paths = [ { from = "smf/sled-agent", to = "pkg" } ]
 output.type = "tarball"
 
+# Installinator is a service which should run in the Global Zone for the
+# explicit purpose of recovery and OS re-installation. It should not be
+# installed concurrently with the sled-agent, and is built separately using the
+# target only_for_target.image_type = "trampoline".
+[package.installinator]
+service_name = "installinator"
+only_for_targets.image_type = "trampoline"
+source.type = "local"
+source.rust.binary_names = ["installinator"]
+source.rust.release = true
+source.paths = [ { from = "smf/installinator", to = "pkg" } ]
+output.type = "tarball"
+
 [package.omicron-nexus]
 service_name = "nexus"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["nexus"]
 source.rust.release = true
@@ -60,6 +75,7 @@ setup_hint = """
 
 [package.oximeter-collector]
 service_name = "oximeter"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["oximeter"]
 source.rust.release = true
@@ -68,6 +84,7 @@ output.type = "zone"
 
 [package.clickhouse]
 service_name = "clickhouse"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
@@ -78,6 +95,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 
 [package.cockroachdb]
 service_name = "cockroachdb"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/cockroachdb", to = "/opt/oxide/cockroachdb" },
@@ -89,18 +107,21 @@ setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary bi
 
 [package.internal-dns]
 service_name = "internal_dns"
+only_for_targets.image_type = "standard"
 source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
 output.type = "zone"
 
 [package.external-dns]
 service_name = "external_dns"
+only_for_targets.image_type = "standard"
 source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
 output.type = "zone"
 
 [package.dns-server]
 service_name = "dns-server"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["dnsadm", "dns-server"]
 source.rust.release = true
@@ -110,6 +131,7 @@ output.intermediate_only = true
 
 [package.internal-dns-customizations]
 service_name = "internal-dns-customizations"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/internal_dns" } ]
 output.intermediate_only = true
@@ -117,6 +139,7 @@ output.type = "zone"
 
 [package.external-dns-customizations]
 service_name = "external-dns-customizations"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" } ]
 output.intermediate_only = true
@@ -124,6 +147,7 @@ output.type = "zone"
 
 [package.omicron-gateway]
 service_name = "mgs"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["mgs"]
 source.rust.release = true
@@ -133,6 +157,7 @@ output.intermediate_only = true
 
 [package.wicketd]
 service_name = "wicketd"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["wicketd"]
 source.rust.release = true
@@ -142,6 +167,7 @@ output.intermediate_only = true
 
 [package.wicket]
 service_name = "wicket"
+only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["wicket"]
 source.rust.release = true
@@ -156,6 +182,7 @@ output.intermediate_only = true
 # for instructions on building this manually.
 [package.crucible]
 service_name = "crucible"
+only_for_targets.image_type = "standard"
 # To manually override the package source (for example, to test a change in
 # both Crucible and Omicron simultaneously):
 #
@@ -172,6 +199,7 @@ output.type = "zone"
 
 [package.crucible-pantry]
 service_name = "crucible_pantry"
+only_for_targets.image_type = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
 source.commit = "fb671895e8adb3cab5e801bbbe8728997178aba4"
@@ -185,6 +213,7 @@ output.type = "zone"
 # for instructions on building this manually.
 [package.propolis-server]
 service_name = "propolis-server"
+only_for_targets.image_type = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
 source.commit = "880a031fbdd7417cd3a4643f8bf419d8d5ea8224"
@@ -195,6 +224,8 @@ output.type = "zone"
 
 [package.maghemite]
 service_name = "mg-ddm"
+# Note: unlike every other package, `maghemite` is not restricted to either the
+# "standard" or "trampoline" image_type; it is included in both.
 source.type = "prebuilt"
 source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
@@ -210,6 +241,7 @@ output.type = "tarball"
 [package.dendrite-stub]
 service_name = "dendrite"
 only_for_targets.switch_variant = "stub"
+only_for_targets.image_type = "standard"
 # To manually override the package source:
 #
 # 1. Build the zone image manually
@@ -220,14 +252,15 @@ only_for_targets.switch_variant = "stub"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "cd0793ca40f3b7542d82e586ceb1dc7279d3afee"
-source.sha256 = "1d824a8eee30c8e187a7a5cbdc931872b5a6a3096cdd52a5e0b1a5bec872a39f"
+source.commit = "67a45ff847989e8b8be37c099f70a7451b277c0d"
+source.sha256 = "a2d7bda00d53e1fc2f569ef9afbef4a56a82636e2d613b7668fba7b767805474"
 output.type = "zone"
 output.intermediate_only = true
 
 [package.dendrite-asic]
 service_name = "dendrite"
 only_for_targets.switch_variant = "asic"
+only_for_targets.image_type = "standard"
 # To manually override the package source:
 #
 # 1. Build the zone image manually
@@ -238,8 +271,8 @@ only_for_targets.switch_variant = "asic"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "cd0793ca40f3b7542d82e586ceb1dc7279d3afee"
-source.sha256 = "00b615894d146fb04749cd91254e715ed5ec43c5057a5309e314dadcee9d3626"
+source.commit = "67a45ff847989e8b8be37c099f70a7451b277c0d"
+source.sha256 = "633e71a764fe02adf2c62dff31923ca4f8863818d0e4d68983c8a360bf23eb3a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -250,6 +283,7 @@ output.intermediate_only = true
 [package.switch-asic]
 service_name = "switch"
 only_for_targets.switch_variant = "asic"
+only_for_targets.image_type = "standard"
 source.type = "composite"
 source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"
@@ -263,6 +297,7 @@ output.type = "zone"
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch_variant = "stub"
+only_for_targets.image_type = "standard"
 source.type = "composite"
 source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"

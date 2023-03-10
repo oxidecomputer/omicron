@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 installinator-common.workspace = true
 progenitor.workspace = true
+regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
