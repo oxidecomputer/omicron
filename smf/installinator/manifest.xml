@@ -4,16 +4,40 @@
 <service_bundle type='manifest' name='installinator'>
 
 <service name='system/illumos/installinator' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
   <single_instance />
 
-  <dependency name='multi_user' grouping='require_all' restart_on='none'
+  <!-- File systems should all be mounted before we begin: -->
+  <dependency name='fs-root' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/milestone/multi-user:default' />
+    <service_fmri value='svc:/system/filesystem/root' />
+  </dependency>
+  <dependency name='fs-minimal' grouping='require_all' restart_on='none'
+    type='service'>
+    <service_fmri value='svc:/system/filesystem/minimal' />
+  </dependency>
+
+  <!-- Run after initial device configuration has completed. -->
+  <dependency name='devices' grouping='require_all' restart_on='none'
+    type='service'>
+    <service_fmri value='svc:/milestone/devices' />
+  </dependency>
+
+  <!-- The bootstrapping portion of installinator uses the network to
+      communicate with other servers on the rack. -->
+  <dependency name='network' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/network' />
+  </dependency>
+
+  <!-- ... and make sure we run after the T6 has been configured. -->
+  <dependency name='t6init' grouping='require_all' restart_on='none'
+    type='service'>
+        <service_fmri value='svc:/system/t6init' />
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/installinator/bin/installinator install --from-ipcc --install-on-gimlet --stay-alive &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/installinator/installinator install --bootstrap-sled --from-ipcc --install-on-gimlet --stay-alive &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
