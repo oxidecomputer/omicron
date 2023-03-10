@@ -73,16 +73,17 @@ impl UpdatePane {
 
     pub fn draw_log_popup(&mut self, state: &State, frame: &mut Frame<'_>) {
         let selected = state.rack_state.selected;
+        let logs = state.update_state.logs.get(&selected).map_or_else(
+            || "No Logs Available".to_string(),
+            |l| format!("{:#?}", l),
+        );
 
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" UPDATE LOGS: {}", selected.to_string()),
                 style::header(true),
             )])]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
-                " Some scrollable text",
-                style::plain_text(),
-            )])]),
+            body: Text::styled(logs, style::plain_text()),
             buttons: vec![
                 ButtonText { instruction: "CLOSE", key: "ESC" },
                 ButtonText { instruction: "SCROLL", key: "UP/DOWN" },

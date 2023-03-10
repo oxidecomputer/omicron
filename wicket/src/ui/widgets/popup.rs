@@ -78,8 +78,12 @@ impl Widget for Popup<'_> {
             .border_type(BorderType::Rounded)
             .style(style::selected_line());
 
+        // TODO: Much better sizing
+        let width = u16::min(self.width(), full_screen.width);
+        let height = u16::min(self.height(), full_screen.height);
+
         let rect = full_screen
-            .center_horizontally(self.width())
+            .center_horizontally(width)
             .center_vertically(self.height());
 
         // Clear the popup

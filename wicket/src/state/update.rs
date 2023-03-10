@@ -100,6 +100,7 @@ impl RackUpdateState {
 
     pub fn update_logs(&mut self, logs: UpdateLogAll) {
         for (sp_type, logs) in logs.sps {
+            // TODO: Handle more than sleds
             if sp_type == "sled" {
                 for (i, log) in logs {
                     // TODO: Sanity check slot number
