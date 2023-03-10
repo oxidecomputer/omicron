@@ -23,12 +23,12 @@ use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
-use crate::external_api::params;
-use crate::external_api::shared::IpRange;
 use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -74,7 +74,7 @@ impl DataStore {
     }
 
     /// Looks up the default IP pool by name.
-    pub(crate) async fn ip_pools_fetch_default_for(
+    pub async fn ip_pools_fetch_default_for(
         &self,
         opctx: &OpContext,
         action: authz::Action,

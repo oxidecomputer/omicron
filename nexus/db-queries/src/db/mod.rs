@@ -23,10 +23,10 @@ mod pagination;
 mod pool;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.
-pub(crate) mod queries;
+pub mod queries;
 mod saga_recovery;
 mod sec_store;
-pub(crate) mod subquery;
+pub mod subquery;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
@@ -37,13 +37,10 @@ pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 pub use nexus_db_model::schema;
 
-#[cfg(test)]
 pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use pool::Pool;
-#[cfg(test)]
-pub use pool::ALLOW_FULL_TABLE_SCAN_SQL;
 pub use saga_recovery::{recover, RecoveryTask};
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;

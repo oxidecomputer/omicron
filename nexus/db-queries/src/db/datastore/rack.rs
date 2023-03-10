@@ -24,7 +24,6 @@ use crate::db::model::Service;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
-use crate::internal_api::params as internal_params;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
@@ -33,6 +32,7 @@ use diesel::prelude::*;
 use diesel::upsert::excluded;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -331,7 +331,7 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: Uuid,
     ) -> Result<(), Error> {
-        use crate::external_api::params;
+        use nexus_types::external_api::params;
         use omicron_common::api::external::IdentityMetadataCreateParams;
         use omicron_common::api::external::Name;
 
@@ -467,7 +467,7 @@ mod test {
                         .await
                         .unwrap()
                         .transaction_async(|conn| async move {
-                            conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                            conn.batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                                 .await
                                 .unwrap();
                             Ok::<_, crate::db::TransactionError<()>>(

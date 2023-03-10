@@ -7,7 +7,6 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::authn;
-use crate::context::OpContext;
 use crate::db;
 use serde::Deserialize;
 use serde::Serialize;
@@ -88,7 +87,10 @@ async fn sdd_account_space(
     let params = sagactx.saga_params::<Params>()?;
 
     let deleted_disk = sagactx.lookup::<db::model::Disk>("deleted_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_disk(
@@ -109,7 +111,10 @@ async fn sdd_account_space_undo(
     let params = sagactx.saga_params::<Params>()?;
 
     let deleted_disk = sagactx.lookup::<db::model::Disk>("deleted_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_disk(
@@ -128,7 +133,10 @@ async fn sdd_delete_volume(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let volume_id =
         sagactx.lookup::<db::model::Disk>("deleted_disk")?.volume_id;
     osagactx
@@ -144,9 +152,9 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
         app::sagas::disk_delete::SagaDiskDelete, authn::saga::Serialized,
-        context::OpContext,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;

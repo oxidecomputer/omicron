@@ -112,8 +112,7 @@ impl<U, T> RunnableQuery<U> for T where
 
 pub struct DataStore {
     pool: Arc<Pool>,
-    virtual_provisioning_collection_producer:
-        crate::app::provisioning::Producer,
+    virtual_provisioning_collection_producer: crate::provisioning::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -124,7 +123,7 @@ impl DataStore {
         DataStore {
             pool,
             virtual_provisioning_collection_producer:
-                crate::app::provisioning::Producer::new(),
+                crate::provisioning::Producer::new(),
         }
     }
 
@@ -153,7 +152,8 @@ impl DataStore {
         Ok(self.pool.pool())
     }
 
-    #[cfg(test)]
+    /// For testing only. This isn't cfg(test) because nexus needs access to it.
+    #[doc(hidden)]
     pub async fn pool_for_tests(
         &self,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
@@ -280,10 +280,10 @@ mod test {
         UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
-    use crate::external_api::params;
     use assert_matches::assert_matches;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
     use omicron_common::api::external::{
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
@@ -508,7 +508,7 @@ mod test {
         let zpool = Zpool::new(
             zpool_id,
             sled_id,
-            &crate::internal_api::params::ZpoolPutRequest {
+            &nexus_types::internal_api::params::ZpoolPutRequest {
                 size: test_zpool_size(),
             },
         );

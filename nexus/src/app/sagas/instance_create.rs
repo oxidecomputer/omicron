@@ -9,7 +9,6 @@ use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
 };
-use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount as DbByteCount;
@@ -17,6 +16,7 @@ use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use chrono::Utc;
+use nexus_db_queries::context::OpContext;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::Error;
@@ -395,8 +395,10 @@ async fn sic_create_network_interface_undo(
     let saga_params = repeat_saga_params.saga_params;
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
     let interface_id = repeat_saga_params.new_id;
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id)
@@ -447,8 +449,10 @@ async fn create_custom_network_interface(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
 
     // Lookup authz objects, used in the call to create the NIC itself.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
@@ -525,8 +529,10 @@ async fn create_default_primary_network_interface(
 
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
 
     // The literal name "default" is currently used for the VPC and VPC Subnet,
     // when not specified in the client request.
@@ -604,8 +610,10 @@ async fn sic_allocate_instance_snat_ip(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params::<Params>()?;
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
 
@@ -629,8 +637,10 @@ async fn sic_allocate_instance_snat_ip_undo(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params::<Params>()?;
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
     datastore.deallocate_external_ip(&opctx, ip_id).await?;
     Ok(())
@@ -653,8 +663,10 @@ async fn sic_allocate_instance_external_ip(
         }
         Some(ref prs) => prs,
     };
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
     let instance_id = repeat_saga_params.instance_id;
     let ip_id = repeat_saga_params.new_id;
 
@@ -683,8 +695,10 @@ async fn sic_allocate_instance_external_ip_undo(
         return Ok(());
     }
 
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
     let ip_id = repeat_saga_params.new_id;
     datastore.deallocate_external_ip(&opctx, ip_id).await?;
     Ok(())
@@ -709,7 +723,10 @@ async fn ensure_instance_disk_attach_state(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<DiskAttachParams>()?;
     let datastore = osagactx.datastore();
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let instance_id = params.instance_id;
     let project_id = params.project_id;
 
@@ -784,7 +801,10 @@ async fn sic_account_resources(
     let params = sagactx.saga_params::<Params>()?;
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_instance(
@@ -806,7 +826,10 @@ async fn sic_account_resources_undo(
     let params = sagactx.saga_params::<Params>()?;
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_instance(
@@ -826,7 +849,10 @@ async fn sic_allocate_propolis_ip(
     sagactx: NexusActionContext,
 ) -> Result<Ipv6Addr, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     allocate_sled_ipv6(&opctx, sagactx, "server_id").await
 }
 
@@ -835,7 +861,10 @@ async fn sic_create_instance_record(
 ) -> Result<db::model::Name, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let propolis_uuid = sagactx.lookup::<Uuid>("propolis_id")?;
@@ -886,7 +915,10 @@ async fn sic_delete_instance_record(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
 
@@ -955,7 +987,10 @@ async fn sic_instance_ensure(
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // instance name now.  See oxidecomputer/omicron#1536.
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
@@ -1014,7 +1049,7 @@ pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
-        authn::saga::Serialized, context::OpContext, db::datastore::DataStore,
+        authn::saga::Serialized, db::datastore::DataStore,
         external_api::params,
     };
     use async_bb8_diesel::{
@@ -1025,6 +1060,7 @@ pub mod test {
         BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
@@ -1169,7 +1205,7 @@ pub mod test {
             .unwrap()
             .transaction_async(|conn| async move {
                 conn
-                    .batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
 
@@ -1196,9 +1232,11 @@ pub mod test {
             .await
             .unwrap()
             .transaction_async(|conn| async move {
-                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
-                    .await
-                    .unwrap();
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
                 Ok::<_, crate::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
                         .filter(

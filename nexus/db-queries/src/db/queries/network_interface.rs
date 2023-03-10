@@ -4,7 +4,6 @@
 
 //! Query for inserting a guest network interface.
 
-use crate::app::MAX_NICS_PER_INSTANCE;
 use crate::db;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::MacAddr;
@@ -29,6 +28,8 @@ use omicron_common::api::external;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
 // These are sentinel values and other constants used to verify the state of the
 // system when operating on network interfaces
@@ -1537,15 +1538,15 @@ mod tests {
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
-    use crate::external_api::params;
-    use crate::external_api::params::InstanceCreate;
-    use crate::external_api::params::InstanceNetworkInterfaceAttachment;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use ipnetwork::Ipv4Network;
     use ipnetwork::Ipv6Network;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
+    use nexus_types::external_api::params::InstanceCreate;
+    use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Error;

@@ -5,14 +5,14 @@
 //! Implementation of queries for operating on external IP addresses from IP
 //! Pools.
 
-use crate::db::model::ExternalIp;
-use crate::db::model::IncompleteExternalIp;
-use crate::db::model::IpKind;
-use crate::db::model::IpKindEnum;
-use crate::db::model::Name;
-use crate::db::pool::DbConnection;
-use crate::db::schema;
-use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
+use crate::model::ExternalIp;
+use crate::model::IncompleteExternalIp;
+use crate::model::IpKind;
+use crate::model::IpKindEnum;
+use crate::model::Name;
+use crate::pool::DbConnection;
+use crate::schema;
+use crate::true_or_cast_error::{matches_sentinel, TrueOrCastError};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::pg::Pg;
@@ -42,7 +42,7 @@ const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
 
 /// Translates a generic pool error to an external error.
 pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
-    use crate::db::error;
+    use crate::error;
 
     let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
@@ -755,18 +755,18 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 #[cfg(test)]
 mod tests {
     use crate::context::OpContext;
-    use crate::db::datastore::DataStore;
-    use crate::db::datastore::SERVICE_IP_POOL_NAME;
-    use crate::db::identity::Resource;
-    use crate::db::model::IpKind;
-    use crate::db::model::IpPool;
-    use crate::db::model::IpPoolRange;
-    use crate::db::model::Name;
-    use crate::external_api::shared::IpRange;
+    use crate::datastore::DataStore;
+    use crate::datastore::SERVICE_IP_POOL_NAME;
+    use crate::identity::Resource;
+    use crate::model::IpKind;
+    use crate::model::IpPool;
+    use crate::model::IpPoolRange;
+    use crate::model::Name;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::shared::IpRange;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -788,11 +788,11 @@ mod tests {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
-            crate::db::datastore::datastore_test(&logctx, &db).await;
-            let cfg = crate::db::Config { url: db.pg_config().clone() };
-            let pool = Arc::new(crate::db::Pool::new(&cfg));
+            crate::datastore::datastore_test(&logctx, &db).await;
+            let cfg = crate::Config { url: db.pg_config().clone() };
+            let pool = Arc::new(crate::Pool::new(&cfg));
             let db_datastore =
-                Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+                Arc::new(crate::DataStore::new(Arc::clone(&pool)));
             let opctx =
                 OpContext::for_tests(log.new(o!()), db_datastore.clone());
             Self { logctx, opctx, db, db_datastore }
@@ -808,7 +808,7 @@ mod tests {
                 internal,
             );
 
-            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            use crate::schema::ip_pool::dsl as ip_pool_dsl;
             diesel::insert_into(ip_pool_dsl::ip_pool)
                 .values(pool.clone())
                 .execute_async(
@@ -825,7 +825,7 @@ mod tests {
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
             // Find the target IP pool
-            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            use crate::schema::ip_pool::dsl as ip_pool_dsl;
             let pool = ip_pool_dsl::ip_pool
                 .filter(ip_pool_dsl::name.eq(name.to_string()))
                 .filter(ip_pool_dsl::time_deleted.is_null())
@@ -842,7 +842,7 @@ mod tests {
             // Insert a range into this IP pool
             let pool_range = IpPoolRange::new(&range, pool.id());
             diesel::insert_into(
-                crate::db::schema::ip_pool_range::dsl::ip_pool_range,
+                crate::schema::ip_pool_range::dsl::ip_pool_range,
             )
             .values(pool_range)
             .execute_async(
