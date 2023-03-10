@@ -34,6 +34,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=st
 ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=stub' package
 ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=trampoline' package
 
+old_pwd="$(pwd)"
 tarball_src_dir="$(pwd)/out"
 
 # Assemble some utilities into a tarball that can be used by deployment
@@ -136,3 +137,5 @@ zones=(
 	out/switch-stub.tar.gz
 )
 cp "${zones[@]}" /work/zones/
+
+cd "$old_pwd"
