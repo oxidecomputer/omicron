@@ -4057,8 +4057,9 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.8.2"
-source = "git+https://github.com/oxidecomputer/omicron-package?branch=version-stamp#1125bfc8fa6fb1ed0d87bfb1cebb2c288b7db3f2"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dc0973625837d1c4e31d4aa60e72008f3af3aa9b0d0ebfd5b5dc67d2e721a48"
 dependencies = [
  "anyhow",
  "async-trait",
