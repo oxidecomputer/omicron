@@ -8,7 +8,6 @@
 #:	"=/work/helios/image/output/zfs.img",
 #:	"=/work/helios/image/output/rom",
 #: ]
-#: skip_clone = true
 #: access_repos = [
 #:	"oxidecomputer/amd-apcb",
 #:	"oxidecomputer/amd-efs",
