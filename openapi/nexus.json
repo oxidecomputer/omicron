@@ -85,7 +85,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/by-id/instances/{id}": {
@@ -1606,6 +1607,7 @@
           "disks"
         ],
         "summary": "Fetch disk metrics",
+        "description": "Use `/v1/disks/{disk}/{metric}` instead",
         "operationId": "disk_metrics_list",
         "parameters": [
           {
@@ -1697,6 +1699,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -1706,7 +1709,7 @@
           "images"
         ],
         "summary": "List images",
-        "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first.",
+        "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first. Use `GET /v1/images` instead",
         "operationId": "image_list",
         "parameters": [
           {
@@ -1773,6 +1776,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -1829,7 +1833,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/images/{image_name}": {
@@ -1883,7 +1888,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -1928,7 +1934,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances": {
@@ -2384,6 +2391,7 @@
           "instances"
         ],
         "summary": "List external IP addresses",
+        "description": "Use `/v1/instances/{instance}/external-ips` instead",
         "operationId": "instance_external_ip_list",
         "parameters": [
           {
@@ -2428,7 +2436,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate": {
@@ -4932,7 +4941,8 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List network interfaces",
+        "summary": "List network interfaces for a VPC subnet",
+        "description": "Use `/v1/vpc-subnets/{subnet}/network-interfaces` instead",
         "operationId": "vpc_subnet_list_network_interfaces",
         "parameters": [
           {
@@ -4959,7 +4969,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -5013,6 +5023,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -5450,7 +5461,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/by-id/ip-pools/{id}": {
@@ -5459,6 +5471,7 @@
           "system"
         ],
         "summary": "Fetch an IP pool by id",
+        "description": "Use `GET /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_view_by_id",
         "parameters": [
           {
@@ -5488,7 +5501,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/by-id/silos/{id}": {
@@ -5497,6 +5511,7 @@
           "system"
         ],
         "summary": "Fetch a silo by id",
+        "description": "Use `GET /v1/system/silos/{id}` instead.",
         "operationId": "silo_view_by_id",
         "parameters": [
           {
@@ -5526,7 +5541,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/certificates": {
@@ -6113,7 +6129,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/images/{image_name}": {
@@ -6151,7 +6168,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -6180,7 +6198,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools": {
@@ -6189,6 +6208,7 @@
           "system"
         ],
         "summary": "List IP pools",
+        "description": "Use `GET /v1/system/ip-pools` instead",
         "operationId": "ip_pool_list",
         "parameters": [
           {
@@ -6237,6 +6257,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -6244,6 +6265,7 @@
           "system"
         ],
         "summary": "Create an IP pool",
+        "description": "Use `POST /v1/system/ip-pools` instead",
         "operationId": "ip_pool_create",
         "requestBody": {
           "content": {
@@ -6272,7 +6294,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools/{pool_name}": {
@@ -6281,6 +6304,7 @@
           "system"
         ],
         "summary": "Fetch an IP pool",
+        "description": "Use `GET /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_view",
         "parameters": [
           {
@@ -6309,13 +6333,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "system"
         ],
         "summary": "Update an IP Pool",
+        "description": "Use `PUT /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_update",
         "parameters": [
           {
@@ -6354,13 +6380,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "system"
         ],
         "summary": "Delete an IP Pool",
+        "description": "Use `DELETE /v1/system/ip-pools/{pool}` instead",
         "operationId": "ip_pool_delete",
         "parameters": [
           {
@@ -6382,7 +6410,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools/{pool_name}/ranges": {
@@ -6391,7 +6420,7 @@
           "system"
         ],
         "summary": "List ranges for an IP pool",
-        "description": "Ranges are ordered by their first address.",
+        "description": "Ranges are ordered by their first address. Use `GET /v1/system/ip-pools/{pool}/ranges` instead",
         "operationId": "ip_pool_range_list",
         "parameters": [
           {
@@ -6441,6 +6470,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -6450,6 +6480,7 @@
           "system"
         ],
         "summary": "Add a range to an IP pool",
+        "description": "Use `POST /v1/system/ip-pools/{pool}/ranges/add` instead",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -6488,7 +6519,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools/{pool_name}/ranges/remove": {
@@ -6497,6 +6529,7 @@
           "system"
         ],
         "summary": "Remove a range from an IP pool",
+        "description": "Use `POST /v1/system/ip-pools/{pool}/ranges/remove` instead.",
         "operationId": "ip_pool_range_remove",
         "parameters": [
           {
@@ -6528,7 +6561,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools-service": {
@@ -6537,6 +6571,7 @@
           "system"
         ],
         "summary": "Fetch the IP pool used for Oxide services.",
+        "description": "Use `GET /v1/system/ip-pools-service` instead",
         "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
@@ -6555,7 +6590,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools-service/ranges": {
@@ -6564,7 +6600,7 @@
           "system"
         ],
         "summary": "List ranges for the IP pool used for Oxide services.",
-        "description": "Ranges are ordered by their first address.",
+        "description": "Ranges are ordered by their first address. Use `GET /v1/system/ip-pools-service/ranges` instead.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
           {
@@ -6606,6 +6642,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -6615,6 +6652,7 @@
           "system"
         ],
         "summary": "Add a range to an IP pool used for Oxide services.",
+        "description": "Use `POST /v1/system/ip-pools-service/ranges/add` instead",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -6643,7 +6681,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/ip-pools-service/ranges/remove": {
@@ -6652,6 +6691,7 @@
           "system"
         ],
         "summary": "Remove a range from an IP pool used for Oxide services.",
+        "description": "Use `POST /v1/system/ip-pools-service/ranges/remove` instead",
         "operationId": "ip_pool_service_range_remove",
         "requestBody": {
           "content": {
@@ -6673,7 +6713,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/metrics/{metric_name}": {
@@ -6824,7 +6865,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/sagas": {
@@ -6932,7 +6974,7 @@
           "system"
         ],
         "summary": "List silos",
-        "description": "Lists silos that are discoverable based on the current permissions.",
+        "description": "Lists silos that are discoverable based on the current permissions. Use `GET /v1/system/silos` instead",
         "operationId": "silo_list",
         "parameters": [
           {
@@ -6981,6 +7023,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       },
       "post": {
@@ -6988,6 +7031,7 @@
           "system"
         ],
         "summary": "Create a silo",
+        "description": "Use `POST /v1/system/silos` instead",
         "operationId": "silo_create",
         "requestBody": {
           "content": {
@@ -7016,7 +7060,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}": {
@@ -7025,7 +7070,7 @@
           "system"
         ],
         "summary": "Fetch a silo",
-        "description": "Fetch a silo by name.",
+        "description": "Fetch a silo by name. Use `GET /v1/system/silos/{silo}` instead.",
         "operationId": "silo_view",
         "parameters": [
           {
@@ -7055,14 +7100,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
           "system"
         ],
         "summary": "Delete a silo",
-        "description": "Delete a silo by name.",
+        "description": "Delete a silo by name. Use `DELETE /v1/system/silos/{silo}` instead.",
         "operationId": "silo_delete",
         "parameters": [
           {
@@ -7085,7 +7131,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/identity-providers": {
@@ -7094,6 +7141,7 @@
           "system"
         ],
         "summary": "List a silo's IDPs",
+        "description": "Use `/v1/system/silos/{silo}/identity-providers` instead.",
         "operationId": "silo_identity_provider_list",
         "parameters": [
           {
@@ -7151,6 +7199,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -7209,6 +7258,7 @@
           "system"
         ],
         "summary": "Delete a user",
+        "description": "Use `DELETE /v1/system/identity-providers/local/users/{user_id}` instead",
         "operationId": "local_idp_user_delete",
         "parameters": [
           {
@@ -7241,7 +7291,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password": {
@@ -7250,7 +7301,7 @@
           "system"
         ],
         "summary": "Set or invalidate a user's password",
-        "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
+        "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`. Use `POST /v1/system/identity-providers/local/users/{user_id}/set-password` instead",
         "operationId": "local_idp_user_set_password",
         "parameters": [
           {
@@ -7293,7 +7344,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/identity-providers/saml": {
@@ -7302,6 +7354,7 @@
           "system"
         ],
         "summary": "Create a SAML IDP",
+        "description": "Use `POST /v1/system/identity-providers/saml` instead.",
         "operationId": "saml_identity_provider_create",
         "parameters": [
           {
@@ -7341,7 +7394,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/identity-providers/saml/{provider_name}": {
@@ -7350,6 +7404,7 @@
           "system"
         ],
         "summary": "Fetch a SAML IDP",
+        "description": "Use `GET /v1/system/identity-providers/saml/{provider_name}` instead",
         "operationId": "saml_identity_provider_view",
         "parameters": [
           {
@@ -7388,7 +7443,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/policy": {
@@ -7397,6 +7453,7 @@
           "system"
         ],
         "summary": "Fetch a silo's IAM policy",
+        "description": "Use `GET /v1/system/silos/{silo}/policy` instead.",
         "operationId": "silo_policy_view",
         "parameters": [
           {
@@ -7426,13 +7483,15 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "put": {
         "tags": [
           "system"
         ],
         "summary": "Update a silo's IAM policy",
+        "description": "Use `PUT /v1/system/silos/{silo}/policy` instead",
         "operationId": "silo_policy_update",
         "parameters": [
           {
@@ -7472,7 +7531,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/silos/{silo_name}/users/all": {
@@ -7481,6 +7541,7 @@
           "system"
         ],
         "summary": "List users in a silo",
+        "description": "Use `GET /v1/system/users` instead.",
         "operationId": "silo_users_list",
         "parameters": [
           {
@@ -7538,6 +7599,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -7547,6 +7609,7 @@
           "system"
         ],
         "summary": "Fetch a user",
+        "description": "Use `GET /v1/system/users/{user_id}` instead",
         "operationId": "silo_user_view",
         "parameters": [
           {
@@ -7586,7 +7649,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/system/user": {
@@ -8009,6 +8073,104 @@
         }
       }
     },
+    "/v1/disks/{disk}/metrics/{metric}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Fetch disk metrics",
+        "operationId": "disk_metrics_list_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "metric",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiskMetricName"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "An exclusive end time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "An inclusive start time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/v1/groups": {
       "get": {
         "tags": [
@@ -8094,6 +8256,226 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/images": {
+      "get": {
+        "tags": [
+          "images"
+        ],
+        "summary": "List images",
+        "description": "List images which are global or scoped to the specified project. The images are returned sorted by creation date, with the most recent images appearing first.",
+        "operationId": "image_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Create an image",
+        "description": "Create a new image in a project.",
+        "operationId": "image_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/images/{image}": {
+      "get": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Fetch an image",
+        "description": "Fetch the details for a specific image in a project.",
+        "operationId": "image_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Delete an image",
+        "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
+        "operationId": "image_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8508,6 +8890,57 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/external-ips": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List external IP addresses",
+        "operationId": "instance_external_ip_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalIpResultsPage"
                 }
               }
             }
@@ -10550,6 +10983,795 @@
         "x-dropshot-pagination": true
       }
     },
+    "/v1/system/identity-providers": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List a silo's IDPs_name",
+        "operationId": "silo_identity_provider_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityProviderResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/identity-providers/local/users": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a user",
+        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider. Use `POST /v1/system/identity-providers/local/users` instead",
+        "operationId": "local_idp_user_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "deprecated": true
+      }
+    },
+    "/v1/system/identity-providers/local/users/{user_id}": {
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete a user",
+        "operationId": "local_idp_user_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/identity-providers/local/users/{user_id}/set-password": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Set or invalidate a user's password",
+        "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
+        "operationId": "local_idp_user_set_password_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/identity-providers/saml": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a SAML IDP",
+        "operationId": "saml_identity_provider_create_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SamlIdentityProviderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SamlIdentityProvider"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/identity-providers/saml/{provider}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a SAML IDP",
+        "operationId": "saml_identity_provider_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SamlIdentityProvider"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List IP pools",
+        "operationId": "ip_pool_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create an IP pool",
+        "operationId": "ip_pool_create_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch an IP pool",
+        "operationId": "ip_pool_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Update an IP Pool",
+        "operationId": "ip_pool_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete an IP Pool",
+        "operationId": "ip_pool_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/ranges": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List ranges for an IP pool",
+        "description": "Ranges are ordered by their first address.",
+        "operationId": "ip_pool_range_list_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/ip-pools/{pool}/ranges/add": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Add a range to an IP pool",
+        "operationId": "ip_pool_range_add_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRange"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/ranges/remove": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Remove a range from an IP pool",
+        "operationId": "ip_pool_range_remove_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools-service": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch the IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_view_v1",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools-service/ranges": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List ranges for the IP pool used for Oxide services.",
+        "description": "Ranges are ordered by their first address.",
+        "operationId": "ip_pool_service_range_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/ip-pools-service/ranges/add": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Add a range to an IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_range_add_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRange"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools-service/ranges/remove": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Remove a range from an IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_range_remove_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/policy": {
       "get": {
         "tags": [
@@ -10694,6 +11916,248 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Saga"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/silos": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List silos",
+        "description": "Lists silos that are discoverable based on the current permissions.",
+        "operationId": "silo_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a silo",
+        "operationId": "silo_create_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Silo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/silos/{silo}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a silo",
+        "description": "Fetch a silo by name.",
+        "operationId": "silo_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Silo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete a silo",
+        "description": "Delete a silo by name.",
+        "operationId": "silo_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/silos/{silo}/policy": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a silo's IAM policy",
+        "operationId": "silo_policy_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Update a silo's IAM policy",
+        "operationId": "silo_policy_update_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -11082,6 +12546,117 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SystemVersion"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/users": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List users in a silo",
+        "operationId": "silo_users_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/users/{user_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a user",
+        "operationId": "silo_user_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
                 }
               }
             }
@@ -12237,6 +13812,92 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/vpc-subnets/{subnet}/network-interfaces": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List network interfaces",
+        "operationId": "vpc_subnet_list_network_interfaces_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/v1/vpcs": {
@@ -14203,8 +15864,12 @@
               }
             ]
           },
+          "os": {
+            "description": "The family of the operating system like Debian, Ubuntu, etc.",
+            "type": "string"
+          },
           "project_id": {
-            "description": "The project the disk belongs to",
+            "description": "The project the image belongs to",
             "type": "string",
             "format": "uuid"
           },
@@ -14232,8 +15897,7 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
-            "description": "Version of this, if any",
+            "description": "Version of the operating system",
             "type": "string"
           }
         },
@@ -14242,10 +15906,12 @@
           "description",
           "id",
           "name",
+          "os",
           "project_id",
           "size",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "version"
         ]
       },
       "ImageCreate": {
@@ -14266,6 +15932,10 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
+          "os": {
+            "description": "The family of the operating system (e.g. Debian, Ubuntu, etc.)",
+            "type": "string"
+          },
           "source": {
             "description": "The source of the image's contents.",
             "allOf": [
@@ -14273,13 +15943,19 @@
                 "$ref": "#/components/schemas/ImageSource"
               }
             ]
+          },
+          "version": {
+            "description": "The version of the operating system (e.g. 18.04, 20.04, etc.)",
+            "type": "string"
           }
         },
         "required": [
           "block_size",
           "description",
           "name",
-          "source"
+          "os",
+          "source",
+          "version"
         ]
       },
       "ImageResultsPage": {
@@ -16382,7 +18058,7 @@
       },
       "SemverVersion": {
         "type": "string",
-        "pattern": "^\\d+\\.\\d+\\.\\d+([\\-\\+].+)?$"
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceUsingCertificate": {
         "description": "The service intended to use this certificate.",

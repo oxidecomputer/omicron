@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::state::ComponentId;
 use tokio::time::Instant;
-use wicketd_client::types::RackV1Inventory;
+use wicketd_client::types::{ArtifactId, RackV1Inventory, UpdateLogAll};
 
 use crossterm::event::Event as TermEvent;
 
@@ -17,6 +17,12 @@ pub enum Event {
 
     /// An Inventory Update Event
     Inventory(InventoryEvent),
+
+    /// Update Log Event
+    UpdateLog(UpdateLogAll),
+
+    /// TUF repo artifacts unpacked by wicketd
+    UpdateArtifacts(Vec<ArtifactId>),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
@@ -58,7 +64,7 @@ pub enum InventoryEvent {
         wicketd_received: Instant,
 
         /// The time at which information was received from MGS.
-        mgs_received: libsw::Stopwatch,
+        mgs_received: libsw::TokioSw,
     },
     /// The inventory is unavailable.
     Unavailable {

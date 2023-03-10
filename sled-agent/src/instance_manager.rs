@@ -38,6 +38,12 @@ pub enum Error {
 
     #[error("OPTE port management error: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
+
+    #[error("Cannot find data link: {0}")]
+    Underlay(#[from] sled_hardware::underlay::Error),
+
+    #[error("No datalinks found")]
+    NoDatalinks,
 }
 
 struct InstanceManagerInternal {
@@ -67,10 +73,12 @@ impl InstanceManager {
         etherstub: Etherstub,
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
-    ) -> InstanceManager {
-        let data_link =
-            underlay::find_chelsio_links().unwrap().into_iter().next().unwrap();
-        InstanceManager {
+    ) -> Result<InstanceManager, Error> {
+        let data_link = underlay::find_chelsio_links()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::NoDatalinks)?;
+        Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
                 lazy_nexus_client,
@@ -83,7 +91,7 @@ impl InstanceManager {
                     gateway_mac,
                 ),
             }),
-        }
+        })
     }
 
     /// Idempotently ensures that the given Instance (described by
@@ -340,7 +348,8 @@ mod test {
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
             MacAddr6::from([0u8; 6]),
-        );
+        )
+        .unwrap();
 
         // Verify that no instances exist.
         assert!(im.inner.instances.lock().unwrap().is_empty());
@@ -428,7 +437,8 @@ mod test {
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
             MacAddr6::from([0u8; 6]),
-        );
+        )
+        .unwrap();
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();

@@ -6,7 +6,6 @@ use std::{
     collections::BTreeMap,
     fmt,
     net::{Ipv6Addr, SocketAddrV6},
-    pin::Pin,
     time::Duration,
 };
 
@@ -23,7 +22,10 @@ use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::peers::{FetchSender, PeersImpl};
+use crate::{
+    errors::HttpError,
+    peers::{FetchReceiver, PeersImpl},
+};
 
 struct MockPeersUniverse {
     artifact: Bytes,
@@ -228,18 +230,22 @@ impl PeersImpl for MockPeers {
         self.selected_peers.len()
     }
 
-    fn fetch_from_peer_impl(
+    async fn fetch_from_peer_impl(
         &self,
         peer: SocketAddrV6,
         // We don't (yet) use the artifact ID in MockPeers
         _artifact_hash_id: ArtifactHashId,
-        sender: FetchSender,
-    ) -> Pin<Box<dyn futures::Future<Output = ()> + Send>> {
+    ) -> Result<(u64, FetchReceiver), HttpError> {
         let peer_data = self
             .get(peer)
             .unwrap_or_else(|| panic!("peer {peer} not found in selection"))
             .clone();
-        Box::pin(async move { peer_data.send_response(sender).await })
+        let artifact_size = peer_data.artifact.len() as u64;
+
+        let (sender, receiver) = mpsc::channel(8);
+        tokio::spawn(async move { peer_data.send_response(sender).await });
+        // TODO: add tests to ensure an invalid artifact size is correctly detected
+        Ok((artifact_size, receiver))
     }
 
     async fn report_progress_impl(
@@ -271,7 +277,10 @@ impl fmt::Debug for MockPeer {
 }
 
 impl MockPeer {
-    async fn send_response(self, sender: FetchSender) {
+    async fn send_response(
+        self,
+        sender: mpsc::Sender<Result<Bytes, ClientError>>,
+    ) {
         let mut artifact = self.artifact;
         match self.response {
             MockResponse::Response(actions) => {
@@ -486,12 +495,11 @@ impl PeersImpl for MockReportPeers {
         3
     }
 
-    fn fetch_from_peer_impl(
+    async fn fetch_from_peer_impl(
         &self,
         _peer: SocketAddrV6,
         _artifact_hash_id: ArtifactHashId,
-        _sender: FetchSender,
-    ) -> Pin<Box<dyn futures::Future<Output = ()> + Send>> {
+    ) -> Result<(u64, FetchReceiver), HttpError> {
         unimplemented!(
             "this should never be called -- \
             eventually we'll want to unify this with MockPeers",
@@ -539,6 +547,7 @@ mod tests {
 
     use bytes::Buf;
     use futures::{future, StreamExt};
+    use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::ReceiverStream;
@@ -602,7 +611,7 @@ mod tests {
                         anyhow::anyhow!("ran out of attempts"),
                     )),
                 },
-                &dummy_artifact_hash_id(),
+                &dummy_artifact_hash_id(KnownArtifactKind::ControlPlane),
                 &event_sender,
             )
             .await;

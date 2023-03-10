@@ -71,6 +71,57 @@ pub struct SnapshotPath {
     pub snapshot: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ImagePath {
+    pub image: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SiloPath {
+    pub silo: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProviderPath {
+    pub provider: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct IpPoolPath {
+    pub pool: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SiloSelector {
+    pub silo: NameOrId,
+}
+
+impl From<Name> for SiloSelector {
+    fn from(name: Name) -> Self {
+        SiloSelector { silo: name.into() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SamlIdentityProviderSelector {
+    #[serde(flatten)]
+    pub silo_selector: Option<SiloSelector>,
+    pub saml_identity_provider: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SamlIdentityProviderSelector {
+    pub fn new(
+        silo: Option<NameOrId>,
+        saml_identity_provider: NameOrId,
+    ) -> Self {
+        SamlIdentityProviderSelector {
+            silo_selector: silo.map(|s| SiloSelector { silo: s }),
+            saml_identity_provider,
+        }
+    }
+}
+
 // Only by ID because groups have an `external_id` instead of a name and
 // therefore don't implement `ObjectIdentity`, which makes lookup by name
 // inconvenient. We should figure this out more generally, as there are several
@@ -128,6 +179,7 @@ pub struct DiskSelector {
     pub disk: NameOrId,
 }
 
+// TODO-v1: delete this post migration
 impl DiskSelector {
     pub fn new(
         organization: Option<NameOrId>,
@@ -149,6 +201,7 @@ pub struct SnapshotSelector {
     pub snapshot: NameOrId,
 }
 
+// TODO-v1: delete this post migration
 impl SnapshotSelector {
     pub fn new(
         organization: Option<NameOrId>,
@@ -159,6 +212,28 @@ impl SnapshotSelector {
             project_selector: project
                 .map(|p| ProjectSelector::new(organization, p)),
             snapshot,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ImageSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub image: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl ImageSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        image: NameOrId,
+    ) -> Self {
+        ImageSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            image,
         }
     }
 }
@@ -222,7 +297,7 @@ pub struct VpcSelector {
     pub vpc: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
@@ -1295,6 +1370,12 @@ pub struct ImageCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// The family of the operating system (e.g. Debian, Ubuntu, etc.)
+    pub os: String,
+
+    /// The version of the operating system (e.g. 18.04, 20.04, etc.)
+    pub version: String,
 
     /// block size in bytes
     pub block_size: BlockSize,

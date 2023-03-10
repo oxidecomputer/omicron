@@ -272,11 +272,11 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_SNAPSHOT_CREATE).unwrap(),
             id_routes: vec!["/by-id/snapshots/{id}"],
         },
-        // Create a GlobalImage
+        // Create an Image in the Project
         SetupReq::Post {
-            url: "/system/images",
-            body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
-            id_routes: vec!["/system/by-id/images/{id}"],
+            url: &DEMO_PROJECT_IMAGES_URL,
+            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
+            id_routes: vec!["/v1/images/{id}"],
         },
         // Create a SAML identity provider
         SetupReq::Post {

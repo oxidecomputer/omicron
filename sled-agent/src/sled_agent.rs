@@ -254,7 +254,7 @@ impl SledAgent {
                     "Sled Agent upserting zpool to Storage Manager: {}",
                     pool.to_string()
                 );
-                storage.upsert_zpool(pool.clone()).await;
+                storage.upsert_zpool(pool.clone(), None).await;
             }
         }
         let instances = InstanceManager::new(
@@ -263,7 +263,7 @@ impl SledAgent {
             etherstub.clone(),
             *sled_address.ip(),
             request.gateway.mac,
-        );
+        )?;
 
         let svc_config = services::Config::new(
             config.sidecar_revision.clone(),
