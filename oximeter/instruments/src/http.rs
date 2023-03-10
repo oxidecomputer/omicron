@@ -164,22 +164,7 @@ impl LatencyTracker {
     ) -> Result<R, HttpError>
     where
         R: HttpResponse,
-        H: Future<Output = Result<R, HttpError>> + Send,
-        T: ServerContext,
-    {
-        tokio::pin!(handler);
-        self.instrument_dropshot_handler_inner(context, handler).await
-    }
-
-    async fn instrument_dropshot_handler_inner<'a, T, R>(
-        &self,
-        context: &RequestContext<T>,
-        handler: Pin<
-            &'a mut (dyn Future<Output = Result<R, HttpError>> + Send),
-        >,
-    ) -> Result<R, HttpError>
-    where
-        R: HttpResponse,
+        H: Future<Output = Result<R, HttpError>>,
         T: ServerContext,
     {
         let start = Instant::now();
