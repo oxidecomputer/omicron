@@ -282,7 +282,6 @@ where
     .expect("infallible")
 }
 
-
 #[async_trait]
 impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
