@@ -635,7 +635,7 @@
         ]
       },
       "GetArtifactsResponse": {
-        "description": "The response to a `get_artifacts` call: the list of all artifacts currently held by wicketd.",
+        "description": "The response to a `get_artifacts` call: the system version, and the list of all artifacts currently held by wicketd.",
         "type": "object",
         "properties": {
           "artifacts": {
@@ -643,6 +643,14 @@
             "items": {
               "$ref": "#/components/schemas/ArtifactId"
             }
+          },
+          "system_version": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SemverVersion"
+              }
+            ]
           }
         },
         "required": [
