@@ -72,7 +72,9 @@ cd -
 # Checkout helios at a pinned commit
 git clone https://github.com/oxidecomputer/helios.git
 cd helios
-git checkout 49d501d2f37060e29a84a50e9026860315975794
+
+source "./tools/helios_version"
+git checkout "$COMMIT"
 
 # Create the "./helios-build" command, which lets us build images
 gmake setup
