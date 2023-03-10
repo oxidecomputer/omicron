@@ -62,12 +62,12 @@ impl Default for KnownTarget {
     }
 }
 
-impl Into<Target> for KnownTarget {
-    fn into(self) -> Target {
+impl From<KnownTarget> for Target {
+    fn from(kt: KnownTarget) -> Target {
         let mut map = BTreeMap::new();
-        map.insert("image".to_string(), self.image.to_string());
-        map.insert("machine".to_string(), self.machine.to_string());
-        map.insert("switch".to_string(), self.switch.to_string());
+        map.insert("image".to_string(), kt.image.to_string());
+        map.insert("machine".to_string(), kt.machine.to_string());
+        map.insert("switch".to_string(), kt.switch.to_string());
         Target(map)
     }
 }
@@ -102,7 +102,7 @@ impl std::str::FromStr for KnownTarget {
                 _ => {
                     bail!(
                         "Unknown target key {k}\nValid keys include: [{}]",
-                        Target::from(Self::default().into())
+                        Target::from(Self::default())
                             .0
                             .keys()
                             .cloned()

@@ -184,8 +184,7 @@ async fn do_target(
             };
 
             let path = get_single_target(&target_dir, name).await?;
-            tokio::fs::write(&path, Target::from(target.into()).to_string())
-                .await?;
+            tokio::fs::write(&path, Target::from(target).to_string()).await?;
 
             replace_link(&name, &target_dir).await?;
 
