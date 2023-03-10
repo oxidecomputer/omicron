@@ -854,9 +854,9 @@ async fn test_instances_invalid_creation_returns_bad_request(
         )
         .await
         .unwrap_err();
-    assert!(error
-        .message
-        .starts_with("unable to parse JSON body: invalid value: integer `-3`"));
+    assert!(error.message.starts_with(
+        "unable to parse JSON body: ncpus: invalid value: integer `-3`"
+    ));
 }
 
 #[nexus_test]
