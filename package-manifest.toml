@@ -253,7 +253,7 @@ only_for_targets.image_type = "standard"
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "8ba0f2cde2577219f58eb768850705e9ef7249a0"
-source.sha256 = "5ca05573a21612a8f92af428200342b63b6fb6e1b6cce89a8008341cf08a4dbe"
+source.sha256 = "05a47e1a069a376b29c9171abd8b558b4498bd2b1d623c889c6b712334d23815"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -272,7 +272,7 @@ only_for_targets.image_type = "standard"
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "8ba0f2cde2577219f58eb768850705e9ef7249a0"
-source.sha256 = "52772b64689a590663716bcd79d10e9013f31a05f2315472495c09241069eb47"
+source.sha256 = "b1efb112820a682a4fd651825a835d35c5a55cc15fc7898266bbd77c2f48c18a"
 output.type = "zone"
 output.intermediate_only = true
 
