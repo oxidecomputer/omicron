@@ -52,7 +52,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     project.identity.id
 }
 
-async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
+async fn create_image(client: &ClientTestContext) -> views::Image {
     populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
 
@@ -69,7 +69,7 @@ async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -79,14 +79,16 @@ async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    NexusRequest::objects_post(client, "/system/images", &image_create_params)
+    let images_url = format!(
+        "/v1/images?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    );
+    NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -97,7 +99,7 @@ async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
 
 async fn create_base_disk(
     client: &ClientTestContext,
-    global_image: &views::GlobalImage,
+    image: &views::Image,
     disks_url: &String,
     base_disk_name: &Name,
 ) -> Disk {
@@ -107,9 +109,7 @@ async fn create_base_disk(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 
@@ -141,11 +141,10 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -211,11 +210,10 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
     // Define a global image
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -280,11 +278,10 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot requests
     let snapshots_url = format!(
@@ -351,11 +348,10 @@ async fn test_snapshot_prevents_other_disk(
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -402,9 +398,7 @@ async fn test_snapshot_prevents_other_disk(
             name: next_disk_name.clone(),
             description: String::from("will fail"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 

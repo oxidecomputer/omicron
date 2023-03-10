@@ -126,6 +126,11 @@ struct InstallOpts {
     #[command(flatten)]
     artifact_ids: ArtifactIdOpts,
 
+    /// If true, perform sled-agent-like bootstrapping operations on startup
+    /// (e.g., configure and enable maghemite).
+    #[clap(long)]
+    bootstrap_sled: bool,
+
     /// If true, do not exit after successful completion (e.g., to continue
     /// running as an smf service).
     #[clap(long)]
@@ -150,6 +155,10 @@ struct InstallOpts {
 
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
+        if self.bootstrap_sled {
+            crate::bootstrap::bootstrap_sled(log.clone()).await?;
+        }
+
         let image_id = self.artifact_ids.resolve()?;
 
         let host_phase_2_id = ArtifactHashId {
