@@ -9186,16 +9186,16 @@ async fn current_user_ssh_key_delete_v1(
     path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let ssh_key = &path.ssh_key;
         let &actor = opctx
             .authn
             .actor_required()
             .internal_context("deleting one of current user's ssh keys")?;
-        nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
+        nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

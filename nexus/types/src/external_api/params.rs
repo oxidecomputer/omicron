@@ -136,6 +136,15 @@ pub struct GroupPath {
     pub group: Uuid,
 }
 
+// The shape of this selector is slightly different than the others given that
+// silos users can only be specified via ID and are automatically provided by
+// the environment the user is authetnicated in
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SshKeySelector {
+    pub silo_user: Uuid,
+    pub ssh_key: NameOrId,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OrganizationSelector {
     pub organization: NameOrId,
