@@ -231,7 +231,10 @@ async fn get_single_target(
     name: &str,
 ) -> Result<PathBuf> {
     if name == ACTIVE {
-        bail!("The name '{name}' is reserved; please try another with the '-t <target>' flag");
+        bail!(
+            "The name '{name}' is reserved, please try another (e.g. 'default')\n\
+            Usage: 'omicron-package -t <TARGET> package ...' flag"
+        );
     }
     Ok(target_dir.as_ref().join(name))
 }

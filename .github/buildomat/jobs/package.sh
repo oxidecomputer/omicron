@@ -115,7 +115,7 @@ cp "${zones[@]}" /work/zones/
 
 # Build necessary for the trampoline image
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t recovery target create -i recovery -m gimlet -s asic
+  -t recovery target create -i trampoline -m gimlet -s asic
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery package
 
