@@ -183,5 +183,7 @@ pub use oso_generic::DATABASE;
 
 mod roles;
 
+mod update;
+
 #[cfg(test)]
 mod policy_test;

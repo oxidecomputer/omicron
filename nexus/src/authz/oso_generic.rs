@@ -9,6 +9,12 @@ use super::actor::AuthenticatedActor;
 use super::api_resources::*;
 use super::context::AuthorizedResource;
 use super::roles::RoleSet;
+use super::update::Component;
+use super::update::HostImage;
+use super::update::HubrisImage;
+use super::update::Image;
+use super::update::Reboot;
+use super::update::Update;
 use super::Authz;
 use crate::authn;
 use crate::context::OpContext;
@@ -25,6 +31,9 @@ use std::fmt;
 
 /// Base Polar configuration describing control plane authorization rules
 const OMICRON_AUTHZ_CONFIG_BASE: &str = include_str!("omicron.polar");
+
+/// Base Polar configuration describing update planning policy rules
+const OMICRON_UPDATE_POLICY_BASE: &str = include_str!("update.polar");
 
 /// Used to configure Polar resources
 pub(super) struct Init {
@@ -55,7 +64,10 @@ impl OsoInitBuilder {
             log,
             oso: Oso::new(),
             class_names: BTreeSet::new(),
-            snippets: vec![OMICRON_AUTHZ_CONFIG_BASE],
+            snippets: vec![
+                OMICRON_UPDATE_POLICY_BASE,
+                OMICRON_AUTHZ_CONFIG_BASE,
+            ],
         }
     }
 
@@ -111,6 +123,13 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         DeviceAuthRequestList::get_polar_class(),
         SiloIdentityProviderList::get_polar_class(),
         SiloUserList::get_polar_class(),
+        // Update classes
+        Component::get_polar_class(),
+        HostImage::get_polar_class(),
+        HubrisImage::get_polar_class(),
+        Image::get_polar_class(),
+        Update::get_polar_class(),
+        Reboot::get_polar_class(),
     ];
     for c in classes {
         oso_builder = oso_builder.register_class(c)?;
