@@ -4,6 +4,7 @@
 
 //! Sleds, and the hardware and services within them.
 
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
@@ -18,6 +19,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
@@ -229,6 +231,168 @@ impl super::Nexus {
         );
         let service = db::model::Service::new(id, sled_id, address, kind);
         self.db_datastore.service_upsert(opctx, service).await?;
+        Ok(())
+    }
+
+    // OPTE V2P mappings
+
+    /// Ensure that the necessary v2p mappings for an instance are created
+    pub async fn create_instance_v2p_mappings(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> Result<(), Error> {
+        // For every sled that isn't the sled this instance was allocated to, create
+        // a virtual to physical mapping for each of this instance's NICs.
+        //
+        // TODO this is a first-pass naive approach. A more optimized approach would
+        // be to see what other instances share the VPC this instance is in (or more
+        // generally, what instances should have connectivity to this one), see what
+        // sleds those are allocated to, and only create a v2p mapping for those
+        // sleds. However, this naive approach has the advantage of not requiring
+        // additional work: v2p mappings have to be bidirectional in order for both
+        // instances's packets to make a round trip. After this function executes, a
+        // v2p mapping to this instance will exist on every sled, and when another
+        // instance is allocated to a random sled, that sled will already contain a
+        // mapping to this instance.
+        //
+        // TODO-correctness OPTE currently will block instances in different VPCs
+        // from connecting to each other. If it ever stops doing this, this naive
+        // approach will create v2p mappings that shouldn't exist.
+
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .instance_id(instance_id)
+                .fetch_for(authz::Action::Read)
+                .await?;
+
+        let instance_nics = self
+            .db_datastore
+            .derive_guest_network_interface_info(&opctx, &authz_instance)
+            .await?;
+
+        // Lookup the physical host IP of the sled hosting this instance
+        let instance_sled_id = db_instance.runtime().sled_id;
+        let physical_host_ip: std::net::IpAddr =
+            (*self.sled_lookup(&self.opctx_alloc, &instance_sled_id).await?.ip)
+                .into();
+
+        let mut last_sled_id: Option<Uuid> = None;
+        loop {
+            let pagparams = DataPageParams {
+                marker: last_sled_id.as_ref(),
+                direction: dropshot::PaginationOrder::Ascending,
+                limit: std::num::NonZeroU32::new(10).unwrap(),
+            };
+
+            let sleds_page =
+                self.sleds_list(&self.opctx_alloc, &pagparams).await?;
+
+            for sled in &sleds_page {
+                // set_v2p not required for sled instance was allocated to, OPTE
+                // currently does that automatically
+                if sled.id() == instance_sled_id {
+                    continue;
+                }
+
+                let client = self.sled_client(&sled.id()).await?;
+
+                for nic in &instance_nics {
+                    // This function is idempotent: calling the set_v2p ioctl with
+                    // the same information is a no-op.
+                    client
+                        .set_v2p(&SetVirtualNetworkInterfaceHost {
+                            virtual_ip: nic.ip,
+                            virtual_mac: nic.mac.clone(),
+                            physical_host_ip,
+                            vni: nic.vni.clone(),
+                        })
+                        .await?;
+                }
+            }
+
+            if sleds_page.len() < 10 {
+                break;
+            }
+
+            if let Some(last) = sleds_page.last() {
+                last_sled_id = Some(last.id());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Ensure that the necessary v2p mappings for an instance are deleted
+    pub async fn delete_instance_v2p_mappings(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> Result<(), Error> {
+        // For every sled that isn't the sled this instance was allocated to, delete
+        // the virtual to physical mapping for each of this instance's NICs. If
+        // there isn't a V2P mapping, del_v2p should be a no-op.
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .instance_id(instance_id)
+                .fetch_for(authz::Action::Read)
+                .await?;
+
+        let instance_nics = self
+            .db_datastore
+            .derive_guest_network_interface_info(&opctx, &authz_instance)
+            .await?;
+
+        // Lookup the physical host IP of the sled hosting this instance
+        let instance_sled_id = db_instance.runtime().sled_id;
+        let physical_host_ip: std::net::IpAddr =
+            (*self.sled_lookup(&self.opctx_alloc, &instance_sled_id).await?.ip)
+                .into();
+
+        let mut last_sled_id: Option<Uuid> = None;
+
+        loop {
+            let pagparams = DataPageParams {
+                marker: last_sled_id.as_ref(),
+                direction: dropshot::PaginationOrder::Ascending,
+                limit: std::num::NonZeroU32::new(10).unwrap(),
+            };
+
+            let sleds_page =
+                self.sleds_list(&self.opctx_alloc, &pagparams).await?;
+
+            for sled in &sleds_page {
+                // del_v2p not required for sled instance was allocated to, OPTE
+                // currently does that automatically
+                if sled.id() == instance_sled_id {
+                    continue;
+                }
+
+                let client = self.sled_client(&sled.id()).await?;
+
+                for nic in &instance_nics {
+                    // This function is idempotent: calling the set_v2p ioctl with
+                    // the same information is a no-op.
+                    client
+                        .del_v2p(&SetVirtualNetworkInterfaceHost {
+                            virtual_ip: nic.ip,
+                            virtual_mac: nic.mac.clone(),
+                            physical_host_ip,
+                            vni: nic.vni.clone(),
+                        })
+                        .await?;
+                }
+            }
+
+            if sleds_page.len() < 10 {
+                break;
+            }
+
+            if let Some(last) = sleds_page.last() {
+                last_sled_id = Some(last.id());
+            }
+        }
+
         Ok(())
     }
 }

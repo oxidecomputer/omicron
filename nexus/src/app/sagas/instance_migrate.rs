@@ -144,6 +144,13 @@ async fn sim_instance_migrate(
     let (instance_id, old_runtime) =
         sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
 
+    // Remove existing V2P mappings for source instance
+    osagactx
+        .nexus()
+        .delete_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     // Allocate an IP address the destination sled for the new Propolis server.
     let propolis_addr = osagactx
         .datastore()
@@ -250,6 +257,13 @@ async fn sim_instance_migrate(
     osagactx
         .datastore()
         .instance_update_runtime(&instance_id, &new_runtime_state.into())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Add V2P mappings for destination instance
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, instance_id)
         .await
         .map_err(ActionError::action_failed)?;
 

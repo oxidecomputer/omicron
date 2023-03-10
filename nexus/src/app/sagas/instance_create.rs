@@ -106,6 +106,9 @@ declare_saga_actions! {
     INSTANCE_ENSURE -> "instance_ensure" {
         + sic_instance_ensure
     }
+    V2P_ENSURE -> "v2p_ensure" {
+        + sic_v2p_ensure
+    }
 }
 
 // instance create saga: definition
@@ -300,6 +303,8 @@ impl NexusSaga for SagaInstanceCreate {
         }
 
         builder.append(instance_ensure_action());
+        builder.append(v2p_ensure_action());
+
         Ok(builder.build()?)
     }
 }
@@ -1005,6 +1010,26 @@ async fn sic_instance_ensure(
             .await
             .map_err(ActionError::action_failed)?;
     }
+
+    Ok(())
+}
+
+/// Ensure that the necessary v2p mappings exist for this instance
+async fn sic_v2p_ensure(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    // TODO-idempotent if this action fails half way through, unwind is not
+    // called!
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
 
     Ok(())
 }

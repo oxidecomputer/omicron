@@ -15,6 +15,7 @@ use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -39,6 +40,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_serial_get)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(vpc_firewall_rules_put)?;
+        api.register(set_v2p)?;
+        api.register(del_v2p)?;
 
         Ok(())
     }
@@ -277,6 +280,40 @@ async fn vpc_firewall_rules_put(
     sa.firewall_rules_ensure(vpc_id, &body_args.rules[..])
         .await
         .map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Create a mapping from a virtual NIC to a physical host
+#[endpoint {
+    method = PUT,
+    path = "/set-v2p",
+}]
+async fn set_v2p(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+
+    sa.set_virtual_nic_host(&body_args).await.map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Delete a mapping from a virtual NIC to a physical host
+#[endpoint {
+    method = PUT,
+    path = "/del-v2p",
+}]
+async fn del_v2p(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+
+    sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

@@ -13,6 +13,7 @@ use crate::params::{
 use crate::serial::ByteOffset;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -236,6 +237,32 @@ impl InstanceManager {
             "rules" => ?&rules,
         );
         self.inner.port_manager.firewall_rules_ensure(rules)?;
+        Ok(())
+    }
+
+    pub async fn set_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            &self.inner.log,
+            "Mapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+        self.inner.port_manager.set_virtual_nic_host(mapping)?;
+        Ok(())
+    }
+
+    pub async fn unset_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            &self.inner.log,
+            "Unmapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+        self.inner.port_manager.unset_virtual_nic_host(mapping)?;
         Ok(())
     }
 }

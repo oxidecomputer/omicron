@@ -10,6 +10,33 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/del-v2p": {
+      "put": {
+        "summary": "Delete a mapping from a virtual NIC to a physical host",
+        "operationId": "del_v2p",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
@@ -253,6 +280,33 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ServiceEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/set-v2p": {
+      "put": {
+        "summary": "Create a mapping from a virtual NIC to a physical host",
+        "operationId": "set_v2p",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -1595,6 +1649,32 @@
           "id",
           "services",
           "zone_type"
+        ]
+      },
+      "SetVirtualNetworkInterfaceHost": {
+        "description": "A mapping from a virtual NIC to a physical host",
+        "type": "object",
+        "properties": {
+          "physical_host_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "physical_host_ip",
+          "virtual_ip",
+          "virtual_mac",
+          "vni"
         ]
       },
       "Slot": {

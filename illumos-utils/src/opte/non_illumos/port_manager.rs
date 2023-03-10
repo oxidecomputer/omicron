@@ -7,6 +7,7 @@
 use crate::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
 use crate::opte::params::NetworkInterface;
+use crate::opte::params::SetVirtualNetworkInterfaceHost;
 use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
@@ -185,6 +186,22 @@ impl PortManager {
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ignoring {} firewall rules", rules.len());
+        Ok(())
+    }
+
+    pub fn set_virtual_nic_host(
+        &self,
+        _mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring virtual NIC mapping");
+        Ok(())
+    }
+
+    pub fn unset_virtual_nic_host(
+        &self,
+        _mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
         Ok(())
     }
 }

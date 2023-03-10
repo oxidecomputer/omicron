@@ -9,6 +9,7 @@ use super::metrics::query_for_latest_metric;
 use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -21,6 +22,7 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::start_sled_agent;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -34,6 +36,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
 use omicron_nexus::context::OpContext;
+use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
@@ -41,6 +44,7 @@ use omicron_nexus::external_api::shared::SiloIdentityMode;
 use omicron_nexus::external_api::views;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
+use omicron_sled_agent::sim::SledAgent;
 use sled_agent_client::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -3147,6 +3151,83 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         .expect("Failed to create instance")
         .parsed_body::<Instance>()
         .expect("Failed to parse instance");
+}
+
+/// Test that appropriate OPTE V2P mappings are created and deleted.
+#[nexus_test]
+async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    populate_ip_pool(&client, "default", None).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Add a few more sleds
+    let nsleds = 3;
+    let mut additional_sleds = Vec::with_capacity(nsleds);
+    for _ in 0..nsleds {
+        let sa_id = Uuid::new_v4();
+        let log =
+            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
+        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let update_directory = std::path::Path::new("/should/not/be/used");
+        additional_sleds.push(
+            start_sled_agent(log, addr, sa_id, &update_directory)
+                .await
+                .unwrap(),
+        );
+    }
+
+    // Create an instance.
+    let instance_name = "test-instance";
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
+            .await;
+
+    // Validate that every sled (except the instance's sled) now has a V2P
+    // mapping for this instance
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let mut sled_agents: Vec<&Arc<SledAgent>> =
+        additional_sleds.iter().map(|x| &x.sled_agent).collect();
+    sled_agents.push(&cptestctx.sled_agent.sled_agent);
+
+    for sled_agent in &sled_agents {
+        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        if sled_agent.id != db_instance.runtime().sled_id {
+            assert!(!v2p_mappings.is_empty());
+        } else {
+            assert!(v2p_mappings.is_empty());
+        }
+    }
+
+    // Delete the instance
+    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    let instance_url = get_instance_url(instance_name);
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Validate that every sled no longer has the V2P mapping for this instance
+    for sled_agent in &sled_agents {
+        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        assert!(v2p_mappings.is_empty());
+    }
 }
 
 async fn instance_get(

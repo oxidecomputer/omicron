@@ -18,6 +18,7 @@ use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -591,6 +592,28 @@ impl SledAgent {
         self.inner
             .instances
             .firewall_rules_ensure(rules)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub async fn set_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .set_virtual_nic_host(mapping)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub async fn unset_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .unset_virtual_nic_host(mapping)
             .await
             .map_err(Error::from)
     }

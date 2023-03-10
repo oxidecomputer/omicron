@@ -50,3 +50,12 @@ pub struct VpcFirewallRule {
     pub action: external::VpcFirewallRuleAction,
     pub priority: external::VpcFirewallRulePriority,
 }
+
+/// A mapping from a virtual NIC to a physical host
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SetVirtualNetworkInterfaceHost {
+    pub virtual_ip: IpAddr,
+    pub virtual_mac: external::MacAddr,
+    pub physical_host_ip: IpAddr,
+    pub vni: external::Vni,
+}

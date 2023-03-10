@@ -10,6 +10,7 @@ use crate::dladm::VnicSource;
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
 use crate::opte::params::NetworkInterface;
+use crate::opte::params::SetVirtualNetworkInterfaceHost;
 use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
@@ -26,9 +27,11 @@ use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::Ipv4PrefixLen;
 use oxide_vpc::api::MacAddr;
+use oxide_vpc::api::PhysNet;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SetFwRulesReq;
+use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::VpcCfg;
 use slog::debug;
 use slog::info;
@@ -488,6 +491,51 @@ impl PortManager {
             );
             hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
         }
+        Ok(())
+    }
+
+    pub fn set_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+
+        hdl.set_v2p(&SetVirt2PhysReq {
+            vip: match mapping.virtual_ip {
+                std::net::IpAddr::V4(ipv4) => oxide_vpc::api::IpAddr::Ip4(
+                    oxide_vpc::api::Ipv4Addr::from(ipv4),
+                ),
+                std::net::IpAddr::V6(ipv6) => oxide_vpc::api::IpAddr::Ip6(
+                    oxide_vpc::api::Ipv6Addr::from(ipv6),
+                ),
+            },
+            phys: PhysNet {
+                ether: oxide_vpc::api::MacAddr::from(
+                    (*mapping.virtual_mac).into_array(),
+                ),
+                ip: match mapping.physical_host_ip {
+                    std::net::IpAddr::V4(_) => {
+                        return Err(opte_ioctl::Error::InvalidArgument(
+                            String::from("sleds should only have v6 addresses"),
+                        )
+                        .into());
+                    }
+                    std::net::IpAddr::V6(ipv6) => {
+                        oxide_vpc::api::Ipv6Addr::from(ipv6)
+                    }
+                },
+                vni: Vni::new(mapping.vni).unwrap(),
+            },
+        })?;
+
+        Ok(())
+    }
+
+    pub fn unset_virtual_nic_host(
+        &self,
+        _mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        // TODO requires https://github.com/oxidecomputer/opte/issues/332
         Ok(())
     }
 }

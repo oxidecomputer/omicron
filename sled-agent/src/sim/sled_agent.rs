@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crucible_client_types::VolumeConstructionRequest;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 
 use super::collection::SimCollection;
 use super::config::Config;
@@ -50,6 +51,7 @@ pub struct SledAgent {
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
+    pub v2p_mappings: Mutex<Vec<SetVirtualNetworkInterfaceHost>>,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -136,6 +138,7 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
+            v2p_mappings: Mutex::new(Vec::new()),
         })
     }
 
@@ -450,6 +453,23 @@ impl SledAgent {
             }
         }
 
+        Ok(())
+    }
+
+    pub async fn set_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        self.v2p_mappings.lock().await.push(mapping.clone());
+        Ok(())
+    }
+
+    pub async fn unset_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        let mut v2p_mappings = self.v2p_mappings.lock().await;
+        v2p_mappings.retain(|x| x != mapping);
         Ok(())
     }
 }
