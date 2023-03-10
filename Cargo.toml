@@ -181,7 +181,7 @@ omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 # TODO: Before merging, use a published version. See: https://github.com/oxidecomputer/omicron-package/pull/38
-omicron-zone-package = { path = "../omicron-package" }
+omicron-zone-package = { git = "https://github.com/oxidecomputer/omicron-package", rev = "611e92ab235b0e14234b889d8b5e8b58b0ba499f" }
 # omicron-zone-package = { git = "https://github.com/oxidecomputer/omicron-package", branch = "version-stamp" }
 # omicron-zone-package = "0.5.1"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "41ba1d3fa476284c9cbc5d7eab7539cfad3eeb37", features = [ "api", "std" ] }
