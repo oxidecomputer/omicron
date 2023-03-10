@@ -11,5 +11,6 @@ regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 uuid.workspace = true
