@@ -338,10 +338,10 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(current_user_view_v1)?;
         api.register(current_user_groups_v1)?;
-        api.register(current_user_sshkey_list_v1)?;
-        api.register(current_user_sshkey_view_v1)?;
-        api.register(current_user_sshkey_create_v1)?;
-        api.register(current_user_sshkey_delete_v1)?;
+        api.register(current_user_ssh_key_list_v1)?;
+        api.register(current_user_ssh_key_view_v1)?;
+        api.register(current_user_ssh_key_create_v1)?;
+        api.register(current_user_ssh_key_delete_v1)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -8896,7 +8896,6 @@ async fn role_view(
 #[endpoint {
    method = GET,
    path = "/v1/current-user",
-   tags = ["hidden"],
 }]
 pub async fn current_user_view_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -8904,9 +8903,6 @@ pub async fn current_user_view_v1(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
-        // We don't care about authentication method, as long as they are authed
-        // as _somebody_. We could restrict this to session auth only, but it's
-        // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
         Ok(HttpResponseOk(user.into()))
@@ -8918,7 +8914,6 @@ pub async fn current_user_view_v1(
 #[endpoint {
     method = GET,
     path = "/v1/current-user/groups",
-    tags = ["hidden"],
  }]
 pub async fn current_user_groups_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -8928,9 +8923,6 @@ pub async fn current_user_groups_v1(
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
     let handler = async {
-        // We don't care about authentication method, as long as they are authed
-        // as _somebody_. We could restrict this to session auth only, but it's
-        // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let groups = nexus
             .silo_user_fetch_groups_for_self(
@@ -8997,10 +8989,10 @@ async fn session_sshkey_list(
 /// Lists SSH public keys for the currently authenticated user.
 #[endpoint {
     method = GET,
-    path = "/v1/current-user/sshkeys",
+    path = "/v1/current-user/ssh-keys",
     tags = ["session"],
 }]
-async fn current_user_sshkey_list_v1(
+async fn current_user_ssh_key_list_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
@@ -9064,10 +9056,10 @@ async fn session_sshkey_create(
 /// Create an SSH public key for the currently authenticated user.
 #[endpoint {
     method = POST,
-    path = "/v1/current-user/sshkeys",
+    path = "/v1/current-user/ssh-keys",
     tags = ["session"],
 }]
-async fn current_user_sshkey_create_v1(
+async fn current_user_ssh_key_create_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_key: TypedBody<params::SshKeyCreate>,
 ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
@@ -9096,7 +9088,7 @@ struct SshKeyPathParams {
 /// Fetch an SSH public key
 ///
 /// Fetch an SSH public key associated with the currently authenticated user.
-/// Use `GET /v1/current-user/sshkeys` instead
+/// Use `GET /v1/current-user/ssh-keys` instead
 #[endpoint {
     method = GET,
     path = "/session/me/sshkeys/{ssh_key_name}",
@@ -9129,10 +9121,10 @@ async fn session_sshkey_view(
 /// Fetch an SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = GET,
-    path = "/v1/current-user/sshkeys/{ssh_key}",
+    path = "/v1/current-user/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
-async fn current_user_sshkey_view_v1(
+async fn current_user_ssh_key_view_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
@@ -9186,10 +9178,10 @@ async fn session_sshkey_delete(
 /// Delete an SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = DELETE,
-    path = "/v1/current-user/sshkeys/{ssh_key}",
+    path = "/v1/current-user/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
-async fn current_user_sshkey_delete_v1(
+async fn current_user_ssh_key_delete_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
