@@ -12,6 +12,7 @@ use omicron_common::api::internal::nexus::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
@@ -33,6 +34,9 @@ pub enum Error {
 
     #[error("Version not found in artifact {}", .0.display())]
     VersionNotFound(PathBuf),
+
+    #[error("Cannot parse json: {0}")]
+    Json(#[from] serde_json::Error),
 
     #[error("Malformed version in artifact {path}: {why}", path = path.display())]
     VersionMalformed { path: PathBuf, why: String },
@@ -177,12 +181,15 @@ impl UpdateManager {
 
         // Look for the JSON file which contains the package information
         for entry in entries {
-            let entry = entry.map_err(|err| io_err(path, err))?;
+            let mut entry = entry.map_err(|err| io_err(path, err))?;
             let entry_path = entry.path().map_err(|err| io_err(path, err))?;
             if entry_path == Path::new("oxide.json") {
-                let contents = std::fs::read_to_string(entry_path)
+                let mut contents = String::new();
+                entry
+                    .read_to_string(&mut contents)
                     .map_err(|err| io_err(path, err))?;
-                let json = serde_json::Value::from(contents.as_str());
+                let json: serde_json::Value =
+                    serde_json::from_str(contents.as_str())?;
 
                 // Parse keys from the JSON file
                 let serde_json::Value::String(pkg) = &json["pkg"] else {
@@ -254,9 +261,12 @@ mod test {
     use super::*;
     use crate::mocks::MockNexusClient;
     use bytes::Bytes;
+    use flate2::write::GzEncoder;
     use http::StatusCode;
     use progenitor::progenitor_client::{ByteStream, ResponseValue};
     use reqwest::{header::HeaderMap, Result};
+    use std::io::Write;
+    use tar::Builder;
 
     #[tokio::test]
     #[serial_test::serial]
@@ -306,5 +316,82 @@ mod test {
         assert!(expected_path.exists());
         let contents = tokio::fs::read(&expected_path).await.unwrap();
         assert_eq!(std::str::from_utf8(&contents).unwrap(), expected_contents);
+    }
+
+    #[tokio::test]
+    async fn test_query_no_components() {
+        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let config =
+            ConfigUpdates { zone_artifact_path: tempdir.path().to_path_buf() };
+        let um = UpdateManager::new(config);
+        let components =
+            um.components_get().await.expect("Failed to get components");
+        assert!(components.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_query_zone_version() {
+        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+
+        // Construct something that looks like a zone image in the tempdir.
+        let zone_path = tempdir.path().join("test-pkg.tar.gz");
+        let file = std::fs::File::create(&zone_path).unwrap();
+        let gzw = GzEncoder::new(file, flate2::Compression::fast());
+        let mut archive = Builder::new(gzw);
+        archive.mode(tar::HeaderMode::Deterministic);
+
+        let mut json = tempfile::NamedTempFile::new().unwrap();
+        json.write_all(
+            &r#"{"v":"1","t":"layer","pkg":"test-pkg","version":"2.0.0"}"#
+                .as_bytes(),
+        )
+        .unwrap();
+        archive.append_path_with_name(json.path(), "oxide.json").unwrap();
+        let mut other_data = tempfile::NamedTempFile::new().unwrap();
+        other_data
+            .write_all("lets throw in another file for good measure".as_bytes())
+            .unwrap();
+        archive.append_path_with_name(json.path(), "oxide.json").unwrap();
+        archive.into_inner().unwrap().finish().unwrap();
+
+        drop(json);
+        drop(other_data);
+
+        let config =
+            ConfigUpdates { zone_artifact_path: tempdir.path().to_path_buf() };
+        let um = UpdateManager::new(config);
+
+        let components =
+            um.components_get().await.expect("Failed to get components");
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "test-pkg".to_string());
+        assert_eq!(
+            components[0].version,
+            SemverVersion(semver::Version::new(2, 0, 0))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_query_sled_agent_version() {
+        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+
+        // Construct something that looks like the sled agent.
+        let sled_agent_dir = tempdir.path().join("sled-agent");
+        std::fs::create_dir(&sled_agent_dir).unwrap();
+        std::fs::write(sled_agent_dir.join("VERSION"), "1.2.3".as_bytes())
+            .unwrap();
+
+        let config =
+            ConfigUpdates { zone_artifact_path: tempdir.path().to_path_buf() };
+        let um = UpdateManager::new(config);
+
+        let components =
+            um.components_get().await.expect("Failed to get components");
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].name, "sled-agent".to_string());
+        assert_eq!(
+            components[0].version,
+            SemverVersion(semver::Version::new(1, 2, 3))
+        );
     }
 }
