@@ -34,7 +34,7 @@ set -o xtrace
 cargo --version
 rustc --version
 
-source "./tools/helios_version"
+source "/work/oxidecomputer/omicron/tools/helios_version"
 
 #
 # The token authentication mechanism that affords us access to other private
