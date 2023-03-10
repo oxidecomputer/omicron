@@ -3503,6 +3503,7 @@ dependencies = [
  "nexus-types",
  "num-integer",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
  "once_cell",
