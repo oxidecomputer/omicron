@@ -230,6 +230,7 @@ impl UpdatePane {
                         // Trigger the update
                         let selected = state.rack_state.selected;
                         info!(self.log, "Updating {}", selected);
+                        self.popup = None;
                         Some(Action::Update(selected))
                     }
                     KeyCode::Char('N') | KeyCode::Char('n') => {
