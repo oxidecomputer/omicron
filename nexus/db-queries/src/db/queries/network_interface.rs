@@ -521,7 +521,7 @@ impl QueryFragment<Pg> for NextNicSlot {
     }
 }
 
-/// A [`NextItem`] query that selects a random available MAC address for a guest
+/// A `NextItem` query that selects a random available MAC address for a guest
 /// network interface.
 #[derive(Debug, Clone, Copy)]
 pub struct NextGuestMacAddress {
