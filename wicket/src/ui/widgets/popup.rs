@@ -82,9 +82,8 @@ impl Widget for Popup<'_> {
         let width = u16::min(self.width(), full_screen.width);
         let height = u16::min(self.height(), full_screen.height);
 
-        let rect = full_screen
-            .center_horizontally(width)
-            .center_vertically(self.height());
+        let rect =
+            full_screen.center_horizontally(width).center_vertically(height);
 
         // Clear the popup
         Clear.render(rect, buf);
