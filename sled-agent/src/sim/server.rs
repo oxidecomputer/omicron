@@ -9,7 +9,9 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::NexusClient;
+use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
+use dns_service_client::types::DnsConfig;
 use internal_dns_names::{ServiceName, AAAA, SRV};
 use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
@@ -32,10 +34,10 @@ pub struct Server {
     /// real internal dns server storage dir
     pub dns_server_storage_dir: tempfile::TempDir,
     /// real internal dns server
-    pub dns_server: dns_server::dns_server::Server,
+    pub dns_server: dns_server::dns_server::ServerHandle,
     /// real internal dns dropshot server
     pub dns_dropshot_server:
-        dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
+        dropshot::HttpServer<dns_server::http_server::Context>,
 }
 
 impl Server {
@@ -161,42 +163,50 @@ impl Server {
                 bind_address: "[::1]:0".parse().unwrap(),
                 ..Default::default()
             },
-            data: dns_server::dns_data::Config {
-                nmax_messages: 16,
+            storage: dns_server::storage::Config {
                 storage_path: dns_server_storage_dir
                     .path()
                     .to_string_lossy()
-                    .to_string(),
+                    .to_string()
+                    .into(),
             },
         };
         let dns_log = log.new(o!("kind" => "dns"));
         let zone = "control-plane.oxide.internal".to_string();
         let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
 
-        let (dns_server, dns_dropshot_server) = dns_server::start(
-            dns_log,
-            dns_server_config,
-            zone,
-            dns_address.into(),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        // XXX-dap need to update this code.  Probably should consider re-adding
+        // an analog to dns_server::start?
+        let dns_server: dns_server::dns_server::ServerHandle = todo!();
+        let dns_dropshot_server: dropshot::HttpServer<
+            dns_server::http_server::Context,
+        > = todo!();
+        //let (dns_server, dns_dropshot_server) = dns_server::start(
+        //    dns_log,
+        //    dns_server_config,
+        //    zone,
+        //    dns_address.into(),
+        //)
+        //.await
+        //.map_err(|e| e.to_string())?;
 
         // Insert SRV and AAAA record for Crucible Pantry
-        let mut records: HashMap<_, Vec<(_, SocketAddrV6)>> = HashMap::new();
-        records
-            .entry(SRV::Service(ServiceName::CruciblePantry))
-            .or_insert_with(Vec::new)
-            .push((
-                AAAA::Zone(pantry_server.server.app_private().id),
-                match pantry_server.addr() {
-                    SocketAddr::V6(v6) => v6,
+        // XXX-dap
+        let dns_config: DnsConfig = todo!();
+        //let mut records: HashMap<_, Vec<(_, SocketAddrV6)>> = HashMap::new();
+        //records
+        //    .entry(SRV::Service(ServiceName::CruciblePantry))
+        //    .or_insert_with(Vec::new)
+        //    .push((
+        //        AAAA::Zone(pantry_server.server.app_private().id),
+        //        match pantry_server.addr() {
+        //            SocketAddr::V6(v6) => v6,
 
-                    SocketAddr::V4(_) => {
-                        panic!("pantry address must be IPv6");
-                    }
-                },
-            ));
+        //            SocketAddr::V4(_) => {
+        //                panic!("pantry address must be IPv6");
+        //            }
+        //        },
+        //    ));
 
         let dns_client = dns_service_client::multiclient::Updater::new(
             &dns_service_client::multiclient::ServerAddresses {
@@ -207,8 +217,9 @@ impl Server {
         );
 
         dns_client
-            .insert_dns_records(&records)
+            .dns_initialize(&dns_config)
             .await
+            .context("initializing DNS")
             .map_err(|e| e.to_string())?;
 
         let rack_init_request = NexusTypes::RackInitializationRequest {

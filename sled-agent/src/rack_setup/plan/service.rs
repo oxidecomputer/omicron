@@ -25,6 +25,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
+use dns_service_client::types::DnsConfig;
 
 // The number of Nexus instances to create from RSS.
 const NEXUS_COUNT: usize = 1;
@@ -86,6 +87,7 @@ pub struct SledRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Plan {
     pub services: HashMap<SocketAddrV6, SledRequest>,
+    pub dns_config: DnsConfig,
 }
 
 impl Plan {
@@ -321,7 +323,8 @@ impl Plan {
             services.insert(addr, allocation);
         }
 
-        let plan = Self { services };
+        let dns_config = todo!(); // XXX-dap
+        let plan = Self { services, dns_config };
 
         // Once we've constructed a plan, write it down to durable storage.
         let serialized_plan =

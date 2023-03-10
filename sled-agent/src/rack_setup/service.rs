@@ -89,7 +89,6 @@ use std::iter;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::OnceCell;
 
 // The minimum number of sleds to initialize the rack.
 const MINIMUM_SLED_COUNT: usize = 1;
@@ -219,12 +218,11 @@ enum PeerExpectation {
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
-    dns_servers: OnceCell<DnsUpdater>,
 }
 
 impl ServiceInner {
     fn new(log: Logger) -> Self {
-        ServiceInner { log, dns_servers: OnceCell::new() }
+        ServiceInner { log }
     }
 
     async fn initialize_datasets(
@@ -265,32 +263,6 @@ impl ServiceInner {
             )
             .await?;
         }
-
-        let mut records: HashMap<_, Vec<_>> = HashMap::new();
-        for dataset in datasets {
-            records
-                .entry(dataset.srv())
-                .or_default()
-                .push((dataset.aaaa(), dataset.address()));
-        }
-        let records_put = || async {
-            self.dns_servers
-                .get()
-                .expect("DNS servers must be initialized first")
-                .insert_dns_records(&records)
-                .await
-                .map_err(BackoffError::transient)?;
-            Ok::<(), BackoffError<DnsError>>(())
-        };
-        let log_failure = |error, _| {
-            warn!(self.log, "failed to set DNS records"; "error" => ?error);
-        };
-        retry_notify(
-            retry_policy_internal_service_aggressive(),
-            records_put,
-            log_failure,
-        )
-        .await?;
 
         Ok(())
     }
@@ -335,37 +307,6 @@ impl ServiceInner {
             log_failure,
         )
         .await?;
-
-        // Insert DNS records, if the DNS servers have been initialized
-        if let Some(dns_servers) = self.dns_servers.get() {
-            let mut records = HashMap::new();
-            for zone in services {
-                for service in &zone.services {
-                    if let Some(addr) = zone.address(&service) {
-                        records
-                            .entry(zone.srv(&service))
-                            .or_insert_with(Vec::new)
-                            .push((zone.aaaa(), addr));
-                    }
-                }
-            }
-            let records_put = || async {
-                dns_servers
-                    .insert_dns_records(&records)
-                    .await
-                    .map_err(BackoffError::transient)?;
-                Ok::<(), BackoffError<DnsError>>(())
-            };
-            let log_failure = |error, _| {
-                warn!(self.log, "failed to set DNS records"; "error" => ?error);
-            };
-            retry_notify(
-                retry_policy_internal_service_aggressive(),
-                records_put,
-                log_failure,
-            )
-            .await?;
-        }
 
         Ok(())
     }
@@ -762,14 +703,36 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
 
-        let dns_servers = DnsUpdater::new(
+        // Write the initial DNS configuration to the internal DNS servers.
+        let dns_updater = DnsUpdater::new(
             &config.az_subnet(),
             self.log.new(o!("client" => "DNS")),
         );
-        self.dns_servers
-            .set(dns_servers)
-            .map_err(|_| ())
-            .expect("DNS servers should only be set once");
+        let dns_update = || async {
+            // XXX-dap We need to determine if this error really is transient or
+            // not.  We also need to make sure we properly handle the case where
+            // we're writing the same generation to a server that already knows
+            // about it.  (That might be solved on the server side, but either
+            // way, we should make sure it works.)
+            dns_updater
+                .dns_initialize(&service_plan.dns_config)
+                .await
+                .map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<DnsError>>(())
+        };
+        let log_failure = |error, _| {
+            warn!(
+                self.log,
+                "failed to write DNS configuration (will retry)";
+                "error_message" => #%error
+            );
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            dns_update,
+            log_failure,
+        )
+        .await?;
 
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(service_plan.services.iter().map(

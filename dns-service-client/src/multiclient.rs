@@ -93,87 +93,15 @@ impl Updater {
         Self { log, clients }
     }
 
-    /// Inserts all service records into the DNS server.
-    ///
-    /// Each SRV record should have one or more AAAA records.
-    pub async fn insert_dns_records(
-        &self,
-        records: &HashMap<internal_dns_names::SRV, Vec<AAAARecord>>,
-    ) -> Result<(), DnsError> {
-        for (srv, aaaa) in records.iter() {
-            info!(self.log, "Inserting DNS record: {:?}", srv);
-
-            self.insert_dns_records_internal(aaaa, srv).await?;
-        }
-        Ok(())
-    }
-
-    // Utility function to insert:
-    // - A set of uniquely-named AAAA records, each corresponding to an address
-    // - An SRV record, pointing to each of the AAAA records.
-    async fn insert_dns_records_internal(
-        &self,
-        aaaa: &Vec<AAAARecord>,
-        srv_key: &internal_dns_names::SRV,
-    ) -> Result<(), DnsError> {
-        let mut records = Vec::with_capacity(aaaa.len() + 1);
-
-        // Add one DnsKv per AAAA, each with a single record.
-        records.extend(aaaa.iter().map(|(name, addr)| DnsKv {
-            key: DnsRecordKey { name: name.to_string() },
-            records: vec![DnsRecord::Aaaa(*addr.ip())],
-        }));
-
-        // Add the DnsKv for the SRV, with a record for each AAAA.
-        records.push(DnsKv {
-            key: DnsRecordKey { name: srv_key.to_string() },
-            records: aaaa
-                .iter()
-                .map(|(name, addr)| {
-                    DnsRecord::Srv(Srv {
-                        prio: 0,
-                        weight: 0,
-                        port: addr.port(),
-                        target: name.to_string(),
-                    })
-                })
-                .collect::<Vec<_>>(),
-        });
-        self.dns_records_set(&records).await
-    }
-
-    /// Sets a records on all DNS servers.
-    ///
-    /// Returns an error if setting the record fails on any server.
-    pub async fn dns_records_set<'a>(
+    /// Attempts to write a DNS generation to the DNS servers
+    pub async fn dns_initialize<'a>(
         &'a self,
-        body: &'a Vec<crate::types::DnsKv>,
-    ) -> Result<(), DnsError> {
-
-        stream::iter(&self.clients)
-            .map(Ok::<_, DnsError>)
-            .try_for_each_concurrent(None, |client| async move {
-                todo!(); // XXX-dap
-                // client.dns_records_create(body).await?;
-                // Ok(())
-            })
-            .await?;
-
-        Ok(())
-    }
-
-    /// Deletes records in all DNS servers.
-    ///
-    /// Returns an error if deleting the record fails on any server.
-    #[cfg(test)]
-    pub async fn dns_records_delete<'a>(
-        &'a self,
-        body: &'a Vec<crate::types::DnsRecordKey>,
+        body: &'a crate::types::DnsConfig,
     ) -> Result<(), DnsError> {
         stream::iter(&self.clients)
             .map(Ok::<_, DnsError>)
             .try_for_each_concurrent(None, |client| async move {
-                client.dns_records_delete(body).await?;
+                client.dns_config_put(body).await?;
                 Ok(())
             })
             .await?;
