@@ -162,7 +162,10 @@ async fn do_build(config: &Config) -> Result<()> {
 }
 
 async fn do_dot(config: &Config) -> Result<()> {
-    println!("{}", omicron_package::dot::do_dot(&config.package_config)?);
+    println!(
+        "{}",
+        omicron_package::dot::do_dot(&config.target, &config.package_config)?
+    );
     Ok(())
 }
 
@@ -192,12 +195,13 @@ async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
 
 // Ensures a package exists, either by creating it or downloading it.
 async fn get_package(
+    target: &Target,
     ui: &Arc<ProgressUI>,
     package_name: &String,
     package: &Package,
     output_directory: &Path,
 ) -> Result<()> {
-    let total_work = package.get_total_work();
+    let total_work = package.get_total_work_for_target(&target)?;
     let progress = ui.add_package(package_name.to_string(), total_work);
     match &package.source {
         PackageSource::Prebuilt { repo, commit, sha256 } => {
@@ -206,7 +210,7 @@ async fn get_package(
 
             let should_download = if path.exists() {
                 // Re-download the package if the SHA doesn't match.
-                progress.set_message("verifying hash".to_string());
+                progress.set_message("verifying hash".into());
                 let digest = get_sha256_digest(&path).await?;
                 digest.as_ref() != expected_digest
             } else {
@@ -214,7 +218,7 @@ async fn get_package(
             };
 
             if should_download {
-                progress.set_message("downloading prebuilt".to_string());
+                progress.set_message("downloading prebuilt".into());
                 let url = format!(
                     "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/{}/image/{}/{}",
                     repo,
@@ -267,9 +271,9 @@ async fn get_package(
             }
         }
         PackageSource::Local { .. } | PackageSource::Composite { .. } => {
-            progress.set_message("bundle package".to_string());
+            progress.set_message("bundle package".into());
             package
-                .create_with_progress(&progress, package_name, &output_directory)
+                .create_with_progress_for_target(&progress, &target, package_name, &output_directory)
                 .await
                 .with_context(|| {
                     let msg = format!("failed to create {package_name} in {output_directory:?}");
@@ -315,14 +319,41 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
             .try_for_each_concurrent(
                 None,
                 |((package_name, package), ui)| async move {
-                    get_package(&ui, package_name, package, output_directory)
-                        .await
+                    get_package(
+                        &config.target,
+                        &ui,
+                        package_name,
+                        package,
+                        output_directory,
+                    )
+                    .await
                 },
             );
 
         pkg_stream.await?;
     }
 
+    Ok(())
+}
+
+async fn do_stamp(
+    config: &Config,
+    output_directory: &Path,
+    package_name: &str,
+    version: &semver::Version,
+) -> Result<()> {
+    // Find the package which should be stamped
+    let (_name, package) = config
+        .package_config
+        .packages_to_deploy(&config.target)
+        .into_iter()
+        .find(|(name, _pkg)| name.as_str() == package_name)
+        .ok_or_else(|| anyhow!("Package {package_name} not found"))?;
+
+    // Stamp it
+    let stamped_path =
+        package.stamp(package_name, output_directory, version).await?;
+    println!("Created: {}", stamped_path.display());
     Ok(())
 }
 
@@ -636,12 +667,8 @@ impl PackageProgress {
 }
 
 impl Progress for PackageProgress {
-    fn set_message(&self, message: impl Into<std::borrow::Cow<'static, str>>) {
-        self.pb.set_message(format!(
-            "{}: {}",
-            self.service_name,
-            message.into()
-        ));
+    fn set_message(&self, message: std::borrow::Cow<'static, str>) {
+        self.pb.set_message(format!("{}: {}", self.service_name, message));
         self.pb.tick();
     }
 
@@ -728,6 +755,13 @@ async fn main() -> Result<()> {
         }
         SubCommand::Build(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, &artifact_dir).await?;
+        }
+        SubCommand::Build(BuildCommand::Stamp {
+            artifact_dir,
+            package_name,
+            version,
+        }) => {
+            do_stamp(&config, &artifact_dir, package_name, version).await?;
         }
         SubCommand::Build(BuildCommand::Check) => do_check(&config).await?,
         SubCommand::Deploy(DeployCommand::Install {

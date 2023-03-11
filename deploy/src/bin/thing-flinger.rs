@@ -988,6 +988,9 @@ fn main() -> Result<()> {
         SubCommand::Builder(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, artifact_dir)?;
         }
+        SubCommand::Builder(BuildCommand::Stamp { .. }) => {
+            anyhow::bail!("Distributed package stamping not supported")
+        }
         SubCommand::Builder(BuildCommand::Check) => do_check(&config)?,
         SubCommand::Builder(BuildCommand::Dot) => {
             do_dot(&config)?;

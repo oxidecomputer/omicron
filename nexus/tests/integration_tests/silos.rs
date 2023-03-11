@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_local_user, create_organization, create_silo, grant_iam,
@@ -16,7 +17,6 @@ use omicron_common::api::external::{
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::authz::{self, SiloRole};
-use omicron_nexus::context::OpContext;
 use omicron_nexus::db;
 use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use omicron_nexus::db::identity::Asset;

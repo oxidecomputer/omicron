@@ -227,7 +227,7 @@ impl DataStore {
 
     /// Return the information about an instance's network interfaces required
     /// for the sled agent to instantiate them via OPTE.
-    pub(crate) async fn derive_guest_network_interface_info(
+    pub async fn derive_guest_network_interface_info(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -246,7 +246,7 @@ impl DataStore {
 
     /// Return information about all VNICs connected to a VPC required
     /// for the sled agent to instantiate firewall rules via OPTE.
-    pub(crate) async fn derive_vpc_network_interface_info(
+    pub async fn derive_vpc_network_interface_info(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
@@ -265,7 +265,7 @@ impl DataStore {
 
     /// Return information about all VNICs connected to a VpcSubnet required
     /// for the sled agent to instantiate firewall rules via OPTE.
-    pub(crate) async fn derive_subnet_network_interface_info(
+    pub async fn derive_subnet_network_interface_info(
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,

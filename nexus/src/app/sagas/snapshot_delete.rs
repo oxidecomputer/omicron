@@ -5,7 +5,6 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::{authn, authz, db};
 use serde::Deserialize;
 use serde::Serialize;
@@ -106,7 +105,10 @@ async fn ssd_delete_snapshot_record(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     osagactx
         .datastore()
@@ -125,7 +127,10 @@ async fn ssd_account_space(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_snapshot(

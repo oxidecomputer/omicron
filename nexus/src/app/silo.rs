@@ -5,7 +5,6 @@
 //! Silos, Users, and SSH Keys.
 
 use crate::authz::ApiResource;
-use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
@@ -16,6 +15,7 @@ use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;

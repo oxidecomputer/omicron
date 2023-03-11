@@ -15,7 +15,7 @@ use diesel::query_builder::*;
 ///
 /// Q: The Query we're explaining.
 ///
-/// EXPLAIN: https://www.cockroachlabs.com/docs/stable/explain.html
+/// EXPLAIN: <https://www.cockroachlabs.com/docs/stable/explain.html>
 pub trait Explainable<Q> {
     /// Syncronously issues an explain statement.
     fn explain(

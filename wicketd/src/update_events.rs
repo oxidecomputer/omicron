@@ -8,6 +8,7 @@ use camino::Utf8PathBuf;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::PowerState;
 use gateway_client::types::UpdatePreparationProgress;
+use installinator_common::CompletionEventKind;
 use omicron_common::update::ArtifactId;
 use omicron_common::update::ArtifactKind;
 use schemars::gen::SchemaGenerator;
@@ -89,20 +90,21 @@ pub struct UpdateEvent {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
 pub enum UpdateEventKind {
-    Success(UpdateEventSuccessKind),
-    Failure(UpdateEventFailureKind),
+    Normal(UpdateNormalEventKind),
+    Terminal(UpdateTerminalEventKind),
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
-pub enum UpdateEventSuccessKind {
+pub enum UpdateNormalEventKind {
     SpResetComplete,
     ArtifactUpdateComplete { artifact: ArtifactId },
+    InstallinatorEvent(CompletionEventKind),
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
-pub enum UpdateEventFailureKind {
+pub enum UpdateTerminalEventKind {
     SpResetFailed { reason: String },
     ArtifactUpdateFailed { artifact: ArtifactId, reason: String },
 }

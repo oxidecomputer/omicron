@@ -21,7 +21,7 @@ fn test_init_and_add() -> Result<()> {
     let key = Key::generate_ed25519();
 
     let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
-    cmd.args(["init"]);
+    cmd.args(["init", "0.0.0"]);
     cmd.assert().success();
 
     // Create a couple of stub files on disk.
@@ -66,7 +66,7 @@ fn test_init_and_add() -> Result<()> {
     let mut artifacts_iter = artifacts.artifacts.into_iter();
     let artifact = artifacts_iter.next().unwrap();
     assert_eq!(artifact.name, "omicron-nexus", "artifact name");
-    assert_eq!(artifact.version, "42.0.0", "artifact version");
+    assert_eq!(artifact.version, "42.0.0".parse().unwrap(), "artifact version");
     assert_eq!(
         artifact.kind,
         ArtifactKind::from_known(KnownArtifactKind::GimletSp),
@@ -79,7 +79,7 @@ fn test_init_and_add() -> Result<()> {
 
     let artifact = artifacts_iter.next().unwrap();
     assert_eq!(artifact.name, "my-unknown-kind", "artifact name");
-    assert_eq!(artifact.version, "0.1.0", "artifact version");
+    assert_eq!(artifact.version, "0.1.0".parse().unwrap(), "artifact version");
     assert_eq!(
         artifact.kind,
         ArtifactKind::new("my_unknown_kind".to_owned()),

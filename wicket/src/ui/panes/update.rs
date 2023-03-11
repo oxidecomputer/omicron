@@ -17,6 +17,7 @@ use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
+use wicketd_client::types::SemverVersion;
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -163,9 +164,12 @@ fn installed_version(
 
 fn artifact_version(
     artifact: &KnownArtifactKind,
-    versions: &BTreeMap<KnownArtifactKind, String>,
+    versions: &BTreeMap<KnownArtifactKind, SemverVersion>,
 ) -> String {
-    versions.get(artifact).cloned().unwrap_or_else(|| "UNKNOWN".to_string())
+    versions
+        .get(artifact)
+        .cloned()
+        .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string())
 }
 
 impl Control for UpdatePane {
