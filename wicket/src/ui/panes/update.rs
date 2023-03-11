@@ -56,9 +56,11 @@ impl UpdatePane {
                 .map(|id| TreeItem::new(*id, vec![]))
                 .collect(),
             help: vec![
-                ("OPEN", "<RIGHT>"),
-                ("CLOSE", "<LEFT>"),
-                ("SELECT", "<UP/DOWN>"),
+                ("Expand", "<e>"),
+                ("Collapse", "<c>"),
+                ("Move", "<Up/Down>"),
+                ("Details", "<d>"),
+                ("Update", "<Enter>"),
             ],
             rect: Rect::default(),
             title_rect: Rect::default(),
@@ -116,7 +118,6 @@ impl UpdatePane {
             buttons: vec![
                 ButtonText { instruction: "YES", key: "Y" },
                 ButtonText { instruction: "NO", key: "N" },
-                ButtonText { instruction: "VIEW LOGS", key: "L" },
             ],
         };
         let full_screen = Rect {
@@ -229,10 +230,6 @@ impl UpdatePane {
                         self.popup = None;
                         Some(Action::Redraw)
                     }
-                    Cmd::Details => {
-                        self.popup = Some(PopupKind::Logs);
-                        Some(Action::Redraw)
-                    }
                     _ => None,
                 }
             }
@@ -338,7 +335,7 @@ impl Control for UpdatePane {
                 state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                 Some(Action::Redraw)
             }
-            Cmd::Left => {
+            Cmd::Collapse | Cmd::Left => {
                 // We always want something selected. If we close the root,
                 // we want to re-open it. This is the only API currently provided
                 // that allows this.
@@ -351,12 +348,16 @@ impl Control for UpdatePane {
                     Some(Action::Redraw)
                 }
             }
-            Cmd::Right => {
+            Cmd::Expand | Cmd::Right => {
                 self.tree_state.key_right();
                 Some(Action::Redraw)
             }
             Cmd::Enter => {
                 self.open_popup(state);
+                Some(Action::Redraw)
+            }
+            Cmd::Details => {
+                self.popup = Some(PopupKind::Logs);
                 Some(Action::Redraw)
             }
             _ => None,

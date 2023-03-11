@@ -96,6 +96,13 @@ impl KeyHandler {
             KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::KnightRiderMode
             }
+
+            // Vim navigation
+            KeyCode::Char('k') => Cmd::Up,
+            KeyCode::Char('j') => Cmd::Down,
+            KeyCode::Char('h') => Cmd::Left,
+            KeyCode::Char('l') => Cmd::Right,
+
             _ => return None,
         };
         Some(cmd)
