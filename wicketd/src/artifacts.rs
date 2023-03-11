@@ -20,7 +20,9 @@ use futures::stream;
 use hyper::Body;
 use installinator_artifactd::{ArtifactGetter, ProgressReportStatus};
 use installinator_common::ProgressReport;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::api::{
+    external::SemverVersion, internal::nexus::KnownArtifactKind,
+};
 use omicron_common::update::{
     ArtifactHash, ArtifactHashId, ArtifactId, ArtifactKind,
 };
@@ -46,6 +48,7 @@ struct ArtifactsWithPlan {
 /// The artifact server interface for wicketd.
 #[derive(Debug)]
 pub(crate) struct WicketdArtifactServer {
+    #[allow(dead_code)]
     log: Logger,
     store: WicketdArtifactStore,
     ipr_artifact: IprArtifactServer,
@@ -67,18 +70,8 @@ impl ArtifactGetter for WicketdArtifactServer {
     async fn get(&self, id: &ArtifactId) -> Option<(u64, Body)> {
         // This is a test artifact name used by the installinator.
         if id.name == "__installinator-test" {
-            // For testing, the version is the size of the artifact.
-            let size: u64 = id
-                        .version
-                        .parse()
-                        .map_err(|err| {
-                            slog::warn!(
-                                self.log,
-                                "for installinator-test, version should be a u64 indicating the size but found {}: {err}",
-                                id.version
-                            );
-                        })
-                        .ok()?;
+            // For testing, the major version is the size of the artifact.
+            let size: u64 = id.version.0.major;
             let mut bytes = BytesMut::with_capacity(size as usize);
             bytes.put_bytes(0, size as usize);
             return Some((size, Body::from(bytes.freeze())));
@@ -142,8 +135,14 @@ impl WicketdArtifactStore {
         Ok(())
     }
 
-    pub(crate) fn artifact_ids(&self) -> Vec<ArtifactId> {
-        self.artifacts_with_plan.lock().unwrap().by_id.keys().cloned().collect()
+    pub(crate) fn system_version_and_artifact_ids(
+        &self,
+    ) -> (Option<SemverVersion>, Vec<ArtifactId>) {
+        let artifacts = self.artifacts_with_plan.lock().unwrap();
+        let system_version =
+            artifacts.plan.as_ref().map(|p| p.system_version.clone());
+        let artifact_ids = artifacts.by_id.keys().cloned().collect();
+        (system_version, artifact_ids)
     }
 
     pub(crate) fn current_plan(&self) -> Option<UpdatePlan> {
@@ -326,7 +325,12 @@ impl ArtifactsWithPlan {
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = UpdatePlan::new(&by_id, &mut by_hash, log)?;
+        let plan = UpdatePlan::new(
+            artifacts.system_version,
+            &by_id,
+            &mut by_hash,
+            log,
+        )?;
 
         Ok(Self {
             by_id: by_id.into(),
@@ -462,6 +466,7 @@ pub(crate) struct ArtifactIdData {
 
 #[derive(Debug, Clone)]
 pub(crate) struct UpdatePlan {
+    pub(crate) system_version: SemverVersion,
     pub(crate) gimlet_sp: ArtifactIdData,
     pub(crate) psc_sp: ArtifactIdData,
     pub(crate) sidecar_sp: ArtifactIdData,
@@ -490,6 +495,7 @@ pub(crate) struct UpdatePlan {
 
 impl UpdatePlan {
     fn new(
+        system_version: SemverVersion,
         by_id: &HashMap<ArtifactId, Bytes>,
         by_hash: &mut HashMap<ArtifactHashId, Bytes>,
         log: &Logger,
@@ -614,6 +620,7 @@ impl UpdatePlan {
         }
 
         Ok(Self {
+            system_version,
             gimlet_sp: gimlet_sp.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::GimletSp,

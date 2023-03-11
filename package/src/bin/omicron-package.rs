@@ -337,6 +337,27 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
     Ok(())
 }
 
+async fn do_stamp(
+    config: &Config,
+    output_directory: &Path,
+    package_name: &str,
+    version: &semver::Version,
+) -> Result<()> {
+    // Find the package which should be stamped
+    let (_name, package) = config
+        .package_config
+        .packages_to_deploy(&config.target)
+        .into_iter()
+        .find(|(name, _pkg)| name.as_str() == package_name)
+        .ok_or_else(|| anyhow!("Package {package_name} not found"))?;
+
+    // Stamp it
+    let stamped_path =
+        package.stamp(package_name, output_directory, version).await?;
+    println!("Created: {}", stamped_path.display());
+    Ok(())
+}
+
 async fn do_unpack(
     config: &Config,
     artifact_dir: &Path,
@@ -735,6 +756,13 @@ async fn main() -> Result<()> {
         }
         SubCommand::Build(BuildCommand::Package { artifact_dir }) => {
             do_package(&config, &artifact_dir).await?;
+        }
+        SubCommand::Build(BuildCommand::Stamp {
+            artifact_dir,
+            package_name,
+            version,
+        }) => {
+            do_stamp(&config, &artifact_dir, package_name, version).await?;
         }
         SubCommand::Build(BuildCommand::Check) => do_check(&config).await?,
         SubCommand::Deploy(DeployCommand::Install {
