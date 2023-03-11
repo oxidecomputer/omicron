@@ -8897,6 +8897,7 @@ async fn role_view(
 #[endpoint {
    method = GET,
    path = "/v1/current-user",
+   tags = ["session"],
 }]
 pub async fn current_user_view_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -8915,6 +8916,7 @@ pub async fn current_user_view_v1(
 #[endpoint {
     method = GET,
     path = "/v1/current-user/groups",
+    tags = ["session"],
  }]
 pub async fn current_user_groups_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
