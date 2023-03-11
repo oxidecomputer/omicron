@@ -8,9 +8,7 @@ use super::{align_by, help_text, Control};
 use crate::state::{artifact_title, ComponentId, Inventory, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup};
-use crate::{Action, Event, Frame, State};
-use crossterm::event::Event as TermEvent;
-use crossterm::event::KeyCode;
+use crate::{Action, Cmd, Frame, State};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use slog::{info, o, Logger};
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -206,38 +204,32 @@ impl UpdatePane {
             .collect();
     }
 
-    fn handle_event_in_popup(
+    fn handle_cmd_in_popup(
         &mut self,
         state: &mut State,
-        event: Event,
+        cmd: Cmd,
     ) -> Option<Action> {
-        let key_code = match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Esc => {
-                    self.popup = None;
-                    return Some(Action::Redraw);
-                }
-                key_code => key_code,
-            },
-            _ => return None,
-        };
+        if cmd == Cmd::Exit {
+            self.popup = None;
+            return Some(Action::Redraw);
+        }
         match self.popup.as_ref().unwrap() {
             PopupKind::Logs => None,
             PopupKind::MissingRepo => None,
             PopupKind::StartUpdate => {
-                match key_code {
-                    KeyCode::Char('Y') | KeyCode::Char('y') => {
+                match cmd {
+                    Cmd::Yes => {
                         // Trigger the update
                         let selected = state.rack_state.selected;
                         info!(self.log, "Updating {}", selected);
                         self.popup = None;
                         Some(Action::Update(selected))
                     }
-                    KeyCode::Char('N') | KeyCode::Char('n') => {
+                    Cmd::No => {
                         self.popup = None;
                         Some(Action::Redraw)
                     }
-                    KeyCode::Char('L') | KeyCode::Char('l') => {
+                    Cmd::Details => {
                         self.popup = Some(PopupKind::Logs);
                         Some(Action::Redraw)
                     }
@@ -328,48 +320,45 @@ impl Control for UpdatePane {
         self.update_items(state);
     }
 
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         self.ensure_selection_matches_rack_state(state);
         if self.popup.is_some() {
-            return self.handle_event_in_popup(state, event);
+            return self.handle_cmd_in_popup(state, cmd);
         }
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Up => {
-                    self.tree_state.key_up(&self.items);
-                    let selected = self.tree_state.selected();
-                    state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
+        match cmd {
+            Cmd::Up => {
+                self.tree_state.key_up(&self.items);
+                let selected = self.tree_state.selected();
+                state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
+                Some(Action::Redraw)
+            }
+            Cmd::Down => {
+                self.tree_state.key_down(&self.items);
+                let selected = self.tree_state.selected();
+                state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
+                Some(Action::Redraw)
+            }
+            Cmd::Left => {
+                // We always want something selected. If we close the root,
+                // we want to re-open it. This is the only API currently provided
+                // that allows this.
+                let selected = self.tree_state.selected();
+                self.tree_state.key_left();
+                if self.tree_state.selected().is_empty() {
+                    self.tree_state.select(selected);
+                    None
+                } else {
                     Some(Action::Redraw)
                 }
-                KeyCode::Down => {
-                    self.tree_state.key_down(&self.items);
-                    let selected = self.tree_state.selected();
-                    state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
-                    Some(Action::Redraw)
-                }
-                KeyCode::Left => {
-                    // We always want something selected. If we close the root,
-                    // we want to re-open it. This is the only API currently provided
-                    // that allows this.
-                    let selected = self.tree_state.selected();
-                    self.tree_state.key_left();
-                    if self.tree_state.selected().is_empty() {
-                        self.tree_state.select(selected);
-                        None
-                    } else {
-                        Some(Action::Redraw)
-                    }
-                }
-                KeyCode::Right => {
-                    self.tree_state.key_right();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Enter => {
-                    self.open_popup(state);
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
+            }
+            Cmd::Right => {
+                self.tree_state.key_right();
+                Some(Action::Redraw)
+            }
+            Cmd::Enter => {
+                self.open_popup(state);
+                Some(Action::Redraw)
+            }
             _ => None,
         }
     }

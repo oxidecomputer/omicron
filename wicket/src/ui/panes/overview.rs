@@ -11,9 +11,7 @@ use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::panes::compute_scroll_offset;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
-use crate::{Action, Event, Frame, State};
-use crossterm::event::Event as TermEvent;
-use crossterm::event::KeyCode;
+use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
 use tui::text::{Span, Spans, Text};
@@ -37,31 +35,24 @@ impl OverviewPane {
         }
     }
 
-    pub fn dispatch(
-        &mut self,
-        state: &mut State,
-        event: Event,
-    ) -> Option<Action> {
+    pub fn dispatch(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         if self.rack_view_selected {
-            self.rack_view.on(state, event)
+            self.rack_view.on(state, cmd)
         } else {
-            self.inventory_view.on(state, event)
+            self.inventory_view.on(state, cmd)
         }
     }
 }
 
 impl Control for OverviewPane {
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Enter => {
-                    // Switch between rack and inventory view
-                    self.rack_view_selected = !self.rack_view_selected;
-                    Some(Action::Redraw)
-                }
-                _ => self.dispatch(state, event),
-            },
-            _ => self.dispatch(state, event),
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::Enter => {
+                // Switch between rack and inventory view
+                self.rack_view_selected = !self.rack_view_selected;
+                Some(Action::Redraw)
+            }
+            _ => self.dispatch(state, cmd),
         }
     }
 
@@ -84,28 +75,25 @@ impl Control for OverviewPane {
 pub struct RackView {}
 
 impl Control for RackView {
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Up => {
-                    state.rack_state.up();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Down => {
-                    state.rack_state.down();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Char('k') => {
-                    state.rack_state.toggle_knight_rider_mode();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Left | KeyCode::Right => {
-                    state.rack_state.left_or_right();
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
-            Event::Tick => {
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::Up => {
+                state.rack_state.up();
+                Some(Action::Redraw)
+            }
+            Cmd::Down => {
+                state.rack_state.down();
+                Some(Action::Redraw)
+            }
+            Cmd::KnightRiderMode => {
+                state.rack_state.toggle_knight_rider_mode();
+                Some(Action::Redraw)
+            }
+            Cmd::Left | Cmd::Right => {
+                state.rack_state.left_or_right();
+                Some(Action::Redraw)
+            }
+            Cmd::Tick => {
                 // TODO: This only animates when the pane is active. Should we move the
                 // tick into the wizard instead?
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
@@ -286,44 +274,41 @@ impl Control for InventoryView {
         );
     }
 
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Left => {
-                    state.rack_state.prev();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Right => {
-                    state.rack_state.next();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Down => {
-                    let component_id = state.rack_state.selected;
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::Left => {
+                state.rack_state.prev();
+                Some(Action::Redraw)
+            }
+            Cmd::Right => {
+                state.rack_state.next();
+                Some(Action::Redraw)
+            }
+            Cmd::Down => {
+                let component_id = state.rack_state.selected;
 
-                    // We currently debug print inventory on each call to
-                    // `draw`, so we don't know  how many lines the total text is.
-                    // We also don't know the Rect containing this Control, since
-                    // we don't keep track of them anymore, and only know during
-                    // rendering. Therefore, we just increment and correct
-                    // for more incrments than lines exist during render, since
-                    // `self` is passed mutably.
-                    //
-                    // It's also worth noting that the inventory may update
-                    // before rendering, and so this is a somewhat sensible
-                    // strategy.
-                    *self.scroll_offsets.get_mut(&component_id).unwrap() += 1;
-                    Some(Action::Redraw)
-                }
-                KeyCode::Up => {
-                    let component_id = state.rack_state.selected;
-                    let offset =
-                        self.scroll_offsets.get_mut(&component_id).unwrap();
-                    *offset = offset.saturating_sub(1);
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
-            Event::Tick => {
+                // We currently debug print inventory on each call to
+                // `draw`, so we don't know  how many lines the total text is.
+                // We also don't know the Rect containing this Control, since
+                // we don't keep track of them anymore, and only know during
+                // rendering. Therefore, we just increment and correct
+                // for more incrments than lines exist during render, since
+                // `self` is passed mutably.
+                //
+                // It's also worth noting that the inventory may update
+                // before rendering, and so this is a somewhat sensible
+                // strategy.
+                *self.scroll_offsets.get_mut(&component_id).unwrap() += 1;
+                Some(Action::Redraw)
+            }
+            Cmd::Up => {
+                let component_id = state.rack_state.selected;
+                let offset =
+                    self.scroll_offsets.get_mut(&component_id).unwrap();
+                *offset = offset.saturating_sub(1);
+                Some(Action::Redraw)
+            }
+            Cmd::Tick => {
                 // TODO: This only animates when the pane is active. Should we move the
                 // tick into the [`Runner`] instead?
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
