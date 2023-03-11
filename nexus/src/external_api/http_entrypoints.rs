@@ -335,6 +335,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(session_sshkey_list)?;
         api.register(session_sshkey_view)?;
         api.register(session_sshkey_create)?;
+        api.register(session_sshkey_delete)?;
 
         api.register(current_user_view_v1)?;
         api.register(current_user_groups_v1)?;
@@ -9100,17 +9101,22 @@ async fn session_sshkey_view(
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let &actor = opctx
             .authn
             .actor_required()
             .internal_context("fetching one of current user's ssh keys")?;
-        let ssh_key =
-            nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key_name).await?;
+        let ssh_key_selector = params::SshKeySelector {
+            silo_user_id: actor.actor_id(),
+            ssh_key: path.ssh_key_name.into(),
+        };
+        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
+        let (.., silo_user, _, ssh_key) = ssh_key_lookup.fetch().await?;
+        // Ensure the SSH key exists in the current silo
+        assert_eq!(silo_user.id(), actor.actor_id());
         Ok(HttpResponseOk(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -9133,13 +9139,18 @@ async fn current_user_ssh_key_view_v1(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let ssh_key = &path.ssh_key;
-        let &actor = opctx
+        let actor = opctx
             .authn
             .actor_required()
             .internal_context("fetching one of current user's ssh keys")?;
-        let ssh_key =
-            nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key).await?;
+        let ssh_key_selector = params::SshKeySelector {
+            silo_user_id: actor.actor_id(),
+            ssh_key: path.ssh_key,
+        };
+        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
+        let (.., silo_user, _, ssh_key) = ssh_key_lookup.fetch().await?;
+        // Ensure the SSH key exists in the current silo
+        assert_eq!(silo_user.id(), actor.actor_id());
         Ok(HttpResponseOk(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -9158,16 +9169,20 @@ async fn session_sshkey_delete(
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let actor = opctx
             .authn
             .actor_required()
             .internal_context("deleting one of current user's ssh keys")?;
-        nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
+        let ssh_key_selector = params::SshKeySelector {
+            silo_user_id: actor.actor_id(),
+            ssh_key: path.ssh_key_name.into(),
+        };
+        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
+        nexus.ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -9190,12 +9205,16 @@ async fn current_user_ssh_key_delete_v1(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let ssh_key = &path.ssh_key;
-        let &actor = opctx
+        let actor = opctx
             .authn
             .actor_required()
             .internal_context("deleting one of current user's ssh keys")?;
-        nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key).await?;
+        let ssh_key_selector = params::SshKeySelector {
+            silo_user_id: actor.actor_id(),
+            ssh_key: path.ssh_key,
+        };
+        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
+        nexus.ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

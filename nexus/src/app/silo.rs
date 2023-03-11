@@ -558,26 +558,26 @@ impl super::Nexus {
     }
 
     // SSH Keys
-    pub async fn ssh_key_lookup<'a>(
+    pub fn ssh_key_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         ssh_key_selector: &'a params::SshKeySelector,
     ) -> LookupResult<lookup::SshKey<'a>> {
         match ssh_key_selector {
             params::SshKeySelector {
-                silo_user: _,
+                silo_user_id: _,
                 ssh_key: NameOrId::Id(id),
             } => {
                 let ssh_key =
-                    LookupPath::new(opctx, &self.datastore()).ssh_key_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).ssh_key_id(*id);
                 Ok(ssh_key)
             }
             params::SshKeySelector {
-                silo_user,
+                silo_user_id,
                 ssh_key: NameOrId::Name(name),
             } => {
-                let ssh_key = LookupPath::new(opctx, &self.datastore())
-                    .silo_user_id(*silo_user)
+                let ssh_key = LookupPath::new(opctx, &self.db_datastore)
+                    .silo_user_id(*silo_user_id)
                     .ssh_key_name(Name::ref_cast(name));
                 Ok(ssh_key)
             }
@@ -613,29 +613,15 @@ impl super::Nexus {
         self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
     }
 
-    pub async fn ssh_key_fetch(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-        ssh_key: &NameOrId,
-    ) -> LookupResult<SshKey> {
-        let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(silo_user_id)
-            .ssh_key_name(ssh_key_name)
-            .fetch()
-            .await?;
-        assert_eq!(ssh_key.name(), &ssh_key_name.0);
-        Ok(ssh_key)
-    }
-
     pub async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
+        silo_user_id: Uuid,
         ssh_key_lookup: &lookup::SshKey<'_>,
     ) -> DeleteResult {
         let (.., authz_silo_user, authz_ssh_key) =
             ssh_key_lookup.lookup_for(authz::Action::Delete).await?;
-        assert_eq!(authz_user.id(), silo_user_id);
+        assert_eq!(authz_silo_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
     }
 

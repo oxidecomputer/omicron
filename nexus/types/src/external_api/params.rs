@@ -141,7 +141,7 @@ pub struct GroupPath {
 // the environment the user is authetnicated in
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
-    pub silo_user: Uuid,
+    pub silo_user_id: Uuid,
     pub ssh_key: NameOrId,
 }
 
