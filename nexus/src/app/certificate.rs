@@ -4,7 +4,6 @@
 
 //! x.509 Certificates
 
-use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
@@ -12,6 +11,7 @@ use crate::db::model::Name;
 use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use crate::external_api::shared;
+use nexus_db_queries::context::OpContext;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;

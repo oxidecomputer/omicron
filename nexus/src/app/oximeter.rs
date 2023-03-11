@@ -5,7 +5,6 @@
 //! Oximeter-related functionality
 
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
@@ -13,6 +12,7 @@ use crate::internal_api::params::OximeterInfo;
 use dns_service_client::multiclient::{ResolveError, Resolver};
 use dropshot::PaginationParams;
 use internal_dns_names::{ServiceName, SRV};
+use nexus_db_queries::context::OpContext;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;

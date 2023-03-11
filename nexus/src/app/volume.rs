@@ -6,7 +6,7 @@
 
 use crate::app::sagas;
 use crate::authn;
-use crate::context::OpContext;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use std::sync::Arc;
