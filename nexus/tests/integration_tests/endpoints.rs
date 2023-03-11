@@ -391,7 +391,7 @@ lazy_static! {
         };
 
     // SSH keys
-    pub static ref DEMO_SSHKEYS_URL: &'static str = "/v1/current-user/sshkeys";
+    pub static ref DEMO_SSHKEYS_URL: &'static str = "/v1/current-user/ssh-keys";
     pub static ref DEMO_SSHKEY_NAME: Name = "aaaaa-ssh-key".parse().unwrap();
     pub static ref DEMO_SSHKEY_CREATE: params::SshKeyCreate = params::SshKeyCreate {
         identity: IdentityMetadataCreateParams {
@@ -1593,7 +1593,7 @@ lazy_static! {
         /* Misc */
 
         VerifyEndpoint {
-            url: "/v1/current-user/me",
+            url: "/v1/current-user",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![

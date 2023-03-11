@@ -62,7 +62,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     // Create a key
     let _new_key: views::SshKey = NexusRequest::objects_post(
         client,
-        "/v1/current-user/sshkeys",
+        "/v1/current-user/ssh-keys",
         &params::SshKeyCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
@@ -81,7 +81,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     // user1 can read that key
     let _fetched_key: views::SshKey = NexusRequest::object_get(
         client,
-        &format!("/v1/current-user/sshkeys/{}", name),
+        &format!("/v1/current-user/ssh-keys/{}", name),
     )
     .authn_as(AuthnMode::SiloUser(user1))
     .execute()
@@ -95,7 +95,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             http::Method::GET,
-            &format!("/v1/current-user/sshkeys/{}", name),
+            &format!("/v1/current-user/ssh-keys/{}", name),
         )
         .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
@@ -108,7 +108,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             http::Method::DELETE,
-            &format!("/v1/current-user/sshkeys/{}", name),
+            &format!("/v1/current-user/ssh-keys/{}", name),
         )
         .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
@@ -119,7 +119,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // it also shouldn't show up in their list
     let user2_keys: ResultsPage<views::SshKey> =
-        NexusRequest::object_get(client, &"/v1/current-user/sshkeys")
+        NexusRequest::object_get(client, &"/v1/current-user/ssh-keys")
             .authn_as(AuthnMode::SiloUser(user2))
             .execute()
             .await
