@@ -8904,7 +8904,7 @@ pub async fn current_user_view_v1(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
         Ok(HttpResponseOk(user.into()))
     };
@@ -8922,10 +8922,10 @@ pub async fn current_user_groups_v1(
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
         let groups = nexus
             .silo_user_fetch_groups_for_self(
                 &opctx,
@@ -9000,7 +9000,7 @@ async fn current_user_ssh_key_list_v1(
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let pag_params = data_page_params_for(&rqctx, &query)?;
@@ -9067,35 +9067,7 @@ async fn current_user_ssh_key_create_v1(
 ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("creating ssh key for current user")?;
-        let ssh_key = nexus
-            .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
-            .await?;
-        Ok(HttpResponseCreated(ssh_key.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create an SSH public key
-///
-/// Create an SSH public key for the currently authenticated user.
-#[endpoint {
-    method = POST,
-    path = "/v1/current-user/ssh-keys",
-    tags = ["session"],
-}]
-async fn current_user_ssh_key_create_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_key: TypedBody<params::SshKeyCreate>,
-) -> Result<HttpResponseCreated<SshKey>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let &actor = opctx
             .authn
@@ -9131,7 +9103,7 @@ async fn session_sshkey_view(
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let &actor = opctx
@@ -9165,7 +9137,9 @@ async fn current_user_ssh_key_view_v1(
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let &actor = opctx
             .authn
             .actor_required()
@@ -9197,7 +9171,7 @@ async fn session_sshkey_delete(
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let actor = opctx
@@ -9229,7 +9203,9 @@ async fn current_user_ssh_key_delete_v1(
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
         let &actor = opctx
             .authn
             .actor_required()
