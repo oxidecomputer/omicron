@@ -7,7 +7,6 @@ license = "MPL-2.0"
 
 [dependencies]
 clap.workspace = true
-dns-service-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 internal-dns-names.workspace = true

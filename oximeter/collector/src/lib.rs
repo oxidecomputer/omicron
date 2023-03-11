@@ -6,7 +6,7 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use dns_service_client::multiclient::{ResolveError, Resolver};
+use internal_dns_names::multiclient::{ResolveError, Resolver};
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,

@@ -4,13 +4,23 @@
 
 //! Naming scheme for Internal DNS names (RFD 248).
 
+// XXX-dap rename crate to "internal-dns"
+
+use anyhow::anyhow;
+use dns_service_client::types::{
+    DnsConfig, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey,
+};
+use std::collections::BTreeMap;
 use std::fmt;
+use std::net::Ipv6Addr;
 use uuid::Uuid;
+
+pub mod multiclient;
 
 pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 
 /// Names for services where backends are interchangeable.
-#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {
     Clickhouse,
     Cockroach,
@@ -68,6 +78,7 @@ pub enum SRV {
     ///
     /// This is used in cases where services are not interchangeable, such as
     /// for the Sled agent.
+    // XXX-dap the naming here is misleading
     Backend(BackendName, Uuid),
 }
 
@@ -105,6 +116,144 @@ impl fmt::Display for AAAA {
         }
     }
 }
+
+/// Helper for building an initial DNS configuration
+// XXX-dap I wonder if we can make the stuff above non-pub once we flesh this
+// out.  (Is it used anywhere aside from constructing DNS configuration?)
+// XXX-dap TODO-doc design note: this is pretty simple because it makes a lot of
+// assumptions: only zones are backends for services; there is only ever one
+// address for zones or sleds
+// XXX-dap TODO-doc this could use better documentation
+// XXX-dap this crate could use better file organization now
+
+pub struct DnsConfigBuilder {
+    sleds: BTreeMap<Uuid, Ipv6Addr>,
+    zones: BTreeMap<Uuid, Ipv6Addr>,
+    service_instances: BTreeMap<ServiceName, BTreeMap<Uuid, u16>>,
+}
+
+pub struct Zone(Uuid);
+
+impl DnsConfigBuilder {
+    pub fn new() -> Self {
+        DnsConfigBuilder {
+            sleds: BTreeMap::new(),
+            zones: BTreeMap::new(),
+            service_instances: BTreeMap::new(),
+        }
+    }
+
+    pub fn host_sled(
+        &mut self,
+        sled_id: Uuid,
+        addr: Ipv6Addr,
+    ) -> anyhow::Result<()> {
+        match self.sleds.insert(sled_id, addr) {
+            None => Ok(()),
+            Some(existing) => Err(anyhow!(
+                "multiple definitions for sled {} (previously {}, now {})",
+                sled_id,
+                existing,
+                addr,
+            )),
+        }
+    }
+
+    pub fn host_zone(
+        &mut self,
+        zone_id: Uuid,
+        addr: Ipv6Addr,
+    ) -> anyhow::Result<Zone> {
+        match self.zones.insert(zone_id, addr) {
+            None => Ok(Zone(zone_id)),
+            Some(existing) => Err(anyhow!(
+                "multiple definitions for zone {} (previously {}, now {})",
+                zone_id,
+                existing,
+                addr
+            )),
+        }
+    }
+
+    pub fn service_backend(
+        &mut self,
+        service: ServiceName,
+        zone: &Zone,
+        port: u16,
+    ) -> anyhow::Result<()> {
+        let set = self
+            .service_instances
+            .entry(service.clone())
+            .or_insert_with(BTreeMap::new);
+        let zone_id = zone.0;
+        match set.insert(zone_id, port) {
+            None => Ok(()),
+            Some(existing) => Err(anyhow!(
+                "service {}: zone {}: registered twice\
+                (previously port {}, now {})",
+                service,
+                zone_id,
+                existing,
+                port
+            )),
+        }
+    }
+
+    pub fn build(self) -> DnsConfig {
+        // Assemble the set of "AAAA" records for sleds.
+        let sled_records = self.sleds.into_iter().map(|(sled_id, sled_ip)| {
+            let name = AAAA::Sled(sled_id).to_string();
+            DnsKv {
+                key: DnsRecordKey { name },
+                // XXX-dap fix the case of these
+                records: vec![DnsRecord::Aaaa(sled_ip)],
+            }
+        });
+
+        // Assemble the set of AAAA records for zones.
+        let zone_records = self.zones.into_iter().map(|(zone_id, zone_ip)| {
+            let name = AAAA::Zone(zone_id).to_string();
+            DnsKv {
+                key: DnsRecordKey { name },
+                records: vec![DnsRecord::Aaaa(zone_ip)],
+            }
+        });
+
+        // Assemble the set of SRV records, which implicitly point back at
+        // zones' AAAA records.
+        let srv_records = self.service_instances.into_iter().map(
+            |(service_name, zone2port)| {
+                let name = SRV::Service(service_name).to_string();
+                let records = zone2port
+                    .into_iter()
+                    .map(|(zone_id, port)| {
+                        DnsRecord::Srv(dns_service_client::types::Srv {
+                            prio: 0,
+                            weight: 0,
+                            port,
+                            target: AAAA::Zone(zone_id).to_string(),
+                        })
+                    })
+                    .collect();
+
+                DnsKv { key: DnsRecordKey { name }, records }
+            },
+        );
+
+        let all_records =
+            sled_records.chain(zone_records).chain(srv_records).collect();
+
+        DnsConfig {
+            generation: 1,
+            zones: vec![DnsConfigZone {
+                zone_name: DNS_ZONE.to_owned(),
+                records: all_records,
+            }],
+        }
+    }
+}
+
+// XXX-dap TODO-coverage test coverage for DnsConfigBuilder
 
 #[cfg(test)]
 mod test {

@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::types::{DnsKv, DnsRecord, DnsRecordKey, Srv};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT,
 };
 use slog::{info, Logger};
-use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
@@ -16,9 +14,9 @@ use trust_dns_resolver::config::{
 };
 use trust_dns_resolver::TokioAsyncResolver;
 
-pub type DnsError = crate::Error<crate::types::Error>;
+pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 
-pub type AAAARecord = (internal_dns_names::AAAA, SocketAddrV6);
+pub type AAAARecord = (crate::AAAA, SocketAddrV6);
 
 /// Describes how to find the DNS servers.
 ///
@@ -69,10 +67,14 @@ impl DnsAddressLookup for ServerAddresses {
     }
 }
 
-/// A connection used to update multiple DNS servers.
+/// A connection used to update multiple DNS servers
+///
+/// Note that this is only suitable for use in writing an initial update to the
+/// DNS servers.  After transfer-of-control to Nexus, Nexus uses a more
+/// synchronized process for updating the DNS servers.  See RFD 367 for details.
 pub struct Updater {
     log: Logger,
-    clients: Vec<crate::Client>,
+    clients: Vec<dns_service_client::Client>,
 }
 
 impl Updater {
@@ -86,7 +88,10 @@ impl Updater {
             .into_iter()
             .map(|addr| {
                 info!(log, "Adding DNS server: {}", addr);
-                crate::Client::new(&format!("http://{}", addr), log.clone())
+                dns_service_client::Client::new(
+                    &format!("http://{}", addr),
+                    log.clone(),
+                )
             })
             .collect::<Vec<_>>();
 
@@ -96,7 +101,7 @@ impl Updater {
     /// Attempts to write a DNS generation to the DNS servers
     pub async fn dns_initialize<'a>(
         &'a self,
-        body: &'a crate::types::DnsConfig,
+        body: &'a dns_service_client::types::DnsConfig,
     ) -> Result<(), DnsError> {
         // XXX-dap log
         stream::iter(&self.clients)
@@ -117,7 +122,7 @@ pub enum ResolveError {
     Resolve(#[from] trust_dns_resolver::error::ResolveError),
 
     #[error("Record not found for SRV key: {0}")]
-    NotFound(internal_dns_names::SRV),
+    NotFound(crate::SRV),
 
     #[error("Record not found for {0}")]
     NotFoundByString(String),
@@ -174,7 +179,7 @@ impl Resolver {
     // API that can be improved upon later.
     pub async fn lookup_ipv6(
         &self,
-        srv: internal_dns_names::SRV,
+        srv: crate::SRV,
     ) -> Result<Ipv6Addr, ResolveError> {
         let response = self.inner.ipv6_lookup(&srv.to_string()).await?;
         let address = response
@@ -188,7 +193,7 @@ impl Resolver {
     /// Returns an error if the record does not exist.
     pub async fn lookup_socket_v6(
         &self,
-        srv: internal_dns_names::SRV,
+        srv: crate::SRV,
     ) -> Result<SocketAddrV6, ResolveError> {
         let response =
             self.inner.lookup(&srv.to_string(), RecordType::SRV).await?;
@@ -221,7 +226,7 @@ impl Resolver {
 
     pub async fn lookup_ip(
         &self,
-        srv: internal_dns_names::SRV,
+        srv: crate::SRV,
     ) -> Result<IpAddr, ResolveError> {
         let response = self.inner.lookup_ip(&srv.to_string()).await?;
         let address = response
@@ -235,7 +240,7 @@ impl Resolver {
 #[cfg(test)]
 mod test {
     use super::*;
-    use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
+    use crate::{BackendName, ServiceName, AAAA, SRV};
     use omicron_test_utils::dev::test_setup_log;
     use std::str::FromStr;
     use std::sync::Arc;

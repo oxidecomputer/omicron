@@ -1647,23 +1647,12 @@ dependencies = [
 name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
- "dns-server",
- "dropshot",
  "futures",
- "internal-dns-names",
- "omicron-common",
- "omicron-test-utils",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
- "sled",
  "slog",
- "tempfile",
- "thiserror",
- "tokio",
- "trust-dns-proto",
- "trust-dns-resolver",
  "uuid",
 ]
 
@@ -2953,6 +2942,20 @@ dependencies = [
 name = "internal-dns-names"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "dns-server",
+ "dns-service-client",
+ "dropshot",
+ "futures",
+ "omicron-common",
+ "omicron-test-utils",
+ "sled",
+ "slog",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "trust-dns-proto",
+ "trust-dns-resolver",
  "uuid",
 ]
 
@@ -3545,8 +3548,8 @@ name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "dns-service-client",
  "dropshot",
+ "internal-dns-names",
  "omicron-common",
  "slog",
  "uuid",
@@ -3559,11 +3562,11 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
- "dns-service-client",
  "dropshot",
  "headers",
  "http",
  "hyper",
+ "internal-dns-names",
  "nexus-test-interface",
  "omicron-common",
  "omicron-nexus",
@@ -3903,7 +3906,6 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dns-service-client",
  "dropshot",
  "expectorate",
  "fatfs",
@@ -4355,7 +4357,6 @@ name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "clap 4.1.6",
- "dns-service-client",
  "dropshot",
  "expectorate",
  "futures",

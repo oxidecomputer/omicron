@@ -11,14 +11,12 @@ use super::storage::PantryServer;
 use crate::nexus::NexusClient;
 use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
-use dns_service_client::types::DnsConfig;
-use internal_dns_names::{ServiceName, AAAA, SRV};
+use internal_dns_names::ServiceName;
 use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{info, Drain, Logger};
-use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 
@@ -172,11 +170,8 @@ impl Server {
             },
         };
         let dns_log = log.new(o!("kind" => "dns"));
-        let zone = "control-plane.oxide.internal".to_string();
         let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
 
-        // XXX-dap need to update this code.  Probably should consider re-adding
-        // an analog to dns_server::start?
         let store = dns_server::storage::Store::new(
             log.new(o!("component" => "store")),
             &dns_server_config.storage,
@@ -185,7 +180,7 @@ impl Server {
         .map_err(|e| e.to_string())?;
 
         let (dns_server, dns_dropshot_server) = dns_server::start_servers(
-            log.clone(),
+            dns_log,
             store,
             &dns_server::dns_server::Config {
                 bind_address: SocketAddr::from(dns_address).to_string(),
@@ -196,25 +191,28 @@ impl Server {
         .map_err(|e| e.to_string())?;
 
         // Insert SRV and AAAA record for Crucible Pantry
-        // XXX-dap
-        let dns_config: DnsConfig = todo!();
-        //let mut records: HashMap<_, Vec<(_, SocketAddrV6)>> = HashMap::new();
-        //records
-        //    .entry(SRV::Service(ServiceName::CruciblePantry))
-        //    .or_insert_with(Vec::new)
-        //    .push((
-        //        AAAA::Zone(pantry_server.server.app_private().id),
-        //        match pantry_server.addr() {
-        //            SocketAddr::V6(v6) => v6,
+        let mut dns = internal_dns_names::DnsConfigBuilder::new();
+        let pantry_zone_id = pantry_server.server.app_private().id;
+        let pantry_addr = match pantry_server.addr() {
+            SocketAddr::V6(v6) => v6,
+            SocketAddr::V4(_) => {
+                panic!("pantry address must be IPv6");
+            }
+        };
+        let pantry_zone = dns
+            .host_zone(pantry_zone_id, *pantry_addr.ip())
+            .expect("failed to set up DNS");
+        dns.service_backend(
+            ServiceName::CruciblePantry,
+            &pantry_zone,
+            pantry_addr.port(),
+        )
+        .expect("failed to set up DNS");
 
-        //            SocketAddr::V4(_) => {
-        //                panic!("pantry address must be IPv6");
-        //            }
-        //        },
-        //    ));
+        let dns_config = dns.build();
 
-        let dns_client = dns_service_client::multiclient::Updater::new(
-            &dns_service_client::multiclient::ServerAddresses {
+        let dns_client = internal_dns_names::multiclient::Updater::new(
+            &internal_dns_names::multiclient::ServerAddresses {
                 dropshot_server_addrs: vec![dns_dropshot_server.local_addr()],
                 dns_server_addrs: vec![],
             },

@@ -5,4 +5,20 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow.workspace = true
+dns-service-client.workspace = true
+futures.workspace = true
+omicron-common.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+trust-dns-proto.workspace = true
+trust-dns-resolver.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+dropshot.workspace = true
+dns-server.workspace = true
+omicron-test-utils.workspace = true
+sled.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = [ "full" ] }

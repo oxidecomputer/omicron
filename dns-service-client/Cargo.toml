@@ -6,22 +6,9 @@ license = "MPL-2.0"
 
 [dependencies]
 futures.workspace = true
-internal-dns-names.workspace = true
-omicron-common.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
-thiserror.workspace = true
-trust-dns-proto.workspace = true
-trust-dns-resolver.workspace = true
 uuid.workspace = true
-
-[dev-dependencies]
-dropshot.workspace = true
-dns-server.workspace = true
-omicron-test-utils.workspace = true
-sled.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
