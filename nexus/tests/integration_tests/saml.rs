@@ -1015,7 +1015,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
     // ask whoami
     NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/session/me")
+        RequestBuilder::new(client, Method::GET, "/v1/current-user")
             .expect_status(Some(StatusCode::UNAUTHORIZED)),
     )
     .execute()
@@ -1043,7 +1043,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     assert_same_items(silo_group_names, vec!["SRE", "Admins"]);
 
     let session_me: views::User = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/session/me")
+        RequestBuilder::new(client, Method::GET, "/v1/current-user")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
     )
@@ -1056,7 +1056,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(session_me.display_name, "some@customer.com");
 
     let session_me: ResultsPage<views::Group> = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/session/me/groups")
+        RequestBuilder::new(client, Method::GET, "/v1/current-user/groups")
             .header(http::header::COOKIE, session_cookie_value)
             .expect_status(Some(StatusCode::OK)),
     )

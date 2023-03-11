@@ -327,15 +327,15 @@ async fn test_absolute_static_dir() {
 async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // hitting /session/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/session/me")
+    // hitting /v1/current-user without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/v1/current-user")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed request");
 
     // now make same request with auth
-    let priv_user = NexusRequest::object_get(testctx, "/session/me")
+    let priv_user = NexusRequest::object_get(testctx, "/v1/current-user")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -352,7 +352,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         }
     );
 
-    let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/current-user")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
         .await
@@ -374,8 +374,8 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
 async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // hitting /session/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/session/me/groups")
+    // hitting /v1/current-user without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/v1/current-user/groups")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -383,7 +383,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
 
     // now make same request with auth
     let priv_user_groups =
-        NexusRequest::object_get(testctx, "/session/me/groups")
+        NexusRequest::object_get(testctx, "/v1/current-user/groups")
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -394,7 +394,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(priv_user_groups.items, vec![]);
 
     let unpriv_user_groups =
-        NexusRequest::object_get(testctx, "/session/me/groups")
+        NexusRequest::object_get(testctx, "/v1/current-user/groups")
             .authn_as(AuthnMode::UnprivilegedUser)
             .execute()
             .await

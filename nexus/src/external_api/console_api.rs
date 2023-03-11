@@ -619,7 +619,7 @@ pub async fn login_begin(
 /// Use `GET /v1/current-user` instead
 #[endpoint {
    method = GET,
-   path = "/session/me",
+   path = "/v1/current-user",
    tags = ["hidden"],
    deprecated = true
 }]
@@ -643,7 +643,7 @@ pub async fn session_me(
 /// Use `GET /v1/current-user/groups` instead
 #[endpoint {
     method = GET,
-    path = "/session/me/groups",
+    path = "/v1/current-user/groups",
     tags = ["hidden"],
     deprecated = true
  }]

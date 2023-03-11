@@ -62,7 +62,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     // Create a key
     let _new_key: views::SshKey = NexusRequest::objects_post(
         client,
-        "/session/me/sshkeys",
+        "/v1/current-user/sshkeys",
         &params::SshKeyCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
@@ -81,7 +81,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     // user1 can read that key
     let _fetched_key: views::SshKey = NexusRequest::object_get(
         client,
-        &format!("/session/me/sshkeys/{}", name),
+        &format!("/v1/current-user/sshkeys/{}", name),
     )
     .authn_as(AuthnMode::SiloUser(user1))
     .execute()
@@ -95,7 +95,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             http::Method::GET,
-            &format!("/session/me/sshkeys/{}", name),
+            &format!("/v1/current-user/sshkeys/{}", name),
         )
         .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
@@ -108,7 +108,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             http::Method::DELETE,
-            &format!("/session/me/sshkeys/{}", name),
+            &format!("/v1/current-user/sshkeys/{}", name),
         )
         .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
@@ -119,7 +119,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // it also shouldn't show up in their list
     let user2_keys: ResultsPage<views::SshKey> =
-        NexusRequest::object_get(client, &"/session/me/sshkeys")
+        NexusRequest::object_get(client, &"/v1/current-user/sshkeys")
             .authn_as(AuthnMode::SiloUser(user2))
             .execute()
             .await
@@ -306,7 +306,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 }
 
-// Test that an authenticated, unprivileged user can access /session/me
+// Test that an authenticated, unprivileged user can access /v1/current-user
 #[nexus_test]
 async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -330,7 +330,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     .id;
 
     let _session_user: views::User =
-        NexusRequest::object_get(client, &"/session/me")
+        NexusRequest::object_get(client, &"/v1/current-user")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await

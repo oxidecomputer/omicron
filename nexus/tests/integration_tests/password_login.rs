@@ -359,13 +359,13 @@ async fn expect_session_valid(
     client: &ClientTestContext,
     session_token: &str,
 ) -> views::User {
-    NexusRequest::object_get(client, "/session/me")
+    NexusRequest::object_get(client, "/v1/current-user")
         .authn_as(AuthnMode::Session(session_token.to_string()))
         .execute()
         .await
         .expect("expected successful request, but it failed")
         .parsed_body()
-        .expect("failed to parse /session/me response body")
+        .expect("failed to parse /v1/current-user response body")
 }
 
 async fn expect_session_invalid(
@@ -376,7 +376,7 @@ async fn expect_session_invalid(
         client,
         StatusCode::UNAUTHORIZED,
         Method::GET,
-        "/session/me",
+        "/v1/current-user",
     )
     .authn_as(AuthnMode::Session(session_token.to_string()))
     .execute()
