@@ -297,6 +297,7 @@ pub struct DatasetEnsureBody {
     pub address: SocketAddrV6,
 }
 
+// XXX-dap can we get rid of this now that we're constructing DNS separately?
 impl DatasetEnsureBody {
     pub fn aaaa(&self) -> AAAA {
         AAAA::Zone(self.id)

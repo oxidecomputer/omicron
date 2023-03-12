@@ -8,6 +8,8 @@ use crate::params::{
     DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use dns_service_client::types::DnsConfig;
+use internal_dns_names::{BackendName, ServiceName, SRV};
 use omicron_common::address::{
     get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DNS_PORT,
     DNS_SERVER_PORT, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
@@ -25,7 +27,6 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
-use dns_service_client::types::DnsConfig;
 
 // The number of Nexus instances to create from RSS.
 const NEXUS_COUNT: usize = 1;
@@ -188,6 +189,7 @@ impl Plan {
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
 
         let mut allocations = vec![];
+        let mut dns_builder = internal_dns_names::DnsConfigBuilder::new();
 
         for idx in 0..sled_addrs.len() {
             let sled_address = sled_addrs[idx];
@@ -201,9 +203,18 @@ impl Plan {
             // The first enumerated sleds get assigned the responsibility
             // of hosting Nexus.
             if idx < NEXUS_COUNT {
+                let id = Uuid::new_v4();
                 let address = addr_alloc.next().expect("Not enough addrs");
+                let zone = dns_builder.host_zone(id, address).unwrap();
+                dns_builder
+                    .service_backend(
+                        SRV::Service(ServiceName::Nexus),
+                        &zone,
+                        omicron_common::address::NEXUS_INTERNAL_PORT,
+                    )
+                    .unwrap();
                 request.services.push(ServiceZoneRequest {
-                    id: Uuid::new_v4(),
+                    id,
                     zone_type: ZoneType::Nexus,
                     addresses: vec![address],
                     gz_addresses: vec![],
@@ -216,9 +227,18 @@ impl Plan {
 
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
             if idx < OXIMETER_COUNT {
+                let id = Uuid::new_v4();
                 let address = addr_alloc.next().expect("Not enough addrs");
+                let zone = dns_builder.host_zone(id, address).unwrap();
+                dns_builder
+                    .service_backend(
+                        SRV::Service(ServiceName::Oximeter),
+                        &zone,
+                        omicron_common::address::OXIMETER_PORT,
+                    )
+                    .unwrap();
                 request.services.push(ServiceZoneRequest {
-                    id: Uuid::new_v4(),
+                    id,
                     zone_type: ZoneType::Oximeter,
                     addresses: vec![address],
                     gz_addresses: vec![],
@@ -229,14 +249,20 @@ impl Plan {
             // The first enumerated sleds host the CRDB datasets, using
             // zpools described from the underlying config file.
             if idx < CRDB_COUNT {
-                let address = SocketAddrV6::new(
-                    addr_alloc.next().expect("Not enough addrs"),
-                    omicron_common::address::COCKROACH_PORT,
-                    0,
-                    0,
-                );
+                let id = Uuid::new_v4();
+                let address = addr_alloc.next().expect("Not enough addrs");
+                let port = omicron_common::address::COCKROACH_PORT;
+                let zone = dns_builder.host_zone(id, address).unwrap();
+                dns_builder
+                    .service_backend(
+                        SRV::Service(ServiceName::Cockroach),
+                        &zone,
+                        port,
+                    )
+                    .unwrap();
+                let address = SocketAddrV6::new(address, port, 0, 0);
                 request.datasets.push(DatasetEnsureBody {
-                    id: Uuid::new_v4(),
+                    id,
                     zpool_id: zpools[0],
                     dataset_kind: crate::params::DatasetKind::CockroachDb {
                         all_addresses: vec![address],
@@ -247,14 +273,20 @@ impl Plan {
 
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
             if idx < CLICKHOUSE_COUNT {
-                let address = SocketAddrV6::new(
-                    addr_alloc.next().expect("Not enough addrs"),
-                    omicron_common::address::CLICKHOUSE_PORT,
-                    0,
-                    0,
-                );
+                let id = Uuid::new_v4();
+                let address = addr_alloc.next().expect("Not enough addrs");
+                let port = omicron_common::address::CLICKHOUSE_PORT;
+                let zone = dns_builder.host_zone(id, address).unwrap();
+                dns_builder
+                    .service_backend(
+                        SRV::Service(ServiceName::Clickhouse),
+                        &zone,
+                        port,
+                    )
+                    .unwrap();
+                let address = SocketAddrV6::new(address, port, 0, 0);
                 request.datasets.push(DatasetEnsureBody {
-                    id: Uuid::new_v4(),
+                    id,
                     zpool_id: zpools[0],
                     dataset_kind: crate::params::DatasetKind::Clickhouse,
                     address,
@@ -271,8 +303,18 @@ impl Plan {
                     0,
                     0,
                 );
+                let id = Uuid::new_v4();
+                let zone = dns_builder.host_zone(id, *address.ip()).unwrap();
+                dns_builder
+                    .service_backend(
+                        SRV::Backend(BackendName::Crucible, id),
+                        &zone,
+                        address.port(),
+                    )
+                    .unwrap();
+
                 request.datasets.push(DatasetEnsureBody {
-                    id: Uuid::new_v4(),
+                    id,
                     zpool_id,
                     dataset_kind: crate::params::DatasetKind::Crucible,
                     address,
@@ -284,8 +326,17 @@ impl Plan {
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
                 let dns_addr = dns_subnet.dns_address().ip();
+                let id = Uuid::new_v4();
+                let zone = dns_builder.host_zone(id, dns_addr).unwrap();
+                dns_builder
+                    .service_backend(
+                        SRV::Service(ServiceName::InternalDNS),
+                        &zone,
+                        DNS_SERVER_PORT,
+                    )
+                    .unwrap();
                 request.services.push(ServiceZoneRequest {
-                    id: Uuid::new_v4(),
+                    id,
                     zone_type: ZoneType::InternalDNS,
                     addresses: vec![dns_addr],
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
@@ -306,8 +357,18 @@ impl Plan {
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
             if idx < PANTRY_COUNT {
                 let address = addr_alloc.next().expect("Not enough addrs");
+                let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
+                let id = Uuid::new_v4();
+                let zone = dns_builder.host_zone(id, address).unwrap();
+                dns_builder
+                    .service_backend(
+                        SRV::Service(ServiceName::InternalDNS),
+                        &zone,
+                        port,
+                    )
+                    .unwrap();
                 request.services.push(ServiceZoneRequest {
-                    id: Uuid::new_v4(),
+                    id,
                     zone_type: ZoneType::CruciblePantry,
                     addresses: vec![address],
                     gz_addresses: vec![],
@@ -323,7 +384,7 @@ impl Plan {
             services.insert(addr, allocation);
         }
 
-        let dns_config = todo!(); // XXX-dap
+        let dns_config = dns_builder.build();
         let plan = Self { services, dns_config };
 
         // Once we've constructed a plan, write it down to durable storage.

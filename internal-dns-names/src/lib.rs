@@ -52,7 +52,7 @@ impl fmt::Display for ServiceName {
 }
 
 /// Names for services where backends are not interchangeable.
-#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum BackendName {
     Crucible,
     SledAgent,
@@ -67,7 +67,7 @@ impl fmt::Display for BackendName {
     }
 }
 
-#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SRV {
     /// A service identified and accessed by name, such as "nexus", "CRDB", etc.
     ///
@@ -129,7 +129,7 @@ impl fmt::Display for AAAA {
 pub struct DnsConfigBuilder {
     sleds: BTreeMap<Uuid, Ipv6Addr>,
     zones: BTreeMap<Uuid, Ipv6Addr>,
-    service_instances: BTreeMap<ServiceName, BTreeMap<Uuid, u16>>,
+    service_instances: BTreeMap<SRV, BTreeMap<Uuid, u16>>,
 }
 
 pub struct Zone(Uuid);
@@ -177,7 +177,7 @@ impl DnsConfigBuilder {
 
     pub fn service_backend(
         &mut self,
-        service: ServiceName,
+        service: SRV,
         zone: &Zone,
         port: u16,
     ) -> anyhow::Result<()> {
@@ -223,7 +223,10 @@ impl DnsConfigBuilder {
         // zones' AAAA records.
         let srv_records = self.service_instances.into_iter().map(
             |(service_name, zone2port)| {
-                let name = SRV::Service(service_name).to_string();
+                // XXX-dap For internal DNS should we create two sets of SRV
+                // records?  Should the caller be responsible for that?
+                // XXX-dap this should not have the DNS_ZONE in it either
+                let name = service_name.to_string();
                 let records = zone2port
                     .into_iter()
                     .map(|(zone_id, port)| {
@@ -231,6 +234,7 @@ impl DnsConfigBuilder {
                             prio: 0,
                             weight: 0,
                             port,
+                            // XXX-dap this should not have the DNS_ZONE in it.
                             target: AAAA::Zone(zone_id).to_string(),
                         })
                     })
