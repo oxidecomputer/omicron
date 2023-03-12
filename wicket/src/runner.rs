@@ -145,6 +145,7 @@ impl Runner {
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::UpdateLog(logs) => {
+                    info!(self.log, "{:#?}", logs);
                     self.state.update_state.update_logs(logs);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }

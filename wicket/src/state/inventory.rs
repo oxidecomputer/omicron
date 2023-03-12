@@ -6,6 +6,7 @@
 
 use anyhow::anyhow;
 use lazy_static::lazy_static;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
@@ -158,6 +159,22 @@ pub enum ComponentId {
 impl ComponentId {
     pub fn name(&self) -> String {
         self.to_string()
+    }
+
+    pub fn sp_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletSp,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchSp,
+            ComponentId::Psc(_) => KnownArtifactKind::PscSp,
+        }
+    }
+
+    pub fn rot_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
+            ComponentId::Psc(_) => KnownArtifactKind::PscRot,
+        }
     }
 }
 

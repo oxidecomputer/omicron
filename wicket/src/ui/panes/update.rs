@@ -15,7 +15,7 @@ use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use wicketd_client::types::SemverVersion;
+use wicketd_client::types::{SemverVersion, UpdateState};
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -337,8 +337,7 @@ impl Control for UpdatePane {
             }
             Cmd::Collapse | Cmd::Left => {
                 // We always want something selected. If we close the root,
-                // we want to re-open it. This is the only API currently provided
-                // that allows this.
+                // we want to re-open it.
                 let selected = self.tree_state.selected();
                 self.tree_state.key_left();
                 if self.tree_state.selected().is_empty() {
