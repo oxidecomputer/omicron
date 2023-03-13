@@ -593,7 +593,7 @@ version = "8.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "031718ddb8f78aa5def78a09e90defe30151d1f6c672f937af4dd916429ed996"
 dependencies = [
- "semver 1.0.16",
+ "semver 1.0.17",
  "serde",
  "toml 0.5.11",
  "url",
@@ -2601,9 +2601,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "0.14.24"
+version = "0.14.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e011372fa0b68db8350aa7a248930ecc7839bf46d8485577d69f117a75f164c"
+checksum = "cc5e554ff619822309ffd57d8734d77cd5ce6238bc956f037ea06c58238c9899"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -3456,7 +3456,7 @@ dependencies = [
  "rand 0.8.5",
  "ref-cast",
  "schemars",
- "semver 1.0.16",
+ "semver 1.0.17",
  "serde",
  "serde_json",
  "sled-agent-client",
@@ -3827,7 +3827,7 @@ dependencies = [
  "reqwest",
  "ring",
  "schemars",
- "semver 1.0.16",
+ "semver 1.0.17",
  "serde",
  "serde_derive",
  "serde_human_bytes",
@@ -4020,7 +4020,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "ring",
- "semver 1.0.16",
+ "semver 1.0.17",
  "serde",
  "serde_derive",
  "sled-hardware",
@@ -4147,7 +4147,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "reqwest",
- "semver 1.0.16",
+ "semver 1.0.17",
  "serde",
  "serde_derive",
  "tar",
@@ -5629,7 +5629,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.16",
+ "semver 1.0.17",
 ]
 
 [[package]]
@@ -5901,9 +5901,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.16"
+version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58bc9567378fc7690d6b2addae4e60ac2eeea07becb2c64b9f218b53865cba2a"
+checksum = "bebd363326d05ec3e2f532ab7660680f3b02130d780c299bca73469d521bc0ed"
 dependencies = [
  "serde",
 ]
@@ -6049,9 +6049,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "2.3.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ea48c9627169d206b35905699f513f513c303ab9d964a59b44fdcf66c1d1ab7"
+checksum = "85456ffac572dc8826334164f2fb6fb40a7c766aebe195a2a21ee69ee2885ecf"
 dependencies = [
  "base64 0.13.1",
  "chrono",
@@ -6065,9 +6065,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "2.3.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e6b7e52858f9f06c25e1c566bbb4ab428200cb3b30053ea09dc50837de7538b"
+checksum = "7cbcd6104f8a4ab6af7f6be2a0da6be86b9de3c401f6e86bb856ab2af739232f"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -7894,7 +7894,7 @@ dependencies = [
  "omicron-common",
  "proptest",
  "reqwest",
- "semver 1.0.16",
+ "semver 1.0.17",
  "serde",
  "serde_json",
  "sha3",
