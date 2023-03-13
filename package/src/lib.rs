@@ -43,6 +43,20 @@ pub enum BuildCommand {
         #[clap(long = "out", default_value = "out", action)]
         artifact_dir: PathBuf,
     },
+    /// Stamps semver versions onto packages within a manifest
+    Stamp {
+        /// The output directory, where artifacts should be placed.
+        ///
+        /// Defaults to "out".
+        #[clap(long = "out", default_value = "out", action)]
+        artifact_dir: PathBuf,
+
+        /// The name of the artifact to be stamped.
+        package_name: String,
+
+        /// The version to be stamped onto the package.
+        version: semver::Version,
+    },
     /// Checks the packages specified in a manifest, without building them.
     Check,
 }

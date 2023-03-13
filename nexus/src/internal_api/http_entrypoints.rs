@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/// Handler functions (entrypoints) for HTTP APIs internal to the control plane
-use crate::context::OpContext;
+//! Handler functions (entrypoints) for HTTP APIs internal to the control plane
+
 use crate::ServerContext;
 
 use super::params::{
@@ -111,7 +111,7 @@ async fn rack_initialization_complete(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let request = info.into_inner();
-    let opctx = OpContext::for_internal_api(&rqctx).await;
+    let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
 
     nexus.rack_initialize(&opctx, path.rack_id, request).await?;
 
@@ -131,7 +131,7 @@ async fn physical_disk_put(
     let nexus = &apictx.nexus;
     let disk = body.into_inner();
     let handler = async {
-        let opctx = OpContext::for_internal_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.upsert_physical_disk(&opctx, disk).await?;
         Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
     };
@@ -152,7 +152,7 @@ async fn physical_disk_delete(
     let disk = body.into_inner();
 
     let handler = async {
-        let opctx = OpContext::for_internal_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.delete_physical_disk(&opctx, disk).await?;
         Ok(HttpResponseDeleted())
     };
@@ -232,7 +232,7 @@ async fn cpapi_disks_put(
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
     let handler = async {
-        let opctx = OpContext::for_internal_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.notify_disk_updated(&opctx, path.disk_id, &new_state).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
@@ -266,7 +266,7 @@ async fn cpapi_volume_remove_read_only_parent(
     let path = path_params.into_inner();
 
     let handler = async {
-        let opctx = OpContext::for_internal_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.volume_remove_read_only_parent(&opctx, path.volume_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
@@ -291,7 +291,7 @@ async fn cpapi_disk_remove_read_only_parent(
     let path = path_params.into_inner();
 
     let handler = async {
-        let opctx = OpContext::for_internal_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.disk_remove_read_only_parent(&opctx, path.disk_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
@@ -372,7 +372,8 @@ async fn cpapi_artifact_download(
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
-    let opctx = OpContext::for_internal_api(&request_context).await;
+    let opctx =
+        crate::context::op_context_for_internal_api(&request_context).await;
     // TODO: return 404 if the error we get here says that the record isn't found
     let body =
         nexus.download_artifact(&opctx, path_params.into_inner()).await?;

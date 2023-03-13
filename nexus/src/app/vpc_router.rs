@@ -5,7 +5,6 @@
 //! VPC routers and routes
 
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
@@ -14,6 +13,7 @@ use crate::db::model::RouterRoute;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
 use crate::external_api::params;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;

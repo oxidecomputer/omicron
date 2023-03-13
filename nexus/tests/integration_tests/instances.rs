@@ -10,6 +10,7 @@ use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_interface::NexusServer;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -35,7 +36,6 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
-use omicron_nexus::context::OpContext;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
@@ -858,9 +858,9 @@ async fn test_instances_invalid_creation_returns_bad_request(
         )
         .await
         .unwrap_err();
-    assert!(error
-        .message
-        .starts_with("unable to parse JSON body: invalid value: integer `-3`"));
+    assert!(error.message.starts_with(
+        "unable to parse JSON body: ncpus: invalid value: integer `-3`"
+    ));
 }
 
 #[nexus_test]

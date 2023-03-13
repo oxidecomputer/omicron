@@ -12,7 +12,7 @@ use diesel::SelectableExpression;
 
 /// Allows an [`diesel::Expression`] to be referenced by a new name.
 ///
-/// This generates an "<expression> AS <name>" SQL fragment.
+/// This generates an `<expression> AS <name>` SQL fragment.
 ///
 ///
 /// For example:

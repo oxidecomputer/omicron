@@ -28,7 +28,7 @@ use diesel::query_builder::QueryId;
 pub trait Subquery: QueryFragment<Pg> + Send {
     /// Returns the underlying query fragment.
     ///
-    /// For "<ALIAS> as <QUERY>", this refers to the "QUERY" portion
+    /// For `<ALIAS> as <QUERY>`, this refers to the "QUERY" portion
     /// of SQL.
     fn query(&self) -> &dyn QueryFragment<Pg>;
 }

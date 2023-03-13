@@ -7,7 +7,6 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use nexus_defaults as defaults;
@@ -77,7 +76,10 @@ async fn spc_create_record(
 ) -> Result<(authz::Project, db::model::Project), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let db_project =
         db::model::Project::new(params.authz_org.id(), params.project_create);
@@ -93,7 +95,10 @@ async fn spc_create_record_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (_authz_project, project) =
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
@@ -115,7 +120,10 @@ async fn spc_create_vpc_params(
     sagactx: NexusActionContext,
 ) -> Result<sagas::vpc_create::Params, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (authz_project, _project) =
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
@@ -148,8 +156,7 @@ mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::project_create::Params,
         app::sagas::project_create::SagaProjectCreate, authn::saga::Serialized,
-        authz, context::OpContext, db::datastore::DataStore,
-        external_api::params,
+        authz, db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -157,6 +164,7 @@ mod test {
     };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils_macros::nexus_test;
@@ -255,7 +263,7 @@ mod test {
             .unwrap()
             .transaction_async(|conn| async move {
                 conn
-                    .batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                    .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
                 Ok::<_, crate::db::TransactionError<()>>(

@@ -6,7 +6,6 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::db;
 use crate::{authn, authz};
 use nexus_types::identity::Resource;
@@ -96,7 +95,10 @@ async fn sid_delete_instance_record(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .project_delete_instance(&opctx, &params.authz_instance)
@@ -120,7 +122,10 @@ async fn sid_delete_network_interfaces(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .instance_delete_all_network_interfaces(&opctx, &params.authz_instance)
@@ -134,7 +139,10 @@ async fn sid_deallocate_external_ip(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .deallocate_external_ip_by_instance_id(
@@ -151,7 +159,10 @@ async fn sid_account_resources(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     osagactx
         .datastore()
@@ -174,10 +185,11 @@ mod test {
         app::sagas::instance_create::test::verify_clean_slate,
         app::sagas::instance_delete::Params,
         app::sagas::instance_delete::SagaInstanceDelete,
-        authn::saga::Serialized, context::OpContext, db,
-        db::lookup::LookupPath, external_api::params,
+        authn::saga::Serialized, db, db::lookup::LookupPath,
+        external_api::params,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;

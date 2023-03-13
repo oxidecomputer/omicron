@@ -11,7 +11,6 @@
 
 use super::console_api::console_index_or_login_redirect;
 use super::views::DeviceAccessTokenGrant;
-use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
 use dropshot::{
@@ -172,7 +171,7 @@ pub async fn device_auth_confirm(
     let nexus = &apictx.nexus;
     let params = params.into_inner();
     let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required().internal_context(
             "creating new device auth session for current user",
         )?;

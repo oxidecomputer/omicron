@@ -116,7 +116,7 @@
 //!
 //! This record means that user "cookie-monster" has the "viewer" role on the
 //! "project" with id 123.  (Note that ids are really uuids, and some of these
-//! tables have other columns.)  See the [`roles`] module for more details on
+//! tables have other columns.)  See the `roles` module for more details on
 //! how we find these records and make them available for the authz check.
 //!
 //! Built-in users are only one possible target for role assignments.  IdP users
@@ -136,7 +136,7 @@
 //! "monster-foodies" Project).  Then:
 //!
 //! 1. The authorization subsystem loads all of Abby's roles related to this
-//!    resource.  Much more on this in the [`roles`] submodule.
+//!    resource.  Much more on this in the `roles` submodule.
 //! 2. The authorization subsystem asks Oso whether the action should be
 //!    allowed.  Oso answers this based on the policy we've defined.  As part of
 //!    evaluating this:
@@ -163,7 +163,7 @@
 //!          that grants the "modify" permission)
 //!
 //! Each of these role lookups uses data that we provide to Oso.  (Again, more
-//! in [`roles`] about how this is set up.)  If Oso finds a role granting this
+//! in `roles` about how this is set up.)  If Oso finds a role granting this
 //! permission that's associated with this actor and resource, the action is
 //! allowed.  Otherwise, it's not.
 
