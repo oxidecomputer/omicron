@@ -142,7 +142,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main",
 expectorate = "1.0.6"
 fatfs = "0.3.6"
 fs-err = "2.9.0"
-futures = "0.3.25"
+futures = "0.3.27"
 gateway-client = { path = "gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "f896b7cf0fe7e72641b33060185b71e5d3562b12" }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f896b7cf0fe7e72641b33060185b71e5d3562b12" }
