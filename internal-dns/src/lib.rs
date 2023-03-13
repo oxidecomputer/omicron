@@ -80,15 +80,11 @@ pub enum SRV {
     Backend(BackendName, Uuid),
 }
 
-impl fmt::Display for SRV {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl SRV {
+    fn dns_name(&self) -> String {
         match &self {
-            SRV::Service(name) => {
-                write!(f, "_{}._tcp", name)
-            }
-            SRV::Backend(name, id) => {
-                write!(f, "_{}._tcp.{}", name, id)
-            }
+            SRV::Service(name) => format!("_{}._tcp", name),
+            SRV::Backend(name, id) => format!("_{}._tcp.{}", name, id),
         }
     }
 }
@@ -102,22 +98,16 @@ enum AAAA {
     Zone(Uuid),
 }
 
-impl fmt::Display for AAAA {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl AAAA {
+    fn dns_name(&self) -> String {
         match &self {
-            AAAA::Sled(id) => {
-                write!(f, "{}.sled", id)
-            }
-            AAAA::Zone(id) => {
-                write!(f, "{}.host", id)
-            }
+            AAAA::Sled(id) => format!("{}.sled", id),
+            AAAA::Zone(id) => format!("{}.host", id),
         }
     }
 }
 
 /// Helper for building an initial DNS configuration
-// XXX-dap I wonder if we can make the stuff above non-pub once we flesh this
-// out.  (Is it used anywhere aside from constructing DNS configuration?)
 // XXX-dap TODO-doc design note: this is pretty simple because it makes a lot of
 // assumptions: only zones are backends for services; there is only ever one
 // address for zones or sleds
@@ -189,7 +179,7 @@ impl DnsConfigBuilder {
             Some(existing) => Err(anyhow!(
                 "service {}: zone {}: registered twice\
                 (previously port {}, now {})",
-                service,
+                service.dns_name(),
                 zone_id,
                 existing,
                 port
@@ -200,7 +190,7 @@ impl DnsConfigBuilder {
     pub fn build(self) -> DnsConfig {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled_id, sled_ip)| {
-            let name = AAAA::Sled(sled_id).to_string();
+            let name = AAAA::Sled(sled_id).dns_name();
             DnsKv {
                 key: DnsRecordKey { name },
                 // XXX-dap fix the case of these
@@ -210,7 +200,7 @@ impl DnsConfigBuilder {
 
         // Assemble the set of AAAA records for zones.
         let zone_records = self.zones.into_iter().map(|(zone_id, zone_ip)| {
-            let name = AAAA::Zone(zone_id).to_string();
+            let name = AAAA::Zone(zone_id).dns_name();
             DnsKv {
                 key: DnsRecordKey { name },
                 records: vec![DnsRecord::Aaaa(zone_ip)],
@@ -223,7 +213,7 @@ impl DnsConfigBuilder {
             |(service_name, zone2port)| {
                 // XXX-dap For internal DNS should we create two sets of SRV
                 // records?  Should the caller be responsible for that?
-                let name = service_name.to_string();
+                let name = service_name.dns_name();
                 let records = zone2port
                     .into_iter()
                     .map(|(zone_id, port)| {
@@ -233,7 +223,7 @@ impl DnsConfigBuilder {
                             port,
                             target: format!(
                                 "{}.{}",
-                                AAAA::Zone(zone_id).to_string(),
+                                AAAA::Zone(zone_id).dns_name(),
                                 DNS_ZONE
                             ),
                         })
@@ -266,28 +256,28 @@ mod test {
     #[test]
     fn display_srv_service() {
         assert_eq!(
-            SRV::Service(ServiceName::Clickhouse).to_string(),
+            SRV::Service(ServiceName::Clickhouse).dns_name(),
             "_clickhouse._tcp",
         );
         assert_eq!(
-            SRV::Service(ServiceName::Cockroach).to_string(),
+            SRV::Service(ServiceName::Cockroach).dns_name(),
             "_cockroach._tcp",
         );
         assert_eq!(
-            SRV::Service(ServiceName::InternalDNS).to_string(),
+            SRV::Service(ServiceName::InternalDNS).dns_name(),
             "_internalDNS._tcp",
         );
-        assert_eq!(SRV::Service(ServiceName::Nexus).to_string(), "_nexus._tcp",);
+        assert_eq!(SRV::Service(ServiceName::Nexus).dns_name(), "_nexus._tcp",);
         assert_eq!(
-            SRV::Service(ServiceName::Oximeter).to_string(),
+            SRV::Service(ServiceName::Oximeter).dns_name(),
             "_oximeter._tcp",
         );
         assert_eq!(
-            SRV::Service(ServiceName::Dendrite).to_string(),
+            SRV::Service(ServiceName::Dendrite).dns_name(),
             "_dendrite._tcp",
         );
         assert_eq!(
-            SRV::Service(ServiceName::CruciblePantry).to_string(),
+            SRV::Service(ServiceName::CruciblePantry).dns_name(),
             "_crucible-pantry._tcp",
         );
     }
@@ -296,11 +286,11 @@ mod test {
     fn display_srv_backend() {
         let uuid = Uuid::nil();
         assert_eq!(
-            SRV::Backend(BackendName::Crucible, uuid).to_string(),
+            SRV::Backend(BackendName::Crucible, uuid).dns_name(),
             "_crucible._tcp.00000000-0000-0000-0000-000000000000",
         );
         assert_eq!(
-            SRV::Backend(BackendName::SledAgent, uuid).to_string(),
+            SRV::Backend(BackendName::SledAgent, uuid).dns_name(),
             "_sledagent._tcp.00000000-0000-0000-0000-000000000000",
         );
     }
@@ -309,11 +299,11 @@ mod test {
     fn display_aaaa() {
         let uuid = Uuid::nil();
         assert_eq!(
-            AAAA::Sled(uuid).to_string(),
+            AAAA::Sled(uuid).dns_name(),
             "00000000-0000-0000-0000-000000000000.sled",
         );
         assert_eq!(
-            AAAA::Zone(uuid).to_string(),
+            AAAA::Zone(uuid).dns_name(),
             "00000000-0000-0000-0000-000000000000.host",
         );
     }

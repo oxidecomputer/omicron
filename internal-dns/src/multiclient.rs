@@ -83,7 +83,7 @@ pub enum ResolveError {
     #[error(transparent)]
     Resolve(#[from] trust_dns_resolver::error::ResolveError),
 
-    #[error("Record not found for SRV key: {0}")]
+    #[error("Record not found for SRV key: {}", .0.dns_name())]
     NotFound(crate::SRV),
 
     #[error("Record not found for {0}")]
@@ -143,7 +143,7 @@ impl Resolver {
         &self,
         srv: crate::SRV,
     ) -> Result<Ipv6Addr, ResolveError> {
-        let name = format!("{}.{}", srv.to_string(), DNS_ZONE);
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
         let response = self.inner.ipv6_lookup(&name).await?;
         let address = response
             .iter()
@@ -158,7 +158,7 @@ impl Resolver {
         &self,
         srv: crate::SRV,
     ) -> Result<SocketAddrV6, ResolveError> {
-        let name = format!("{}.{}", srv.to_string(), DNS_ZONE);
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
         let response = self.inner.lookup(&name, RecordType::SRV).await?;
 
         let rdata = response
@@ -191,7 +191,8 @@ impl Resolver {
         &self,
         srv: crate::SRV,
     ) -> Result<IpAddr, ResolveError> {
-        let response = self.inner.lookup_ip(&srv.to_string()).await?;
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        let response = self.inner.lookup_ip(&name).await?;
         let address = response
             .iter()
             .next()
