@@ -3,11 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DNS_ZONE;
-use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT,
 };
-use slog::{info, Logger};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
@@ -15,6 +13,7 @@ use trust_dns_resolver::config::{
 };
 use trust_dns_resolver::TokioAsyncResolver;
 
+// XXX-dap remove
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 
 /// Describes how to find the DNS servers.
@@ -22,12 +21,23 @@ pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 /// In production code, this is nearly always [`Ipv6Subnet<AZ_PREFIX>`],
 /// but it allows a point of dependency-injection for tests to supply their
 /// own address lookups.
+
+// XXX-dap remove
 pub trait DnsAddressLookup {
     fn dropshot_server_addrs(&self) -> Vec<SocketAddr>;
 
     fn dns_server_addrs(&self) -> Vec<SocketAddr>;
 }
 
+pub async fn dns_config_ips_for_subnet(
+    subnet: Ipv6Subnet<AZ_PREFIX>,
+) -> impl Iterator<Item = SocketAddr> {
+    subnet_to_ips(subnet)
+        .map(|address| SocketAddr::new(address, DNS_SERVER_PORT))
+}
+
+// XXX-dap this ought to come from the DNS servers themselves, using
+// bootstrapping resolvers
 fn subnet_to_ips(
     subnet: Ipv6Subnet<AZ_PREFIX>,
 ) -> impl Iterator<Item = IpAddr> {
@@ -63,55 +73,6 @@ impl DnsAddressLookup for ServerAddresses {
 
     fn dns_server_addrs(&self) -> Vec<SocketAddr> {
         self.dns_server_addrs.clone()
-    }
-}
-
-/// A connection used to update multiple DNS servers
-///
-/// Note that this is only suitable for use in writing an initial update to the
-/// DNS servers.  After transfer-of-control to Nexus, Nexus uses a more
-/// synchronized process for updating the DNS servers.  See RFD 367 for details.
-pub struct Updater {
-    log: Logger,
-    clients: Vec<dns_service_client::Client>,
-}
-
-impl Updater {
-    pub fn new(address_getter: &impl DnsAddressLookup, log: Logger) -> Self {
-        let addrs = address_getter.dropshot_server_addrs();
-        Self::new_from_addrs(addrs, log)
-    }
-
-    fn new_from_addrs(addrs: Vec<SocketAddr>, log: Logger) -> Self {
-        let clients = addrs
-            .into_iter()
-            .map(|addr| {
-                info!(log, "Adding DNS server: {}", addr);
-                dns_service_client::Client::new(
-                    &format!("http://{}", addr),
-                    log.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        Self { log, clients }
-    }
-
-    /// Attempts to write a DNS generation to the DNS servers
-    pub async fn dns_initialize<'a>(
-        &'a self,
-        body: &'a dns_service_client::types::DnsConfig,
-    ) -> Result<(), DnsError> {
-        // XXX-dap log
-        stream::iter(&self.clients)
-            .map(Ok::<_, DnsError>)
-            .try_for_each_concurrent(None, |client| async move {
-                client.dns_config_put(body).await?;
-                Ok(())
-            })
-            .await?;
-
-        Ok(())
     }
 }
 

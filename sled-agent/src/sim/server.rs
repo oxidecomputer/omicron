@@ -210,17 +210,12 @@ impl Server {
         .expect("failed to set up DNS");
 
         let dns_config = dns.build();
-
-        let dns_client = internal_dns::multiclient::Updater::new(
-            &internal_dns::multiclient::ServerAddresses {
-                dropshot_server_addrs: vec![dns_dropshot_server.local_addr()],
-                dns_server_addrs: vec![],
-            },
-            log.new(o!("kind" => "dns-client")),
+        let dns_config_client = dns_service_client::Client::new(
+            &format!("http://{}", dns_dropshot_server.local_addr()),
+            log.clone(),
         );
-
-        dns_client
-            .dns_initialize(&dns_config)
+        dns_config_client
+            .dns_config_put(&dns_config)
             .await
             .context("initializing DNS")
             .map_err(|e| e.to_string())?;
