@@ -7,9 +7,7 @@ use tui::style::Style;
 use crate::ui::defaults::style;
 
 use super::{ComponentId, ALL_COMPONENT_IDS};
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
-};
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::{

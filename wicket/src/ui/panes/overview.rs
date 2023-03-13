@@ -48,9 +48,24 @@ impl Control for OverviewPane {
     fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         match cmd {
             Cmd::Enter => {
-                // Switch between rack and inventory view
-                self.rack_view_selected = !self.rack_view_selected;
-                Some(Action::Redraw)
+                // Transition to the inventory view `Enter` makes sense here
+                // because we are entering a view of the given component.
+                if self.rack_view_selected {
+                    self.rack_view_selected = false;
+                    Some(Action::Redraw)
+                } else {
+                    None
+                }
+            }
+            Cmd::Exit => {
+                // Transition to the rack view. `Exit` makes sense here
+                // because we are exiting a subview of the rack.
+                if !self.rack_view_selected {
+                    self.rack_view_selected = true;
+                    Some(Action::Redraw)
+                } else {
+                    None
+                }
             }
             _ => self.dispatch(state, cmd),
         }
