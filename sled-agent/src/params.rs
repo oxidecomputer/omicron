@@ -2,10 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::address::{
-    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
-    OXIMETER_PORT,
-};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -296,13 +292,6 @@ pub struct DatasetEnsureBody {
     pub address: SocketAddrV6,
 }
 
-// XXX-dap can we get rid of this now that we're constructing DNS separately?
-impl DatasetEnsureBody {
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
-    }
-}
-
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     fn from(p: DatasetEnsureBody) -> Self {
         Self {
@@ -435,38 +424,6 @@ pub struct ServiceZoneRequest {
     pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
     pub services: Vec<ServiceType>,
-}
-
-// XXX-dap can we remove this?
-impl ServiceZoneRequest {
-    pub fn address(&self, service: &ServiceType) -> Option<SocketAddrV6> {
-        match service {
-            ServiceType::InternalDns { server_address, .. } => {
-                Some(*server_address)
-            }
-            ServiceType::Nexus { internal_ip, .. } => {
-                Some(SocketAddrV6::new(*internal_ip, NEXUS_INTERNAL_PORT, 0, 0))
-            }
-            ServiceType::Oximeter => {
-                Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
-            }
-            ServiceType::ManagementGatewayService => {
-                Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
-            }
-            // TODO: Is this correct?
-            ServiceType::Wicketd => None,
-            ServiceType::Dendrite { .. } => {
-                Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
-            }
-            ServiceType::Tfport { .. } => None,
-            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
-                self.addresses[0],
-                CRUCIBLE_PANTRY_PORT,
-                0,
-                0,
-            )),
-        }
-    }
 }
 
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
