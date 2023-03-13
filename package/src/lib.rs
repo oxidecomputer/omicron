@@ -74,12 +74,21 @@ pub enum BuildCommand {
         #[command(subcommand)]
         subcommand: TargetCommand,
     },
-    /// Builds the packages specified in a manifest.
-    Package,
-    /// Checks the packages specified in a manifest without building them
-    Check,
     /// Make a `dot` graph to visualize the package tree
     Dot,
+    /// Builds the packages specified in a manifest, and places them into an
+    /// 'out' directory.
+    Package,
+    /// Stamps semver versions onto packages within a manifest
+    Stamp {
+        /// The name of the artifact to be stamped.
+        package_name: String,
+
+        /// The version to be stamped onto the package.
+        version: semver::Version,
+    },
+    /// Checks the packages specified in a manifest, without building them.
+    Check,
 }
 
 /// Commands which should execute on a host installing packages.

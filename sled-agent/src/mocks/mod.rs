@@ -8,8 +8,8 @@ use mockall::mock;
 use nexus_client::types::{
     DiskRuntimeState, InstanceRuntimeState, KnownArtifactKind,
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
-    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
-    ZpoolPutResponse,
+    RackInitializationRequest, SemverVersion, SledAgentStartupInfo,
+    ZpoolPutRequest, ZpoolPutResponse,
 };
 use slog::Logger;
 use uuid::Uuid;
@@ -51,7 +51,7 @@ mock! {
             &self,
             kind: KnownArtifactKind,
             name: &str,
-            version: &str,
+            version: &SemverVersion,
         ) -> Result<progenitor::progenitor_client::ByteStream>;
         pub async fn zpool_put(
             &self,

@@ -11,7 +11,7 @@ use schemars::{
     schema::{Schema, SchemaObject},
     JsonSchema,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A report, consisting of a list of events and some more metadata.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, JsonSchema)]
@@ -51,7 +51,7 @@ pub struct CompletionEvent {
 /// An individual kind of completion event.
 ///
 /// Forms part of [`CompletionEvent`].
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum CompletionEventKind {
     /// The download of an artifact failed.
