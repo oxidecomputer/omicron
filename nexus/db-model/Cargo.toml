@@ -11,7 +11,7 @@ path = "../../rpaths"
 anyhow.workspace = true
 chrono.workspace = true
 diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-internal-dns-names.workspace = true
+internal-dns.workspace = true
 hex.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true

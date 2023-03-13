@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 async-trait.workspace = true
 dropshot.workspace = true
-internal-dns-names.workspace = true
+internal-dns.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
 uuid.workspace = true

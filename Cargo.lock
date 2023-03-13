@@ -2939,7 +2939,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "internal-dns-names"
+name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3498,7 +3498,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "hex",
- "internal-dns-names",
+ "internal-dns",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -3550,7 +3550,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "dropshot",
- "internal-dns-names",
+ "internal-dns",
  "omicron-common",
  "slog",
  "uuid",
@@ -3567,7 +3567,7 @@ dependencies = [
  "headers",
  "http",
  "hyper",
- "internal-dns-names",
+ "internal-dns",
  "nexus-test-interface",
  "omicron-common",
  "omicron-nexus",
@@ -3917,7 +3917,7 @@ dependencies = [
  "httptest",
  "hyper",
  "hyper-rustls",
- "internal-dns-names",
+ "internal-dns",
  "ipnetwork",
  "itertools",
  "lazy_static",
@@ -4044,7 +4044,7 @@ dependencies = [
  "futures",
  "http",
  "illumos-utils",
- "internal-dns-names",
+ "internal-dns",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -4361,7 +4361,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "internal-dns-names",
+ "internal-dns",
  "nexus-client",
  "omicron-common",
  "omicron-test-utils",
