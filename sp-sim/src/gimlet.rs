@@ -297,7 +297,7 @@ impl SerialConsoleTcpTask {
         while !remaining.is_empty() {
             let message = Message {
                 header: Header {
-                    version: version::V2,
+                    version: version::CURRENT,
                     message_id: self.next_request_message_id(),
                 },
                 kind: MessageKind::SpRequest(SpRequest::SerialConsole {
@@ -1137,6 +1137,18 @@ impl SpHandler for Handler {
             "port" => ?port,
             "key" => key,
             "value" => ?value,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_caboose_value(
+        &mut self,
+        key: [u8; 4],
+    ) -> std::result::Result<&'static [u8], SpError> {
+        warn!(
+            &self.log,
+            "received request for caboose key; not supported by simulated gimlet";
+            "key" => ?key,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
