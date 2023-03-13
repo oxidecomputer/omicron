@@ -38,6 +38,8 @@ pub async fn dns_config_ips_for_subnet(
 
 // XXX-dap this ought to come from the DNS servers themselves, using
 // bootstrapping resolvers
+// Nexus could instead get them from CockroachDB, but other stuff won't be able
+// to do that.
 fn subnet_to_ips(
     subnet: Ipv6Subnet<AZ_PREFIX>,
 ) -> impl Iterator<Item = IpAddr> {

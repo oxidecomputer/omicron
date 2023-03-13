@@ -4,8 +4,6 @@
 
 //! Naming scheme for Internal DNS names (RFD 248).
 
-// XXX-dap rename crate to "internal-dns"
-
 use anyhow::anyhow;
 use dns_service_client::types::{
     DnsConfig, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey,

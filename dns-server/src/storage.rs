@@ -103,11 +103,15 @@ use slog::{debug, error, info, o, warn};
 use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::Mutex;
 use trust_dns_client::rr::LowerName;
 use trust_dns_client::rr::Name;
 
 // XXX-dap
 use crate::dns_types::*;
+
+const KEY_CONFIG: &'static str = "config";
+const KEEP_OLD_TREES: usize = 3;
 
 /// Configuration for persistent storage of DNS data
 #[derive(Deserialize, Debug)]
@@ -122,10 +126,59 @@ pub struct Store {
     log: slog::Logger,
     db: Arc<sled::Db>,
     keep: usize, // XXX-dap from configuration file
+    updating: Arc<Mutex<Option<UpdateInfo>>>,
 }
 
-const KEY_CONFIG: &'static str = "config";
-const KEEP_OLD_TREES: usize = 3;
+/// Describes an ongoing update, if any
+struct UpdateInfo {
+    start_time: std::time::SystemTime,
+    start_instant: std::time::Instant,
+    generation: u64,
+    req_id: String,
+}
+
+struct UpdateGuard<'store, 'req_id> {
+    store: &'store Store,
+    req_id: &'req_id str,
+    finished: bool,
+}
+
+impl<'a, 'b> UpdateGuard<'a, 'b> {
+    async fn finish(mut self) {
+        let store = self.store;
+        let mut update = store.updating.lock().await;
+        match update.take() {
+            None => panic!(
+                "expected to end update from req_id {:?}, but \
+                there is no update in progress",
+                self.req_id,
+            ),
+            Some(UpdateInfo { req_id, .. }) if req_id != self.req_id => panic!(
+                "expected to end update from req_id {:?}, but \
+                    the current update is from req_id {:?}",
+                self.req_id, req_id
+            ),
+            _ => (),
+        };
+        self.finished = true;
+    }
+}
+
+impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
+    fn drop(&mut self) {
+        // TODO-cleanup It would be far better if we could enforce this at
+        // compile-time, similar to a MutexGuard.  The obvious approach of doing
+        // it on drop does not work because we cannot take the async lock from
+        // the synchronous Drop function.  And we don't want to use a std Mutex
+        // and risk blocking the executor.  And it doesn't seem like we can use
+        // blocking_lock() because we _are_ in an asynchronous context.  We
+        // could use a semaphore like tokio's MutexGuard does, but that would
+        // involve unsafe code.)
+        if !self.finished {
+            panic!("attempted to return early without finishing update!");
+        }
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 struct CurrentConfig {
@@ -154,7 +207,12 @@ impl Store {
         log: slog::Logger,
         db: Arc<sled::Db>,
     ) -> Result<Self, anyhow::Error> {
-        let store = Store { log, db, keep: KEEP_OLD_TREES };
+        let store = Store {
+            log,
+            db,
+            keep: KEEP_OLD_TREES,
+            updating: Arc::new(Mutex::new(None)),
+        };
         if store.read_config_optional()?.is_none() {
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
                 generation: 0,
@@ -241,34 +299,55 @@ impl Store {
         Ok(DnsConfig { generation: config.generation, zones })
     }
 
+    async fn begin_update<'a, 'b>(
+        &'a self,
+        req_id: &'b str,
+        generation: u64,
+    ) -> Result<UpdateGuard<'a, 'b>, anyhow::Error> {
+        let mut update = self.updating.lock().await;
+        if let Some(ref update) = *update {
+            bail!(
+                "concurrent update in progress \
+                 (from req_id {:?}, to generation {}, \
+                 started at {:?}, {:?} ago)",
+                update.req_id,
+                update.generation,
+                update.start_time,
+                update.start_instant
+            );
+        }
+
+        *update = Some(UpdateInfo {
+            start_time: std::time::SystemTime::now(),
+            start_instant: std::time::Instant::now(),
+            generation,
+            req_id: req_id.to_string(),
+        });
+
+        Ok(UpdateGuard { store: self, req_id, finished: false })
+    }
+
     /// Updates to a new generation of DNS data
     ///
     /// See module-level documentation for constraints and design.
     pub(crate) async fn dns_config_update(
         &self,
         config: &DnsConfig,
+        req_id: &str,
     ) -> Result<(), anyhow::Error> {
-        let log = &self.log.new(o!("new_generation" => config.generation));
+        let log = &self.log.new(o!(
+            "req_id" => req_id.to_owned(),
+            "new_generation" => config.generation
+        ));
 
-        // This boolean acts as a lock to prevent concurrent updates.
-        // We must not return early without setting it back!  (We make this
-        // harder to do by accident by putting the bulk of the update into a
-        // separate function.)
-        // XXX-dap doesn't work at the Store level unless we separate it into
-        // "server" and "clients".  We could do this at the dropshot level but
-        // it'd be a little riskier.
-        // if let Err(error) = self.updating.compare_exchange(
-        //     false,
-        //     true,
-        //     Ordering::SeqCst,
-        //     Ordering::SeqCst,
-        // ) {
-        //     error!(log, "skipping update (update already in progress)");
-        //     bail!("concurrent update in progress");
-        // }
+        // Lock out concurrent updates.  We must not return until we've released
+        // the "updating" lock!  (See UpdateGuard's `drop` impl.)
+        let update = self.begin_update(req_id, config.generation).await?;
 
         info!(log, "attempting generation update");
-        let result = self.do_update(config).await;
+        let result = self.do_update(config).await.with_context(|| {
+            format!("update to generation {}", config.generation)
+        });
         match &result {
             Ok(_) => info!(log, "updated generation"),
             Err(error) => {
@@ -276,15 +355,10 @@ impl Store {
             }
         };
 
-        // Nobody else should have modified this value since we locked it above.
-        // XXX-dap
-        //self.updating
-        //    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-        //    .expect("self.updating changed during update");
+        // Release our lock on concurrent update.
+        update.finish().await;
 
-        result.with_context(|| {
-            format!("update to generation {}", config.generation)
-        })
+        result
     }
 
     async fn do_update(&self, config: &DnsConfig) -> Result<(), anyhow::Error> {

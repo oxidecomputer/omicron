@@ -54,7 +54,11 @@ async fn dns_config_put(
     rq: dropshot::TypedBody<DnsConfig>,
 ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError> {
     let apictx = rqctx.context();
-    apictx.store.dns_config_update(&rq.into_inner()).await.map_err(|e| {
+    apictx
+        .store
+        .dns_config_update(&rq.into_inner(), &rqctx.request_id)
+        .await
+        .map_err(|e| {
         dropshot::HttpError::for_internal_error(format!(
             "internal error: {:?}",
             e
