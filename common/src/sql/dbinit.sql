@@ -1147,6 +1147,55 @@ STORING (vpc_id, subnet_id, is_primary)
 WHERE
     time_deleted IS NULL;
 
+/* TODO: Consolidate with `network_interface` table */
+CREATE TABLE omicron.public.service_network_interface (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+
+    /* FK into Service table. */
+    service_id UUID NOT NULL,
+
+    /* FK into VPC table */
+    vpc_id UUID NOT NULL,
+    /* FK into VPCSubnet table. */
+    subnet_id UUID NOT NULL,
+
+    /*
+     * The EUI-48 MAC address of the service interface.
+     *
+     * Note that we use the bytes of a 64-bit integer, in big-endian byte order
+     * to represent the MAC.
+     */
+    mac INT8 NOT NULL,
+
+    ip INET NOT NULL,
+    /*
+     * For simplicity, match the same limit as for guest interfaces.
+     * See `slot` column in `network_interface` table.
+     */
+    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8)
+);
+
+/* Ensure we do not assign the same address twice within a subnet */
+CREATE UNIQUE INDEX ON omicron.public.service_network_interface (
+    subnet_id,
+    ip
+) WHERE
+    time_deleted IS NULL;
+
+/* Ensure we do not assign the same MAC twice within a VPC */
+CREATE UNIQUE INDEX ON omicron.public.service_network_interface (
+    vpc_id,
+    mac
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE omicron.public.vpc_firewall_rule_status AS ENUM (
     'disabled',
     'enabled'

@@ -88,6 +88,7 @@ pub mod nexus_service {
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::sled_agent::NetworkInterface;
+    use std::net::IpAddr;
 
     /// The MAC address assigned to the OPTE port for the Nexus service.
     ///
@@ -101,16 +102,21 @@ pub mod nexus_service {
         /// Chosen from the Oxide-reserved range.
         pub static ref VNI: Vni = 100.try_into().unwrap();
 
+        /// The IP address assigned to the OPTE port for the Nexus service.
+        ///
+        /// This is the private IP nexus will bind to within its service zone.
+        /// OPTE will map to this from whatever external IP Nexus is configured
+        /// to use.
+        /// Use first non-reserved IP in the subnet, see RFD 21, section 2.2,
+        ///
+        /// TODO-completeness: IPv6
+        pub static ref EXTERNAL_NIC_PRIVATE_IP: IpAddr =
+            DEFAULT_VPC_SUBNET_IPV4_BLOCK.iter().nth(5).unwrap().into();
+
         /// Information used to construct the OPTE port for the Nexus service.
         pub static ref EXTERNAL_NIC: NetworkInterface = NetworkInterface {
             name: "nexus".parse().unwrap(),
-            // This is the private IP nexus will bind to within its
-            // service zone. OPTE will map to this from whatever external
-            // IP nexus gets configured with.
-            // Use first non-reserved IP in the subnet, see RFD 21, section
-            // 2.2, table 1.
-            // TODO-completeness: IPv6
-            ip: DEFAULT_VPC_SUBNET_IPV4_BLOCK.iter().nth(5).unwrap().into(),
+            ip: *EXTERNAL_NIC_PRIVATE_IP,
             mac: EXTERNAL_NIC_MAC,
             subnet: (*DEFAULT_VPC_SUBNET_IPV4_BLOCK).into(),
             vni: *VNI,

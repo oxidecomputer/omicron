@@ -62,6 +62,7 @@ enum RackInitError {
     VpcRouterInsert { err: PoolError, router: String },
     VpcRouteInsert { err: AsyncInsertError, router_id: Uuid, route: String },
     VpcSubnetInsert { err: AsyncInsertError, vpc_id: Uuid, subnet_id: Uuid },
+    ServiceNicInsert { err: PoolError, nic: String },
     VpcFwRuleInsert { err: AsyncInsertError, vpc_id: Uuid },
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     RackUpdate { err: PoolError, rack_id: Uuid },
@@ -188,6 +189,13 @@ impl From<TxnError> for Error {
                     )
                 }
             },
+            TxnError::CustomError(RackInitError::ServiceNicInsert {
+                err,
+                nic,
+            }) => public_error_from_diesel_pool(
+                err,
+                ErrorHandler::Conflict(ResourceType::NetworkInterface, &nic),
+            ),
             TxnError::CustomError(RackInitError::VpcFwRuleInsert {
                 err,
                 vpc_id,
@@ -427,7 +435,9 @@ impl DataStore {
 
         // Populate some default VPC resources.
         Self::create_default_vpc_router(log, conn, &vpc).await?;
-        Self::create_service_vpc_subnet(log, conn, service, &vpc).await?;
+        let vpc_subnet =
+            Self::create_service_vpc_subnet(log, conn, service, &vpc).await?;
+        Self::create_service_nic(log, conn, service, &vpc_subnet).await?;
 
         Ok(vpc)
     }
@@ -566,6 +576,70 @@ impl DataStore {
                 subnet_id,
             })
         })
+    }
+
+    /// Create a NIC record for the given service in the given VPC subnet.
+    ///
+    /// This NIC represents the OPTE port the service zone will be given
+    /// that provides externally connectivity.
+    async fn create_service_nic<ConnErr>(
+        log: &slog::Logger,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        service: &internal_params::ServicePutRequest,
+        vpc_subnet: &VpcSubnet,
+    ) -> Result<(), TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::model::ServiceNetworkInterface;
+        use db::model::ServiceNetworkInterfaceIdentity;
+        use db::schema::service_network_interface;
+
+        if !matches!(service.kind, internal_params::ServiceKind::Nexus { .. }) {
+            // Nexus is the only service that currently needs external
+            // connectivity and thus has an OPTE port.
+            return Ok(());
+        }
+
+        let nic_id = Uuid::new_v4();
+        let nic_db = ServiceNetworkInterface {
+            identity: ServiceNetworkInterfaceIdentity::new(
+                nic_id,
+                IdentityMetadataCreateParams {
+                    name: "nexus".parse().unwrap(),
+                    description: "Nexus service external NIC".to_string(),
+                },
+            ),
+            service_id: service.service_id,
+            vpc_id: vpc_subnet.vpc_id,
+            subnet_id: vpc_subnet.id(),
+            mac: nexus_defaults::nexus_service::EXTERNAL_NIC_MAC.into(),
+            ip: (*nexus_defaults::nexus_service::EXTERNAL_NIC_PRIVATE_IP)
+                .into(),
+            slot: 0,
+        };
+
+        diesel::insert_into(
+            service_network_interface::dsl::service_network_interface,
+        )
+        .values(nic_db)
+        .on_conflict(service_network_interface::dsl::id)
+        .do_nothing()
+        .execute_async(conn)
+        .await
+        .map_err(|err| {
+            warn!(
+                log,
+                "Initializing Rack: Failed to insert service NIC record"
+            );
+            TxnError::CustomError(RackInitError::ServiceNicInsert {
+                err: err.into(),
+                nic: "nexus".to_string(),
+            })
+        })?;
+
+        Ok(())
     }
 
     /// Create the default firewall rules for the Nexus service in the given VPC.

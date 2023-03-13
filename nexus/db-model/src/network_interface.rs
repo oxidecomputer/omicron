@@ -14,7 +14,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use uuid::Uuid;
 
-#[derive(Selectable, Queryable, Insertable, Clone, Debug, Resource)]
+#[derive(Selectable, Queryable, Clone, Debug, Resource)]
 #[diesel(table_name = network_interface)]
 pub struct NetworkInterface {
     #[diesel(embed)]
