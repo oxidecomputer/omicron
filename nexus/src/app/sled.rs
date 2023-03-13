@@ -256,6 +256,13 @@ impl super::Nexus {
         // instance is allocated to a random sled, that sled will already contain a
         // mapping to this instance.
         //
+        // TODO any approach that creates V2P mappings on a subset of sleds
+        // (instead of every sled like the naive approach) could potentially
+        // create mappings that are invalid: there is a TOCTOU problem due to
+        // the fact that an instances' sled allocation can change at any time.
+        // Without something constantly running that will correct these
+        // mappings, it's only safe to globally apply all mappings.
+        //
         // TODO-correctness OPTE currently will block instances in different VPCs
         // from connecting to each other. If it ever stops doing this, this naive
         // approach will create v2p mappings that shouldn't exist.

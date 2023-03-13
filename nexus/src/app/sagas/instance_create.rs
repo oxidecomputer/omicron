@@ -1059,9 +1059,7 @@ async fn sic_instance_ensure(
     Ok(())
 }
 
-async fn sic_noop(
-    _sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+async fn sic_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }
 
