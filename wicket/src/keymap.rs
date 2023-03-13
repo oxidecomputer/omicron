@@ -71,6 +71,9 @@ pub enum Cmd {
     /// Trigger any operation that must be executed periodically, like
     /// animations.
     Tick,
+
+    /// Swap between the sidebar and primary pane
+    SwapPane,
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting
@@ -132,6 +135,7 @@ impl KeyHandler {
             KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::KnightRiderMode
             }
+            KeyCode::Char('s') => Cmd::SwapPane,
 
             // Vim navigation
             KeyCode::Char('k') => Cmd::Up,
@@ -142,7 +146,6 @@ impl KeyHandler {
                 self.seq = Some(MultiKeySeqStart::g);
                 return None;
             }
-
             _ => return None,
         };
         Some(cmd)

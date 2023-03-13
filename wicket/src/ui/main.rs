@@ -122,9 +122,10 @@ impl MainScreen {
     /// system to take.
     pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         match cmd {
-            Cmd::Exit => {
+            Cmd::SwapPane => {
                 if self.sidebar.active {
-                    None
+                    self.sidebar.active = false;
+                    Some(Action::Redraw)
                 } else {
                     if self.current_pane().is_modal_active() {
                         self.current_pane().on(state, cmd)
