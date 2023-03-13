@@ -287,6 +287,8 @@ impl super::Nexus {
 
             let sleds_page =
                 self.sleds_list(&self.opctx_alloc, &pagparams).await?;
+            let mut join_handles =
+                Vec::with_capacity(sleds_page.len() * instance_nics.len());
 
             for sled in &sleds_page {
                 // set_v2p not required for sled instance was allocated to, OPTE
@@ -295,23 +297,42 @@ impl super::Nexus {
                     continue;
                 }
 
-                let client = self.sled_client(&sled.id()).await?;
-
                 for nic in &instance_nics {
+                    let client = self.sled_client(&sled.id()).await?;
+                    let nic_id = nic.id;
+                    let mapping = SetVirtualNetworkInterfaceHost {
+                        virtual_ip: nic.ip,
+                        virtual_mac: nic.mac.clone(),
+                        physical_host_ip,
+                        vni: nic.vni.clone(),
+                    };
+
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
-                    client
-                        .set_v2p(
-                            &nic.id,
-                            &SetVirtualNetworkInterfaceHost {
-                                virtual_ip: nic.ip,
-                                virtual_mac: nic.mac.clone(),
-                                physical_host_ip,
-                                vni: nic.vni.clone(),
-                            },
-                        )
-                        .await?;
+                    join_handles.push(tokio::spawn(futures::future::lazy(
+                        move |_ctx| async move {
+                            client.set_v2p(&nic_id, &mapping).await
+                        },
+                    )));
                 }
+            }
+
+            // Concurrently run each future to completion, but return the last
+            // error seen.
+            let mut error = None;
+            for join_handle in join_handles {
+                let result = join_handle
+                    .await
+                    .map_err(|e| Error::internal_error(&e.to_string()))?
+                    .await;
+
+                if result.is_err() {
+                    error!(self.log, "{:?}", result);
+                    error = Some(result);
+                }
+            }
+            if let Some(e) = error {
+                return e.map(|_| ()).map_err(|e| e.into());
             }
 
             if sleds_page.len() < 10 {
@@ -363,6 +384,8 @@ impl super::Nexus {
 
             let sleds_page =
                 self.sleds_list(&self.opctx_alloc, &pagparams).await?;
+            let mut join_handles =
+                Vec::with_capacity(sleds_page.len() * instance_nics.len());
 
             for sled in &sleds_page {
                 // del_v2p not required for sled instance was allocated to, OPTE
@@ -371,23 +394,42 @@ impl super::Nexus {
                     continue;
                 }
 
-                let client = self.sled_client(&sled.id()).await?;
-
                 for nic in &instance_nics {
+                    let client = self.sled_client(&sled.id()).await?;
+                    let nic_id = nic.id;
+                    let mapping = SetVirtualNetworkInterfaceHost {
+                        virtual_ip: nic.ip,
+                        virtual_mac: nic.mac.clone(),
+                        physical_host_ip,
+                        vni: nic.vni.clone(),
+                    };
+
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
-                    client
-                        .del_v2p(
-                            &nic.id,
-                            &SetVirtualNetworkInterfaceHost {
-                                virtual_ip: nic.ip,
-                                virtual_mac: nic.mac.clone(),
-                                physical_host_ip,
-                                vni: nic.vni.clone(),
-                            },
-                        )
-                        .await?;
+                    join_handles.push(tokio::spawn(futures::future::lazy(
+                        move |_ctx| async move {
+                            client.del_v2p(&nic_id, &mapping).await
+                        },
+                    )));
                 }
+            }
+
+            // Concurrently run each future to completion, but return the last
+            // error seen.
+            let mut error = None;
+            for join_handle in join_handles {
+                let result = join_handle
+                    .await
+                    .map_err(|e| Error::internal_error(&e.to_string()))?
+                    .await;
+
+                if result.is_err() {
+                    error!(self.log, "{:?}", result);
+                    error = Some(result);
+                }
+            }
+            if let Some(e) = error {
+                return e.map(|_| ()).map_err(|e| e.into());
             }
 
             if sleds_page.len() < 10 {
