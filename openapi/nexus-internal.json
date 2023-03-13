@@ -1717,6 +1717,14 @@
             "description": "address of propolis-server running this Instance",
             "type": "string"
           },
+          "propolis_gen": {
+            "description": "The generation number for the Propolis and sled identifiers for this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "propolis_id": {
             "description": "which propolis-server is running this Instance",
             "type": "string",
@@ -1746,6 +1754,7 @@
           "hostname",
           "memory",
           "ncpus",
+          "propolis_gen",
           "propolis_id",
           "run_state",
           "sled_id",

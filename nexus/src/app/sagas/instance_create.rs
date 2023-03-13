@@ -1169,6 +1169,7 @@ async fn sic_create_instance_record(
             12400,
         )),
         migration_id: None,
+        propolis_gen: Generation::new(),
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
         ncpus: params.create_params.ncpus,

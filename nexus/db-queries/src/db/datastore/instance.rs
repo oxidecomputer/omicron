@@ -180,11 +180,18 @@ impl DataStore {
         let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            // Runtime state updates are allowed if either:
+            // - the active Propolis ID will not change, the state generation
+            //   increased, and the Propolis generation will not change, or
+            // - the Propolis generation increased.
             .filter(
-                dsl::migration_id
-                    .is_null()
-                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_id)),
+                (dsl::active_propolis_id
+                    .eq(new_runtime.propolis_id)
+                    .and(dsl::state_generation.lt(new_runtime.gen))
+                    .and(
+                        dsl::propolis_generation.eq(new_runtime.propolis_gen),
+                    ))
+                .or(dsl::propolis_generation.lt(new_runtime.propolis_gen)),
             )
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)

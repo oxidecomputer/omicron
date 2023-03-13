@@ -789,6 +789,15 @@ CREATE TABLE omicron.public.instance (
      */
     migration_id UUID,
 
+    /*
+     * A generation number protecting information about the "location" of a
+     * running instance: its active server ID, Propolis ID and IP, and migration
+     * information. This is used for mutual exclusion (to allow only one
+     * migration to proceed at a time) and to coordinate state changes when a
+     * migration finishes.
+     */
+    propolis_generation INT NOT NULL,
+
     /* Instance configuration */
     ncpus INT NOT NULL,
     memory INT NOT NULL,
