@@ -47,7 +47,7 @@ pub trait NexusServer {
 
     async fn set_resolver(
         &self,
-        resolver: internal_dns_names::multiclient::Resolver,
+        resolver: internal_dns::multiclient::Resolver,
     );
 
     // Previously, as a dataset was created (within the sled agent),

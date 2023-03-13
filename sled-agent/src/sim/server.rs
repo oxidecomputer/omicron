@@ -11,7 +11,7 @@ use super::storage::PantryServer;
 use crate::nexus::NexusClient;
 use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::{ServiceName, SRV};
 use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -191,7 +191,7 @@ impl Server {
         .map_err(|e| e.to_string())?;
 
         // Insert SRV and AAAA record for Crucible Pantry
-        let mut dns = internal_dns_names::DnsConfigBuilder::new();
+        let mut dns = internal_dns::DnsConfigBuilder::new();
         let pantry_zone_id = pantry_server.server.app_private().id;
         let pantry_addr = match pantry_server.addr() {
             SocketAddr::V6(v6) => v6,
@@ -211,8 +211,8 @@ impl Server {
 
         let dns_config = dns.build();
 
-        let dns_client = internal_dns_names::multiclient::Updater::new(
-            &internal_dns_names::multiclient::ServerAddresses {
+        let dns_client = internal_dns::multiclient::Updater::new(
+            &internal_dns::multiclient::ServerAddresses {
                 dropshot_server_addrs: vec![dns_dropshot_server.local_addr()],
                 dns_server_addrs: vec![],
             },

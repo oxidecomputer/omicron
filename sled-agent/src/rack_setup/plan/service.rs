@@ -9,7 +9,7 @@ use crate::params::{
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use dns_service_client::types::DnsConfig;
-use internal_dns_names::{BackendName, ServiceName, SRV};
+use internal_dns::{BackendName, ServiceName, SRV};
 use omicron_common::address::{
     get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DNS_PORT,
     DNS_SERVER_PORT, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
@@ -189,7 +189,7 @@ impl Plan {
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
 
         let mut allocations = vec![];
-        let mut dns_builder = internal_dns_names::DnsConfigBuilder::new();
+        let mut dns_builder = internal_dns::DnsConfigBuilder::new();
 
         for idx in 0..sled_addrs.len() {
             let sled_address = sled_addrs[idx];

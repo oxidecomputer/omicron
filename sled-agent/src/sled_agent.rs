@@ -88,7 +88,7 @@ pub enum Error {
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns_names::multiclient::ResolveError),
+    ResolveError(#[from] internal_dns::multiclient::ResolveError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
