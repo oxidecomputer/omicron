@@ -165,7 +165,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(test, derive(strum::EnumIter))]
 pub enum Action {
-    Query, // only used for [`Database`]
+    Query, // only used for `Database`
     Read,
     ListChildren,
     ReadPolicy,
@@ -196,7 +196,7 @@ impl oso::PolarClass for Action {
 /// not _any_ old string can be used as a permission.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Perm {
-    Query, // Only for [`Database`]
+    Query, // Only for `Database`
     Read,
     Modify,
     ListChildren,
@@ -239,7 +239,7 @@ impl fmt::Display for Perm {
 /// This exists so that we can have roles with no access to the database at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Database;
-/// Singleton representing the [`Database`] itself for authz purposes
+/// Singleton representing the `Database` itself for authz purposes
 pub const DATABASE: Database = Database;
 
 impl oso::PolarClass for Database {

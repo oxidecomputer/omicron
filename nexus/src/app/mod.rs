@@ -8,7 +8,6 @@ use crate::app::oximeter::LazyTimeseriesClient;
 use crate::authn;
 use crate::authz;
 use crate::config;
-use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -17,6 +16,7 @@ use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
@@ -38,7 +38,6 @@ mod network_interface;
 mod organization;
 mod oximeter;
 mod project;
-pub mod provisioning;
 mod rack;
 pub mod saga;
 mod session;
@@ -419,9 +418,9 @@ impl Nexus {
     /// _existence_ of this endpoint is not a secret.  Use:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
@@ -441,9 +440,9 @@ impl Nexus {
     /// of a specific resource of type "my-new-kind-of-resource").  Use:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
@@ -483,10 +482,10 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
     /// use omicron_nexus::authz;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::lookup::LookupPath;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
@@ -513,10 +512,10 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
     /// use omicron_nexus::authz;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::lookup::LookupPath;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;

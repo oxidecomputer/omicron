@@ -170,6 +170,17 @@ impl Zpool {
         cmd.arg(&name.to_string());
         cmd.arg(vdev);
         execute(&mut cmd).map_err(Error::from)?;
+
+        // Ensure that this zpool has the encryption feature enabled
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL)
+            .arg("set")
+            .arg("feature@encryption=enabled")
+            .arg(&name.to_string());
+        execute(&mut cmd).map_err(Error::from)?;
+
         Ok(())
     }
 

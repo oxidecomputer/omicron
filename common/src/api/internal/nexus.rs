@@ -6,7 +6,7 @@
 
 use crate::api::external::{
     ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState, IpNet,
-    Vni,
+    SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
 use parse_display::{Display, FromStr};
@@ -97,7 +97,7 @@ pub struct UpdateArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: String,
+    pub version: SemverVersion,
 
     /// The kind of update artifact this is.
     pub kind: KnownArtifactKind,

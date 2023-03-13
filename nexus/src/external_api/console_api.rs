@@ -11,7 +11,6 @@ use super::views;
 use crate::authn::{
     silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
 };
-use crate::context::OpContext;
 use crate::ServerContext;
 use crate::{
     authn::external::{
@@ -34,6 +33,7 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::{
     data_page_params_for, PaginatedById, ScanById, ScanParams,
@@ -484,7 +484,7 @@ pub async fn logout(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let opctx = OpContext::for_external_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await;
         let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
         if let Ok(opctx) = opctx {
@@ -630,7 +630,7 @@ pub async fn session_me(
         // We don't care about authentication method, as long as they are authed
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
         Ok(HttpResponseOk(user.into()))
     };
@@ -654,7 +654,7 @@ pub async fn session_me_groups(
         // We don't care about authentication method, as long as they are authed
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let groups = nexus
             .silo_user_fetch_groups_for_self(
                 &opctx,
@@ -676,7 +676,7 @@ pub async fn session_me_groups(
 pub async fn console_index_or_login_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
-    let opctx = OpContext::for_external_api(&rqctx).await;
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await;
 
     // if authed, serve console index.html with JS bundle in script tag
     if let Ok(opctx) = opctx {

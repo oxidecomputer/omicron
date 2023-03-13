@@ -4,6 +4,7 @@
 
 use super::impl_enum_wrapper;
 use crate::schema::update_available_artifact;
+use crate::SemverVersion;
 use chrono::{DateTime, Utc};
 use omicron_common::api::internal;
 use parse_display::Display;
@@ -41,7 +42,7 @@ impl_enum_wrapper!(
 pub struct UpdateAvailableArtifact {
     pub name: String,
     /// Version of the artifact itself
-    pub version: String,
+    pub version: SemverVersion,
     pub kind: KnownArtifactKind,
     /// `version` field of targets.json from the repository
     // FIXME this *should* be a NonZeroU64
@@ -55,7 +56,7 @@ pub struct UpdateAvailableArtifact {
 }
 
 impl UpdateAvailableArtifact {
-    pub fn id(&self) -> (String, String, KnownArtifactKind) {
+    pub fn id(&self) -> (String, SemverVersion, KnownArtifactKind) {
         (self.name.clone(), self.version.clone(), self.kind)
     }
 }

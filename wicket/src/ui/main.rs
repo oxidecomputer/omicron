@@ -11,6 +11,7 @@ use crate::ui::widgets::Fade;
 use crate::{Action, Event, Frame, State, Term};
 use crossterm::event::Event as TermEvent;
 use crossterm::event::KeyCode;
+use slog::{o, Logger};
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Modifier, Style};
 use tui::text::{Span, Spans};
@@ -26,6 +27,8 @@ use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 /// Specific functionality is put inside [`Pane`]s, which can be customized
 /// as needed.
 pub struct MainScreen {
+    #[allow(unused)]
+    log: Logger,
     sidebar: Sidebar,
     panes: BTreeMap<&'static str, Box<dyn Control>>,
     rect: Rect,
@@ -34,15 +37,17 @@ pub struct MainScreen {
 }
 
 impl MainScreen {
-    pub fn new() -> MainScreen {
+    pub fn new(log: &Logger) -> MainScreen {
         // We want the sidebar ordered in this specific manner
         let sidebar_ordered_panes = vec![
             ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
-            ("update", Box::new(UpdatePane::new()) as Box<dyn Control>),
+            ("update", Box::new(UpdatePane::new(log)) as Box<dyn Control>),
         ];
         let sidebar_keys: Vec<_> =
             sidebar_ordered_panes.iter().map(|&(title, _)| title).collect();
+        let log = log.new(o!("component" => "MainScreen"));
         MainScreen {
+            log,
             sidebar: Sidebar::new(sidebar_keys),
             panes: BTreeMap::from_iter(sidebar_ordered_panes),
             rect: Rect::default(),

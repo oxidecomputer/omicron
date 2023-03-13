@@ -41,11 +41,11 @@ use uuid::Uuid;
 /// # Examples
 ///
 /// ```
-/// # use omicron_nexus::authz;
-/// # use omicron_nexus::context::OpContext;
-/// # use omicron_nexus::db;
-/// # use omicron_nexus::db::DataStore;
-/// # use omicron_nexus::db::lookup::LookupPath;
+/// # use nexus_db_queries::authz;
+/// # use nexus_db_queries::context::OpContext;
+/// # use nexus_db_queries::db;
+/// # use nexus_db_queries::db::DataStore;
+/// # use nexus_db_queries::db::lookup::LookupPath;
 /// # use uuid::Uuid;
 /// # async fn foo(opctx: &OpContext, datastore: &DataStore)
 /// # -> Result<(), omicron_common::api::external::Error> {
@@ -388,13 +388,13 @@ impl<'a> LookupPath<'a> {
     pub fn update_available_artifact_tuple(
         self,
         name: &str,
-        version: &str,
+        version: db::model::SemverVersion,
         kind: KnownArtifactKind,
     ) -> UpdateAvailableArtifact<'a> {
         UpdateAvailableArtifact::PrimaryKey(
             Root { lookup_root: self },
             name.to_string(),
-            version.to_string(),
+            version,
             kind,
         )
     }
@@ -728,7 +728,7 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "name", rust_type = String },
-        { column_name = "version", rust_type = String },
+        { column_name = "version", rust_type = db::model::SemverVersion },
         { column_name = "kind", rust_type = KnownArtifactKind }
     ]
 }

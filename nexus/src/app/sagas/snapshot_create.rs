@@ -98,7 +98,6 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
@@ -309,7 +308,10 @@ async fn ssc_alloc_regions(
     // https://github.com/oxidecomputer/omicron/issues/613 , we
     // should consider using a paginated API to access regions, rather than
     // returning all of them at once.
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -478,7 +480,10 @@ async fn ssc_create_destination_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
@@ -493,7 +498,10 @@ async fn ssc_create_snapshot_record(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
@@ -554,7 +562,10 @@ async fn ssc_create_snapshot_record_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "deleting snapshot {}", snapshot_id);
@@ -582,7 +593,10 @@ async fn ssc_account_space(
 
     let snapshot_created =
         sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_snapshot(
@@ -604,7 +618,10 @@ async fn ssc_account_space_undo(
 
     let snapshot_created =
         sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_snapshot(
@@ -623,7 +640,10 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
@@ -686,7 +706,10 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot request for {snapshot_id}");
@@ -759,7 +782,10 @@ async fn ssc_attach_disk_to_pantry(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -828,7 +854,10 @@ async fn ssc_attach_disk_to_pantry_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -884,7 +913,10 @@ async fn ssc_call_pantry_attach_for_disk(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (pantry_address, disk_already_attached_to_pantry) =
         sagactx.lookup::<(SocketAddrV6, bool)>("pantry_address")?;
@@ -986,7 +1018,10 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     let params = sagactx.saga_params::<Params>()?;
 
@@ -1045,7 +1080,10 @@ async fn ssc_detach_disk_from_pantry(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -1117,7 +1155,10 @@ async fn ssc_start_running_snapshot(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "starting running snapshot for {snapshot_id}");
@@ -1214,7 +1255,10 @@ async fn ssc_start_running_snapshot_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot start running request for {snapshot_id}");
@@ -1273,7 +1317,10 @@ async fn ssc_create_volume_record(
 
     // For a snapshot, copy the volume construction request at the time the
     // snapshot was taken.
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -1340,7 +1387,10 @@ async fn ssc_create_volume_record_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
     info!(log, "deleting volume {}", volume_id);
@@ -1355,7 +1405,10 @@ async fn ssc_finalize_snapshot_record(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     info!(log, "snapshot final lookup...");
 
@@ -1488,6 +1541,7 @@ mod test {
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;

@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
-use omicron_common::update::ArtifactKind;
+use omicron_common::{api::external::SemverVersion, update::ArtifactKind};
 use tufaceous_lib::{
     assemble::{ArtifactManifest, OmicronRepoAssembler},
     AddArtifact, ArchiveExtractor, Key, OmicronRepo,
@@ -43,12 +43,13 @@ impl Args {
         };
 
         match self.command {
-            Command::Init { no_generate_key } => {
+            Command::Init { system_version, no_generate_key } => {
                 let keys = maybe_generate_keys(self.keys, no_generate_key);
 
                 let repo = OmicronRepo::initialize(
                     &log,
                     &repo_path,
+                    system_version,
                     keys,
                     self.expiry,
                 )?;
@@ -178,6 +179,9 @@ impl Args {
 enum Command {
     /// Create a new rack update TUF repository
     Init {
+        /// The system version.
+        system_version: SemverVersion,
+
         /// Disable random key generation and exit if no keys are provided
         #[clap(long)]
         no_generate_key: bool,
@@ -198,7 +202,7 @@ enum Command {
         name: Option<String>,
 
         /// Artifact version.
-        version: String,
+        version: SemverVersion,
     },
     /// Archives this repository to a zip file.
     Archive {

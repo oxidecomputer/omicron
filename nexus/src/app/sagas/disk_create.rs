@@ -12,7 +12,6 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
@@ -134,7 +133,10 @@ async fn sdc_create_disk_record(
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let block_size: db::model::BlockSize =
         match &params.create_params.disk_source {
@@ -239,7 +241,10 @@ async fn sdc_alloc_regions(
     // https://github.com/oxidecomputer/omicron/issues/613 , we
     // should consider using a paginated API to access regions, rather than
     // returning all of them at once.
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(
@@ -277,7 +282,10 @@ async fn sdc_account_space(
     let params = sagactx.saga_params::<Params>()?;
 
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_disk(
@@ -298,7 +306,10 @@ async fn sdc_account_space_undo(
     let params = sagactx.saga_params::<Params>()?;
 
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_disk(
@@ -334,7 +345,10 @@ async fn sdc_regions_ensure(
     // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
         match &params.create_params.disk_source {
@@ -581,7 +595,10 @@ async fn sdc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     osagactx.nexus().volume_delete(&opctx, volume_id).await?;
     Ok(())
@@ -593,7 +610,10 @@ async fn sdc_finalize_disk_record(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
@@ -782,7 +802,7 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
-        context::OpContext, db::datastore::DataStore, external_api::params,
+        db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -790,6 +810,7 @@ pub(crate) mod test {
     };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
@@ -926,9 +947,11 @@ pub(crate) mod test {
             .await
             .unwrap()
             .transaction_async(|conn| async move {
-                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
-                    .await
-                    .unwrap();
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
                 Ok::<_, crate::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
                         .filter(dsl::virtual_disk_bytes_provisioned.ne(0))

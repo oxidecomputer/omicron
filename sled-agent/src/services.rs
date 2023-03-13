@@ -1113,9 +1113,6 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
-                            // TODO: For this restart to be optional, Dendrite must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
                         }
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
