@@ -16,6 +16,7 @@ use omicron_common::api::external::{Error, InstanceState, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -42,6 +43,7 @@ use super::storage::Storage;
 /// move later.
 pub struct SledAgent {
     pub id: Uuid,
+    pub ip: IpAddr,
     /// collection of simulated instances, indexed by instance uuid
     instances: Arc<SimCollection<SimInstance>>,
     /// collection of simulated disks, indexed by disk uuid
@@ -118,6 +120,7 @@ impl SledAgent {
 
         Arc::new(SledAgent {
             id,
+            ip: config.dropshot.bind_address.ip(),
             instances: Arc::new(SimCollection::new(
                 Arc::clone(&nexus_client),
                 instance_log,

@@ -3202,11 +3202,17 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance.identity.id)
         .fetch()
         .await
         .unwrap();
+
+    let guest_nics = datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await
+        .unwrap();
+    assert_eq!(guest_nics.len(), 1);
 
     let mut sled_agents: Vec<&Arc<SledAgent>> =
         additional_sleds.iter().map(|x| &x.sled_agent).collect();
@@ -3216,10 +3222,17 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         let v2p_mappings = sled_agent.v2p_mappings.lock().await;
         if sled_agent.id != db_instance.runtime().sled_id {
             assert!(!v2p_mappings.is_empty());
-            assert!(!v2p_mappings
-                .get(&nics[0].identity.id)
-                .unwrap()
-                .is_empty());
+            assert_eq!(
+                v2p_mappings.get(&nics[0].identity.id).unwrap().len(),
+                1
+            );
+
+            // Confirm that OPTE was passed the correct information
+            let mapping = &v2p_mappings.get(&nics[0].identity.id).unwrap()[0];
+            assert_eq!(mapping.virtual_ip, nics[0].ip);
+            assert_eq!(mapping.virtual_mac, nics[0].mac);
+            assert_eq!(mapping.physical_host_ip, sled_agent.ip);
+            assert_eq!(mapping.vni, guest_nics[0].vni.clone().into());
         } else {
             assert!(v2p_mappings.is_empty());
         }
