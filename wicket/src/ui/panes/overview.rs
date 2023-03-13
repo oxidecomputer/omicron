@@ -308,6 +308,18 @@ impl Control for InventoryView {
                 *offset = offset.saturating_sub(1);
                 Some(Action::Redraw)
             }
+            Cmd::GotoTop => {
+                let component_id = state.rack_state.selected;
+                *self.scroll_offsets.get_mut(&component_id).unwrap() = 0;
+                Some(Action::Redraw)
+            }
+            Cmd::GotoBottom => {
+                let component_id = state.rack_state.selected;
+                // This will get corrected to be the bottom line during `draw`
+                *self.scroll_offsets.get_mut(&component_id).unwrap() =
+                    usize::MAX;
+                Some(Action::Redraw)
+            }
             Cmd::Tick => {
                 // TODO: This only animates when the pane is active. Should we move the
                 // tick into the [`Runner`] instead?

@@ -359,6 +359,17 @@ impl Control for UpdatePane {
                 self.popup = Some(PopupKind::Logs);
                 Some(Action::Redraw)
             }
+            Cmd::GotoTop => {
+                self.tree_state.select_first();
+                state.rack_state.selected = ALL_COMPONENT_IDS[0];
+                Some(Action::Redraw)
+            }
+            Cmd::GotoBottom => {
+                self.tree_state.select_last(&self.items);
+                state.rack_state.selected =
+                    ALL_COMPONENT_IDS[ALL_COMPONENT_IDS.len() - 1];
+                Some(Action::Redraw)
+            }
             _ => None,
         }
     }

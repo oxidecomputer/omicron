@@ -56,6 +56,12 @@ pub enum Cmd {
     /// Accept
     Yes,
 
+    /// Goto top of list/screen/etc...
+    GotoTop,
+
+    /// Goto bottom of list/screen/etc...
+    GotoBottom,
+
     /// Decline
     No,
 
@@ -67,6 +73,14 @@ pub enum Cmd {
     Tick,
 }
 
+/// We allow certain multi-key sequences, and explicitly enumerate the starting
+/// key(s) here.
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+enum MultiKeySeqStart {
+    g,
+}
+
 /// A Key Handler maintains any state that is needed across key presses,
 /// such as whether the user is in `insert` mode, or a key sequence is
 /// being processed.
@@ -76,11 +90,33 @@ pub enum Cmd {
 ///
 /// Note: We don't handle raw events or key sequences yet, although this is
 /// possible.
-#[derive(Debug, Default)]
-pub struct KeyHandler {}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct KeyHandler {
+    seq: Option<MultiKeySeqStart>,
+}
 
 impl KeyHandler {
     pub fn on(&mut self, event: KeyEvent) -> Option<Cmd> {
+        if let Some(seq) = self.seq {
+            match seq {
+                MultiKeySeqStart::g => match event.code {
+                    KeyCode::Char('g') => {
+                        self.seq = None;
+                        return Some(Cmd::GotoTop);
+                    }
+                    KeyCode::Char('e') => {
+                        self.seq = None;
+                        return Some(Cmd::GotoBottom);
+                    }
+                    _ => (),
+                },
+            }
+        }
+
+        // We didn't match any multi-sequence starting characters. Treat this
+        // key-press as a new key-press and reset the sequence.
+        self.seq = None;
+
         let cmd = match event.code {
             KeyCode::Enter => Cmd::Enter,
             KeyCode::Esc => Cmd::Exit,
@@ -102,6 +138,10 @@ impl KeyHandler {
             KeyCode::Char('j') => Cmd::Down,
             KeyCode::Char('h') => Cmd::Left,
             KeyCode::Char('l') => Cmd::Right,
+            KeyCode::Char('g') => {
+                self.seq = Some(MultiKeySeqStart::g);
+                return None;
+            }
 
             _ => return None,
         };
