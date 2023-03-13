@@ -201,8 +201,7 @@ impl super::Nexus {
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
             .await?;
-        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules, None)
-            .await?;
+        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules).await?;
         Ok(rules)
     }
 
@@ -226,7 +225,6 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
-        sleds: Option<&[db::model::Sled]>,
     ) -> Result<(), Error> {
         let rules_for_sled = self
             .resolve_firewall_rules_for_sled_agent(opctx, &vpc, rules)
@@ -237,28 +235,15 @@ impl super::Nexus {
                 rules: rules_for_sled,
             };
 
-        let vpc_to_sleds;
-        let vpc_to_sleds = match sleds {
-            Some(sleds) => {
-                debug!(
-                    self.log, "using provided sleds for vpc {}", vpc.name();
-                    "vpc_to_sleds" => ?sleds
-                );
-                sleds
-            }
-            None => {
-                vpc_to_sleds =
-                    self.db_datastore.vpc_resolve_to_sleds(vpc.id()).await?;
-                debug!(
-                    self.log, "resolved sleds for vpc {}", vpc.name();
-                    "vpc_to_sleds" => ?vpc_to_sleds
-                );
-                &vpc_to_sleds
-            }
-        };
+        let vpc_to_sleds =
+            self.db_datastore.vpc_resolve_to_sleds(vpc.id()).await?;
+        debug!(
+            self.log, "resolved sleds for vpc {}", vpc.name();
+            "vpc_to_sleds" => ?vpc_to_sleds
+        );
 
         let mut sled_requests = Vec::with_capacity(vpc_to_sleds.len());
-        for sled in vpc_to_sleds {
+        for sled in &vpc_to_sleds {
             let sled_id = sled.id();
             let vpc_id = vpc.id();
             let sled_rules_request = sled_rules_request.clone();
@@ -396,6 +381,19 @@ impl super::Nexus {
                 for iface in self
                     .db_datastore
                     .derive_vpc_network_interface_info(opctx, &authz_vpc)
+                    .await?
+                {
+                    vpc_interfaces
+                        .entry(vpc_name.0.clone())
+                        .or_insert_with(Vec::new)
+                        .push(iface);
+                }
+
+                for iface in self
+                    .db_datastore
+                    .derive_vpc_service_network_interface_info(
+                        opctx, &authz_vpc,
+                    )
                     .await?
                 {
                     vpc_interfaces

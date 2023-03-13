@@ -121,7 +121,7 @@ pub mod nexus_service {
             subnet: (*DEFAULT_VPC_SUBNET_IPV4_BLOCK).into(),
             vni: *VNI,
             // Irrelevant for service NICs
-            primary: true,
+            primary: false,
             // Only a single port currently
             slot: 0,
         };

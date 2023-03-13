@@ -344,15 +344,18 @@ impl DataStore {
             })
     }
 
-    /// Return the list of `Sled`s hosting instances with network interfaces
-    /// on the provided VPC.
+    /// Return the list of `Sled`s hosting instances or services with network
+    /// interfaces on the provided VPC.
     pub async fn vpc_resolve_to_sleds(
         &self,
         vpc_id: Uuid,
     ) -> Result<Vec<Sled>, Error> {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
-        use db::schema::{instance, network_interface, sled};
+        use db::schema::{
+            instance, network_interface, service, service_network_interface,
+            sled,
+        };
         network_interface::table
             .inner_join(
                 instance::table
@@ -363,7 +366,17 @@ impl DataStore {
             .filter(network_interface::time_deleted.is_null())
             .filter(instance::time_deleted.is_null())
             .select(Sled::as_select())
-            .distinct()
+            .union(
+                // TODO: Consolidate tables for instance and service NICs
+                service_network_interface::table
+                    .inner_join(service::table.on(
+                        service::id.eq(service_network_interface::service_id),
+                    ))
+                    .inner_join(sled::table.on(sled::id.eq(service::sled_id)))
+                    .filter(service_network_interface::vpc_id.eq(vpc_id))
+                    .filter(service_network_interface::time_deleted.is_null())
+                    .select(Sled::as_select()),
+            )
             .get_results_async(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))

@@ -47,8 +47,13 @@ struct NicInfo {
     ipv4_block: db::model::Ipv4Net,
     ipv6_block: db::model::Ipv6Net,
     vni: db::model::Vni,
-    primary: bool,
     slot: i16,
+}
+
+#[derive(Debug, diesel::Queryable)]
+struct InstanceNicInfo {
+    base: NicInfo,
+    is_primary: bool,
 }
 
 impl From<NicInfo> for sled_client_types::NetworkInterface {
@@ -64,8 +69,17 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
             mac: sled_client_types::MacAddr::from(nic.mac.0),
             subnet: sled_client_types::IpNet::from(ip_subnet),
             vni: sled_client_types::Vni::from(nic.vni.0),
-            primary: nic.primary,
+            primary: false,
             slot: u8::try_from(nic.slot).unwrap(),
+        }
+    }
+}
+
+impl From<InstanceNicInfo> for sled_client_types::NetworkInterface {
+    fn from(nic: InstanceNicInfo) -> sled_client_types::NetworkInterface {
+        sled_client_types::NetworkInterface {
+            primary: nic.is_primary,
+            ..nic.base.into()
         }
     }
 }
@@ -205,16 +219,20 @@ impl DataStore {
             // ideal, but we can't derive `Selectable` since this is the result
             // of a JOIN and not from a single table. DRY this out if possible.
             .select((
-                network_interface::name,
-                network_interface::ip,
-                network_interface::mac,
-                vpc_subnet::ipv4_block,
-                vpc_subnet::ipv6_block,
-                vpc::vni,
+                (
+                    network_interface::name,
+                    network_interface::ip,
+                    network_interface::mac,
+                    vpc_subnet::ipv4_block,
+                    vpc_subnet::ipv6_block,
+                    vpc::vni,
+                    network_interface::slot,
+                ),
                 network_interface::is_primary,
-                network_interface::slot,
             ))
-            .get_results_async::<NicInfo>(self.pool_authorized(opctx).await?)
+            .get_results_async::<InstanceNicInfo>(
+                self.pool_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
@@ -261,6 +279,52 @@ impl DataStore {
                 .into_boxed(),
         )
         .await
+    }
+
+    /// Return information about all service VNICs connected to a VPC.
+    pub async fn derive_vpc_service_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
+
+        use db::schema::service_network_interface;
+        use db::schema::vpc;
+        use db::schema::vpc_subnet;
+
+        let rows =
+            service_network_interface::table
+                .filter(service_network_interface::vpc_id.eq(authz_vpc.id()))
+                .filter(service_network_interface::time_deleted.is_null())
+                .inner_join(vpc_subnet::table.on(
+                    service_network_interface::subnet_id.eq(vpc_subnet::id),
+                ))
+                .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
+                .order_by(service_network_interface::slot)
+                // TODO-cleanup: Having to specify each column again is less than
+                // ideal, but we can't derive `Selectable` since this is the result
+                // of a JOIN and not from a single table. DRY this out if possible.
+                .select((
+                    service_network_interface::name,
+                    service_network_interface::ip,
+                    service_network_interface::mac,
+                    vpc_subnet::ipv4_block,
+                    vpc_subnet::ipv6_block,
+                    vpc::vni,
+                    service_network_interface::slot,
+                ))
+                .get_results_async::<NicInfo>(
+                    self.pool_authorized(opctx).await?,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                })?;
+        Ok(rows
+            .into_iter()
+            .map(sled_client_types::NetworkInterface::from)
+            .collect())
     }
 
     /// Return information about all VNICs connected to a VpcSubnet required

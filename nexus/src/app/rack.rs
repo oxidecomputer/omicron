@@ -185,14 +185,7 @@ impl super::Nexus {
                 self.vpc_list_firewall_rules(opctx, &vpc_lookup).await?;
             let (_, _, _, _, vpc) = vpc_lookup.fetch().await?;
 
-            let sled = self.sled_lookup(opctx, &service.sled_id).await?;
-            self.send_sled_agents_firewall_rules(
-                opctx,
-                &vpc,
-                &rules,
-                Some(&[sled]),
-            )
-            .await?;
+            self.send_sled_agents_firewall_rules(opctx, &vpc, &rules).await?;
         }
 
         Ok(())
