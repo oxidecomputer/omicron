@@ -141,6 +141,6 @@ impl std::str::FromStr for KnownTarget {
                 }
             }
         }
-        Ok(KnownTarget::new(image, machine, switch)?)
+        KnownTarget::new(image, machine, switch)
     }
 }
