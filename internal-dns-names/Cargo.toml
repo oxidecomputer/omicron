@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+assert_matches.workspace = true
 dns-service-client.workspace = true
 futures.workspace = true
 omicron-common.workspace = true

@@ -8,8 +8,6 @@ use crate::ipv6;
 use crate::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
-use nexus_types::identity::Asset;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
@@ -74,20 +72,6 @@ impl Dataset {
 
     pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
         SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
-    }
-
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id())
-    }
-
-    pub fn srv(&self) -> SRV {
-        match self.kind {
-            DatasetKind::Crucible => {
-                SRV::Backend(BackendName::Crucible, self.id())
-            }
-            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
-            DatasetKind::Cockroach => SRV::Service(ServiceName::Cockroach),
-        }
     }
 }
 

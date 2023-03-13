@@ -77,31 +77,31 @@ async fn main() -> Result<()> {
     match opt.subcommand {
         SubCommand::ListRecords => {
             todo!(); // XXX-dap
-            // let records = client.dns_records_list().await?;
-            // println!("{:#?}", records);
+                     // let records = client.dns_records_list().await?;
+                     // println!("{:#?}", records);
         }
         SubCommand::AddAAAA(cmd) => {
             todo!(); // XXX-dap
-            //client
-            //    .dns_records_create(&vec![DnsKv {
-            //        key: DnsRecordKey { name: cmd.name },
-            //        records: vec![DnsRecord::Aaaa(cmd.addr)],
-            //    }])
-            //    .await?;
+                     //client
+                     //    .dns_records_create(&vec![DnsKv {
+                     //        key: DnsRecordKey { name: cmd.name },
+                     //        records: vec![DnsRecord::Aaaa(cmd.addr)],
+                     //    }])
+                     //    .await?;
         }
         SubCommand::AddSRV(cmd) => {
             todo!(); // XXX-dap
-            //client
-            //    .dns_records_create(&vec![DnsKv {
-            //        key: DnsRecordKey { name: cmd.name },
-            //        records: vec![DnsRecord::Srv(Srv {
-            //            prio: cmd.prio,
-            //            weight: cmd.weight,
-            //            port: cmd.port,
-            //            target: cmd.target,
-            //        })],
-            //    }])
-            //    .await?;
+                     //client
+                     //    .dns_records_create(&vec![DnsKv {
+                     //        key: DnsRecordKey { name: cmd.name },
+                     //        records: vec![DnsRecord::Srv(Srv {
+                     //            prio: cmd.prio,
+                     //            weight: cmd.weight,
+                     //            port: cmd.port,
+                     //            target: cmd.target,
+                     //        })],
+                     //    }])
+                     //    .await?;
         }
         SubCommand::DeleteRecord(cmd) => {
             todo!();

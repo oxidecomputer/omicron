@@ -2943,6 +2943,7 @@ name = "internal-dns-names"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "dns-server",
  "dns-service-client",
  "dropshot",

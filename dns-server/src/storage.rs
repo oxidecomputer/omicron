@@ -138,6 +138,11 @@ impl Store {
         log: slog::Logger,
         config: &Config,
     ) -> Result<Self, anyhow::Error> {
+        info!(&log,
+            "opening sled database";
+            "path" => &config.storage_path.to_string()
+        );
+
         let db = sled::open(&config.storage_path).with_context(|| {
             format!("open DNS database {:?}", &config.storage_path)
         })?;
@@ -328,6 +333,10 @@ impl Store {
                     )
                 })?;
             }
+
+            tree.flush_async()
+                .await
+                .with_context(|| format!("flush tree {:?}", tree_name))?;
         }
 
         let new_config = CurrentConfig {
@@ -374,6 +383,7 @@ impl Store {
             bail!("final update: {:#}", error);
         }
 
+        debug!(&log, "flushing default tree");
         self.db.flush_async().await.context("flush")?;
 
         self.prune_older(&new_config);

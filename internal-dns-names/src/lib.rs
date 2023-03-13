@@ -86,17 +86,17 @@ impl fmt::Display for SRV {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             SRV::Service(name) => {
-                write!(f, "_{}._tcp.{}", name, DNS_ZONE)
+                write!(f, "_{}._tcp", name)
             }
             SRV::Backend(name, id) => {
-                write!(f, "_{}._tcp.{}.{}", name, id, DNS_ZONE)
+                write!(f, "_{}._tcp.{}", name, id)
             }
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
-pub enum AAAA {
+enum AAAA {
     /// Identifies an AAAA record for a sled.
     Sled(Uuid),
 
@@ -108,10 +108,10 @@ impl fmt::Display for AAAA {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             AAAA::Sled(id) => {
-                write!(f, "{}.sled.{}", id, DNS_ZONE)
+                write!(f, "{}.sled", id)
             }
             AAAA::Zone(id) => {
-                write!(f, "{}.host.{}", id, DNS_ZONE)
+                write!(f, "{}.host", id)
             }
         }
     }
@@ -225,7 +225,6 @@ impl DnsConfigBuilder {
             |(service_name, zone2port)| {
                 // XXX-dap For internal DNS should we create two sets of SRV
                 // records?  Should the caller be responsible for that?
-                // XXX-dap this should not have the DNS_ZONE in it either
                 let name = service_name.to_string();
                 let records = zone2port
                     .into_iter()
@@ -234,8 +233,11 @@ impl DnsConfigBuilder {
                             prio: 0,
                             weight: 0,
                             port,
-                            // XXX-dap this should not have the DNS_ZONE in it.
-                            target: AAAA::Zone(zone_id).to_string(),
+                            target: format!(
+                                "{}.{}",
+                                AAAA::Zone(zone_id).to_string(),
+                                DNS_ZONE
+                            ),
                         })
                     })
                     .collect();
@@ -267,31 +269,28 @@ mod test {
     fn display_srv_service() {
         assert_eq!(
             SRV::Service(ServiceName::Clickhouse).to_string(),
-            "_clickhouse._tcp.control-plane.oxide.internal",
+            "_clickhouse._tcp",
         );
         assert_eq!(
             SRV::Service(ServiceName::Cockroach).to_string(),
-            "_cockroach._tcp.control-plane.oxide.internal",
+            "_cockroach._tcp",
         );
         assert_eq!(
             SRV::Service(ServiceName::InternalDNS).to_string(),
-            "_internalDNS._tcp.control-plane.oxide.internal",
+            "_internalDNS._tcp",
         );
-        assert_eq!(
-            SRV::Service(ServiceName::Nexus).to_string(),
-            "_nexus._tcp.control-plane.oxide.internal",
-        );
+        assert_eq!(SRV::Service(ServiceName::Nexus).to_string(), "_nexus._tcp",);
         assert_eq!(
             SRV::Service(ServiceName::Oximeter).to_string(),
-            "_oximeter._tcp.control-plane.oxide.internal",
+            "_oximeter._tcp",
         );
         assert_eq!(
             SRV::Service(ServiceName::Dendrite).to_string(),
-            "_dendrite._tcp.control-plane.oxide.internal",
+            "_dendrite._tcp",
         );
         assert_eq!(
             SRV::Service(ServiceName::CruciblePantry).to_string(),
-            "_crucible-pantry._tcp.control-plane.oxide.internal",
+            "_crucible-pantry._tcp",
         );
     }
 
@@ -300,11 +299,11 @@ mod test {
         let uuid = Uuid::nil();
         assert_eq!(
             SRV::Backend(BackendName::Crucible, uuid).to_string(),
-            "_crucible._tcp.00000000-0000-0000-0000-000000000000.control-plane.oxide.internal",
+            "_crucible._tcp.00000000-0000-0000-0000-000000000000",
         );
         assert_eq!(
             SRV::Backend(BackendName::SledAgent, uuid).to_string(),
-            "_sledagent._tcp.00000000-0000-0000-0000-000000000000.control-plane.oxide.internal",
+            "_sledagent._tcp.00000000-0000-0000-0000-000000000000",
         );
     }
 
@@ -313,11 +312,11 @@ mod test {
         let uuid = Uuid::nil();
         assert_eq!(
             AAAA::Sled(uuid).to_string(),
-            "00000000-0000-0000-0000-000000000000.sled.control-plane.oxide.internal",
+            "00000000-0000-0000-0000-000000000000.sled",
         );
         assert_eq!(
             AAAA::Zone(uuid).to_string(),
-            "00000000-0000-0000-0000-000000000000.host.control-plane.oxide.internal",
+            "00000000-0000-0000-0000-000000000000.host",
         );
     }
 }

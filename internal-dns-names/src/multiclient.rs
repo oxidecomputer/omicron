@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DNS_ZONE;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT,
@@ -15,8 +16,6 @@ use trust_dns_resolver::config::{
 use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
-
-pub type AAAARecord = (crate::AAAA, SocketAddrV6);
 
 /// Describes how to find the DNS servers.
 ///
@@ -181,7 +180,8 @@ impl Resolver {
         &self,
         srv: crate::SRV,
     ) -> Result<Ipv6Addr, ResolveError> {
-        let response = self.inner.ipv6_lookup(&srv.to_string()).await?;
+        let name = format!("{}.{}", srv.to_string(), DNS_ZONE);
+        let response = self.inner.ipv6_lookup(&name).await?;
         let address = response
             .iter()
             .next()
@@ -195,8 +195,8 @@ impl Resolver {
         &self,
         srv: crate::SRV,
     ) -> Result<SocketAddrV6, ResolveError> {
-        let response =
-            self.inner.lookup(&srv.to_string(), RecordType::SRV).await?;
+        let name = format!("{}.{}", srv.to_string(), DNS_ZONE);
+        let response = self.inner.lookup(&name, RecordType::SRV).await?;
 
         let rdata = response
             .iter()
@@ -240,67 +240,87 @@ impl Resolver {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{BackendName, ServiceName, AAAA, SRV};
+    use crate::DnsConfigBuilder;
+    use crate::{BackendName, ServiceName, SRV};
+    use assert_matches::assert_matches;
     use omicron_test_utils::dev::test_setup_log;
+    use slog::o;
     use std::str::FromStr;
-    use std::sync::Arc;
     use tempfile::TempDir;
     use uuid::Uuid;
 
     struct DnsServer {
-        _storage: TempDir,
-        dns_server: dns_server::dns_server::Server,
-        dropshot_server:
-            dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
+        // We hang onto the storage_path even though it's never used because
+        // dropping it causes it to be cleaned up.
+        #[allow(dead_code)]
+        storage_path: Option<TempDir>,
+
+        successful: bool,
+        dns_server: dns_server::dns_server::ServerHandle,
+        dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
     }
 
     impl DnsServer {
         async fn create(log: &Logger) -> Self {
-            let storage =
+            let storage_path =
                 TempDir::new().expect("Failed to create temporary directory");
-
-            let db = Arc::new(sled::open(&storage.path()).unwrap());
-
-            let dns_server = {
-                let db = db.clone();
-                let log = log.clone();
-                let dns_config = dns_server::dns_server::Config {
-                    bind_address: "[::1]:0".to_string(),
-                    zone: internal_dns_names::DNS_ZONE.into(),
-                };
-
-                dns_server::dns_server::run(log, db, dns_config).await.unwrap()
+            let config_store = dns_server::storage::Config {
+                storage_path: storage_path
+                    .path()
+                    .to_string_lossy()
+                    .into_owned()
+                    .into(),
             };
+            let store = dns_server::storage::Store::new(
+                log.new(o!("component" => "DnsStore")),
+                &config_store,
+            )
+            .unwrap();
 
-            let config = dns_server::Config {
-                log: dropshot::ConfigLogging::StderrTerminal {
-                    level: dropshot::ConfigLoggingLevel::Info,
+            let (dns_server, dropshot_server) = dns_server::start_servers(
+                log.clone(),
+                store,
+                &dns_server::dns_server::Config {
+                    bind_address: "[::1]:0".to_string(),
                 },
-                dropshot: dropshot::ConfigDropshot {
+                &dropshot::ConfigDropshot {
                     bind_address: "[::1]:0".parse().unwrap(),
-                    request_body_max_bytes: 1024,
+                    request_body_max_bytes: 8 * 1024,
                     ..Default::default()
                 },
-                data: dns_server::dns_data::Config {
-                    nmax_messages: 16,
-                    storage_path: storage.path().to_string_lossy().into(),
-                },
-            };
+            )
+            .await
+            .unwrap();
 
-            let dropshot_server =
-                dns_server::start_dropshot_server(config, log.clone(), db)
-                    .await
-                    .unwrap();
-
-            Self { _storage: storage, dns_server, dropshot_server }
+            Self {
+                storage_path: Some(storage_path),
+                dns_server,
+                dropshot_server,
+                successful: false,
+            }
         }
 
         fn dns_server_address(&self) -> SocketAddr {
-            self.dns_server.address
+            *self.dns_server.local_address()
         }
 
         fn dropshot_server_address(&self) -> SocketAddr {
             self.dropshot_server.local_addr()
+        }
+
+        fn cleanup_successful(mut self) {
+            self.successful = true;
+            drop(self)
+        }
+    }
+
+    impl Drop for DnsServer {
+        fn drop(&mut self) {
+            if !self.successful {
+                // If we didn't explicitly succeed, then we want to keep the
+                // temporary directory around.
+                let _ = self.storage_path.take().unwrap().into_path();
+            }
         }
     }
 
@@ -370,6 +390,7 @@ mod test {
             ),
             "Saw error: {dns_error}",
         );
+        dns_server.cleanup_successful();
         logctx.cleanup_successful();
     }
 
@@ -389,29 +410,22 @@ mod test {
             .expect("Error creating localhost resolver");
         let updater = Updater::new(&address_getter, logctx.log.clone());
 
-        let records = HashMap::from([(
-            SRV::Service(ServiceName::Cockroach),
-            vec![(
-                AAAA::Zone(Uuid::new_v4()),
-                SocketAddrV6::new(
-                    Ipv6Addr::from_str("ff::01").unwrap(),
-                    12345,
-                    0,
-                    0,
-                ),
-            )],
-        )]);
-        updater.insert_dns_records(&records).await.unwrap();
+        let mut dns_config = DnsConfigBuilder::new();
+        let ip = Ipv6Addr::from_str("ff::01").unwrap();
+        let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
+        dns_config
+            .service_backend(SRV::Service(ServiceName::Cockroach), &zone, 12345)
+            .unwrap();
+        let dns_config = dns_config.build();
+        updater.dns_initialize(&dns_config).await.unwrap();
 
-        let ip = resolver
+        let found_ip = resolver
             .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(
-            &ip,
-            records[&SRV::Service(ServiceName::Cockroach)][0].1.ip()
-        );
+        assert_eq!(found_ip, ip,);
 
+        dns_server.cleanup_successful();
         logctx.cleanup_successful();
     }
 
@@ -468,28 +482,34 @@ mod test {
         let srv_clickhouse = SRV::Service(ServiceName::Clickhouse);
         let srv_backend = SRV::Backend(BackendName::Crucible, Uuid::new_v4());
 
-        let records = HashMap::from([
-            // Three Cockroach services
-            (
-                srv_crdb.clone(),
-                vec![
-                    (AAAA::Zone(Uuid::new_v4()), cockroach_addrs[0]),
-                    (AAAA::Zone(Uuid::new_v4()), cockroach_addrs[1]),
-                    (AAAA::Zone(Uuid::new_v4()), cockroach_addrs[2]),
-                ],
-            ),
-            // One Clickhouse service
-            (
+        let mut dns_builder = DnsConfigBuilder::new();
+        for db_ip in &cockroach_addrs {
+            let zone =
+                dns_builder.host_zone(Uuid::new_v4(), *db_ip.ip()).unwrap();
+            dns_builder
+                .service_backend(srv_crdb.clone(), &zone, db_ip.port())
+                .unwrap();
+        }
+
+        let zone = dns_builder
+            .host_zone(Uuid::new_v4(), *clickhouse_addr.ip())
+            .unwrap();
+        dns_builder
+            .service_backend(
                 srv_clickhouse.clone(),
-                vec![(AAAA::Zone(Uuid::new_v4()), clickhouse_addr)],
-            ),
-            // One Backend service
-            (
-                srv_backend.clone(),
-                vec![(AAAA::Zone(Uuid::new_v4()), crucible_addr)],
-            ),
-        ]);
-        updater.insert_dns_records(&records).await.unwrap();
+                &zone,
+                clickhouse_addr.port(),
+            )
+            .unwrap();
+
+        let zone =
+            dns_builder.host_zone(Uuid::new_v4(), *crucible_addr.ip()).unwrap();
+        dns_builder
+            .service_backend(srv_backend.clone(), &zone, crucible_addr.port())
+            .unwrap();
+
+        let mut dns_config = dns_builder.build();
+        updater.dns_initialize(&dns_config).await.unwrap();
 
         // Look up Cockroach
         let ip = resolver
@@ -512,21 +532,34 @@ mod test {
             .expect("Should have been able to look up IP address");
         assert_eq!(&ip, crucible_addr.ip());
 
-        // If we remove the AAAA records for two of the CRDB services,
-        // only one will remain.
-        updater
-            .dns_records_delete(&vec![
-                DnsRecordKey { name: records[&srv_crdb][0].0.to_string() },
-                DnsRecordKey { name: records[&srv_crdb][1].0.to_string() },
-            ])
-            .await
-            .expect("Should have been able to delete record");
-        let ip = resolver
+        // If we deploy a new generation that removes all records, then we don't
+        // find anything any more.
+        dns_config.generation += 1;
+        dns_config.zones[0].records = Vec::new();
+        updater.dns_initialize(&dns_config).await.unwrap();
+
+        // If we remove the records for all services, we won't find them any
+        // more.  (e.g., there's no hidden caching going on)
+        let error = resolver
             .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
             .await
-            .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, cockroach_addrs[2].ip());
+            .expect_err("unexpectedly found records");
+        assert_matches!(
+            error,
+            ResolveError::Resolve(error)
+                if matches!(error.kind(),
+                    trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
+                )
+        );
 
+        // If we remove the zone altogether, we'll get a different resolution
+        // error because the DNS server is no longer authoritative for this
+        // zone.
+        dns_config.generation += 1;
+        dns_config.zones = Vec::new();
+        updater.dns_initialize(&dns_config).await.unwrap();
+
+        dns_server.cleanup_successful();
         logctx.cleanup_successful();
     }
 
@@ -546,41 +579,36 @@ mod test {
         let updater = Updater::new(&address_getter, logctx.log.clone());
 
         // Insert a record, observe that it exists.
+        let mut dns_builder = DnsConfigBuilder::new();
+        let ip1 = Ipv6Addr::from_str("ff::01").unwrap();
+        let zone = dns_builder.host_zone(Uuid::new_v4(), ip1).unwrap();
         let srv_crdb = SRV::Service(ServiceName::Cockroach);
-        let mut records = HashMap::from([(
-            srv_crdb.clone(),
-            vec![(
-                AAAA::Zone(Uuid::new_v4()),
-                SocketAddrV6::new(
-                    Ipv6Addr::from_str("ff::01").unwrap(),
-                    12345,
-                    0,
-                    0,
-                ),
-            )],
-        )]);
-        updater.insert_dns_records(&records).await.unwrap();
-        let ip = resolver
+        dns_builder.service_backend(srv_crdb.clone(), &zone, 12345).unwrap();
+        let dns_config = dns_builder.build();
+        updater.dns_initialize(&dns_config).await.unwrap();
+        let found_ip = resolver
             .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, records[&srv_crdb][0].1.ip());
+        assert_eq!(found_ip, ip1);
 
         // If we insert the same record with a new address, it should be
         // updated.
-        records.get_mut(&srv_crdb).unwrap()[0].1 = SocketAddrV6::new(
-            Ipv6Addr::from_str("ee::02").unwrap(),
-            54321,
-            0,
-            0,
-        );
-        updater.insert_dns_records(&records).await.unwrap();
-        let ip = resolver
+        let mut dns_builder = DnsConfigBuilder::new();
+        let ip2 = Ipv6Addr::from_str("ee::02").unwrap();
+        let zone = dns_builder.host_zone(Uuid::new_v4(), ip2).unwrap();
+        let srv_crdb = SRV::Service(ServiceName::Cockroach);
+        dns_builder.service_backend(srv_crdb.clone(), &zone, 54321).unwrap();
+        let mut dns_config = dns_builder.build();
+        dns_config.generation += 1;
+        updater.dns_initialize(&dns_config).await.unwrap();
+        let found_ip = resolver
             .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, records[&srv_crdb][0].1.ip());
+        assert_eq!(found_ip, ip2);
 
+        dns_server.cleanup_successful();
         logctx.cleanup_successful();
     }
 }

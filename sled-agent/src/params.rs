@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
     CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
     OXIMETER_PORT,
@@ -299,22 +298,6 @@ pub struct DatasetEnsureBody {
 
 // XXX-dap can we get rid of this now that we're constructing DNS separately?
 impl DatasetEnsureBody {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    pub fn srv(&self) -> SRV {
-        match self.dataset_kind {
-            DatasetKind::Crucible => {
-                SRV::Backend(BackendName::Crucible, self.id)
-            }
-            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
-            DatasetKind::CockroachDb { .. } => {
-                SRV::Service(ServiceName::Cockroach)
-            }
-        }
-    }
-
     pub fn address(&self) -> SocketAddrV6 {
         self.address
     }
@@ -454,31 +437,8 @@ pub struct ServiceZoneRequest {
     pub services: Vec<ServiceType>,
 }
 
+// XXX-dap can we remove this?
 impl ServiceZoneRequest {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    // XXX: any reason this can't just be service.to_string()?
-    pub fn srv(&self, service: &ServiceType) -> SRV {
-        match service {
-            ServiceType::InternalDns { .. } => {
-                SRV::Service(ServiceName::InternalDNS)
-            }
-            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
-            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
-            ServiceType::ManagementGatewayService => {
-                SRV::Service(ServiceName::ManagementGatewayService)
-            }
-            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
-            ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
-            ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
-            ServiceType::CruciblePantry { .. } => {
-                SRV::Service(ServiceName::CruciblePantry)
-            }
-        }
-    }
-
     pub fn address(&self, service: &ServiceType) -> Option<SocketAddrV6> {
         match service {
             ServiceType::InternalDns { server_address, .. } => {
