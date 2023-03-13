@@ -191,6 +191,7 @@ impl PortManager {
 
     pub fn set_virtual_nic_host(
         &self,
+        _interface_id: Uuid,
         _mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ignoring virtual NIC mapping");
@@ -199,6 +200,7 @@ impl PortManager {
 
     pub fn unset_virtual_nic_host(
         &self,
+        _interface_id: Uuid,
         _mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ignoring unset of virtual NIC mapping");

@@ -242,27 +242,33 @@ impl InstanceManager {
 
     pub async fn set_virtual_nic_host(
         &self,
+        interface_id: Uuid,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(
             &self.inner.log,
             "Mapping virtual NIC to physical host";
+            "interface_id" => ?interface_id,
             "mapping" => ?&mapping,
         );
-        self.inner.port_manager.set_virtual_nic_host(mapping)?;
+        self.inner.port_manager.set_virtual_nic_host(interface_id, mapping)?;
         Ok(())
     }
 
     pub async fn unset_virtual_nic_host(
         &self,
+        interface_id: Uuid,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(
             &self.inner.log,
             "Unmapping virtual NIC to physical host";
+            "interface_id" => ?interface_id,
             "mapping" => ?&mapping,
         );
-        self.inner.port_manager.unset_virtual_nic_host(mapping)?;
+        self.inner
+            .port_manager
+            .unset_virtual_nic_host(interface_id, mapping)?;
         Ok(())
     }
 }

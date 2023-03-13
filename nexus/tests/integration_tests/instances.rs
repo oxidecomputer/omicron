@@ -9,8 +9,8 @@ use super::metrics::query_for_latest_metric;
 use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
-use nexus_test_interface::NexusServer;
 use nexus_db_queries::context::OpContext;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -3184,6 +3184,16 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
             .await;
 
+    let nics_url =
+        format!("/v1/network-interfaces?instance={}", instance.identity.id,);
+
+    let nics = objects_list_page_authz::<NetworkInterface>(client, &nics_url)
+        .await
+        .items;
+
+    // The default config is one NIC
+    assert_eq!(nics.len(), 1);
+
     // Validate that every sled (except the instance's sled) now has a V2P
     // mapping for this instance
     let apictx = &cptestctx.server.apictx();
@@ -3206,6 +3216,10 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         let v2p_mappings = sled_agent.v2p_mappings.lock().await;
         if sled_agent.id != db_instance.runtime().sled_id {
             assert!(!v2p_mappings.is_empty());
+            assert!(!v2p_mappings
+                .get(&nics[0].identity.id)
+                .unwrap()
+                .is_empty());
         } else {
             assert!(v2p_mappings.is_empty());
         }
@@ -3226,7 +3240,12 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     // Validate that every sled no longer has the V2P mapping for this instance
     for sled_agent in &sled_agents {
         let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-        assert!(v2p_mappings.is_empty());
+        if sled_agent.id != db_instance.runtime().sled_id {
+            assert!(!v2p_mappings.is_empty());
+            assert!(v2p_mappings.get(&nics[0].identity.id).unwrap().is_empty());
+        } else {
+            assert!(v2p_mappings.is_empty());
+        }
     }
 }
 

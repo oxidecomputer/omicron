@@ -10,33 +10,6 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/del-v2p": {
-      "put": {
-        "summary": "Delete a mapping from a virtual NIC to a physical host",
-        "operationId": "del_v2p",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
@@ -298,10 +271,47 @@
         }
       }
     },
-    "/set-v2p": {
+    "/update": {
+      "post": {
+        "operationId": "update_artifact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArtifactId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v2p/{interface_id}": {
       "put": {
         "summary": "Create a mapping from a virtual NIC to a physical host",
         "operationId": "set_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -323,16 +333,26 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/update": {
-      "post": {
-        "operationId": "update_artifact",
+      },
+      "delete": {
+        "summary": "Delete a mapping from a virtual NIC to a physical host",
+        "operationId": "del_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateArtifactId"
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -1414,6 +1434,10 @@
         "description": "Information required to construct a virtual network interface for a guest",
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "ip": {
             "type": "string",
             "format": "ip"
@@ -1440,6 +1464,7 @@
           }
         },
         "required": [
+          "id",
           "ip",
           "mac",
           "name",

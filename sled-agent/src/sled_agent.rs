@@ -598,22 +598,24 @@ impl SledAgent {
 
     pub async fn set_virtual_nic_host(
         &self,
+        interface_id: Uuid,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .set_virtual_nic_host(mapping)
+            .set_virtual_nic_host(interface_id, mapping)
             .await
             .map_err(Error::from)
     }
 
     pub async fn unset_virtual_nic_host(
         &self,
+        interface_id: Uuid,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .unset_virtual_nic_host(mapping)
+            .unset_virtual_nic_host(interface_id, mapping)
             .await
             .map_err(Error::from)
     }

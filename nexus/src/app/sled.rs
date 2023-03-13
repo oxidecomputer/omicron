@@ -301,12 +301,15 @@ impl super::Nexus {
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
                     client
-                        .set_v2p(&SetVirtualNetworkInterfaceHost {
-                            virtual_ip: nic.ip,
-                            virtual_mac: nic.mac.clone(),
-                            physical_host_ip,
-                            vni: nic.vni.clone(),
-                        })
+                        .set_v2p(
+                            &nic.id,
+                            &SetVirtualNetworkInterfaceHost {
+                                virtual_ip: nic.ip,
+                                virtual_mac: nic.mac.clone(),
+                                physical_host_ip,
+                                vni: nic.vni.clone(),
+                            },
+                        )
                         .await?;
                 }
             }
@@ -374,12 +377,15 @@ impl super::Nexus {
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
                     client
-                        .del_v2p(&SetVirtualNetworkInterfaceHost {
-                            virtual_ip: nic.ip,
-                            virtual_mac: nic.mac.clone(),
-                            physical_host_ip,
-                            vni: nic.vni.clone(),
-                        })
+                        .del_v2p(
+                            &nic.id,
+                            &SetVirtualNetworkInterfaceHost {
+                                virtual_ip: nic.ip,
+                                virtual_mac: nic.mac.clone(),
+                                physical_host_ip,
+                                vni: nic.vni.clone(),
+                            },
+                        )
                         .await?;
                 }
             }

@@ -51,7 +51,7 @@ pub struct SledAgent {
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
-    pub v2p_mappings: Mutex<Vec<SetVirtualNetworkInterfaceHost>>,
+    pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -138,7 +138,7 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
-            v2p_mappings: Mutex::new(Vec::new()),
+            v2p_mappings: Mutex::new(HashMap::new()),
         })
     }
 
@@ -458,18 +458,23 @@ impl SledAgent {
 
     pub async fn set_virtual_nic_host(
         &self,
+        interface_id: Uuid,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        self.v2p_mappings.lock().await.push(mapping.clone());
+        let mut v2p_mappings = self.v2p_mappings.lock().await;
+        let vec = v2p_mappings.entry(interface_id).or_default();
+        vec.push(mapping.clone());
         Ok(())
     }
 
     pub async fn unset_virtual_nic_host(
         &self,
+        interface_id: Uuid,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
-        v2p_mappings.retain(|x| x != mapping);
+        let vec = v2p_mappings.entry(interface_id).or_default();
+        vec.retain(|x| x != mapping);
         Ok(())
     }
 }

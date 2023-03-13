@@ -11,6 +11,7 @@ use std::net::IpAddr;
 /// Information required to construct a virtual network interface for a guest
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkInterface {
+    pub id: uuid::Uuid,
     pub name: external::Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
