@@ -34,26 +34,18 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
 pub enum TargetCommand {
     /// Creates a new build target, and sets it as "active".
     Create {
-        #[clap(
-            short,
-            long,
-            default_value_t = crate::target::Image::Standard,
-        )]
+        #[clap(short, long, default_value = "standard")]
         image: crate::target::Image,
 
         #[clap(
             short,
             long,
-            default_value_t = crate::target::Machine::NonGimlet,
+            default_value_if("image", "standard", "nongimlet")
         )]
-        machine: crate::target::Machine,
+        machine: Option<crate::target::Machine>,
 
-        #[clap(
-            short,
-            long,
-            default_value_t = crate::target::Switch::Stub,
-        )]
-        switch: crate::target::Switch,
+        #[clap(short, long, default_value_if("image", "standard", "stub"))]
+        switch: Option<crate::target::Switch>,
     },
     /// List all existing targets
     List,

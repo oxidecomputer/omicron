@@ -47,17 +47,42 @@ pub enum Switch {
 /// A strongly-typed variant of [Target].
 #[derive(Clone, Debug)]
 pub struct KnownTarget {
-    pub image: Image,
-    pub machine: Machine,
-    pub switch: Switch,
+    image: Image,
+    machine: Option<Machine>,
+    switch: Option<Switch>,
+}
+
+impl KnownTarget {
+    pub fn new(
+        image: Image,
+        machine: Option<Machine>,
+        switch: Option<Switch>,
+    ) -> Result<Self> {
+        if matches!(image, Image::Trampoline) {
+            if machine.is_some() {
+                bail!("Trampoline image does not execute the sled agent (do not pass 'machine' flag)");
+            }
+            if switch.is_some() {
+                bail!("Trampoline image does not contain switch zone (do not pass 'switch' flag)");
+            }
+        }
+
+        if !matches!(machine, Some(Machine::Gimlet))
+            && matches!(switch, Some(Switch::Asic))
+        {
+            bail!("'switch=asic' is only valid with 'machine=gimlet'");
+        }
+
+        Ok(Self { image, machine, switch })
+    }
 }
 
 impl Default for KnownTarget {
     fn default() -> Self {
         KnownTarget {
             image: Image::Standard,
-            machine: Machine::NonGimlet,
-            switch: Switch::Stub,
+            machine: Some(Machine::NonGimlet),
+            switch: Some(Switch::Stub),
         }
     }
 }
@@ -66,8 +91,12 @@ impl From<KnownTarget> for Target {
     fn from(kt: KnownTarget) -> Target {
         let mut map = BTreeMap::new();
         map.insert("image".to_string(), kt.image.to_string());
-        map.insert("machine".to_string(), kt.machine.to_string());
-        map.insert("switch".to_string(), kt.switch.to_string());
+        if let Some(machine) = kt.machine {
+            map.insert("machine".to_string(), machine.to_string());
+        }
+        if let Some(switch) = kt.switch {
+            map.insert("switch".to_string(), switch.to_string());
+        }
         Target(map)
     }
 }
@@ -85,18 +114,19 @@ impl std::str::FromStr for KnownTarget {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let target = Target::from_str(s)?;
 
-        let mut parsed = Self::default();
+        let KnownTarget { mut image, mut machine, mut switch } =
+            Self::default();
 
         for (k, v) in target.0.into_iter() {
             match k.as_str() {
                 "image" => {
-                    parsed.image = v.parse()?;
+                    image = v.parse()?;
                 }
                 "machine" => {
-                    parsed.machine = v.parse()?;
+                    machine = Some(v.parse()?);
                 }
                 "switch" => {
-                    parsed.switch = v.parse()?;
+                    switch = Some(v.parse()?);
                 }
                 _ => {
                     bail!(
@@ -111,6 +141,6 @@ impl std::str::FromStr for KnownTarget {
                 }
             }
         }
-        Ok(parsed)
+        Ok(KnownTarget::new(image, machine, switch)?)
     }
 }

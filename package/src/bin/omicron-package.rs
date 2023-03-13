@@ -177,11 +177,11 @@ async fn do_target(
     tokio::fs::create_dir_all(&target_dir).await?;
     match subcommand {
         TargetCommand::Create { image, machine, switch } => {
-            let target = KnownTarget {
-                image: image.clone(),
-                machine: machine.clone(),
-                switch: switch.clone(),
-            };
+            let target = KnownTarget::new(
+                image.clone(),
+                machine.clone(),
+                switch.clone(),
+            )?;
 
             let path = get_single_target(&target_dir, name).await?;
             tokio::fs::write(&path, Target::from(target).to_string()).await?;
