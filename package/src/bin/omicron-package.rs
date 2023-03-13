@@ -186,7 +186,7 @@ async fn do_target(
             let path = get_single_target(&target_dir, name).await?;
             tokio::fs::write(&path, Target::from(target).to_string()).await?;
 
-            replace_link(&name, &target_dir).await?;
+            replace_active_link(&name, &target_dir).await?;
 
             println!("Created new build target '{name}' and set it as active");
         }
@@ -214,7 +214,7 @@ async fn do_target(
         }
         TargetCommand::Set => {
             let _ = get_single_target(&target_dir, name).await?;
-            replace_link(&name, &target_dir).await?;
+            replace_active_link(&name, &target_dir).await?;
             println!("Set build target '{name}' as active");
         }
         TargetCommand::Delete => {
@@ -240,7 +240,7 @@ async fn get_single_target(
     Ok(target_dir.as_ref().join(name))
 }
 
-async fn replace_link(
+async fn replace_active_link(
     src: impl AsRef<Path>,
     target_dir: impl AsRef<Path>,
 ) -> Result<()> {

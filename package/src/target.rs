@@ -90,14 +90,13 @@ impl std::str::FromStr for KnownTarget {
         for (k, v) in target.0.into_iter() {
             match k.as_str() {
                 "image" => {
-                    parsed.image = <Image as std::str::FromStr>::from_str(&v)?
+                    parsed.image = v.parse()?;
                 }
                 "machine" => {
-                    parsed.machine =
-                        <Machine as std::str::FromStr>::from_str(&v)?
+                    parsed.machine = v.parse()?;
                 }
                 "switch" => {
-                    parsed.switch = <Switch as std::str::FromStr>::from_str(&v)?
+                    parsed.switch = v.parse()?;
                 }
                 _ => {
                     bail!(
