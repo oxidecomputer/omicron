@@ -3694,7 +3694,7 @@ async fn disk_bulk_write_import_start_v1(
             project_selector: query.project_selector,
         };
 
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         nexus.disk_manual_import_start(&opctx, &disk_selector).await?;
 
@@ -3727,7 +3727,7 @@ async fn disk_bulk_write_import_v1(
             project_selector: query.project_selector,
         };
 
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         nexus.disk_manual_import(&opctx, &disk_selector, params).await?;
 
@@ -3758,7 +3758,7 @@ async fn disk_bulk_write_import_stop_v1(
             project_selector: query.project_selector,
         };
 
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         nexus.disk_manual_import_stop(&opctx, &disk_selector).await?;
 
@@ -3791,7 +3791,7 @@ async fn disk_import_blocks_from_url_v1(
             project_selector: query.project_selector,
         };
 
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         nexus
             .import_blocks_from_url_for_disk(&opctx, &disk_selector, params)
@@ -3819,7 +3819,7 @@ async fn disk_finalize_import_v1(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
 
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         nexus.disk_finalize_import(&opctx, path.disk, query).await?;
 

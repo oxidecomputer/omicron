@@ -11,7 +11,6 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
 use crate::app::sagas::snapshot_create;
-use crate::context::OpContext;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::retry_until_known_result;
@@ -140,7 +139,10 @@ async fn sfd_set_finalizing_state(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -188,7 +190,10 @@ async fn sfd_set_finalizing_state_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -251,7 +256,10 @@ async fn sfd_get_pantry_address(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., db_disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -305,7 +313,10 @@ async fn sfd_clear_pantry_address(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     info!(log, "setting disk {} pantry to None", params.disk_id);
 
@@ -329,7 +340,10 @@ async fn sfd_set_detached_state(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())

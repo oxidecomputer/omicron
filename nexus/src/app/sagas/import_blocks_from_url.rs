@@ -10,7 +10,6 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
-use crate::context::OpContext;
 use crate::db::lookup::LookupPath;
 use crate::retry_until_known_result;
 use crate::{authn, authz};
@@ -89,7 +88,10 @@ async fn sibfu_get_importing_state(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -141,7 +143,10 @@ async fn sibfu_get_importing_state_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -204,7 +209,10 @@ async fn sibfu_get_pantry_address(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., db_disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -319,7 +327,10 @@ async fn sibfu_get_import_ready_state(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())

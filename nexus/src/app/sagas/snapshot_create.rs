@@ -743,7 +743,10 @@ async fn ssc_get_pantry_address(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     // If the disk is already attached to a Pantry, use that, otherwise get a
     // random one. Return boolean indicating if additional saga nodes need to

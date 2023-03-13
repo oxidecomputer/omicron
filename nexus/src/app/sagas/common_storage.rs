@@ -7,7 +7,6 @@
 use super::*;
 
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
@@ -20,6 +19,7 @@ use crucible_agent_client::{
 use futures::StreamExt;
 use internal_dns_names::ServiceName;
 use internal_dns_names::SRV;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
 use slog::Logger;
