@@ -9,17 +9,27 @@ use crate::opte::Vni;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
 use std::sync::Arc;
+use uuid::Uuid;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PortType {
     /// Port attached to a guest instance.
-    Guest {
-        /// vNIC slot for the guest connected to this port.
-        slot: u8,
-    },
+    Guest { id: Uuid },
     /// Port created for a service zone.
-    Service,
+    Service { id: Uuid },
 }
+
+impl PortType {
+    pub fn id(&self) -> Uuid {
+        match self {
+            PortType::Guest { id } => *id,
+            PortType::Service { id } => *id,
+        }
+    }
+}
+
+/// Ports are identified by their type (which includes their ID) and slot number.
+pub type PortKey = (PortType, u8);
 
 #[derive(Debug)]
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
@@ -32,6 +42,8 @@ struct PortInner {
     ip: IpAddr,
     // VPC-private MAC address
     mac: MacAddr6,
+    // The index of this port for either a guest instance or a service zone.
+    slot: u8,
     // Geneve VNI for the VPC
     vni: Vni,
     // Information about the virtual gateway, aka OPTE
@@ -104,6 +116,7 @@ impl Port {
         port_type: PortType,
         ip: IpAddr,
         mac: MacAddr6,
+        slot: u8,
         vni: Vni,
         gateway: Gateway,
         vnic: String,
@@ -115,12 +128,21 @@ impl Port {
                 port_type,
                 ip,
                 mac,
+                slot,
                 vni,
                 gateway,
                 vnic,
                 externally_visible,
             }),
         }
+    }
+
+    pub fn key(&self) -> PortKey {
+        (self.inner.port_type, self.inner.slot)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.inner.name
     }
 
     pub fn ip(&self) -> IpAddr {
@@ -143,11 +165,8 @@ impl Port {
         &self.inner.vnic
     }
 
-    pub fn slot(&self) -> Option<u8> {
-        match self.inner.port_type {
-            PortType::Guest { slot } => Some(slot),
-            PortType::Service => None,
-        }
+    pub fn slot(&self) -> u8 {
+        self.inner.slot
     }
 
     pub fn externally_visible(&self) -> bool {

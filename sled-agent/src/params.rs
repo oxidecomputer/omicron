@@ -16,10 +16,10 @@ use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
-pub use illumos_utils::opte::params::NetworkInterface;
 pub use illumos_utils::opte::params::SourceNatConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+pub use omicron_common::api::internal::sled_agent::NetworkInterface;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]

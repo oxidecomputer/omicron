@@ -15,6 +15,7 @@ cfg_if::cfg_if! {
 pub mod params;
 mod port;
 pub use port::Port;
+pub use port::PortKey;
 pub use port::PortType;
 
 use ipnetwork::IpNetwork;

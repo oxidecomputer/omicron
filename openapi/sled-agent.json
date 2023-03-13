@@ -1357,7 +1357,7 @@
         "maxLength": 63
       },
       "NetworkInterface": {
-        "description": "Information required to construct a virtual network interface for a guest",
+        "description": "Information required to construct a virtual network interface for a guest instance or service zone.",
         "type": "object",
         "properties": {
           "ip": {

@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 ipnetwork.workspace = true
 lazy_static.workspace = true
+macaddr.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 

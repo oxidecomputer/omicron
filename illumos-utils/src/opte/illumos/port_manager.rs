@@ -15,15 +15,14 @@ use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
+use crate::opte::PortKey;
 use crate::opte::PortType;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
-use ipnetwork::Ipv4Network;
 use macaddr::MacAddr6;
 use opte_ioctl::OpteHdl;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::IpCfg;
-use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::Ipv4PrefixLen;
@@ -75,8 +74,8 @@ struct PortManagerInner {
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of all ports, keyed on the instance/service Uuid and the port name.
-    ports: Mutex<BTreeMap<(Uuid, String), Port>>,
+    // Map of all ports.
+    ports: Mutex<BTreeMap<PortKey, Port>>,
 }
 
 impl PortManagerInner {
@@ -100,7 +99,7 @@ impl PortManagerInner {
     // advertise as having the guest's MAC address.
     fn update_secondary_macs(
         &self,
-        ports: &mut MutexGuard<'_, BTreeMap<(Uuid, String), Port>>,
+        ports: &mut MutexGuard<'_, BTreeMap<PortKey, Port>>,
     ) -> Result<(), Error> {
         let secondary_macs = ports
             .values()
@@ -172,29 +171,114 @@ impl PortManager {
 
     fn create_port_inner(
         &self,
-        id: Uuid,
         port_type: PortType,
         port_name: Option<String>,
-        vpc_cfg: VpcCfg,
+        nic: &NetworkInterface,
+        source_nat: Option<SourceNatConfig>,
+        external_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
-        externally_visible: bool,
     ) -> Result<(Port, PortTicket), Error> {
-        let vni = vpc_cfg.vni;
-        let mac = MacAddr6::from(vpc_cfg.guest_mac.bytes());
-        let (private_ip, vpc_subnet) = match vpc_cfg.ipv4_cfg() {
-            Some(cfg) => (
-                IpAddr::V4(cfg.private_ip.into()),
-                IpCidr::from(cfg.vpc_subnet),
+        // TODO-completeness: Remove IPv4 restrictions once OPTE supports
+        // virtual IPv6 networks.
+        let private_ip = match nic.ip {
+            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
+            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
+                String::from("IPv6 is not yet supported"),
+            )),
+        }?;
+
+        // Argument checking and conversions into OPTE data types.
+        let subnet = IpNetwork::from(nic.subnet);
+        let mac = *nic.mac;
+        let vni = Vni::new(nic.vni).unwrap();
+        let (vpc_subnet, gateway) = match subnet {
+            IpNetwork::V4(net) => (
+                Ipv4Cidr::new(
+                    net.ip().into(),
+                    Ipv4PrefixLen::new(net.prefix()).unwrap(),
+                ),
+                Gateway::from_subnet(&subnet),
             ),
-            None => {
-                // TODO-completeness: IPv6
-                return Err(opte_ioctl::Error::InvalidArgument(
-                    "IPv6 not supported".to_string(),
-                )
+            IpNetwork::V6(_) => {
+                return Err(opte_ioctl::Error::InvalidArgument(String::from(
+                    "IPv6 is not yet supported",
+                ))
                 .into());
             }
         };
-        let gateway = Gateway::from_subnet(&vpc_subnet.into());
+        let gateway_ip = match gateway.ip {
+            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
+            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
+                String::from("IPv6 is not yet supported"),
+            )),
+        }?;
+        let boundary_services = default_boundary_services();
+
+        // Describe the source NAT for this instance.
+        let snat = match source_nat {
+            Some(snat) => {
+                let external_ip = match snat.ip {
+                    IpAddr::V4(ip) => ip.into(),
+                    IpAddr::V6(_) => {
+                        return Err(opte_ioctl::Error::InvalidArgument(
+                            String::from("IPv6 is not yet supported for external addresses")
+                        ).into());
+                    }
+                };
+                let ports = snat.first_port..=snat.last_port;
+                Some(SNat4Cfg { external_ip, ports })
+            }
+            None => None,
+        };
+
+        // Describe the external IP addresses for this instance/service.
+        //
+        // Note that we're currently only taking the first address, which is all
+        // that OPTE supports. The array is guaranteed to be limited by Nexus.
+        // See https://github.com/oxidecomputer/omicron/issues/1467
+        // See https://github.com/oxidecomputer/opte/issues/196
+        //
+        // In the case of a service we explicitly only pass in a single
+        // address, see `create_svc_port`.
+        let external_ip = match external_ips.get(0) {
+            Some(IpAddr::V4(ipv4)) => Some((*ipv4).into()),
+            Some(IpAddr::V6(_)) => {
+                return Err(opte_ioctl::Error::InvalidArgument(String::from(
+                    "IPv6 is not yet supported for external addresses",
+                ))
+                .into());
+            }
+            None => None,
+        };
+        let externally_visible = external_ip.is_some();
+
+        // TODO-completeness: Add support for IPv6.
+        let vpc_cfg = VpcCfg {
+            ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
+                vpc_subnet,
+                private_ip,
+                gateway_ip,
+                snat,
+                external_ips: external_ip,
+            }),
+            guest_mac: MacAddr::from(mac.into_array()),
+            gateway_mac: MacAddr::from(gateway.mac.into_array()),
+            vni,
+            phys_ip: self.inner.underlay_ip.into(),
+            boundary_services,
+            // TODO-remove: Part of the external IP hack.
+            //
+            // NOTE: This value of this flag is irrelevant, since the driver
+            // always overwrites it. The field itself is used in the `oxide-vpc`
+            // code though, to determine how to set up the ARP layer, which is
+            // why it's still here.
+            proxy_arp_enable: true,
+            phys_gw_mac: Some(MacAddr::from(
+                self.inner.gateway_mac.into_array(),
+            )),
+            // TODO-completeness (#2153): Plumb domain search list
+            domain_list: vec![],
+        };
 
         let port_name =
             port_name.unwrap_or_else(|| self.inner.next_port_name());
@@ -289,17 +373,18 @@ impl PortManager {
         };
 
         // 3. Create the Port object.
-        let ticket = PortTicket::new(id, port_name.clone(), self.inner.clone());
         let port = Port::new(
             port_name.clone(),
             port_type,
-            private_ip,
+            nic.ip,
             mac,
+            nic.slot,
             vni,
             gateway,
             vnic,
             externally_visible,
         );
+        let ticket = PortTicket::new(port.key(), self.inner.clone());
 
         // Update the secondary MAC of the underlay.
         //
@@ -310,11 +395,11 @@ impl PortManager {
         // error with `?`. We need the lock guard to be dropped first, so that
         // the lock acquired when `ticket` is dropped is guaranteed to be free.
         let mut ports = self.inner.ports.lock().unwrap();
-        let old = ports.insert((id, port_name.clone()), port.clone());
+        let old = ports.insert(port.key(), port.clone());
         assert!(
             old.is_none(),
-            "Duplicate OPTE port detected: id = {}, port_name = {}",
-            id,
+            "Duplicate OPTE port detected: key = {:?}, port_name = {}",
+            port.key(),
             port_name,
         );
         self.inner.update_secondary_macs(&mut ports)?;
@@ -324,8 +409,8 @@ impl PortManager {
         // VPC subnet.
         let route = AddRouterEntryReq {
             port_name: port_name.clone(),
-            dest: vpc_subnet,
-            target: RouterTarget::VpcSubnet(vpc_subnet),
+            dest: vpc_subnet.into(),
+            target: RouterTarget::VpcSubnet(vpc_subnet.into()),
         };
         hdl.add_router_entry(&route)?;
         debug!(
@@ -380,199 +465,33 @@ impl PortManager {
         instance_id: Uuid,
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
-        external_ips: Option<Vec<IpAddr>>,
+        external_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
-        // TODO-completeness: Remove IPv4 restrictions once OPTE supports
-        // virtual IPv6 networks.
-        let private_ip = match nic.ip {
-            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported for guest interfaces"),
-            )),
-        }?;
-
-        // Argument checking and conversions into OPTE data types.
-        let subnet = IpNetwork::from(nic.subnet);
-        let mac = *nic.mac;
-        let vni = Vni::new(nic.vni).unwrap();
-        let (opte_subnet, gateway) = match subnet {
-            IpNetwork::V4(net) => (
-                Ipv4Cidr::new(
-                    net.ip().into(),
-                    Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                ),
-                Gateway::from_subnet(&subnet),
-            ),
-            IpNetwork::V6(_) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for guest interfaces",
-                ))
-                .into());
-            }
-        };
-        let gateway_ip = match gateway.ip {
-            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported for guest interfaces"),
-            )),
-        }?;
-        let boundary_services = default_boundary_services();
-
-        // Describe the source NAT for this instance.
-        let snat = match source_nat {
-            Some(snat) => {
-                let external_ip = match snat.ip {
-                    IpAddr::V4(ip) => ip.into(),
-                    IpAddr::V6(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("IPv6 is not yet supported for external addresses")
-                        ).into());
-                    }
-                };
-                let ports = snat.first_port..=snat.last_port;
-                Some(SNat4Cfg { external_ip, ports })
-            }
-            None => None,
-        };
-
-        // Describe the external IP addresses for this instance.
-        //
-        // Note that we're currently only taking the first address, which is all
-        // that OPTE supports. The array is guaranteed to be limited by Nexus.
-        // See https://github.com/oxidecomputer/omicron/issues/1467
-        // See https://github.com/oxidecomputer/opte/issues/196
-        let external_ip = match external_ips {
-            Some(ref ips) if !ips.is_empty() => {
-                match ips[0] {
-                    IpAddr::V4(ipv4) => Some(ipv4.into()),
-                    IpAddr::V6(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("IPv6 is not yet supported for external addresses")
-                        ).into());
-                    }
-                }
-            }
-            _ => None,
-        };
-
-        // TODO-completeness: Add support for IPv6.
-        let vpc_cfg = VpcCfg {
-            ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
-                vpc_subnet: opte_subnet,
-                private_ip,
-                gateway_ip,
-                snat,
-                external_ips: external_ip,
-            }),
-            guest_mac: MacAddr::from(mac.into_array()),
-            gateway_mac: MacAddr::from(gateway.mac.into_array()),
-            vni,
-            phys_ip: self.inner.underlay_ip.into(),
-            boundary_services,
-            // TODO-remove: Part of the external IP hack.
-            //
-            // NOTE: This value of this flag is irrelevant, since the driver
-            // always overwrites it. The field itself is used in the `oxide-vpc`
-            // code though, to determine how to set up the ARP layer, which is
-            // why it's still here.
-            proxy_arp_enable: true,
-            phys_gw_mac: Some(MacAddr::from(
-                self.inner.gateway_mac.into_array(),
-            )),
-            // TODO-completeness (#2153): Plumb domain search list
-            domain_list: vec![],
-        };
-
         self.create_port_inner(
-            instance_id,
-            PortType::Guest { slot: nic.slot },
+            PortType::Guest { id: instance_id },
             None,
-            vpc_cfg,
+            nic,
+            source_nat,
+            external_ips,
             firewall_rules,
-            external_ip.is_some(),
         )
     }
 
     pub fn create_svc_port(
         &self,
         svc_id: Uuid,
-        svc_name: &str,
-        mac: MacAddr6,
+        nic: &NetworkInterface,
         external_ip: IpAddr,
-        vni: u32,
     ) -> Result<(Port, PortTicket), Error> {
-        // TODO: Assume each service zone has a single port.
-        let port_name = format!("{}_{}0", XDE_LINK_PREFIX, svc_name);
-
-        // TODO: Arbitrary subnet, should come from a "service" VPC.
-        let vpc_subnet: Ipv4Network = "10.0.0.0/24".parse().unwrap();
-        // Use first non-reserved IP, see RFD 21, section 2.2, table 1.
-        let private_ip = vpc_subnet.iter().nth(5).unwrap();
-        let gateway = Gateway::from_subnet(&vpc_subnet.into());
-
-        // Convert to OPTE types
-        let vpc_subnet = Ipv4Cidr::from(vpc_subnet);
-        let private_ip = private_ip.into();
-        let gateway_ip = match gateway.ip {
-            IpAddr::V4(ip) => ip.into(),
-            IpAddr::V6(_) => unreachable!("expected IPv4 gateway"),
-        };
-        let gateway_mac = MacAddr::from(gateway.mac.into_array());
-        let guest_mac = MacAddr::from(mac.into_array());
-        let external_ip = match external_ip {
-            IpAddr::V4(ip) => ip.into(),
-            IpAddr::V6(_) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for external addresses",
-                ))
-                .into());
-            }
-        };
-
-        let snat = SNat4Cfg {
-            external_ip,
-            // TODO: Assumes IP is exlusive to this service.
-            ports: 0..=65535,
-        };
-
-        // TODO: Return error for invalid VNI.
-        let vni = Vni::new(vni).unwrap();
-
-        let vpc_cfg = VpcCfg {
-            ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
-                vpc_subnet,
-                private_ip,
-                gateway_ip,
-                snat: Some(snat),
-                external_ips: Some(external_ip),
-            }),
-            guest_mac,
-            gateway_mac,
-            vni,
-            phys_ip: self.inner.underlay_ip.into(),
-            boundary_services: default_boundary_services(),
-            // TODO-remove: Part of the external IP hack.
-            //
-            // NOTE: This value of this flag is irrelevant, since the driver
-            // always overwrites it. The field itself is used in the `oxide-vpc`
-            // code though, to determine how to set up the ARP layer, which is
-            // why it's still here.
-            proxy_arp_enable: true,
-            phys_gw_mac: Some(MacAddr::from(
-                self.inner.gateway_mac.into_array(),
-            )),
-            // TODO-completeness (#2153): Plumb domain search list
-            domain_list: vec![],
-        };
-
+        let port_name = format!("{}_{}{}", XDE_LINK_PREFIX, nic.name, nic.slot);
         self.create_port_inner(
-            svc_id,
-            PortType::Service,
+            PortType::Service { id: svc_id },
             Some(port_name),
-            vpc_cfg,
+            nic,
+            None,
+            &[external_ip],
             &[],
-            /* externally_visible= */ true,
         )
     }
 
@@ -581,7 +500,7 @@ impl PortManager {
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-        for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
+        for (_, port) in self.inner.ports.lock().unwrap().iter() {
             let mut rules =
                 opte_firewall_rules(rules, &port.vni(), &port.mac());
             // TODO-remove: This is part of the external IP hack.
@@ -593,22 +512,24 @@ impl PortManager {
                     .parse()
                     .unwrap(),
             );
-            let port_name = port_name.clone();
+            let port_name = port.name();
             info!(
                 self.inner.log,
                 "Setting OPTE firewall rules";
-                "port" => ?&port_name,
+                "port" => ?&(port.key(), port_name),
                 "rules" => ?&rules,
             );
-            hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+            hdl.set_fw_rules(&SetFwRulesReq {
+                port_name: port_name.to_string(),
+                rules,
+            })?;
         }
         Ok(())
     }
 }
 
 pub struct PortTicket {
-    id: Uuid,
-    port_name: String,
+    port_key: PortKey,
     manager: Option<Arc<PortManagerInner>>,
 }
 
@@ -616,40 +537,37 @@ impl std::fmt::Debug for PortTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if self.manager.is_some() {
             f.debug_struct("PortTicket")
-                .field("id", &self.id)
+                .field("port_key", &self.port_key)
                 .field("manager", &"{ .. }")
                 .finish()
         } else {
-            f.debug_struct("PortTicket").field("id", &self.id).finish()
+            f.debug_struct("PortTicket")
+                .field("port_key", &self.port_key)
+                .finish()
         }
     }
 }
 
 impl PortTicket {
-    fn new(
-        id: Uuid,
-        port_name: String,
-        manager: Arc<PortManagerInner>,
-    ) -> Self {
-        Self { id, port_name, manager: Some(manager) }
+    fn new(port_key: PortKey, manager: Arc<PortManagerInner>) -> Self {
+        Self { port_key, manager: Some(manager) }
     }
 
     pub fn release(&mut self) -> Result<(), Error> {
         if let Some(manager) = self.manager.take() {
             let mut ports = manager.ports.lock().unwrap();
-            ports.remove(&(self.id, self.port_name.clone()));
+            ports.remove(&self.port_key);
             debug!(
                 manager.log,
                 "Removing OPTE port from manager";
-                "id" => ?self.id,
-                "port_name" => &self.port_name,
+                "port_key" => ?self.port_key,
             );
             if let Err(e) = manager.update_secondary_macs(&mut ports) {
                 warn!(
                     manager.log,
                     "Failed to update secondary-macs linkprop when \
                     releasing OPTE ports for instance";
-                    "id" => ?self.id,
+                    "port_key" => ?self.port_key,
                     "err" => ?e,
                 );
                 return Err(e);

@@ -8,17 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-/// Information required to construct a virtual network interface for a guest
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterface {
-    pub name: external::Name,
-    pub ip: IpAddr,
-    pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
-    pub vni: external::Vni,
-    pub primary: bool,
-    pub slot: u8,
-}
+pub use omicron_common::api::internal::sled_agent::NetworkInterface;
 
 /// An IP address and port range used for instance source NAT, i.e., making
 /// outbound network connections from guests.

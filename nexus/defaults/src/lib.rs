@@ -63,26 +63,6 @@ pub fn firewall_rules(vpc_name: &str) -> external::VpcFirewallRuleUpdateParams {
     })).unwrap()
 }
 
-/// Returns the default (nexus) firewall rules for a VPC with the given name.
-pub fn nexus_firewall_rules(
-    vpc_name: &str,
-) -> external::VpcFirewallRuleUpdateParams {
-    serde_json::from_value(serde_json::json!({
-        "rules": [
-            {
-                "name": "allow-external-inbound",
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": vpc_name } ],
-                "filters": { "ports": [ "80", "443" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound connections for HTTP and HTTPS from anywhere"
-            }
-            ]
-    })).unwrap()
-}
-
 /// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
 pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
     use rand::Rng;
@@ -100,6 +80,66 @@ pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
         )
         .unwrap(),
     ))
+}
+
+// Some hardcoded values for the Nexus service itself
+pub mod nexus_service {
+    use super::*;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::sled_agent::NetworkInterface;
+
+    /// The MAC address assigned to the OPTE port for the Nexus service.
+    ///
+    /// Chosen from the "system" portion of the virtual MAC address space.
+    pub const EXTERNAL_NIC_MAC: MacAddr =
+        MacAddr(macaddr::MacAddr6::new(0xA8, 0x40, 0x25, 0xFF, 0x00, 0x01));
+
+    lazy_static! {
+        /// The VNI assigned to the Nexus service VPC.
+        ///
+        /// Chosen from the Oxide-reserved range.
+        pub static ref VNI: Vni = 100.try_into().unwrap();
+
+        /// Information used to construct the OPTE port for the Nexus service.
+        pub static ref EXTERNAL_NIC: NetworkInterface = NetworkInterface {
+            name: "nexus".parse().unwrap(),
+            // This is the private IP nexus will bind to within its
+            // service zone. OPTE will map to this from whatever external
+            // IP nexus gets configured with.
+            // Use first non-reserved IP in the subnet, see RFD 21, section
+            // 2.2, table 1.
+            // TODO-completeness: IPv6
+            ip: DEFAULT_VPC_SUBNET_IPV4_BLOCK.iter().nth(5).unwrap().into(),
+            mac: EXTERNAL_NIC_MAC,
+            subnet: (*DEFAULT_VPC_SUBNET_IPV4_BLOCK).into(),
+            vni: *VNI,
+            // Irrelevant for service NICs
+            primary: true,
+            // Only a single port currently
+            slot: 0,
+        };
+    }
+
+    /// Returns the default (nexus) firewall rules for a VPC with the given name.
+    pub fn firewall_rules(
+        vpc_name: &str,
+    ) -> external::VpcFirewallRuleUpdateParams {
+        serde_json::from_value(serde_json::json!({
+            "rules": [
+                {
+                    "name": "allow-external-inbound",
+                    "status": "enabled",
+                    "direction": "inbound",
+                    "targets": [ { "type": "vpc", "value": vpc_name } ],
+                    "filters": { "ports": [ "80", "443" ], "protocols": [ "TCP" ] },
+                    "action": "allow",
+                    "priority": 65534,
+                    "description": "allow inbound connections for HTTP and HTTPS from anywhere"
+                }
+                ]
+        })).unwrap()
+    }
 }
 
 #[cfg(test)]

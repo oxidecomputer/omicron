@@ -473,18 +473,11 @@ impl ServiceManager {
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { external_ip, .. } => {
-                    // TODO: Arbitrary MAC choice from the "system" portion of the
-                    // virtual MAC address space.
-                    let mac = [0xA8, 0x40, 0x25, 0xFF, 0x00, 0x01].into();
-                    // TODO: Arbitrary VNI choice from Oxide-reserved range.
-                    let vni = 100;
                     let port = port_manager
                         .create_svc_port(
                             req.id,
-                            "nexus",
-                            mac,
+                            &nexus_defaults::nexus_service::EXTERNAL_NIC,
                             *external_ip,
-                            vni,
                         )
                         .map_err(Error::NexusOptePortCreation)?;
                     ports.push(port);
@@ -647,7 +640,7 @@ impl ServiceManager {
                             return Err(Error::SledAgentNotReady);
                         };
 
-                    // TODO: Assumes a single port (0)
+                    // Nexus expects a single OPTE port, see `opte_ports_needed()`
                     let port = running_zone.opte_ports().nth(0).unwrap();
 
                     // While Nexus will be reachable via `external_ip`, it communicates

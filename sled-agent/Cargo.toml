@@ -28,6 +28,7 @@ ipnetwork.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 nexus-client.workspace = true
+nexus-defaults.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 oxide-vpc.workspace = true

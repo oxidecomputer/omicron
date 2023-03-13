@@ -311,9 +311,7 @@ impl InstanceInner {
                 // TODO-correctness: Remove `.vnic_name()` call when we use the port
                 // directly.
                 name: port.vnic_name().to_string(),
-                slot: propolis_client::api::Slot(
-                    port.slot().expect("invalid port type"),
-                ),
+                slot: propolis_client::api::Slot(port.slot()),
             })
             .collect();
 
@@ -537,9 +535,9 @@ impl Instance {
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
             let (snat, external_ips) = if nic.primary {
-                (Some(inner.source_nat), Some(inner.external_ips.clone()))
+                (Some(inner.source_nat), &inner.external_ips[..])
             } else {
-                (None, None)
+                (None, &[][..])
             };
             let port = inner.port_manager.create_guest_port(
                 *inner.id(),

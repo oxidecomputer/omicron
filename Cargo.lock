@@ -3552,6 +3552,7 @@ version = "0.1.0"
 dependencies = [
  "ipnetwork",
  "lazy_static",
+ "macaddr",
  "omicron-common",
  "rand 0.8.5",
  "serde_json",
@@ -4069,6 +4070,7 @@ dependencies = [
  "macaddr",
  "mockall",
  "nexus-client",
+ "nexus-defaults",
  "omicron-common",
  "omicron-test-utils",
  "once_cell",

@@ -402,9 +402,8 @@ impl DataStore {
         let vni = match service.kind {
             // Nexus gets a fixed VNI which must match the VNI used to allocate
             // the OPTE port in sled-agent.
-            // TODO: use const somewhere
             internal_params::ServiceKind::Nexus { .. } => {
-                Some(Vni(100.try_into().unwrap()))
+                Some(Vni(*nexus_defaults::nexus_service::VNI))
             }
             // For any other service, we'll get a random VNI from the Oxide-reserved range.
             _ => None,
@@ -585,7 +584,7 @@ impl DataStore {
         let vpc_id = vpc.id();
         let rules_db = VpcFirewallRule::vec_from_params(
             vpc_id,
-            nexus_defaults::nexus_firewall_rules(vpc.name().as_str()),
+            nexus_defaults::nexus_service::firewall_rules(vpc.name().as_str()),
         );
         <Vpc as DatastoreCollection<VpcFirewallRule>>::insert_resource(
             vpc_id,
