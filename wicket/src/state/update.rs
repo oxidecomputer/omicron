@@ -7,12 +7,14 @@ use tui::style::Style;
 use crate::ui::defaults::style;
 
 use super::{ComponentId, ALL_COMPONENT_IDS};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::{
+    api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
+};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::{
     ArtifactId, SemverVersion, UpdateEventKind, UpdateLog, UpdateLogAll,
-    UpdateNormalEventKind, UpdateTerminalEventKind,
+    UpdateNormalEventKind, UpdateStateKind, UpdateTerminalEventKind,
 };
 
 #[derive(Debug)]
@@ -137,6 +139,7 @@ impl RackUpdateState {
         }
     }
 
+    /// Scan through `log` and update the components status given by `id`
     pub fn update_items(&mut self, id: &ComponentId, log: &UpdateLog) {
         let items = self.items.get_mut(id).unwrap();
         if log.events.is_empty() {
@@ -146,24 +149,31 @@ impl RackUpdateState {
             }
         }
 
-        // TODO: Deal with log.current
-
+        // Mark artifacts as either 'succeeded' or `failed' by looking in
+        // the event log.
         for event in &log.events {
             match &event.kind {
                 UpdateEventKind::Normal(normal) => match normal {
                     UpdateNormalEventKind::SpResetComplete => {
-                        items
-                            .get_mut(&id.sp_known_artifact_kind())
-                            .map(|state| *state = UpdateState::Updated);
+                        let known = Some(id.sp_known_artifact_kind());
+                        update_artifact_state(
+                            items,
+                            known,
+                            UpdateState::Updated,
+                        );
                     }
                     UpdateNormalEventKind::ArtifactUpdateComplete {
                         artifact,
                     } => {
-                        if let Ok(known) = artifact.kind.parse() {
-                            items
-                                .get_mut(&known)
-                                .map(|state| *state = UpdateState::Updated);
-                        }
+                        // We specifically don't want to mark the Host
+                        // complete, if the trampoline has completed, so don't
+                        // use `artifact_to_known_artifact_kind`
+                        let known = artifact.kind.parse().ok();
+                        update_artifact_state(
+                            items,
+                            known,
+                            UpdateState::Updated,
+                        );
                     }
                     UpdateNormalEventKind::InstallinatorEvent(
                         _completion_event_kind,
@@ -178,32 +188,112 @@ impl RackUpdateState {
                 },
                 UpdateEventKind::Terminal(terminal) => match terminal {
                     UpdateTerminalEventKind::SpResetFailed { .. } => {
-                        items
-                            .get_mut(&id.sp_known_artifact_kind())
-                            .map(|state| *state = UpdateState::Failed);
+                        let known = Some(id.sp_known_artifact_kind());
+                        update_artifact_state(
+                            items,
+                            known,
+                            UpdateState::Failed,
+                        );
                     }
                     UpdateTerminalEventKind::ArtifactUpdateFailed {
                         artifact,
                         ..
                     } => {
-                        if let Ok(known) = artifact.kind.parse() {
-                            let known = match known {
-                                KnownArtifactKind::Trampoline
-                                | KnownArtifactKind::Host => {
-                                    // We don't expose the trampoline to the user
-                                    KnownArtifactKind::Host
-                                }
-                                known => known,
-                            };
-                            items
-                                .get_mut(&known)
-                                .map(|state| *state = UpdateState::Failed);
-                        }
+                        let known = artifact_to_known_artifact_kind(artifact);
+                        update_artifact_state(
+                            items,
+                            known,
+                            UpdateState::Failed,
+                        );
                     }
                 },
             }
         }
+
+        // Mark any known artifacts as updating
+        let Some(state) = &log.current else {
+            return;
+        };
+        use UpdateStateKind::*;
+        let known = match &state.kind {
+            WaitingForProgress { .. } => {
+                // Nothing to do here
+                None
+            }
+            ResettingSp => Some(id.sp_known_artifact_kind()),
+            SendingArtifactToMgs { artifact } => {
+                artifact_to_known_artifact_kind(&artifact)
+            }
+            PreparingForArtifact { artifact, .. } => {
+                artifact_to_known_artifact_kind(&artifact)
+            }
+            ArtifactDownloadProgress { kind, .. } => {
+                artifact_kind_to_known_kind(kind)
+            }
+            ArtifactWriteProgress { kind, .. } => {
+                artifact_kind_to_known_kind(kind)
+            }
+            WaitingForStatus { artifact } => {
+                artifact_to_known_artifact_kind(&artifact)
+            }
+            WaitingForTrampolineImageDelivery { artifact, .. } => {
+                artifact_to_known_artifact_kind(&artifact)
+            }
+            SettingHostPowerState { .. }
+            | InstallinatorFormatProgress { .. }
+            | SettingInstallinatorOptions
+            | SettingHostStartupOptions => {
+                // Should we bother doing something here?
+                None
+            }
+        };
+        update_artifact_state(items, known, UpdateState::Updating);
     }
+}
+
+// For a given Component's artifacts, update it's state
+// to reflect what is currently known from the returned log.
+fn update_artifact_state(
+    items: &mut BTreeMap<KnownArtifactKind, UpdateState>,
+    known: Option<KnownArtifactKind>,
+    new_state: UpdateState,
+) {
+    if let Some(known) = &known {
+        items.get_mut(known).map(|state| *state = new_state);
+    }
+}
+
+// Take an `ArtifactId` and return a `KnownArtifactKind` if there is one.
+//
+// We don't expose some `KnownArtifactKind`s like `Trampoline`,
+// since those are artifacts of the install process and not relevant
+// directly to the customer. For cases, like `Trampoline`, we convert
+// to an appropriate `KnownArtiactKind`, like `Host`.
+fn artifact_to_known_artifact_kind(
+    artifact: &ArtifactId,
+) -> Option<KnownArtifactKind> {
+    artifact.kind.parse().ok().map(|known| match known {
+        KnownArtifactKind::Trampoline => {
+            // We don't expose the trampoline to the user
+            KnownArtifactKind::Host
+        }
+        known => known,
+    })
+}
+
+// Take an `ArtifactKind` and return a `KnownArtifactKind` if there is one.
+// We don't expose some `KnownArtifactKind`s like `Trampoline`,
+// since those are artifacts of the install process and not relevant
+// directly to the customer. For cases, like `Trampoline`, we convert
+// to an appropriate `KnownArtiactKind`, like `Host`.
+fn artifact_kind_to_known_kind(kind: &String) -> Option<KnownArtifactKind> {
+    kind.parse().ok().map(|known| match known {
+        KnownArtifactKind::Trampoline => {
+            // We don't expose the trampoline to the user
+            KnownArtifactKind::Host
+        }
+        known => known,
+    })
 }
 
 #[allow(unused)]
