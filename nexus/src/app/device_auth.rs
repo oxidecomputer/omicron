@@ -46,10 +46,10 @@
 
 use crate::authn::{Actor, Reason};
 use crate::authz;
-use crate::context::OpContext;
 use crate::db::lookup::LookupPath;
 use crate::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use crate::external_api::device_auth::DeviceAccessTokenResponse;
+use nexus_db_queries::context::OpContext;
 
 use omicron_common::api::external::{CreateResult, Error};
 

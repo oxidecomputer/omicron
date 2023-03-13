@@ -762,11 +762,11 @@ mod tests {
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
     use crate::db::model::Name;
-    use crate::external_api::shared::IpRange;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::shared::IpRange;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
