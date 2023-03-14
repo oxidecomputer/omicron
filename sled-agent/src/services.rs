@@ -821,7 +821,6 @@ impl ServiceManager {
                                 ),
                                 ));
                             }
-
                             smfh.setprop(
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",
@@ -829,10 +828,6 @@ impl ServiceManager {
                             smfh.setprop(
                                 "config/board_rev",
                                 &self.inner.sidecar_revision,
-                            )?;
-                            smfh.setprop(
-                                "config/transceiver_interface",
-                                "tfportCPU0",
                             )?;
                         }
                         DendriteAsic::TofinoStub => smfh.setprop(
