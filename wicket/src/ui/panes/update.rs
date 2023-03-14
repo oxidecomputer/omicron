@@ -10,7 +10,7 @@ use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup};
 use crate::{Action, Cmd, Frame, State};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use slog::{o, Logger};
+use slog::{info, o, Logger};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
@@ -18,6 +18,12 @@ use tui_tree_widget::{Tree, TreeItem, TreeState};
 use wicketd_client::types::SemverVersion;
 
 const MAX_COLUMN_WIDTH: u16 = 25;
+
+enum PopupKind {
+    MissingRepo,
+    StartUpdate,
+    Logs,
+}
 
 /// Overview of update status and ability to install updates
 /// from a single TUF repo uploaded to wicketd via wicket.
@@ -34,7 +40,7 @@ pub struct UpdatePane {
     table_headers_rect: Rect,
     contents_rect: Rect,
     help_rect: Rect,
-    popup_open: bool,
+    popup: Option<PopupKind>,
 }
 
 impl UpdatePane {
@@ -50,17 +56,77 @@ impl UpdatePane {
                 .map(|id| TreeItem::new(*id, vec![]))
                 .collect(),
             help: vec![
-                ("OPEN", "<RIGHT>"),
-                ("CLOSE", "<LEFT>"),
-                ("SELECT", "<UP/DOWN>"),
+                ("Expand", "<e>"),
+                ("Collapse", "<c>"),
+                ("Move", "<Up/Down>"),
+                ("Details", "<d>"),
+                ("Update", "<Enter>"),
             ],
             rect: Rect::default(),
             title_rect: Rect::default(),
             table_headers_rect: Rect::default(),
             contents_rect: Rect::default(),
             help_rect: Rect::default(),
-            popup_open: false,
+            popup: None,
         }
+    }
+
+    pub fn draw_log_popup(&mut self, state: &State, frame: &mut Frame<'_>) {
+        let selected = state.rack_state.selected;
+        let logs = state.update_state.logs.get(&selected).map_or_else(
+            || "No Logs Available".to_string(),
+            |l| format!("{:#?}", l),
+        );
+
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(" UPDATE LOGS: {}", selected.to_string()),
+                style::header(true),
+            )])]),
+            body: Text::styled(logs, style::plain_text()),
+            buttons: vec![
+                ButtonText { instruction: "CLOSE", key: "ESC" },
+                ButtonText { instruction: "SCROLL", key: "UP/DOWN" },
+            ],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    pub fn draw_start_update_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(
+                    " START UPDATE: {}",
+                    state.rack_state.selected.to_string()
+                ),
+                style::header(true),
+            )])]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                " Would you like to start an update?",
+                style::plain_text(),
+            )])]),
+            buttons: vec![
+                ButtonText { instruction: "YES", key: "Y" },
+                ButtonText { instruction: "NO", key: "N" },
+            ],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
     }
 
     pub fn draw_update_missing_popup(
@@ -138,6 +204,60 @@ impl UpdatePane {
             })
             .collect();
     }
+
+    fn handle_cmd_in_popup(
+        &mut self,
+        state: &mut State,
+        cmd: Cmd,
+    ) -> Option<Action> {
+        if cmd == Cmd::Exit {
+            self.popup = None;
+            return Some(Action::Redraw);
+        }
+        match self.popup.as_ref().unwrap() {
+            PopupKind::Logs => None,
+            PopupKind::MissingRepo => None,
+            PopupKind::StartUpdate => {
+                match cmd {
+                    Cmd::Yes => {
+                        // Trigger the update
+                        let selected = state.rack_state.selected;
+                        info!(self.log, "Updating {}", selected);
+                        self.popup = None;
+                        Some(Action::Update(selected))
+                    }
+                    Cmd::No => {
+                        self.popup = None;
+                        Some(Action::Redraw)
+                    }
+                    _ => None,
+                }
+            }
+        }
+    }
+
+    fn open_popup(&mut self, state: &mut State) {
+        if state.update_state.artifacts.is_empty() {
+            self.popup = Some(PopupKind::MissingRepo);
+        } else {
+            self.popup = Some(PopupKind::StartUpdate);
+        }
+    }
+
+    // When we switch panes, we may have moved around in the rack. We want to
+    // ensure that the currently selected rack component in the  update tree
+    // matches what was selected in the rack or inventory views. We already do
+    // the converse when on this pane and move around the tree.
+    fn ensure_selection_matches_rack_state(&mut self, state: &State) {
+        let selected = self.tree_state.selected();
+        if state.rack_state.selected != ALL_COMPONENT_IDS[selected[0]] {
+            let index = ALL_COMPONENT_IDS
+                .iter()
+                .position(|&id| id == state.rack_state.selected)
+                .unwrap();
+            self.tree_state.select(vec![index]);
+        }
+    }
 }
 
 fn installed_version(
@@ -172,7 +292,7 @@ fn artifact_version(
 
 impl Control for UpdatePane {
     fn is_modal_active(&self) -> bool {
-        self.popup_open
+        self.popup.is_some()
     }
 
     fn resize(&mut self, state: &mut State, rect: Rect) {
@@ -198,6 +318,10 @@ impl Control for UpdatePane {
     }
 
     fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        self.ensure_selection_matches_rack_state(state);
+        if self.popup.is_some() {
+            return self.handle_cmd_in_popup(state, cmd);
+        }
         match cmd {
             Cmd::Up => {
                 self.tree_state.key_up(&self.items);
@@ -213,8 +337,7 @@ impl Control for UpdatePane {
             }
             Cmd::Collapse | Cmd::Left => {
                 // We always want something selected. If we close the root,
-                // we want to re-open it. This is the only API currently provided
-                // that allows this.
+                // we want to re-open it.
                 let selected = self.tree_state.selected();
                 self.tree_state.key_left();
                 if self.tree_state.selected().is_empty() {
@@ -229,26 +352,12 @@ impl Control for UpdatePane {
                 Some(Action::Redraw)
             }
             Cmd::Enter => {
-                // Only open the warning popup if an upload is required
-                if state.update_state.artifacts.is_empty() {
-                    if !self.popup_open {
-                        self.popup_open = true;
-                        Some(Action::Redraw)
-                    } else {
-                        None
-                    }
-                } else {
-                    // Trigger the update
-                    Some(Action::Update(state.rack_state.selected))
-                }
+                self.open_popup(state);
+                Some(Action::Redraw)
             }
-            Cmd::Exit => {
-                if self.popup_open {
-                    self.popup_open = false;
-                    Some(Action::Redraw)
-                } else {
-                    None
-                }
+            Cmd::Details => {
+                self.popup = Some(PopupKind::Logs);
+                Some(Action::Redraw)
             }
             Cmd::GotoTop => {
                 self.tree_state.select_first();
@@ -272,6 +381,7 @@ impl Control for UpdatePane {
         _: Rect,
         active: bool,
     ) {
+        self.ensure_selection_matches_rack_state(state);
         let border_style = style::line(active);
         let header_style = style::header(active);
 
@@ -330,13 +440,15 @@ impl Control for UpdatePane {
             self.contents_rect,
         );
 
-        // TODO: Check to see which popup is open
-        if self.popup_open {
-            // TODO: Only open if an update has not been uploaded to wicketd
-            // Otherwise, prompt whether to update or not.
-            // We can also open the update logs inline once the update has been started
-            // or has completed.
-            self.draw_update_missing_popup(state, frame);
+        match self.popup {
+            Some(PopupKind::Logs) => self.draw_log_popup(state, frame),
+            Some(PopupKind::MissingRepo) => {
+                self.draw_update_missing_popup(state, frame)
+            }
+            Some(PopupKind::StartUpdate) => {
+                self.draw_start_update_popup(state, frame)
+            }
+            None => (),
         }
     }
 }
