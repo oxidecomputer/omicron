@@ -32,7 +32,7 @@ ptime -m ./tools/install_builder_prerequisites.sh -yp
 
 # Build the test target
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t test target create -i standard -m nongimlet -s stub
+  -t test target create -i standard -m non-gimlet -s stub
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
@@ -45,7 +45,7 @@ files=(
 	out/*.tar
 	out/target/test
 	package-manifest.toml
-	smf/sled-agent/nongimlet/config.toml
+	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
 )
