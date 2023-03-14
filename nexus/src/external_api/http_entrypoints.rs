@@ -403,7 +403,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(group_list)?;
 
         api.register(user_list_v1)?;
-        api.register(silo_users_list_v1)?;
+        api.register(silo_user_list_v1)?;
         api.register(silo_user_view_v1)?;
         api.register(group_list_v1)?;
         api.register(group_view)?;
@@ -1065,7 +1065,7 @@ async fn silo_policy_update(
     path = "/v1/system/users",
     tags = ["system"],
 }]
-async fn silo_users_list_v1(
+async fn silo_user_list_v1(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById<params::SiloSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
