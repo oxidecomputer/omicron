@@ -43,7 +43,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut config: Config = toml::from_str(&config_file_contents)
         .with_context(|| format!("parse config file {:?}", config_file))?;
 
-    // XXX-dap do not override dropshot bind_address
     config.dropshot.bind_address = SocketAddr::V6(args.http_address);
     eprintln!("{:?}", config);
 
@@ -61,7 +60,7 @@ async fn main() -> Result<(), anyhow::Error> {
     .context("initializing persistent storage")?;
 
     let dns_server_config = dns_server::dns_server::Config {
-        bind_address: args.dns_address.to_string(), // XXX-dap
+        bind_address: SocketAddr::V6(args.dns_address),
     };
     let (_, dropshot_server) = dns_server::start_servers(
         log,

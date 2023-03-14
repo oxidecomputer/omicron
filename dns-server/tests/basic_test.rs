@@ -345,8 +345,9 @@ async fn init_client_server(
     // XXX-dap clear it?
 
     // launch a dns server
-    let dns_server_config =
-        dns_server::dns_server::Config { bind_address: "[::1]:0".into() };
+    let dns_server_config = dns_server::dns_server::Config {
+        bind_address: "[::1]:0".parse().unwrap(),
+    };
     let (dns_server, dropshot_server) = dns_server::start_servers(
         log.clone(),
         store,

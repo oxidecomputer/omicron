@@ -17,7 +17,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{info, Drain, Logger};
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -154,7 +154,6 @@ impl Server {
             tempfile::tempdir().map_err(|e| e.to_string())?;
 
         let dns_log = log.new(o!("kind" => "dns"));
-        let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
 
         let store = dns_server::storage::Store::new(
             log.new(o!("component" => "store")),
@@ -173,7 +172,7 @@ impl Server {
             dns_log,
             store,
             &dns_server::dns_server::Config {
-                bind_address: SocketAddr::from(dns_address).to_string(),
+                bind_address: "[::1]:0".parse().unwrap(),
             },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),

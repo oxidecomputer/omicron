@@ -35,7 +35,7 @@ use uuid::Uuid;
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     /// The address to listen for DNS requests on
-    pub bind_address: String,
+    pub bind_address: SocketAddr,
 }
 
 pub struct ServerHandle {
