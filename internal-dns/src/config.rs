@@ -141,7 +141,6 @@ impl DnsConfigBuilder {
             let name = AAAA::Sled(sled_id).dns_name();
             DnsKv {
                 key: DnsRecordKey { name },
-                // XXX-dap fix the case of these
                 records: vec![DnsRecord::Aaaa(sled_ip)],
             }
         });
