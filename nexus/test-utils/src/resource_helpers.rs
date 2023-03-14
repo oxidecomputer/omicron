@@ -7,31 +7,31 @@ use crate::ControlPlaneTestContext;
 
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
+use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use nexus_test_interface::NexusServer;
+use nexus_types::external_api::params;
+use nexus_types::external_api::params::UserId;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::IdentityType;
+use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::IpPool;
+use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::User;
+use nexus_types::external_api::views::{
+    Organization, Project, Silo, Vpc, VpcRouter,
+};
+use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_nexus::crucible_agent_client::types::State as RegionState;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::params::UserId;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::shared::IdentityType;
-use omicron_nexus::external_api::shared::IpRange;
-use omicron_nexus::external_api::views;
-use omicron_nexus::external_api::views::Certificate;
-use omicron_nexus::external_api::views::IpPool;
-use omicron_nexus::external_api::views::IpPoolRange;
-use omicron_nexus::external_api::views::User;
-use omicron_nexus::external_api::views::{
-    Organization, Project, Silo, Vpc, VpcRouter,
-};
-use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;

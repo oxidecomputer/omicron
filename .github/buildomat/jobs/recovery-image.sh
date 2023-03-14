@@ -1,6 +1,6 @@
 #!/bin/bash
 #:
-#: name = "helios / build OS image"
+#: name = "helios / build recovery OS image"
 #: variety = "basic"
 #: target = "helios-latest"
 #: rust_toolchain = "1.66.1"
@@ -68,10 +68,8 @@ cd /work
 
 # /work/gz: Global Zone artifacts to be placed in the Helios image.
 mkdir gz && cd gz
-ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz
+ptime -m tar xvzf /input/package/work/trampoline-global-zone-packages.tar.gz
 cd -
-
-# TODO: Consider importing zones here too?
 
 # Checkout helios at a pinned commit
 git clone https://github.com/oxidecomputer/helios.git
@@ -91,4 +89,4 @@ pfexec zfs create -p rpool/images/build
 	-p helios-netdev=https://pkg.oxide.computer/helios-netdev \
 	-F optever=0.21 \
 	-P /work/gz/root \
-	-B
+	-R
