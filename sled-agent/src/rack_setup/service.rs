@@ -342,12 +342,10 @@ impl ServiceInner {
             for zone in services {
                 for service in &zone.services {
                     if let Some(addr) = zone.address(&service) {
-                        if let Some(srv) = zone.srv(&service) {
-                            records
-                                .entry(srv)
-                                .or_insert_with(Vec::new)
-                                .push((zone.aaaa(), addr));
-                        }
+                        records
+                            .entry(zone.srv(&service))
+                            .or_insert_with(Vec::new)
+                            .push((zone.aaaa(), addr));
                     }
                 }
             }

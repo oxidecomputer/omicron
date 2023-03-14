@@ -4,12 +4,10 @@
 <service_bundle type='manifest' name='switch_zone_setup'>
 
 <service name='system/illumos/switch_zone_setup' type='service' version='1'>
-  <create_default_instance enabled='false' />
-  <single_instance />
+  <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
-    <service_fmri value='svc:/system/filesystem/local:default' />
     <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 

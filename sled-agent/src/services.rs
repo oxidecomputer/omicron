@@ -793,9 +793,6 @@ impl ServiceManager {
                     )?;
                     smfh.refresh()?;
                 }
-                ServiceType::SwitchZoneSetup => {
-                    // Nothing to do here.
-                }
                 ServiceType::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
 
@@ -994,7 +991,6 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoStub },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Wicketd,
-                    ServiceType::SwitchZoneSetup,
                 ]
             }
             None => {
@@ -1003,7 +999,6 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::Wicketd,
-                    ServiceType::SwitchZoneSetup,
                 ]
             }
         };

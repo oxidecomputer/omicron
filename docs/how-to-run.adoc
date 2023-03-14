@@ -149,7 +149,7 @@ the Omicron zones:
 $ svcs
 
 # View logs for sled-agent:
-$ tail -f /var/svc/log/system-illumos-sled-agent:default.log
+$ tail -F $(svcs -L sled-agent)
 ----
 
 Once the zones are initialized, they'll show up in `zoneadm`:
@@ -157,7 +157,7 @@ Once the zones are initialized, they'll show up in `zoneadm`:
 [source,text]
 ----
 # View zones managed by Omicron (prefixed with "oxz_"):
-$ zoneadm list -cv
+$ zoneadm list -cnv
 
 # View logs for a service:
 $ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
