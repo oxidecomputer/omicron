@@ -114,8 +114,9 @@ impl std::str::FromStr for KnownTarget {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let target = Target::from_str(s)?;
 
-        let KnownTarget { mut image, mut machine, mut switch } =
-            Self::default();
+        let mut image = Self::default().image;
+        let mut machine = None;
+        let mut switch = None;
 
         for (k, v) in target.0.into_iter() {
             match k.as_str() {
