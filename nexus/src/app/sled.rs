@@ -245,27 +245,35 @@ impl super::Nexus {
         // For every sled that isn't the sled this instance was allocated to, create
         // a virtual to physical mapping for each of this instance's NICs.
         //
-        // TODO this is a first-pass naive approach. A more optimized approach would
-        // be to see what other instances share the VPC this instance is in (or more
-        // generally, what instances should have connectivity to this one), see what
-        // sleds those are allocated to, and only create a v2p mapping for those
-        // sleds. However, this naive approach has the advantage of not requiring
-        // additional work: v2p mappings have to be bidirectional in order for both
-        // instances's packets to make a round trip. After this function executes, a
-        // v2p mapping to this instance will exist on every sled, and when another
-        // instance is allocated to a random sled, that sled will already contain a
-        // mapping to this instance.
+        // For the mappings to be correct, a few invariants must hold:
         //
-        // TODO any approach that creates V2P mappings on a subset of sleds
-        // (instead of every sled like the naive approach) could potentially
-        // create mappings that are invalid: there is a TOCTOU problem due to
-        // the fact that an instances' sled allocation can change at any time.
-        // Without something constantly running that will correct these
-        // mappings, it's only safe to globally apply all mappings.
+        // - mappings must be set whenever an instance's sled changes (eg.
+        //   during instance creation, migration, stop + start)
         //
-        // TODO-correctness OPTE currently will block instances in different VPCs
-        // from connecting to each other. If it ever stops doing this, this naive
-        // approach will create v2p mappings that shouldn't exist.
+        // - an instances' sled must not change while its corresponding mappings
+        //   are being created
+        //
+        // - the same mapping creation must be broadcast to all sleds
+        //
+        // A more targeted approach would be to see what other instances share
+        // the VPC this instance is in (or more generally, what instances should
+        // have connectivity to this one), see what sleds those are allocated
+        // to, and only create V2P mappings for those sleds.
+        //
+        // There's additional work with this approach:
+        //
+        // - it means that delete calls are required as well as set calls,
+        //   meaning that now the ordering of those matters (this may also
+        //   necessitate a generation number for V2P mappings)
+        //
+        // - V2P mappings have to be bidirectional in order for both instances's
+        //   packets to make a round trip. This isn't a problem with the
+        //   broadcast approach because one of the sides will exist already, but
+        //   it is something to orchestrate with a more targeted approach.
+        //
+        // TODO-correctness OPTE currently will block instances in different
+        // VPCs from connecting to each other. If it ever stops doing this, the
+        // broadcast approach will create V2P mappings that shouldn't exist.
 
         let (.., authz_instance, db_instance) =
             LookupPath::new(&opctx, &self.db_datastore)
