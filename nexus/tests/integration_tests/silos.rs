@@ -166,7 +166,10 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let organizations =
         objects_list_page_authz::<Organization>(client, "/organizations")
             .await
-            .items;
+            .items
+            .into_iter()
+            .filter(|o| o.identity.id != *db::fixed_data::ORGANIZATION_ID)
+            .collect::<Vec<_>>();
     assert_eq!(organizations.len(), 1);
     assert_eq!(organizations[0].identity.name, "someorg");
 

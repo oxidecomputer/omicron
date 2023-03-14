@@ -26,7 +26,6 @@ use crate::db::model::Project;
 use crate::db::model::Rack;
 use crate::db::model::Service;
 use crate::db::model::Sled;
-use crate::db::model::Vni;
 use crate::db::model::Vpc;
 use crate::db::model::VpcSubnet;
 use crate::db::model::Zpool;
@@ -410,8 +409,9 @@ impl DataStore {
         let vni = match service.kind {
             // Nexus gets a fixed VNI which must match the VNI used to allocate
             // the OPTE port in sled-agent.
+            #[cfg(not(test))]
             internal_params::ServiceKind::Nexus { .. } => {
-                Some(Vni(*nexus_defaults::nexus_service::VNI))
+                Some(db::model::Vni(*nexus_defaults::nexus_service::VNI))
             }
             // For any other service, we'll get a random VNI from the Oxide-reserved range.
             _ => None,

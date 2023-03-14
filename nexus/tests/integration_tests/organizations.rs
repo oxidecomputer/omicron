@@ -15,6 +15,31 @@ use nexus_test_utils_macros::nexus_test;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+fn filter_builtin_org(o: &Organization) -> bool {
+    o.identity.id != *nexus_db_queries::db::fixed_data::ORGANIZATION_ID
+}
+
+#[nexus_test]
+async fn test_organizations_builtin(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let mut organizations =
+        objects_list_page_authz::<Organization>(client, "/v1/organizations")
+            .await
+            .items;
+    assert_eq!(organizations.len(), 1);
+
+    let org = organizations.pop().unwrap();
+    assert_eq!(
+        org.identity.id,
+        *nexus_db_queries::db::fixed_data::ORGANIZATION_ID
+    );
+    assert_eq!(
+        org.identity.name,
+        nexus_db_queries::db::datastore::SERVICE_ORG_NAME
+    );
+}
+
 #[nexus_test]
 async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -62,7 +87,10 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     let organizations =
         objects_list_page_authz::<Organization>(client, "/v1/organizations")
             .await
-            .items;
+            .items
+            .into_iter()
+            .filter(filter_builtin_org)
+            .collect::<Vec<_>>();
     assert_eq!(organizations.len(), 2);
     // alphabetical order for now
     assert_eq!(organizations[0].identity.name, o2_name);
@@ -92,7 +120,10 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     let organizations =
         objects_list_page_authz::<Organization>(client, "/v1/organizations")
             .await
-            .items;
+            .items
+            .into_iter()
+            .filter(filter_builtin_org)
+            .collect::<Vec<_>>();
     assert_eq!(organizations.len(), 1);
     assert_eq!(organizations[0].identity.name, o2_name);
 
