@@ -110,8 +110,6 @@ function main
 
     pfexec zfs create -p rpool/images/$USER
 
-    find $tmp_gz
-
     ./helios-build experiment-image \
         -p helios-netdev=https://pkg.oxide.computer/helios-netdev \
         -F optever=0.21 \
