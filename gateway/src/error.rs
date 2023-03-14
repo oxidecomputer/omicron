@@ -89,29 +89,67 @@ impl From<SpCommsError> for HttpError {
             }
             SpCommsError::UpdateFailed(UpdateError::Communication(
                 CommunicationError::SpError(SpError::UpdateSlotBusy),
-            )) => HttpError::for_unavail(
-                Some("UpdateSlotBusy".to_string()),
+            )) => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "UpdateSlotBusy",
                 err.to_string(),
             ),
             SpCommsError::UpdateFailed(UpdateError::Communication(
                 CommunicationError::SpError(SpError::UpdateInProgress {
                     ..
                 }),
-            )) => HttpError::for_unavail(
-                Some("UpdateInProgress".to_string()),
+            )) => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "UpdateInProgress",
                 err.to_string(),
             ),
-            SpCommsError::DiscoveryNotYetComplete => HttpError::for_unavail(
-                Some("DiscoveryNotYetComplete".to_string()),
+            SpCommsError::DiscoveryNotYetComplete => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "DiscoveryNotYetComplete",
                 err.to_string(),
             ),
-            SpCommsError::SpAddressUnknown(_)
-            | SpCommsError::DiscoveryFailed { .. }
-            | SpCommsError::Timeout { .. }
-            | SpCommsError::SpCommunicationFailed(_)
-            | SpCommsError::UpdateFailed(_) => {
-                HttpError::for_internal_error(err.to_string())
-            }
+            SpCommsError::SpAddressUnknown(_) => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "SpAddressUnknown",
+                err.to_string(),
+            ),
+            SpCommsError::DiscoveryFailed { .. } => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "DiscoveryFailed ",
+                err.to_string(),
+            ),
+            SpCommsError::Timeout { .. } => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "Timeout ",
+                err.to_string(),
+            ),
+            SpCommsError::SpCommunicationFailed(_) => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "SpCommunicationFailed",
+                err.to_string(),
+            ),
+            SpCommsError::UpdateFailed(_) => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "UpdateFailed",
+                err.to_string(),
+            ),
         }
+    }
+}
+
+// Helper function to return an `HttpError` with the same internal and external
+// message. MGS is an "internal" service - even when we return a 500-level
+// status code, we want to give our caller some information about what is going
+// wrong (e.g., we timed out waiting for an SP).
+fn http_err_with_message(
+    status_code: http::StatusCode,
+    error_code: &str,
+    message: String,
+) -> HttpError {
+    HttpError {
+        status_code,
+        error_code: Some(error_code.to_string()),
+        external_message: message.clone(),
+        internal_message: message,
     }
 }

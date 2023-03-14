@@ -4,7 +4,6 @@
 
 //! Sleds, and the hardware and services within them.
 
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
@@ -14,6 +13,7 @@ use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
 };
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;

@@ -674,7 +674,7 @@ fn overlay_rss_config(
     let src = if let Some(src) = &config.rss_config_path {
         src.clone()
     } else {
-        config.omicron_path.join("smf/sled-agent/config-rss.toml")
+        config.omicron_path.join("smf/sled-agent/nongimlet/config-rss.toml")
     };
     let dst = format!(
         "{}@{}:{}/config-rss.toml",
