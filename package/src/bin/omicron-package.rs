@@ -9,7 +9,8 @@ use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::{zfs, zone, zpool};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use omicron_package::{parse, BuildCommand, DeployCommand};
+use omicron_package::target::KnownTarget;
+use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
 use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
@@ -26,6 +27,7 @@ use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -38,17 +40,6 @@ enum SubCommand {
     #[clap(flatten)]
     Deploy(DeployCommand),
 }
-
-// Describes the default target.
-//
-// NOTE: This was mostly included so that the addition of the "--target"
-// flag does not break anyone's existing workflow. However, picking a default
-// here is an onerous prospect, and it may make more sense to require user
-// involvement. If we choose to remove it, having users pick one of a few
-// "build profiles" (in other words, a curated list of target strings)
-// seems like a promising alternative.
-const DEFAULT_TARGET: &str =
-    "image_type=standard switch_variant=stub machine_type=nongimlet";
 
 #[derive(Debug, Parser)]
 #[clap(name = "packaging tool")]
@@ -68,10 +59,14 @@ struct Args {
     #[clap(
         short,
         long,
-        help = "Key Value pairs (of the form 'KEY=VALUE') describing the package",
-        default_value = DEFAULT_TARGET,
+        help = "The name of the build target to use for this command",
+        default_value_t = ACTIVE.to_string(),
     )]
-    target: Target,
+    target: String,
+
+    /// The output directory, where artifacts should be built and staged
+    #[clap(long = "artifacts", default_value = "out/")]
+    artifact_dir: PathBuf,
 
     #[clap(
         short,
@@ -167,6 +162,97 @@ async fn do_dot(config: &Config) -> Result<()> {
         "{}",
         omicron_package::dot::do_dot(&config.target, &config.package_config)?
     );
+    Ok(())
+}
+
+// The name reserved for the currently-in-use build target.
+const ACTIVE: &str = "active";
+
+async fn do_target(
+    artifact_dir: &Path,
+    name: &str,
+    subcommand: &TargetCommand,
+) -> Result<()> {
+    let target_dir = artifact_dir.join("target");
+    tokio::fs::create_dir_all(&target_dir).await?;
+    match subcommand {
+        TargetCommand::Create { image, machine, switch } => {
+            let target = KnownTarget::new(
+                image.clone(),
+                machine.clone(),
+                switch.clone(),
+            )?;
+
+            let path = get_single_target(&target_dir, name).await?;
+            tokio::fs::write(&path, Target::from(target).to_string()).await?;
+
+            replace_active_link(&name, &target_dir).await?;
+
+            println!("Created new build target '{name}' and set it as active");
+        }
+        TargetCommand::List => {
+            let active = tokio::fs::read_link(target_dir.join(ACTIVE)).await?;
+            let active = active.to_string_lossy();
+            for entry in walkdir::WalkDir::new(&target_dir)
+                .max_depth(1)
+                .sort_by_file_name()
+            {
+                let entry = entry?;
+                if entry.file_type().is_file() {
+                    let contents =
+                        tokio::fs::read_to_string(entry.path()).await?;
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    let status = if active == name {
+                        "SELECTED >>> "
+                    } else {
+                        "             "
+                    };
+                    println!("{status}{name}: {contents}");
+                }
+            }
+        }
+        TargetCommand::Set => {
+            let _ = get_single_target(&target_dir, name).await?;
+            replace_active_link(&name, &target_dir).await?;
+            println!("Set build target '{name}' as active");
+        }
+        TargetCommand::Delete => {
+            let path = get_single_target(&target_dir, name).await?;
+            tokio::fs::remove_file(&path).await?;
+            println!("Removed build target '{name}'");
+        }
+    };
+    Ok(())
+}
+
+async fn get_single_target(
+    target_dir: impl AsRef<Path>,
+    name: &str,
+) -> Result<PathBuf> {
+    if name == ACTIVE {
+        bail!(
+            "The name '{name}' is reserved, please try another (e.g. 'default')\n\
+            Usage: '{} -t <TARGET> target ...'",
+            env::current_exe().unwrap().display(),
+        );
+    }
+    Ok(target_dir.as_ref().join(name))
+}
+
+async fn replace_active_link(
+    src: impl AsRef<Path>,
+    target_dir: impl AsRef<Path>,
+) -> Result<()> {
+    let src = src.as_ref();
+    let target_dir = target_dir.as_ref();
+
+    let dst = target_dir.join(ACTIVE);
+    if !target_dir.join(src).exists() {
+        bail!("Target file {} does not exist", src.display());
+    }
+    let _ = tokio::fs::remove_file(&dst).await;
+    tokio::fs::symlink(src, dst).await?;
     Ok(())
 }
 
@@ -734,13 +820,42 @@ async fn main() -> Result<()> {
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = slog::Logger::root(drain, o!());
 
-    debug!(log, "target: {:?}", args.target);
+    let target_help_str = || -> String {
+        format!(
+            "Try calling: '{} -t default target create' to create a new build target",
+            env::current_exe().unwrap().display()
+        )
+    };
 
-    let config = Config {
-        log: log.clone(),
-        package_config,
-        target: args.target,
-        force: args.force,
+    let get_config = || -> Result<Config> {
+        let target_path = args.artifact_dir.join("target").join(&args.target);
+        let raw_target =
+            std::fs::read_to_string(&target_path).map_err(|e| {
+                eprintln!(
+                    "Failed to read build target: {}\n{}",
+                    target_path.display(),
+                    target_help_str()
+                );
+                e
+            })?;
+        let target: Target = KnownTarget::from_str(&raw_target)
+            .map_err(|e| {
+                eprintln!(
+                    "Failed to parse {} as target\n{}",
+                    target_path.display(),
+                    target_help_str()
+                );
+                e
+            })?
+            .into();
+        debug!(log, "target[{}]: {:?}", args.target, target);
+
+        Ok(Config {
+            log: log.clone(),
+            package_config,
+            target,
+            force: args.force,
+        })
     };
 
     // Use a CWD that is the root of the Omicron repository.
@@ -751,46 +866,40 @@ async fn main() -> Result<()> {
     }
 
     match &args.subcommand {
+        SubCommand::Build(BuildCommand::Target { subcommand }) => {
+            do_target(&args.artifact_dir, &args.target, &subcommand).await?;
+        }
         SubCommand::Build(BuildCommand::Dot) => {
-            do_dot(&config).await?;
+            do_dot(&get_config()?).await?;
         }
-        SubCommand::Build(BuildCommand::Package { artifact_dir }) => {
-            do_package(&config, &artifact_dir).await?;
+        SubCommand::Build(BuildCommand::Package) => {
+            do_package(&get_config()?, &args.artifact_dir).await?;
         }
-        SubCommand::Build(BuildCommand::Stamp {
-            artifact_dir,
-            package_name,
-            version,
-        }) => {
-            do_stamp(&config, &artifact_dir, package_name, version).await?;
+        SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
+            do_stamp(&get_config()?, &args.artifact_dir, package_name, version)
+                .await?;
         }
-        SubCommand::Build(BuildCommand::Check) => do_check(&config).await?,
-        SubCommand::Deploy(DeployCommand::Install {
-            artifact_dir,
-            install_dir,
-        }) => {
-            do_install(&config, &artifact_dir, &install_dir).await?;
+        SubCommand::Build(BuildCommand::Check) => {
+            do_check(&get_config()?).await?
         }
-        SubCommand::Deploy(DeployCommand::Unpack {
-            artifact_dir,
-            install_dir,
-        }) => {
-            do_unpack(&config, &artifact_dir, &install_dir).await?;
+        SubCommand::Deploy(DeployCommand::Install { install_dir }) => {
+            do_install(&get_config()?, &args.artifact_dir, &install_dir)
+                .await?;
+        }
+        SubCommand::Deploy(DeployCommand::Unpack { install_dir }) => {
+            do_unpack(&get_config()?, &args.artifact_dir, &install_dir).await?;
         }
         SubCommand::Deploy(DeployCommand::Activate { install_dir }) => {
-            do_activate(&config, &install_dir)?;
+            do_activate(&get_config()?, &install_dir)?;
         }
         SubCommand::Deploy(DeployCommand::Deactivate) => {
-            do_deactivate(&config).await?;
+            do_deactivate(&get_config()?).await?;
         }
         SubCommand::Deploy(DeployCommand::Uninstall) => {
-            do_uninstall(&config).await?;
+            do_uninstall(&get_config()?).await?;
         }
-        SubCommand::Deploy(DeployCommand::Clean {
-            artifact_dir,
-            install_dir,
-        }) => {
-            do_clean(&config, &artifact_dir, &install_dir).await?;
+        SubCommand::Deploy(DeployCommand::Clean { install_dir }) => {
+            do_clean(&get_config()?, &args.artifact_dir, &install_dir).await?;
         }
     }
 

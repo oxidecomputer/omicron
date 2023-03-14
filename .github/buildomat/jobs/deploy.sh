@@ -164,7 +164,7 @@ rm -rf pkg
 # uninstallation.
 #
 OMICRON_NO_UNINSTALL=1 \
-    ptime -m pfexec ./target/release/omicron-package install
+    ptime -m pfexec ./target/release/omicron-package -t test install
 
 ./tests/bootstrap
 rm ./tests/bootstrap
