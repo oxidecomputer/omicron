@@ -8,9 +8,7 @@ use super::{align_by, help_text, Control};
 use crate::state::{artifact_title, ComponentId, Inventory, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup};
-use crate::{Action, Event, Frame, State};
-use crossterm::event::Event as TermEvent;
-use crossterm::event::KeyCode;
+use crate::{Action, Cmd, Frame, State};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use slog::{o, Logger};
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -199,62 +197,70 @@ impl Control for UpdatePane {
         self.update_items(state);
     }
 
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Up => {
-                    self.tree_state.key_up(&self.items);
-                    let selected = self.tree_state.selected();
-                    state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::Up => {
+                self.tree_state.key_up(&self.items);
+                let selected = self.tree_state.selected();
+                state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
+                Some(Action::Redraw)
+            }
+            Cmd::Down => {
+                self.tree_state.key_down(&self.items);
+                let selected = self.tree_state.selected();
+                state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
+                Some(Action::Redraw)
+            }
+            Cmd::Collapse | Cmd::Left => {
+                // We always want something selected. If we close the root,
+                // we want to re-open it. This is the only API currently provided
+                // that allows this.
+                let selected = self.tree_state.selected();
+                self.tree_state.key_left();
+                if self.tree_state.selected().is_empty() {
+                    self.tree_state.select(selected);
+                    None
+                } else {
                     Some(Action::Redraw)
                 }
-                KeyCode::Down => {
-                    self.tree_state.key_down(&self.items);
-                    let selected = self.tree_state.selected();
-                    state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
-                    Some(Action::Redraw)
-                }
-                KeyCode::Left => {
-                    // We always want something selected. If we close the root,
-                    // we want to re-open it. This is the only API currently provided
-                    // that allows this.
-                    let selected = self.tree_state.selected();
-                    self.tree_state.key_left();
-                    if self.tree_state.selected().is_empty() {
-                        self.tree_state.select(selected);
-                        None
-                    } else {
-                        Some(Action::Redraw)
-                    }
-                }
-                KeyCode::Right => {
-                    self.tree_state.key_right();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Enter => {
-                    // Only open the warning popup if an upload is required
-                    if state.update_state.artifacts.is_empty() {
-                        if !self.popup_open {
-                            self.popup_open = true;
-                            Some(Action::Redraw)
-                        } else {
-                            None
-                        }
-                    } else {
-                        // Trigger the update
-                        Some(Action::Update(state.rack_state.selected))
-                    }
-                }
-                KeyCode::Esc => {
-                    if self.popup_open {
-                        self.popup_open = false;
+            }
+            Cmd::Expand | Cmd::Right => {
+                self.tree_state.key_right();
+                Some(Action::Redraw)
+            }
+            Cmd::Enter => {
+                // Only open the warning popup if an upload is required
+                if state.update_state.artifacts.is_empty() {
+                    if !self.popup_open {
+                        self.popup_open = true;
                         Some(Action::Redraw)
                     } else {
                         None
                     }
+                } else {
+                    // Trigger the update
+                    Some(Action::Update(state.rack_state.selected))
                 }
-                _ => None,
-            },
+            }
+            Cmd::Exit => {
+                if self.popup_open {
+                    self.popup_open = false;
+                    Some(Action::Redraw)
+                } else {
+                    None
+                }
+            }
+            Cmd::GotoTop => {
+                self.tree_state.select_first();
+                state.rack_state.selected = ALL_COMPONENT_IDS[0];
+                Some(Action::Redraw)
+            }
+            Cmd::GotoBottom => {
+                self.tree_state.select_last(&self.items);
+                state.rack_state.selected =
+                    ALL_COMPONENT_IDS[ALL_COMPONENT_IDS.len() - 1];
+                Some(Action::Redraw)
+            }
             _ => None,
         }
     }

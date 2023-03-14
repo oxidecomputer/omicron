@@ -9,7 +9,7 @@ mod panes;
 mod splash;
 mod widgets;
 
-use crate::{Action, Event, State, Term};
+use crate::{Action, Cmd, State, Term};
 use slog::{o, Logger};
 use tui::widgets::ListState;
 
@@ -20,8 +20,8 @@ pub use controls::Control;
 pub use panes::OverviewPane;
 pub use panes::UpdatePane;
 
-/// The primary display representation. It's sole purpose is to dispatch events
-/// to the underlying splash and main screens.
+/// The primary display representation. It's sole purpose is to dispatch
+/// [`Cmd`]s to the underlying splash and main screens.
 ///
 // Note: It would be nice to use an enum here, but swapping between enum
 // variants requires taking the screen by value or having a wrapper struct with
@@ -55,14 +55,14 @@ impl Screen {
         self.main.resize(state, width, height);
     }
 
-    pub fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+    pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         if let Some(splash) = &mut self.splash {
-            if splash.on(event) {
+            if splash.on(cmd) {
                 self.splash = None;
             }
             Some(Action::Redraw)
         } else {
-            self.main.on(state, event)
+            self.main.on(state, cmd)
         }
     }
 
