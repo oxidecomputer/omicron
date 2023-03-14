@@ -1,0 +1,33 @@
+# This file is deployed to the switch zone as /etc/ssh/sshd_config.
+
+# TODO: port
+
+#Port 22
+#AddressFamily any
+#ListenAddress 0.0.0.0
+#ListenAddress ::
+
+# General server hardening
+
+PasswordAuthentication no
+PermitEmptyPasswords no
+PubkeyAuthentication no
+PermitListen none
+PermitOpen none
+PermitTunnel no
+PermitUserRC no
+PermitRootLogin no
+AuthorizedKeysFile none
+AllowAgentForwarding no
+AllowTcpForwarding no
+
+AllowUsers wicket
+
+# Allow "wicket" to log in without a password, and constrain it to the captive shell
+Match User wicket
+        PermitEmptyPasswords yes
+        PasswordAuthentication yes
+        AuthenticationMethods none
+        ForceCommand /opt/oxide/wicket/bin/wicket
+
+# TODO: "support" user as described in https://rfd.shared.oxide.computer/rfd/0354

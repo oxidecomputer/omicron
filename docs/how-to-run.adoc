@@ -134,17 +134,31 @@ $ pfexec ./target/release/omicron-package install
 If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) target ${CARGO_HOME:-~/.cargo}`.
 ====
 
-This service installs a bootstrap service, which itself loads other
-requested services. The bootstrap service is currently the only
-service which is "persistent" across reboots - although it will
-initialize other service as part of its setup sequence anyway.
+This service installs a bootstrap service called
+`svc:/system/illumos/sled-agent:default`, which itself loads other requested
+services. The bootstrap service is currently the only service which is
+"persistent" across reboots - although it will initialize other services as part
+of its setup sequence anyway.
+
+The first time the bootstrap service runs, it will take a while to initialize
+the Omicron zones:
 
 [source,text]
 ----
 # List all services:
 $ svcs
+
+# View logs for sled-agent:
+$ tail -f /var/svc/log/system-illumos-sled-agent:default.log
+----
+
+Once the zones are initialized, they'll show up in `zoneadm`:
+
+[source,text]
+----
 # View zones managed by Omicron (prefixed with "oxz_"):
 $ zoneadm list -cv
+
 # View logs for a service:
 $ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
 ----
@@ -157,6 +171,13 @@ executed:
 $ cargo build --release --bin omicron-package
 $ pfexec ./target/release/omicron-package uninstall
 ----
+
+==== Running the switch zone in stub mode
+
+If you're in a virtual machine, by default the above commands will not cause the
+switch zone to be enabled (a zone called `oxz_switch` will not be created). To
+enable the stub switch, edit `smf/sled-agent/config.toml` and set `stub_scrimlet
+= true`.
 
 === Test Environment
 

@@ -171,6 +171,7 @@ only_for_targets.image_type = "standard"
 source.type = "local"
 source.rust.binary_names = ["wicket"]
 source.rust.release = true
+source.paths = [ { from = "wicket/zone-etc", to = "/etc" } ]
 output.type = "zone"
 output.intermediate_only = true
 
