@@ -167,21 +167,14 @@ fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
     )
 }
 
+// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+// could be randomly generated when it no longer needs to be durable.
 fn bootstrap_ip(
     link: PhysicalLink,
     interface_id: u64,
 ) -> Result<Ipv6Addr, dladm::GetMacError> {
     let mac = Dladm::get_mac(link)?;
     Ok(mac_to_bootstrap_ip(mac, interface_id))
-}
-
-// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
-// could be randomly generated when it no longer needs to be durable.
-fn bootstrap_address(
-    link: PhysicalLink,
-    interface_id: u64,
-) -> Result<Ipv6Addr, dladm::GetMacError> {
-    bootstrap_ip(link, interface_id)
 }
 
 // Deletes all state which may be left-over from a previous execution of the
@@ -250,7 +243,7 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
 
-        let ip = bootstrap_address(link.clone(), 1)?;
+        let ip = bootstrap_ip(link.clone(), 1)?;
 
         // The only zone with a bootstrap ip address besides the global zone,
         // is the switch zone. We allocate this address here since we have
