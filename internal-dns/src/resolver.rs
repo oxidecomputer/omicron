@@ -4,7 +4,7 @@
 
 use crate::DNS_ZONE;
 use omicron_common::address::{
-    Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT,
+    Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_SERVER_PORT,
 };
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_proto::rr::record_type::RecordType;
@@ -14,68 +14,6 @@ use trust_dns_resolver::config::{
 use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
-
-/// Describes how to find the DNS servers.
-///
-/// In production code, this is nearly always [`Ipv6Subnet<AZ_PREFIX>`],
-/// but it allows a point of dependency-injection for tests to supply their
-/// own address lookups.
-
-// XXX-dap remove
-pub trait DnsAddressLookup {
-    fn dropshot_server_addrs(&self) -> Vec<SocketAddr>;
-
-    fn dns_server_addrs(&self) -> Vec<SocketAddr>;
-}
-
-pub async fn dns_config_ips_for_subnet(
-    subnet: Ipv6Subnet<AZ_PREFIX>,
-) -> impl Iterator<Item = SocketAddr> {
-    subnet_to_ips(subnet)
-        .map(|address| SocketAddr::new(address, DNS_SERVER_PORT))
-}
-
-// XXX-dap this ought to come from the DNS servers themselves, using
-// bootstrapping resolvers
-// Nexus could instead get them from CockroachDB, but other stuff won't be able
-// to do that.
-fn subnet_to_ips(
-    subnet: Ipv6Subnet<AZ_PREFIX>,
-) -> impl Iterator<Item = IpAddr> {
-    ReservedRackSubnet::new(subnet)
-        .get_dns_subnets()
-        .into_iter()
-        .map(|dns_subnet| IpAddr::V6(dns_subnet.dns_address().ip()))
-}
-
-impl DnsAddressLookup for Ipv6Subnet<AZ_PREFIX> {
-    fn dropshot_server_addrs(&self) -> Vec<SocketAddr> {
-        subnet_to_ips(*self)
-            .map(|address| SocketAddr::new(address, DNS_SERVER_PORT))
-            .collect()
-    }
-
-    fn dns_server_addrs(&self) -> Vec<SocketAddr> {
-        subnet_to_ips(*self)
-            .map(|address| SocketAddr::new(address, DNS_PORT))
-            .collect()
-    }
-}
-
-pub struct ServerAddresses {
-    pub dropshot_server_addrs: Vec<SocketAddr>,
-    pub dns_server_addrs: Vec<SocketAddr>,
-}
-
-impl DnsAddressLookup for ServerAddresses {
-    fn dropshot_server_addrs(&self) -> Vec<SocketAddr> {
-        self.dropshot_server_addrs.clone()
-    }
-
-    fn dns_server_addrs(&self) -> Vec<SocketAddr> {
-        self.dns_server_addrs.clone()
-    }
-}
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
@@ -97,14 +35,7 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    pub fn new(
-        address_getter: &impl DnsAddressLookup,
-    ) -> Result<Self, ResolveError> {
-        let dns_addrs = address_getter.dns_server_addrs();
-        Self::new_from_addrs(dns_addrs)
-    }
-
-    fn new_from_addrs(
+    pub fn new_from_addrs(
         dns_addrs: Vec<SocketAddr>,
     ) -> Result<Self, ResolveError> {
         let mut rc = ResolverConfig::new();
@@ -123,12 +54,35 @@ impl Resolver {
         Ok(Self { inner })
     }
 
-    /// Convenience wrapper for [`Resolver::new`] which determines the subnet
-    /// based on a provided IP address.
+    /// Convenience wrapper for [`Resolver::new_from_addrs`] that determines
+    /// the subnet based on a provided IP address and then uses the DNS
+    /// resolvers for that subnet.
     pub fn new_from_ip(address: Ipv6Addr) -> Result<Self, ResolveError> {
         let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
+        Self::new_from_subnet(subnet)
+    }
 
-        Resolver::new(&subnet)
+    // TODO-correctness This function and its callers make assumptions about how
+    // many internal DNS servers there are on the subnet and where they are.  Is
+    // that okay?  It would seem more flexible not to assume this.  Instead, we
+    // could make a best effort to distribute the list of DNS servers as
+    // configuration and then use new_from_addrs().  Further, we should use a
+    // mechanism like node-cueball's "bootstrap resolvers", where the set of
+    // nameservers is _itself_ provided by a DNS name.  We would periodically
+    // re-resolve this.  That's how we'd learn about dynamic changes to the set
+    // of DNS servers.
+    pub fn new_from_subnet(
+        subnet: Ipv6Subnet<AZ_PREFIX>,
+    ) -> Result<Self, ResolveError> {
+        let dns_ips = ReservedRackSubnet::new(subnet)
+            .get_dns_subnets()
+            .into_iter()
+            .map(|dns_subnet| {
+                let ip_addr = IpAddr::V6(dns_subnet.dns_address().ip());
+                SocketAddr::new(ip_addr, DNS_SERVER_PORT)
+            })
+            .collect();
+        Resolver::new_from_addrs(dns_ips)
     }
 
     /// Looks up a single [`Ipv6Addr`] based on the SRV name.

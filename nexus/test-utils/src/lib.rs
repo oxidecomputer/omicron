@@ -178,14 +178,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // internal DNS server
     server
         .set_resolver(
-            internal_dns::resolver::Resolver::new(
-                &internal_dns::resolver::ServerAddresses {
-                    dropshot_server_addrs: vec![],
-                    dns_server_addrs: vec![*sled_agent
-                        .dns_server
-                        .local_address()],
-                },
-            )
+            internal_dns::resolver::Resolver::new_from_addrs(vec![*sled_agent
+                .dns_server
+                .local_address()])
             .unwrap(),
         )
         .await;
