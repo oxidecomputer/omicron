@@ -47,7 +47,8 @@ enum SubCommand {
 // involvement. If we choose to remove it, having users pick one of a few
 // "build profiles" (in other words, a curated list of target strings)
 // seems like a promising alternative.
-const DEFAULT_TARGET: &str = "image_type=standard switch_variant=stub";
+const DEFAULT_TARGET: &str =
+    "image_type=standard switch_variant=stub machine_type=nongimlet";
 
 #[derive(Debug, Parser)]
 #[clap(name = "packaging tool")]

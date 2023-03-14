@@ -86,7 +86,7 @@ README is probably a good idea.
 ==== Update `config-rss.toml`
 
 Currently rack setup is driven by a configuration file that lives at
-`smf/sled-agent/config-rss.toml` in the root of this repository. The committed
+`smf/sled-agent/nongimlet/config-rss.toml` in the root of this repository. The committed
 configuration of that file contains a single `requests` entry (with many
 services inside it), which means it will start services on only one sled. To
 start services (e.g., nexus) on multiple sleds, add additional entries to that
