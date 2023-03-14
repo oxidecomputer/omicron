@@ -103,6 +103,7 @@ mod test {
             .expect("Cannot access manifest directory");
         let smf = PathBuf::from(manifest).join("../smf/sled-agent");
 
+        let mut configs_seen = 0;
         for variant in std::fs::read_dir(smf).unwrap() {
             let variant = variant.unwrap();
             if variant.file_type().unwrap().is_dir() {
@@ -115,9 +116,11 @@ mod test {
                                 entry.path().display()
                             )
                         });
+                        configs_seen += 1;
                     }
                 }
             }
         }
+        assert!(configs_seen > 0, "No sled-agent configs found");
     }
 }
