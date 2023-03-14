@@ -16,7 +16,7 @@ use crate::params::{
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
-use crate::updates::{ConfigUpdates, UpdateManager};
+use crate::updates::UpdateManager;
 use dropshot::HttpError;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
@@ -33,7 +33,6 @@ use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -273,9 +272,7 @@ impl SledAgent {
         let hardware = HardwareManager::new(&parent_log, config.stub_scrimlet)
             .map_err(|e| Error::Hardware(e))?;
 
-        let update_config =
-            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
-        let updates = UpdateManager::new(update_config);
+        let updates = UpdateManager::new(config.updates.clone());
 
         services
             .sled_agent_started(
