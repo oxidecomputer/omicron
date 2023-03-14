@@ -5187,6 +5187,7 @@
           "hidden"
         ],
         "summary": "Fetch the user associated with the current session",
+        "description": "Use `GET /v1/me` instead",
         "operationId": "session_me",
         "responses": {
           "200": {
@@ -5205,7 +5206,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/session/me/groups": {
@@ -5214,6 +5216,7 @@
           "hidden"
         ],
         "summary": "Fetch the silo groups the current user belongs to",
+        "description": "Use `GET /v1/me/groups` instead",
         "operationId": "session_me_groups",
         "parameters": [
           {
@@ -5262,6 +5265,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
+        "deprecated": true,
         "x-dropshot-pagination": true
       }
     },
@@ -5365,7 +5369,7 @@
           "session"
         ],
         "summary": "Fetch an SSH public key",
-        "description": "Fetch an SSH public key associated with the currently authenticated user.",
+        "description": "Fetch an SSH public key associated with the currently authenticated user. Use `GET /v1/me/ssh-keys` instead",
         "operationId": "session_sshkey_view",
         "parameters": [
           {
@@ -5394,7 +5398,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -9286,6 +9291,251 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Fetch the user associated with the current session",
+        "operationId": "current_user_view_v1",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/me/groups": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Fetch the silo groups the current user belongs to",
+        "operationId": "current_user_groups_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/me/ssh-keys": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "List SSH public keys",
+        "description": "Lists SSH public keys for the currently authenticated user.",
+        "operationId": "current_user_ssh_key_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKeyResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Create an SSH public key",
+        "description": "Create an SSH public key for the currently authenticated user.",
+        "operationId": "current_user_ssh_key_create_v1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SshKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKey"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/me/ssh-keys/{ssh_key}": {
+      "get": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Fetch an SSH public key",
+        "description": "Fetch an SSH public key associated with the currently authenticated user.",
+        "operationId": "current_user_ssh_key_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ssh_key",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKey"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "session"
+        ],
+        "summary": "Delete an SSH public key",
+        "description": "Delete an SSH public key associated with the currently authenticated user.",
+        "operationId": "current_user_ssh_key_delete_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ssh_key",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
