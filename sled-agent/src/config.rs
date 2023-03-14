@@ -4,6 +4,7 @@
 
 //! Interfaces for working with sled agent configuration
 
+use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -40,6 +41,9 @@ pub struct Config {
     /// This allows continued support for development and testing on emulated
     /// systems.
     pub data_link: Option<PhysicalLink>,
+
+    #[serde(default)]
+    pub updates: ConfigUpdates,
 }
 
 #[derive(Debug, thiserror::Error)]
