@@ -22,7 +22,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // Ensure we start with an empty list of SSH keys.
     let keys =
-        objects_list_page_authz::<SshKey>(client, "/v1/current-user/ssh-keys")
+        objects_list_page_authz::<SshKey>(client, "/v1/me/ssh-keys")
             .await
             .items;
     assert_eq!(keys.len(), 0);
@@ -32,7 +32,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/v1/current-user/ssh-keys/nonexistent",
+        "/v1/me/ssh-keys/nonexistent",
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
@@ -48,7 +48,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     for (name, description, public_key) in &new_keys {
         let new_key: SshKey = NexusRequest::objects_post(
             client,
-            "/v1/current-user/ssh-keys",
+            "/v1/me/ssh-keys",
             &SshKeyCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
@@ -74,7 +74,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
             client,
             http::StatusCode::BAD_REQUEST,
             http::Method::POST,
-            "/v1/current-user/ssh-keys",
+            "/v1/me/ssh-keys",
             &SshKeyCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "key1".parse().unwrap(),
@@ -97,7 +97,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     // Ensure we can GET one of the keys we just posted.
     let key1: SshKey = NexusRequest::object_get(
         client,
-        &format!("/v1/current-user/ssh-keys/{}", new_keys[0].0),
+        &format!("/v1/me/ssh-keys/{}", new_keys[0].0),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
@@ -113,7 +113,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     // TODO-coverage: pagination
     let keys: Vec<SshKey> = NexusRequest::object_get(
         client,
-        "/v1/current-user/ssh-keys?sort_by=name_ascending",
+        "/v1/me/ssh-keys?sort_by=name_ascending",
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
@@ -135,7 +135,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let deleted_key_name = new_keys[0].0;
     NexusRequest::object_delete(
         client,
-        &format!("/v1/current-user/ssh-keys/{}", deleted_key_name),
+        &format!("/v1/me/ssh-keys/{}", deleted_key_name),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
@@ -147,7 +147,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        &format!("/v1/current-user/ssh-keys/{}", deleted_key_name),
+        &format!("/v1/me/ssh-keys/{}", deleted_key_name),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()

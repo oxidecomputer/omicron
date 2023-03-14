@@ -8895,7 +8895,7 @@ async fn role_view(
 /// Fetch the user associated with the current session
 #[endpoint {
    method = GET,
-   path = "/v1/current-user",
+   path = "/v1/me",
    tags = ["session"],
 }]
 pub async fn current_user_view_v1(
@@ -8914,7 +8914,7 @@ pub async fn current_user_view_v1(
 /// Fetch the silo groups the current user belongs to
 #[endpoint {
     method = GET,
-    path = "/v1/current-user/groups",
+    path = "/v1/me/groups",
     tags = ["session"],
  }]
 pub async fn current_user_groups_v1(
@@ -8991,7 +8991,7 @@ async fn session_sshkey_list(
 /// Lists SSH public keys for the currently authenticated user.
 #[endpoint {
     method = GET,
-    path = "/v1/current-user/ssh-keys",
+    path = "/v1/me/ssh-keys",
     tags = ["session"],
 }]
 async fn current_user_ssh_key_list_v1(
@@ -9058,7 +9058,7 @@ async fn session_sshkey_create(
 /// Create an SSH public key for the currently authenticated user.
 #[endpoint {
     method = POST,
-    path = "/v1/current-user/ssh-keys",
+    path = "/v1/me/ssh-keys",
     tags = ["session"],
 }]
 async fn current_user_ssh_key_create_v1(
@@ -9090,7 +9090,7 @@ struct SshKeyPathParams {
 /// Fetch an SSH public key
 ///
 /// Fetch an SSH public key associated with the currently authenticated user.
-/// Use `GET /v1/current-user/ssh-keys` instead
+/// Use `GET /v1/me/ssh-keys` instead
 #[endpoint {
     method = GET,
     path = "/session/me/sshkeys/{ssh_key_name}",
@@ -9128,7 +9128,7 @@ async fn session_sshkey_view(
 /// Fetch an SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = GET,
-    path = "/v1/current-user/ssh-keys/{ssh_key}",
+    path = "/v1/me/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
 async fn current_user_ssh_key_view_v1(
@@ -9194,7 +9194,7 @@ async fn session_sshkey_delete(
 /// Delete an SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = DELETE,
-    path = "/v1/current-user/ssh-keys/{ssh_key}",
+    path = "/v1/me/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
 async fn current_user_ssh_key_delete_v1(

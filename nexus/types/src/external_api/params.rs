@@ -1433,7 +1433,7 @@ pub struct UserBuiltinCreate {
 
 // SSH PUBLIC KEYS
 //
-// The SSH key mangement endpoints are currently under `/v1/current-user`,
+// The SSH key mangement endpoints are currently under `/v1/me`,
 // and so have an implicit silo user ID which must be passed seperately
 // to the creation routine. Note that this disagrees with RFD 44.
 

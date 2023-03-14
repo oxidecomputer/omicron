@@ -616,7 +616,7 @@ pub async fn login_begin(
 }
 
 /// Fetch the user associated with the current session
-/// Use `GET /v1/current-user` instead
+/// Use `GET /v1/me` instead
 #[endpoint {
    method = GET,
    path = "/session/me",
@@ -640,7 +640,7 @@ pub async fn session_me(
 }
 
 /// Fetch the silo groups the current user belongs to
-/// Use `GET /v1/current-user/groups` instead
+/// Use `GET /v1/me/groups` instead
 #[endpoint {
     method = GET,
     path = "/session/me/groups",
