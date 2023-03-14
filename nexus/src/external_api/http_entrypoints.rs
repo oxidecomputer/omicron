@@ -84,9 +84,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_policy_view_v1)?;
         api.register(system_policy_update_v1)?;
 
-        api.register(policy_view)?;
-        api.register(policy_update)?;
-
         api.register(policy_view_v1)?;
         api.register(policy_update_v1)?;
 
@@ -605,35 +602,6 @@ pub async fn policy_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the current silo's IAM policy
-/// Use `GET /v1/policy` instead
-#[endpoint {
-    method = GET,
-    path = "/policy",
-    tags = ["silos"],
-    deprecated = true,
- }]
-pub async fn policy_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let silo: NameOrId = opctx
-            .authn
-            .silo_required()
-            .internal_context("loading current silo")?
-            .id()
-            .into();
-
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let policy = nexus.silo_fetch_policy(&opctx, &silo_lookup).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Update the current silo's IAM policy
 #[endpoint {
     method = PUT,
@@ -648,41 +616,6 @@ async fn policy_update_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let new_policy = new_policy.into_inner();
-        let nasgns = new_policy.role_assignments.len();
-        // This should have been validated during parsing.
-        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let silo: NameOrId = opctx
-            .authn
-            .silo_required()
-            .internal_context("loading current silo")?
-            .id()
-            .into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let policy =
-            nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update the current silo's IAM policy
-/// Use `PUT /v1/policy` instead
-#[endpoint {
-    method = PUT,
-    path = "/policy",
-    tags = ["silos"],
-    deprecated = true,
-}]
-async fn policy_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let new_policy = new_policy.into_inner();
-
-    let handler = async {
         let nasgns = new_policy.role_assignments.len();
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
