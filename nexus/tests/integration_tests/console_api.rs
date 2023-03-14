@@ -382,25 +382,23 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to 401 on unauthed request");
 
     // now make same request with auth
-    let priv_user_groups =
-        NexusRequest::object_get(testctx, "/v1/me/groups")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::Group>>()
-            .unwrap();
+    let priv_user_groups = NexusRequest::object_get(testctx, "/v1/me/groups")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<ResultsPage<views::Group>>()
+        .unwrap();
 
     assert_eq!(priv_user_groups.items, vec![]);
 
-    let unpriv_user_groups =
-        NexusRequest::object_get(testctx, "/v1/me/groups")
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await
-            .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::Group>>()
-            .unwrap();
+    let unpriv_user_groups = NexusRequest::object_get(testctx, "/v1/me/groups")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<ResultsPage<views::Group>>()
+        .unwrap();
 
     assert_eq!(unpriv_user_groups.items, vec![]);
 }

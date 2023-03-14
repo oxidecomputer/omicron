@@ -21,10 +21,9 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Ensure we start with an empty list of SSH keys.
-    let keys =
-        objects_list_page_authz::<SshKey>(client, "/v1/me/ssh-keys")
-            .await
-            .items;
+    let keys = objects_list_page_authz::<SshKey>(client, "/v1/me/ssh-keys")
+        .await
+        .items;
     assert_eq!(keys.len(), 0);
 
     // Ensure GET fails on non-existent keys.

@@ -79,16 +79,14 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // user1 can read that key
-    let _fetched_key: views::SshKey = NexusRequest::object_get(
-        client,
-        &format!("/v1/me/ssh-keys/{}", name),
-    )
-    .authn_as(AuthnMode::SiloUser(user1))
-    .execute()
-    .await
-    .expect("failed to make GET request")
-    .parsed_body()
-    .unwrap();
+    let _fetched_key: views::SshKey =
+        NexusRequest::object_get(client, &format!("/v1/me/ssh-keys/{}", name))
+            .authn_as(AuthnMode::SiloUser(user1))
+            .execute()
+            .await
+            .expect("failed to make GET request")
+            .parsed_body()
+            .unwrap();
 
     // user2 cannot - they should see 404, not 403
     NexusRequest::new(
