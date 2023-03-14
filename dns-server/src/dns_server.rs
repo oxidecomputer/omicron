@@ -69,7 +69,7 @@ impl Server {
         config: &Config,
     ) -> anyhow::Result<ServerHandle> {
         let server_socket = Arc::new(
-            UdpSocket::bind(config.bind_address.clone()).await.with_context(
+            UdpSocket::bind(config.bind_address).await.with_context(
                 || {
                     format!(
                         "DNS server start: UDP bind to {:?}",

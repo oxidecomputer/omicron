@@ -18,8 +18,8 @@ pub struct DnsConfigParams {
 pub struct DnsConfig {
     pub generation: u64,
     pub time_created: chrono::DateTime<chrono::Utc>,
-    pub zones: Vec<DnsConfigZone>,
     pub time_applied: chrono::DateTime<chrono::Utc>,
+    pub zones: Vec<DnsConfigZone>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

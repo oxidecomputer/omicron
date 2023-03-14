@@ -65,7 +65,7 @@ async fn main() -> Result<(), anyhow::Error> {
     )
     .context("initializing persistent storage")?;
 
-    let (_, dropshot_server) = dns_server::start_servers(
+    let (_dns_server, dropshot_server) = dns_server::start_servers(
         log,
         store,
         &dns_server_config,

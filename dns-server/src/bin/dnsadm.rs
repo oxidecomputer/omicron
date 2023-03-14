@@ -2,17 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Basic CLI client for the DNS server, using the Dropshot interface to inspect
+//! and update the configuration
+//!
+//! Note that writes in production are not supported as Nexus is the source of
+//! truth for these updates.
+
+use anyhow::Context;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::{
-    types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
+    types::{
+        DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv,
+    },
     Client,
 };
 use slog::{Drain, Logger};
+use std::iter::once;
 use std::net::Ipv6Addr;
 
 #[derive(Debug, Parser)]
-#[clap(name = "dnsadm", about = "Administer DNS records")]
+#[clap(name = "dnsadm", about = "Administer DNS records (for testing only)")]
 struct Opt {
     #[clap(short, long, action)]
     address: Option<String>,
@@ -35,6 +45,8 @@ enum SubCommand {
 #[derive(Debug, Args)]
 struct AddAAAACommand {
     #[clap(action)]
+    zone: String,
+    #[clap(action)]
     name: String,
     #[clap(action)]
     addr: Ipv6Addr,
@@ -42,6 +54,8 @@ struct AddAAAACommand {
 
 #[derive(Debug, Args)]
 struct AddSRVCommand {
+    #[clap(action)]
+    zone: String,
     #[clap(action)]
     name: String,
     #[clap(action)]
@@ -56,6 +70,8 @@ struct AddSRVCommand {
 
 #[derive(Debug, Args)]
 struct DeleteRecordCommand {
+    #[clap(action)]
+    zone: String,
     #[clap(action)]
     name: String,
 }
@@ -76,18 +92,70 @@ async fn main() -> Result<()> {
 
     match opt.subcommand {
         SubCommand::ListRecords => {
-            todo!(); // XXX-dap
-                     // let records = client.dns_records_list().await?;
-                     // println!("{:#?}", records);
+            let config = client.dns_config_get().await?;
+            println!("generation {}", config.generation);
+            println!("    created {}", config.time_created);
+            println!("    applied {}", config.time_applied);
+            println!("    zones:  {}", config.zones.len());
+
+            for zone_config in &config.zones {
+                println!("\nzone {:?}", zone_config.zone_name);
+
+                for kv in &zone_config.records {
+                    println!("    key {:?}:", kv.key.name);
+                    for record in &kv.records {
+                        match record {
+                            DnsRecord::Aaaa(addr) => {
+                                println!("        AAAA: {:?}", addr);
+                            }
+                            DnsRecord::Srv(srv) => {
+                                println!("        SRV:  {}", srv.target);
+                                println!("              port     {}", srv.port);
+                                println!("              priority {}", srv.prio);
+                                println!(
+                                    "              weight   {}",
+                                    srv.weight
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
         SubCommand::AddAAAA(cmd) => {
-            todo!(); // XXX-dap
-                     //client
-                     //    .dns_records_create(&vec![DnsKv {
-                     //        key: DnsRecordKey { name: cmd.name },
-                     //        records: vec![DnsRecord::Aaaa(cmd.addr)],
-                     //    }])
-                     //    .await?;
+            let config = client.dns_config_get().await?.into_inner();
+            let (our_zone, other_zones): (Vec<_>, Vec<_>) =
+                config.zones.into_iter().partition(|z| z.zone_name == cmd.zone);
+            let our_records = our_zone
+                .into_iter()
+                .next()
+                .map(|z| z.records)
+                .unwrap_or_else(Vec::new);
+            let (our_kv, other_kvs): (Vec<_>, Vec<_>) =
+                our_records.into_iter().partition(|kv| kv.key.name == cmd.name);
+            let mut our_kv =
+                our_kv.into_iter().next().unwrap_or_else(|| DnsKv {
+                    key: DnsRecordKey { name: cmd.name },
+                    records: Vec::new(),
+                });
+            our_kv.records.push(DnsRecord::Aaaa(cmd.addr));
+
+            let new_config = DnsConfigParams {
+                generation: config.generation + 1,
+                time_created: chrono::Utc::now(),
+                zones: other_zones
+                    .into_iter()
+                    .chain(once(DnsConfigZone {
+                        zone_name: cmd.zone,
+                        records: other_kvs
+                            .into_iter()
+                            .chain(once(our_kv))
+                            .collect(),
+                    }))
+                    .collect(),
+            };
+
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
         SubCommand::AddSRV(cmd) => {
             todo!(); // XXX-dap
@@ -112,7 +180,7 @@ async fn main() -> Result<()> {
     }
 
     // XXX-dap
-    // Ok(())
+    Ok(())
 }
 
 fn init_logger() -> Logger {
