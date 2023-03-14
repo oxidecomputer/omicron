@@ -332,13 +332,14 @@ async fn init_client_server(
     test_name: &str,
 ) -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
-    let (tmp, config, logctx) = test_config(test_name)?;
+    let (tmp, config_storage, config_dropshot, logctx) =
+        test_config(test_name)?;
     let log = logctx.log.clone();
 
     // initialize dns server db
     let store = dns_server::storage::Store::new(
         log.new(o!("component" => "store")),
-        &config.storage,
+        &config_storage,
     )
     .context("initializing storage")?;
     // XXX-dap clear it?
@@ -350,7 +351,7 @@ async fn init_client_server(
         log.clone(),
         store,
         &dns_server_config,
-        &config.dropshot,
+        &config_dropshot,
     )
     .await?;
 
@@ -385,26 +386,28 @@ async fn init_client_server(
 
 fn test_config(
     test_name: &str,
-) -> Result<(tempdir::TempDir, dns_server::Config, LogContext), anyhow::Error> {
+) -> Result<
+    (
+        tempdir::TempDir,
+        dns_server::storage::Config,
+        dropshot::ConfigDropshot,
+        LogContext,
+    ),
+    anyhow::Error,
+> {
     let logctx = test_setup_log(test_name);
     let tmp_dir = tempdir::TempDir::new("dns-server-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
     let storage_path = storage_path.to_str().unwrap().into();
-
-    let config = dns_server::Config {
-        log: dropshot::ConfigLogging::StderrTerminal {
-            level: dropshot::ConfigLoggingLevel::Info,
-        },
-        dropshot: dropshot::ConfigDropshot {
-            bind_address: "[::1]:0".to_string().parse().unwrap(),
-            request_body_max_bytes: 1024,
-            ..Default::default()
-        },
-        storage: dns_server::storage::Config { storage_path },
+    let config_storage = dns_server::storage::Config { storage_path };
+    let config_dropshot = dropshot::ConfigDropshot {
+        bind_address: "[::1]:0".to_string().parse().unwrap(),
+        request_body_max_bytes: 1024,
+        ..Default::default()
     };
 
-    Ok((tmp_dir, config, logctx))
+    Ok((tmp_dir, config_storage, config_dropshot, logctx))
 }
 
 async fn dns_records_create(

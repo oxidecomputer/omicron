@@ -153,28 +153,18 @@ impl Server {
         let dns_server_storage_dir =
             tempfile::tempdir().map_err(|e| e.to_string())?;
 
-        let dns_server_config = dns_server::Config {
-            log: dropshot::ConfigLogging::StderrTerminal {
-                level: dropshot::ConfigLoggingLevel::Trace,
-            },
-            dropshot: dropshot::ConfigDropshot {
-                bind_address: "[::1]:0".parse().unwrap(),
-                ..Default::default()
-            },
-            storage: dns_server::storage::Config {
+        let dns_log = log.new(o!("kind" => "dns"));
+        let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
+
+        let store = dns_server::storage::Store::new(
+            log.new(o!("component" => "store")),
+            &dns_server::storage::Config {
                 storage_path: dns_server_storage_dir
                     .path()
                     .to_string_lossy()
                     .to_string()
                     .into(),
             },
-        };
-        let dns_log = log.new(o!("kind" => "dns"));
-        let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
-
-        let store = dns_server::storage::Store::new(
-            log.new(o!("component" => "store")),
-            &dns_server_config.storage,
         )
         .context("initializing DNS storage")
         .map_err(|e| e.to_string())?;
@@ -185,7 +175,10 @@ impl Server {
             &dns_server::dns_server::Config {
                 bind_address: SocketAddr::from(dns_address).to_string(),
             },
-            &dns_server_config.dropshot,
+            &dropshot::ConfigDropshot {
+                bind_address: "[::1]:0".parse().unwrap(),
+                ..Default::default()
+            },
         )
         .await
         .map_err(|e| e.to_string())?;

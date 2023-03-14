@@ -7,6 +7,7 @@
 use anyhow::anyhow;
 use anyhow::Context;
 use clap::Parser;
+use serde::Deserialize;
 use slog::info;
 use slog::o;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -24,13 +25,22 @@ struct Args {
     dns_address: SocketAddrV6,
 }
 
+// XXX-dap some of this maybe should just move to CLI arguments so that it's
+// more easily driven by SMF.
+#[derive(Deserialize, Debug)]
+pub struct Config {
+    pub log: dropshot::ConfigLogging,
+    pub dropshot: dropshot::ConfigDropshot,
+    pub storage: dns_server::storage::Config,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let config_file = &args.config_file;
     let config_file_contents = std::fs::read_to_string(config_file)
         .with_context(|| format!("read config file {:?}", config_file))?;
-    let mut config: dns_server::Config = toml::from_str(&config_file_contents)
+    let mut config: Config = toml::from_str(&config_file_contents)
         .with_context(|| format!("parse config file {:?}", config_file))?;
 
     // XXX-dap do not override dropshot bind_address
