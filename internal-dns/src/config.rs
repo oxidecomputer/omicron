@@ -61,7 +61,6 @@ impl AAAA {
 // assumptions: only zones are backends for services; there is only ever one
 // address for zones or sleds
 // XXX-dap TODO-doc this could use better documentation
-// XXX-dap this crate could use better file organization now
 
 pub struct DnsConfigBuilder {
     sleds: BTreeMap<Uuid, Ipv6Addr>,
