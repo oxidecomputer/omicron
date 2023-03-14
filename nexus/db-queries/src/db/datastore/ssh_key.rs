@@ -18,29 +18,39 @@ use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use ref_cast::RefCast;
 
 impl DataStore {
     pub async fn ssh_keys_list(
         &self,
         opctx: &OpContext,
         authz_user: &authz::SiloUser,
-        page_params: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
         opctx.authorize(authz::Action::ListChildren, authz_user).await?;
 
         use db::schema::ssh_key::dsl;
-        paginated(dsl::ssh_key, dsl::name, page_params)
-            .filter(dsl::silo_user_id.eq(authz_user.id()))
-            .filter(dsl::time_deleted.is_null())
-            .select(SshKey::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::ssh_key, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::ssh_key,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::silo_user_id.eq(authz_user.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(SshKey::as_select())
+        .load_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Create a new SSH public key for a user.
