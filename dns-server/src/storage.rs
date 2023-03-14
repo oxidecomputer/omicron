@@ -91,9 +91,6 @@
 // newline-delimited JSON instead.  Both of these could be done in a
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
-//
-// XXX-dap would it be useful / possible to have a tool for looking at the
-// database and rolling back?
 
 use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
@@ -127,57 +124,6 @@ pub struct Store {
     db: Arc<sled::Db>,
     keep: usize, // XXX-dap from configuration file
     updating: Arc<Mutex<Option<UpdateInfo>>>,
-}
-
-/// Describes an ongoing update, if any
-struct UpdateInfo {
-    start_time: std::time::SystemTime,
-    start_instant: std::time::Instant,
-    generation: u64,
-    req_id: String,
-}
-
-struct UpdateGuard<'store, 'req_id> {
-    store: &'store Store,
-    req_id: &'req_id str,
-    finished: bool,
-}
-
-impl<'a, 'b> UpdateGuard<'a, 'b> {
-    async fn finish(mut self) {
-        let store = self.store;
-        let mut update = store.updating.lock().await;
-        match update.take() {
-            None => panic!(
-                "expected to end update from req_id {:?}, but \
-                there is no update in progress",
-                self.req_id,
-            ),
-            Some(UpdateInfo { req_id, .. }) if req_id != self.req_id => panic!(
-                "expected to end update from req_id {:?}, but \
-                    the current update is from req_id {:?}",
-                self.req_id, req_id
-            ),
-            _ => (),
-        };
-        self.finished = true;
-    }
-}
-
-impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
-    fn drop(&mut self) {
-        // TODO-cleanup It would be far better if we could enforce this at
-        // compile-time, similar to a MutexGuard.  The obvious approach of doing
-        // it on drop does not work because we cannot take the async lock from
-        // the synchronous Drop function.  And we don't want to use a std Mutex
-        // and risk blocking the executor.  And it doesn't seem like we can use
-        // blocking_lock() because we _are_ in an asynchronous context.  We
-        // could use a semaphore like tokio's MutexGuard does, but that would
-        // involve unsafe code.)
-        if !self.finished {
-            panic!("attempted to return early without finishing update!");
-        }
-    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -229,6 +175,14 @@ impl Store {
         store.prune_newer(&config);
         store.prune_older(&config);
         Ok(store)
+    }
+
+    /// Returns true if this Store's database was newly created when this Store
+    /// was created (i.e., we did not restore data from an old database)
+    ///
+    /// This is only intended for testing.
+    pub fn is_new(&self) -> bool {
+        !self.db.was_recovered()
     }
 
     fn read_config(&self) -> anyhow::Result<CurrentConfig> {
@@ -635,4 +589,55 @@ pub(crate) enum QueryError {
 
     #[error("failed to parse database result")]
     ParseFail(#[source] anyhow::Error),
+}
+
+/// Describes an ongoing update, if any
+struct UpdateInfo {
+    start_time: std::time::SystemTime,
+    start_instant: std::time::Instant,
+    generation: u64,
+    req_id: String,
+}
+
+struct UpdateGuard<'store, 'req_id> {
+    store: &'store Store,
+    req_id: &'req_id str,
+    finished: bool,
+}
+
+impl<'a, 'b> UpdateGuard<'a, 'b> {
+    async fn finish(mut self) {
+        let store = self.store;
+        let mut update = store.updating.lock().await;
+        match update.take() {
+            None => panic!(
+                "expected to end update from req_id {:?}, but \
+                there is no update in progress",
+                self.req_id,
+            ),
+            Some(UpdateInfo { req_id, .. }) if req_id != self.req_id => panic!(
+                "expected to end update from req_id {:?}, but \
+                    the current update is from req_id {:?}",
+                self.req_id, req_id
+            ),
+            _ => (),
+        };
+        self.finished = true;
+    }
+}
+
+impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
+    fn drop(&mut self) {
+        // TODO-cleanup It would be far better if we could enforce this at
+        // compile-time, similar to a MutexGuard.  The obvious approach of doing
+        // it on drop does not work because we cannot take the async lock from
+        // the synchronous Drop function.  And we don't want to use a std Mutex
+        // and risk blocking the executor.  And it doesn't seem like we can use
+        // blocking_lock() because we _are_ in an asynchronous context.  We
+        // could use a semaphore like tokio's MutexGuard does, but that would
+        // involve unsafe code.)
+        if !self.finished {
+            panic!("attempted to return early without finishing update!");
+        }
+    }
 }

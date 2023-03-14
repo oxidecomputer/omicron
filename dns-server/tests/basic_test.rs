@@ -342,7 +342,7 @@ async fn init_client_server(
         &config_storage,
     )
     .context("initializing storage")?;
-    // XXX-dap clear it?
+    assert!(store.is_new());
 
     // launch a dns server
     let dns_server_config = dns_server::dns_server::Config {
