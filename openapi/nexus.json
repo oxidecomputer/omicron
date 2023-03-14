@@ -12815,7 +12815,7 @@
           "system"
         ],
         "summary": "List users in a silo",
-        "operationId": "silo_users_list_v1",
+        "operationId": "silo_user_list_v1",
         "parameters": [
           {
             "in": "query",
