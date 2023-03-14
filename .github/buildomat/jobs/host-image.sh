@@ -74,4 +74,4 @@ git checkout "$COMMIT"
 popd
 
 # TODO: Consider importing zones here too?
-./tools/build-host-image.sh -B helios /input/package/work/global-zone-packages.tar.gz
+./tools/build-host-image.sh -B /work/helios /input/package/work/global-zone-packages.tar.gz

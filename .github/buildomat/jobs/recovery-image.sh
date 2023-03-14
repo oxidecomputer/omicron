@@ -71,4 +71,4 @@ cd helios
 git checkout "$COMMIT"
 popd
 
-./tools/build-host-image.sh -R helios /input/package/work/trampoline-global-zone-packages.tar.gz
+./tools/build-host-image.sh -R /work/helios /input/package/work/trampoline-global-zone-packages.tar.gz
