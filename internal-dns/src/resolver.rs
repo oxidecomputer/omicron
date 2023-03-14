@@ -13,7 +13,6 @@ use trust_dns_resolver::config::{
 };
 use trust_dns_resolver::TokioAsyncResolver;
 
-// XXX-dap remove
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 
 /// Describes how to find the DNS servers.
@@ -205,9 +204,10 @@ impl Resolver {
 mod test {
     use super::ResolveError;
     use super::Resolver;
-    use crate::{BackendName, DnsConfig, DnsConfigBuilder, ServiceName, SRV};
+    use crate::{BackendName, DnsConfigBuilder, ServiceName, SRV};
     use anyhow::Context;
     use assert_matches::assert_matches;
+    use dns_service_client::types::DnsConfig;
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
     use std::net::Ipv6Addr;

@@ -67,7 +67,7 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
-use internal_dns::multiclient::{DnsError, Resolver as DnsResolver};
+use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::{ServiceName, SRV};
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,

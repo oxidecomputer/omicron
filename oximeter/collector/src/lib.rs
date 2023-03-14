@@ -11,7 +11,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
 };
-use internal_dns::multiclient::{ResolveError, Resolver};
+use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::{ServiceName, SRV};
 use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
 use omicron_common::api::internal::nexus::ProducerEndpoint;

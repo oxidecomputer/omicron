@@ -147,7 +147,7 @@ impl ServerContext {
             Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
         info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
         let resolver =
-            internal_dns::multiclient::Resolver::new(&az_subnet)
+            internal_dns::resolver::Resolver::new(&az_subnet)
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
 
         // Set up DB pool

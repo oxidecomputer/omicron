@@ -237,7 +237,7 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn set_resolver(
         &self,
-        resolver: internal_dns::multiclient::Resolver,
+        resolver: internal_dns::resolver::Resolver,
     ) {
         self.apictx.nexus.set_resolver(resolver).await
     }

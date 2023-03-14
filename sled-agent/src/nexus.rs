@@ -7,7 +7,7 @@ pub use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
-use internal_dns::multiclient::{ResolveError, Resolver};
+use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::{ServiceName, SRV};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
