@@ -28,11 +28,13 @@ set -o xtrace
 cargo --version
 rustc --version
 
-# Build
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=asic' package
-ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=stub' package
-ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=trampoline' package
+
+# Build the test target
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t test target create -i standard -m nongimlet -s stub
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t test package
 
 tarball_src_dir="$(pwd)/out"
 
@@ -41,18 +43,22 @@ tarball_src_dir="$(pwd)/out"
 
 files=(
 	out/*.tar
+	out/target/test
 	package-manifest.toml
-	smf/sled-agent/config.toml
+	smf/sled-agent/nongimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
 )
 
 ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
 
-#
-# Global Zone files for Host OS
-#
+# Build necessary for the global zone
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t host target create -i standard -m gimlet -s asic
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t host package
 
+# Assemble global zone files in a temporary directory.
 if ! tmp_gz=$(mktemp -d); then
   exit 1
 fi
@@ -84,9 +90,34 @@ mkdir -p /work
 cd "$tmp_gz" && tar cvfz /work/global-zone-packages.tar.gz oxide.json root
 cd -
 
+# Non-Global Zones
+
+# Assemble Zone Images into their respective output locations.
+mkdir -p /work/zones
+zones=(
+	out/clickhouse.tar.gz
+	out/cockroachdb.tar.gz
+	out/crucible-pantry.tar.gz
+	out/crucible.tar.gz
+	out/external-dns.tar.gz
+	out/internal-dns.tar.gz
+	out/omicron-nexus.tar.gz
+	out/oximeter-collector.tar.gz
+	out/propolis-server.tar.gz
+	out/switch-asic.tar.gz
+	out/switch-stub.tar.gz
+)
+cp "${zones[@]}" /work/zones/
+
 #
 # Global Zone files for for Trampoline image
 #
+
+# Build necessary for the trampoline image
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t recovery target create -i trampoline
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t recovery package
 
 if ! tmp_trampoline=$(mktemp -d); then
   exit 1
@@ -116,23 +147,4 @@ mkdir -p /work
 cd "$tmp_trampoline" && tar cvfz /work/trampoline-global-zone-packages.tar.gz oxide.json root
 cd -
 
-#
-# Non-Global Zones
-#
 
-# Assemble Zone Images into their respective output locations.
-mkdir -p /work/zones
-zones=(
-	out/clickhouse.tar.gz
-	out/cockroachdb.tar.gz
-	out/crucible-pantry.tar.gz
-	out/crucible.tar.gz
-	out/external-dns.tar.gz
-	out/internal-dns.tar.gz
-	out/omicron-nexus.tar.gz
-	out/oximeter-collector.tar.gz
-	out/propolis-server.tar.gz
-	out/switch-asic.tar.gz
-	out/switch-stub.tar.gz
-)
-cp "${zones[@]}" /work/zones/
