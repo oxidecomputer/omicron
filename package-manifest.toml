@@ -177,6 +177,11 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["wicket"]
 source.rust.release = true
+source.paths = [
+  { from = "smf/switch_zone_setup", to = "/var/svc/manifest/site/switch_zone_setup" },
+  { from = "wicket/scripts/switch_zone_setup", to = "/opt/oxide/wicket/bin/switch_zone_setup" },
+  { from = "wicket/zone-etc", to = "/etc" },
+]
 output.type = "zone"
 output.intermediate_only = true
 
