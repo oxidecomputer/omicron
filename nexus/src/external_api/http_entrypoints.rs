@@ -78,8 +78,8 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the external nexus API
 pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(system_policy_view_v1)?;
-        api.register(system_policy_update_v1)?;
+        api.register(system_policy_view)?;
+        api.register(system_policy_update)?;
 
         api.register(policy_view)?;
         api.register(policy_update)?;
@@ -490,7 +490,7 @@ pub fn external_api() -> NexusApiDescription {
     path = "/v1/system/policy",
     tags = ["policy"],
 }]
-async fn system_policy_view_v1(
+async fn system_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -515,7 +515,7 @@ struct ByIdPathParams {
     path = "/v1/system/policy",
     tags = ["policy"],
 }]
-async fn system_policy_update_v1(
+async fn system_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
