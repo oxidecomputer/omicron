@@ -301,3 +301,36 @@ the exact addresses that are available depends on the environment.
 6. Optionally, attach to the proxied propolis server serial console (this requires https://github.com/oxidecomputer/cli/commit/adab246142270778db7208126fb03724f5d35858[this commit] or newer of the CLI.)
 
     oxide instance serial --interactive -p myproj -o myorg myinst
+
+== Building host images
+
+Host images for both the standard omicron install and the trampoline/recovery
+install are built as a part of CI. To build them locally, first run the CI
+script:
+
+[source,text]
+----
+$ ./.github/buildomat/jobs/package.sh
+----
+
+This will create a `/work` directory with a few tarballs in it. Building a host
+image requires a checkout of
+https://github.com/oxidecomputer/helios-engvm[helios]; the instructions below
+use `$HELIOS_PATH` for the path to this repository. To match CI builds, you
+should check out the commit specified in `./tools/helios_version`. (The script
+will check your current commit hash and will refuse to run if it doesn't match
+unless you pass `-f`.)
+
+To build a standard host image:
+
+[source,text]
+----
+$ ./tools/build-host-image.sh -B $HELIOS_PATH /work/global-zone-packages.tar.gz
+----
+
+To build a recovery host image:
+
+[source,text]
+----
+$ ./tools/build-host-image.sh -R $HELIOS_PATH /work/trampoline-global-zone-packages.tar.gz
+----
