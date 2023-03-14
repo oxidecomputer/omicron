@@ -370,11 +370,6 @@ async fn init_client_server(
 
     let resolver =
         TokioAsyncResolver::tokio(rc, ResolverOpts::default()).unwrap();
-
-    // wait for server to start
-    // XXX-dap wait_for_condition
-    tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-
     let client =
         Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
 
