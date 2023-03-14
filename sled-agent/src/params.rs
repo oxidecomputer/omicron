@@ -358,6 +358,7 @@ pub enum ServiceType {
     Oximeter,
     ManagementGatewayService,
     Wicketd,
+    SwitchZoneSetup,
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
     CruciblePantry,
@@ -371,6 +372,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
             ServiceType::Wicketd => write!(f, "wicketd"),
+            ServiceType::SwitchZoneSetup => write!(f, "switch_zone_setup"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
@@ -396,6 +398,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Oximeter => AutoSt::Oximeter,
             St::ManagementGatewayService => AutoSt::ManagementGatewayService,
             St::Wicketd => AutoSt::Wicketd,
+            St::SwitchZoneSetup => AutoSt::SwitchZoneSetup,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
@@ -476,22 +479,23 @@ impl ServiceZoneRequest {
     }
 
     // XXX: any reason this can't just be service.to_string()?
-    pub fn srv(&self, service: &ServiceType) -> SRV {
+    pub fn srv(&self, service: &ServiceType) -> Option<SRV> {
         match service {
             ServiceType::InternalDns { .. } => {
-                SRV::Service(ServiceName::InternalDNS)
+                Some(SRV::Service(ServiceName::InternalDNS))
             }
-            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
-            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceType::Nexus { .. } => Some(SRV::Service(ServiceName::Nexus)),
+            ServiceType::Oximeter => Some(SRV::Service(ServiceName::Oximeter)),
             ServiceType::ManagementGatewayService => {
-                SRV::Service(ServiceName::ManagementGatewayService)
+                Some(SRV::Service(ServiceName::ManagementGatewayService))
             }
-            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
-            ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
-            ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
+            ServiceType::Wicketd => Some(SRV::Service(ServiceName::Wicketd)),
+            ServiceType::Dendrite { .. } => Some(SRV::Service(ServiceName::Dendrite)),
+            ServiceType::Tfport { .. } => Some(SRV::Service(ServiceName::Tfport)),
             ServiceType::CruciblePantry { .. } => {
-                SRV::Service(ServiceName::CruciblePantry)
+                Some(SRV::Service(ServiceName::CruciblePantry))
             }
+            ServiceType::SwitchZoneSetup => None,
         }
     }
 
@@ -511,6 +515,7 @@ impl ServiceZoneRequest {
             }
             // TODO: Is this correct?
             ServiceType::Wicketd => None,
+            ServiceType::SwitchZoneSetup => None,
             ServiceType::Dendrite { .. } => {
                 Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
             }

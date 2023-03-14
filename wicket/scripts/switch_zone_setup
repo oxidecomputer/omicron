@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# This script is used to set up the user required for wicket.
+
+set -ex -o pipefail
+
+. /lib/svc/share/smf_include.sh
+
+USERS=(wicket)
+
+for user in ${USERS[@]}; do
+    if ! id -u $user >/dev/null 2>&1; then
+        # Add a new group for the user.
+        groupadd "$user"
+        # Add the user.
+        useradd -m -g "$user" "$user"
+        # Remove the password from the user to enable passwordless login.
+        passwd -d "$user"
+    fi
+done
+
+exit $SMF_EXIT_OK
