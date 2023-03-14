@@ -152,13 +152,6 @@ async fn sim_instance_migrate(
     let (instance_id, old_runtime) =
         sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
 
-    // Remove existing V2P mappings for source instance
-    osagactx
-        .nexus()
-        .delete_instance_v2p_mappings(&opctx, instance_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
     // Allocate an IP address the destination sled for the new Propolis server.
     let propolis_addr = osagactx
         .datastore()
@@ -269,6 +262,19 @@ async fn sim_instance_migrate(
         .map_err(ActionError::action_failed)?;
 
     // Add V2P mappings for destination instance
+    //
+    // TODO-performance the instance_put above will *start* a migration, but the
+    // source and destination propolis servers will perform it asynchronously.
+    // Updating the mappings here will briefly "disconnect" the source instance
+    // in the sense that it will be able to send packets out (as other
+    // instance's V2P mappings will be untouched) but will not be able to
+    // receive any packet (other instances will send packets to the destination
+    // propolis' sled but the vCPUs may not have started yet). Until the
+    // destination propolis takes over, there will be a small network outage for
+    // the instance.
+    //
+    // TODO-correctness if the migration fails, there's nothing that will unwind
+    // this and restore the original V2P mappings
     osagactx
         .nexus()
         .create_instance_v2p_mappings(&opctx, instance_id)
