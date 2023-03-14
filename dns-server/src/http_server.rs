@@ -6,7 +6,7 @@
 // XXX-dap should this use HTTP conditional requests?
 
 use crate::dns_types::{DnsConfig, DnsConfigParams};
-use crate::storage;
+use crate::storage::{self, UpdateError};
 use dropshot::{endpoint, RequestContext};
 
 pub struct Context {
@@ -54,15 +54,31 @@ async fn dns_config_put(
     rq: dropshot::TypedBody<DnsConfigParams>,
 ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError> {
     let apictx = rqctx.context();
-    apictx
-        .store
-        .dns_config_update(&rq.into_inner(), &rqctx.request_id)
-        .await
-        .map_err(|e| {
-        dropshot::HttpError::for_internal_error(format!(
-            "internal error: {:?}",
-            e
-        ))
-    })?;
+    apictx.store.dns_config_update(&rq.into_inner(), &rqctx.request_id).await?;
     Ok(dropshot::HttpResponseUpdatedNoContent())
+}
+
+impl From<UpdateError> for dropshot::HttpError {
+    fn from(error: UpdateError) -> Self {
+        let message = format!("{:#}", error);
+        match &error {
+            UpdateError::BadUpdateGeneration { .. } => dropshot::HttpError {
+                status_code: http::StatusCode::CONFLICT,
+                error_code: Some(String::from("BadUpdateGeneration")),
+                external_message: message.clone(),
+                internal_message: message,
+            },
+
+            UpdateError::UpdateInProgress { .. } => dropshot::HttpError {
+                status_code: http::StatusCode::CONFLICT,
+                error_code: Some(String::from("UpdateInProgress")),
+                external_message: message.clone(),
+                internal_message: message,
+            },
+
+            UpdateError::InternalError(_) => {
+                dropshot::HttpError::for_internal_error(message)
+            }
+        }
+    }
 }

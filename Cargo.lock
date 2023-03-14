@@ -1620,6 +1620,7 @@ dependencies = [
  "dns-service-client",
  "dropshot",
  "expectorate",
+ "http",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",

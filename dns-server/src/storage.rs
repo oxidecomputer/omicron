@@ -92,7 +92,7 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
@@ -181,6 +181,29 @@ struct CurrentConfig {
     zones: Vec<String>,
     time_created: chrono::DateTime<chrono::Utc>,
     time_applied: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Error)]
+pub enum UpdateError {
+    #[error(
+        "unsupported attempt to update to generation \
+        {attempted_generation} while at generation {current_generation}"
+    )]
+    BadUpdateGeneration { current_generation: u64, attempted_generation: u64 },
+
+    #[error(
+        "update already in progress (from req_id {req_id:?}, \
+        to generation {generation}, started at {start_time} ({elapsed} ago))"
+    )]
+    UpdateInProgress {
+        start_time: chrono::DateTime<chrono::Utc>,
+        elapsed: chrono::Duration,
+        generation: u64,
+        req_id: String,
+    },
+
+    #[error("internal error")]
+    InternalError(#[from] anyhow::Error),
 }
 
 impl Store {
@@ -318,22 +341,22 @@ impl Store {
         &'a self,
         req_id: &'b str,
         generation: u64,
-    ) -> Result<UpdateGuard<'a, 'b>, anyhow::Error> {
+    ) -> Result<UpdateGuard<'a, 'b>, UpdateError> {
         let mut update = self.updating.lock().await;
         if let Some(ref update) = *update {
-            bail!(
-                "concurrent update in progress \
-                 (from req_id {:?}, to generation {}, \
-                 started at {:?}, {:?} ago)",
-                update.req_id,
-                update.generation,
-                update.start_time,
-                update.start_instant
-            );
+            let elapsed =
+                chrono::Duration::from_std(update.start_instant.elapsed())
+                    .context("elapsed duration out of range")?;
+            return Err(UpdateError::UpdateInProgress {
+                start_time: update.start_time,
+                elapsed,
+                generation: update.generation,
+                req_id: update.req_id.clone(),
+            });
         }
 
         *update = Some(UpdateInfo {
-            start_time: std::time::SystemTime::now(),
+            start_time: chrono::Utc::now(),
             start_instant: std::time::Instant::now(),
             generation,
             req_id: req_id.to_string(),
@@ -349,7 +372,7 @@ impl Store {
         &self,
         config: &DnsConfigParams,
         req_id: &str,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), UpdateError> {
         let log = &self.log.new(o!(
             "req_id" => req_id.to_owned(),
             "new_generation" => config.generation
@@ -360,9 +383,7 @@ impl Store {
         let update = self.begin_update(req_id, config.generation).await?;
 
         info!(log, "attempting generation update");
-        let result = self.do_update(config).await.with_context(|| {
-            format!("update to generation {}", config.generation)
-        });
+        let result = self.do_update(config).await;
         match &result {
             Ok(_) => info!(log, "updated generation"),
             Err(error) => {
@@ -379,7 +400,7 @@ impl Store {
     async fn do_update(
         &self,
         config: &DnsConfigParams,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), UpdateError> {
         let log = &self.log;
         let generation = config.generation;
 
@@ -392,7 +413,10 @@ impl Store {
             || (self.same_generation_update == SameGenerationUpdate::Disallow
                 && old_config.generation == generation)
         {
-            bail!("already at generation {}", generation);
+            return Err(UpdateError::BadUpdateGeneration {
+                current_generation: old_config.generation,
+                attempted_generation: config.generation,
+            });
         }
 
         // Prune any trees in the db that are newer than the current
@@ -481,9 +505,7 @@ impl Store {
             Ok(())
         });
 
-        if let Err(error) = result {
-            bail!("final update: {:#}", error);
-        }
+        result.map_err(|error| anyhow!("final update: {:#}", error))?;
 
         debug!(&log, "flushing default tree");
         self.db.flush_async().await.context("flush")?;
@@ -667,7 +689,7 @@ pub(crate) enum QueryError {
 
 /// Describes an ongoing update, if any
 struct UpdateInfo {
-    start_time: std::time::SystemTime,
+    start_time: chrono::DateTime<chrono::Utc>,
     start_instant: std::time::Instant,
     generation: u64,
     req_id: String,
