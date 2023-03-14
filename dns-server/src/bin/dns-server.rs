@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap documentation
+/// Executable that starts the HTTP-configurable DNS server used for both
+/// internal DNS (RFD 248) and extenral DNS (RFD 357) for the Oxide system
 
 use anyhow::anyhow;
 use anyhow::Context;
@@ -25,8 +26,6 @@ struct Args {
     dns_address: SocketAddrV6,
 }
 
-// XXX-dap some of this maybe should just move to CLI arguments so that it's
-// more easily driven by SMF.
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub log: dropshot::ConfigLogging,
@@ -50,8 +49,15 @@ async fn main() -> Result<(), anyhow::Error> {
         .log
         .to_logger("dns-server")
         .context("failed to create logger")?;
-    // XXX-dap log arguments or put arguments into config
-    info!(&log, "config"; "config" => ?config);
+
+    let dns_server_config = dns_server::dns_server::Config {
+        bind_address: SocketAddr::V6(args.dns_address),
+    };
+
+    info!(&log, "config";
+        "config" => ?config,
+        "dns_config" => ?dns_server_config
+    );
 
     let store = dns_server::storage::Store::new(
         log.new(o!("component" => "store")),
@@ -59,9 +65,6 @@ async fn main() -> Result<(), anyhow::Error> {
     )
     .context("initializing persistent storage")?;
 
-    let dns_server_config = dns_server::dns_server::Config {
-        bind_address: SocketAddr::V6(args.dns_address),
-    };
     let (_, dropshot_server) = dns_server::start_servers(
         log,
         store,
