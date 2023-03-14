@@ -490,8 +490,12 @@ impl ServiceZoneRequest {
                 Some(SRV::Service(ServiceName::ManagementGatewayService))
             }
             ServiceType::Wicketd => Some(SRV::Service(ServiceName::Wicketd)),
-            ServiceType::Dendrite { .. } => Some(SRV::Service(ServiceName::Dendrite)),
-            ServiceType::Tfport { .. } => Some(SRV::Service(ServiceName::Tfport)),
+            ServiceType::Dendrite { .. } => {
+                Some(SRV::Service(ServiceName::Dendrite))
+            }
+            ServiceType::Tfport { .. } => {
+                Some(SRV::Service(ServiceName::Tfport))
+            }
             ServiceType::CruciblePantry { .. } => {
                 Some(SRV::Service(ServiceName::CruciblePantry))
             }
