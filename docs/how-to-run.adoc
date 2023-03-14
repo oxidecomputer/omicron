@@ -105,6 +105,9 @@ be a value in the same L2 segment as OPTE.
 
 [source,text]
 ----
+# Create a new build target (try 'target create -h' to see all the options)
+$ cargo run --release --bin omicron-package -- -t default target create
+# Actually build that target
 $ cargo run --release --bin omicron-package -- package
 ----
 

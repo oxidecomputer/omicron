@@ -6,7 +6,7 @@ set -ex -o pipefail
 
 . /lib/svc/share/smf_include.sh
 
-USERS=(wicket)
+USERS=(wicket support)
 
 for user in ${USERS[@]}; do
     if ! id -u $user >/dev/null 2>&1; then

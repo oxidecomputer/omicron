@@ -368,6 +368,11 @@ impl<'a> LookupPath<'a> {
         SiloGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type SshKey, identified by its id
+    pub fn ssh_key_id(self, id: Uuid) -> SshKey<'a> {
+        SshKey::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type Rack, identified by its id
     pub fn rack_id(self, id: Uuid) -> Rack<'a> {
         Rack::PrimaryKey(Root { lookup_root: self }, id)

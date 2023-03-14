@@ -91,6 +91,11 @@ pub struct IpPoolPath {
     pub pool: NameOrId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SshKeyPath {
+    pub ssh_key: NameOrId,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
     pub silo: NameOrId,
@@ -129,6 +134,15 @@ impl SamlIdentityProviderSelector {
 #[derive(Deserialize, JsonSchema)]
 pub struct GroupPath {
     pub group: Uuid,
+}
+
+// The shape of this selector is slightly different than the others given that
+// silos users can only be specified via ID and are automatically provided by
+// the environment the user is authetnicated in
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SshKeySelector {
+    pub silo_user_id: Uuid,
+    pub ssh_key: NameOrId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -1419,7 +1433,7 @@ pub struct UserBuiltinCreate {
 
 // SSH PUBLIC KEYS
 //
-// The SSH key mangement endpoints are currently under `/session/me`,
+// The SSH key mangement endpoints are currently under `/v1/me`,
 // and so have an implicit silo user ID which must be passed seperately
 // to the creation routine. Note that this disagrees with RFD 44.
 

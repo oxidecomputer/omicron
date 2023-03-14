@@ -177,7 +177,7 @@ OPTIONS:
     -X, --method <METHOD>
             The HTTP method for the request
 
-$ oxide api /session/me
+$ oxide api /v1/me
 {
   "id": "99ad2514-050c-4493-9cb9-d9ceba980a98"
 }

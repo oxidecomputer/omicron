@@ -21,7 +21,7 @@ AuthorizedKeysFile none
 AllowAgentForwarding no
 AllowTcpForwarding no
 
-AllowUsers wicket
+AllowUsers wicket support
 
 # Allow "wicket" to log in without a password, and constrain it to the captive shell
 Match User wicket
@@ -30,4 +30,8 @@ Match User wicket
         AuthenticationMethods none
         ForceCommand /opt/oxide/wicket/bin/wicket
 
-# TODO: "support" user as described in https://rfd.shared.oxide.computer/rfd/0354
+Match User support
+        PermitEmptyPasswords yes
+        PasswordAuthentication yes
+        # TODO: authentication as described in https://rfd.shared.oxide.computer/rfd/0354
+        AuthenticationMethods none
