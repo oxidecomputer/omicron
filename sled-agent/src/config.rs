@@ -92,3 +92,32 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_smf_configs() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cannot access manifest directory");
+        let smf = PathBuf::from(manifest).join("../smf/sled-agent");
+
+        for variant in std::fs::read_dir(smf).unwrap() {
+            let variant = variant.unwrap();
+            if variant.file_type().unwrap().is_dir() {
+                for entry in std::fs::read_dir(variant.path()).unwrap() {
+                    let entry = entry.unwrap();
+                    if entry.file_name() == "config.toml" {
+                        Config::from_file(entry.path()).unwrap_or_else(|_| {
+                            panic!(
+                                "Failed to parse config {}",
+                                entry.path().display()
+                            )
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
