@@ -2,20 +2,33 @@
 
 set -o errexit
 set -o pipefail
-set -o xtrace
 
 function usage
 {
-    echo "usage: $0 PATH_TO_HELIOS PATH_TO_TRAMPOLINE_TARBALL"
+    echo "usage: $0 [-fRB] HELIOS_PATH PACKAGES_TARBALL"
+    echo
+    echo "  -f   Force helios build despite git hash mismatch"
+    echo "  -R   Build recovery (trampoline) image"
+    echo "  -B   Build standard image"
     exit 1
 }
 
 function main
 {
-    while getopts ":hf" opt; do
+    while getopts ":hfRB" opt; do
         case $opt in
             f)
                 FORCE=1
+                shift
+                ;;
+            R)
+                BUILD_RECOVERY=1
+                HELIOS_BUILD_EXTRA_ARGS=-R
+                shift
+                ;;
+            B)
+                BUILD_STANDARD=1
+                HELIOS_BUILD_EXTRA_ARGS=-B
                 shift
                 ;;
             h | \?)
@@ -24,7 +37,18 @@ function main
         esac
     done
 
-    echo "x$FORCE"
+    # Ensure we got either -R or -B but not both
+    case "x$BUILD_RECOVERY$BUILD_STANDARD" in
+        x11)
+            echo "specify at most one of -R, -B"
+            exit 1
+            ;;
+        x)
+            echo "must specify either -R or -B"
+            exit 1
+            ;;
+        *) ;;
+    esac
 
     if [ "$#" != "2" ]; then
         usage
@@ -92,7 +116,7 @@ function main
         -p helios-netdev=https://pkg.oxide.computer/helios-netdev \
         -F optever=0.21 \
         -P $tmp_gz/root \
-        -R
+        $HELIOS_BUILD_EXTRA_ARGS
 }
 
 main "$@"

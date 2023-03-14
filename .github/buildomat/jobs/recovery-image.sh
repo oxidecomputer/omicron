@@ -71,4 +71,4 @@ cd helios
 git checkout "$COMMIT"
 popd
 
-./tools/build-recovery-image.sh helios /input/package/work/trampoline-global-zone-packages.tar.gz
+./tools/build-recovery-image.sh -R helios /input/package/work/trampoline-global-zone-packages.tar.gz
