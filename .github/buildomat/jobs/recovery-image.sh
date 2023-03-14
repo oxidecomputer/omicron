@@ -63,10 +63,12 @@ done
 #
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-# Checkout helios at a pinned commit
+# Checkout helios at a pinned commit into /work/helios
+pfexec mkdir -p /work
+pushd /work
 git clone https://github.com/oxidecomputer/helios.git
 cd helios
 git checkout "$COMMIT"
-cd ..
+popd
 
 ./tools/build-recovery-image.sh helios /input/package/work/trampoline-global-zone-packages.tar.gz
