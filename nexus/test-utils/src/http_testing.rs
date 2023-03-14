@@ -10,8 +10,8 @@ use anyhow::Context;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use headers::authorization::Credentials;
-use omicron_nexus::authn::external::spoof;
-use omicron_nexus::db::identity::Asset;
+use nexus_db_queries::authn::external::spoof;
+use nexus_db_queries::db::identity::Asset;
 use serde_urlencoded;
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -506,7 +506,7 @@ impl<'a> NexusRequest<'a> {
     /// Causes the request to authenticate to Nexus as a user specified by
     /// `mode`
     pub fn authn_as(mut self, mode: AuthnMode) -> Self {
-        use omicron_nexus::authn;
+        use nexus_db_queries::authn;
 
         match mode {
             AuthnMode::UnprivilegedUser => {
