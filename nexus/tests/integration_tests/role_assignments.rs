@@ -110,7 +110,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
         const ROLE: Self::RoleType = authz::FleetRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
-            String::from("/system/policy")
+            String::from("/v1/system/policy")
         }
 
         fn verify_initial<'a, 'b, 'c, 'd>(
