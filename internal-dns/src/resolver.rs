@@ -161,6 +161,7 @@ mod test {
     use crate::{BackendName, DnsConfigBuilder, ServiceName, SRV};
     use anyhow::Context;
     use assert_matches::assert_matches;
+    use dns_server::storage::SameGenerationUpdate;
     use dns_service_client::types::DnsConfigParams;
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
@@ -190,6 +191,8 @@ mod test {
             let storage_path =
                 TempDir::new().expect("Failed to create temporary directory");
             let config_store = dns_server::storage::Config {
+                keep_old_generations: 3,
+                same_generation_update: SameGenerationUpdate::Disallow,
                 storage_path: storage_path
                     .path()
                     .to_string_lossy()

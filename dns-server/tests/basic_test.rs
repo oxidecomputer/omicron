@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
+use dns_server::storage::SameGenerationUpdate;
 use dns_service_client::{
     types::{
         DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv,
@@ -403,7 +404,11 @@ fn test_config(
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
     let storage_path = storage_path.to_str().unwrap().into();
-    let config_storage = dns_server::storage::Config { storage_path };
+    let config_storage = dns_server::storage::Config {
+        storage_path,
+        same_generation_update: SameGenerationUpdate::Disallow,
+        keep_old_generations: 3,
+    };
     let config_dropshot = dropshot::ConfigDropshot {
         bind_address: "[::1]:0".to_string().parse().unwrap(),
         request_body_max_bytes: 1024,

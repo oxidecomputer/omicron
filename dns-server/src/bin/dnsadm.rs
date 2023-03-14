@@ -2,15 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Basic CLI client for the DNS server, using the Dropshot interface to inspect
-//! and update the configuration
+//! Basic CLI client for our configurable DNS server
 //!
-//! Note that writes in production are not supported as Nexus is the source of
-//! truth for these updates.
+//! This is primarily a development and debugging tool.  Writes have two big
+//! caveats:
+//!
+//! - Writes are not supported at all for a deployed server (one configured with
+//!  `same_generation_update = "disallow"`).
+//! - All writes involve a read-modify-write with no ability to avoid clobbering
+//!   a concurrent write.
 
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+use dns_service_client::types::DnsConfig;
 use dns_service_client::{
     types::{
         DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv,
@@ -36,42 +41,57 @@ struct Opt {
 
 #[derive(Debug, Subcommand)]
 enum SubCommand {
+    /// List all records in all zones operated by the DNS server
     ListRecords,
+    /// Add a AAAA record (non-transactionally) to the DNS server
     AddAAAA(AddAAAACommand),
+    /// Add a SRV record (non-transactionally) to the DNS server
     AddSRV(AddSRVCommand),
+    /// Delete all records for a name (non-transactionally) in the DNS server
     DeleteRecord(DeleteRecordCommand),
 }
 
 #[derive(Debug, Args)]
 struct AddAAAACommand {
+    /// name of one of the server's DNS zones
     #[clap(action)]
-    zone: String,
+    zone_name: String,
+    /// name under which the new record should be added
     #[clap(action)]
     name: String,
+    /// IP address for the new AAAA record
     #[clap(action)]
     addr: Ipv6Addr,
 }
 
 #[derive(Debug, Args)]
 struct AddSRVCommand {
+    /// name of one of the server's DNS zones
     #[clap(action)]
-    zone: String,
+    zone_name: String,
+    /// name under which the new record should be added
     #[clap(action)]
     name: String,
+    /// new SRV record priority
     #[clap(action)]
     prio: u16,
+    /// new SRV record weight
     #[clap(action)]
     weight: u16,
+    /// new SRV record port
     #[clap(action)]
     port: u16,
+    /// new SRV record target
     #[clap(action)]
     target: String,
 }
 
 #[derive(Debug, Args)]
 struct DeleteRecordCommand {
+    /// name of one of the server's DNS zones
     #[clap(action)]
-    zone: String,
+    zone_name: String,
+    /// name whose records should be deleted
     #[clap(action)]
     name: String,
 }
@@ -122,64 +142,65 @@ async fn main() -> Result<()> {
                 }
             }
         }
+
         SubCommand::AddAAAA(cmd) => {
-            let config = client.dns_config_get().await?.into_inner();
-            let (our_zone, other_zones): (Vec<_>, Vec<_>) =
-                config.zones.into_iter().partition(|z| z.zone_name == cmd.zone);
-            let our_records = our_zone
-                .into_iter()
-                .next()
-                .map(|z| z.records)
-                .unwrap_or_else(Vec::new);
-            let (our_kv, other_kvs): (Vec<_>, Vec<_>) =
-                our_records.into_iter().partition(|kv| kv.key.name == cmd.name);
-            let mut our_kv =
-                our_kv.into_iter().next().unwrap_or_else(|| DnsKv {
-                    key: DnsRecordKey { name: cmd.name },
-                    records: Vec::new(),
-                });
-            our_kv.records.push(DnsRecord::Aaaa(cmd.addr));
-
-            let new_config = DnsConfigParams {
-                generation: config.generation + 1,
-                time_created: chrono::Utc::now(),
-                zones: other_zones
-                    .into_iter()
-                    .chain(once(DnsConfigZone {
-                        zone_name: cmd.zone,
-                        records: other_kvs
-                            .into_iter()
-                            .chain(once(our_kv))
-                            .collect(),
-                    }))
-                    .collect(),
-            };
-
+            let old_config = client.dns_config_get().await?.into_inner();
+            let new_config = add_record(
+                old_config,
+                &cmd.zone_name,
+                &cmd.name,
+                DnsRecord::Aaaa(cmd.addr),
+            );
             client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
+
         SubCommand::AddSRV(cmd) => {
-            todo!(); // XXX-dap
-                     //client
-                     //    .dns_records_create(&vec![DnsKv {
-                     //        key: DnsRecordKey { name: cmd.name },
-                     //        records: vec![DnsRecord::Srv(Srv {
-                     //            prio: cmd.prio,
-                     //            weight: cmd.weight,
-                     //            port: cmd.port,
-                     //            target: cmd.target,
-                     //        })],
-                     //    }])
-                     //    .await?;
+            let old_config = client.dns_config_get().await?.into_inner();
+            let new_config = add_record(
+                old_config,
+                &cmd.zone_name,
+                &cmd.name,
+                DnsRecord::Srv(Srv {
+                    prio: cmd.prio,
+                    weight: cmd.weight,
+                    port: cmd.port,
+                    target: cmd.target,
+                }),
+            );
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
+
         SubCommand::DeleteRecord(cmd) => {
-            todo!();
-            //client
-            //    .dns_records_delete(&vec![DnsRecordKey { name: cmd.name }])
-            //    .await?;
+            let old_config = client.dns_config_get().await?.into_inner();
+            let zones = old_config
+                .zones
+                .into_iter()
+                .map(|dns_zone| {
+                    if dns_zone.zone_name != cmd.zone_name {
+                        dns_zone
+                    } else {
+                        DnsConfigZone {
+                            zone_name: dns_zone.zone_name,
+                            records: dns_zone
+                                .records
+                                .into_iter()
+                                .filter(|r| r.key.name != cmd.name)
+                                .collect(),
+                        }
+                    }
+                })
+                .collect();
+
+            // See the comment in add_record() about the generation number.
+            let new_config = DnsConfigParams {
+                generation: old_config.generation,
+                time_created: chrono::Utc::now(),
+                zones,
+            };
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
     }
 
-    // XXX-dap
     Ok(())
 }
 
@@ -189,4 +210,40 @@ fn init_logger() -> Logger {
     let drain = slog_envlogger::new(drain).fuse();
     let drain = slog_async::Async::new(drain).chan_size(0x2000).build().fuse();
     slog::Logger::root(drain, slog::o!())
+}
+
+fn add_record(
+    config: DnsConfig,
+    zone_name: &str,
+    name: &str,
+    record: DnsRecord,
+) -> DnsConfigParams {
+    let generation = config.generation;
+    let (our_zone, other_zones): (Vec<_>, Vec<_>) =
+        config.zones.into_iter().partition(|z| z.zone_name == zone_name);
+    let our_records =
+        our_zone.into_iter().next().map(|z| z.records).unwrap_or_else(Vec::new);
+    let (our_kv, other_kvs): (Vec<_>, Vec<_>) =
+        our_records.into_iter().partition(|kv| kv.key.name == name);
+    let mut our_kv = our_kv.into_iter().next().unwrap_or_else(|| DnsKv {
+        key: DnsRecordKey { name: name.to_owned() },
+        records: Vec::new(),
+    });
+    our_kv.records.push(record);
+
+    // We use the same generation number here as what we're replacing.  This
+    // will only work if the server is configured with `same_generation_update =
+    // "replace".  This is only intended for development.  In production,
+    // `same_generation_update = "disallow"`, and this update will fail.
+    DnsConfigParams {
+        generation,
+        time_created: chrono::Utc::now(),
+        zones: other_zones
+            .into_iter()
+            .chain(once(DnsConfigZone {
+                zone_name: zone_name.to_owned(),
+                records: other_kvs.into_iter().chain(once(our_kv)).collect(),
+            }))
+            .collect(),
+    }
 }
