@@ -8,7 +8,7 @@ use crate::params::{
     DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use dns_service_client::types::DnsConfig;
+use dns_service_client::types::DnsConfigParams;
 use internal_dns::{BackendName, ServiceName, SRV};
 use omicron_common::address::{
     get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DNS_PORT,
@@ -88,7 +88,7 @@ pub struct SledRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Plan {
     pub services: HashMap<SocketAddrV6, SledRequest>,
-    pub dns_config: DnsConfig,
+    pub dns_config: DnsConfigParams,
 }
 
 impl Plan {

@@ -12,6 +12,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use pretty_hex::*;
 use serde::Deserialize;
+use slog::info;
 use slog::{debug, error, o, Logger};
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -82,6 +83,10 @@ impl Server {
             "DNS server start: failed to get local address of bound socket",
         )?;
 
+        info!(&log, "DNS server bound to address";
+            "local_address" => ?local_address
+        );
+
         let server = Server { log, store, server_socket };
         let handle = tokio::task::spawn(server.run());
         Ok(ServerHandle { local_address, handle })
@@ -112,7 +117,8 @@ impl Server {
                 req_id,
             };
 
-            // XXX-dap cap the number of these
+            // TODO-robustness We should cap the number of tokio tasks that
+            // we're willing to spawn if we receive a flood of requests.
             tokio::spawn(handle_dns_packet(request));
         }
     }

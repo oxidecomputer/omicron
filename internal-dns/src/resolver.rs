@@ -161,7 +161,7 @@ mod test {
     use crate::{BackendName, DnsConfigBuilder, ServiceName, SRV};
     use anyhow::Context;
     use assert_matches::assert_matches;
-    use dns_service_client::types::DnsConfig;
+    use dns_service_client::types::DnsConfigParams;
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
     use std::net::Ipv6Addr;
@@ -245,7 +245,10 @@ mod test {
                 .context("creating resolver for test DNS server")
         }
 
-        async fn update(&self, dns_config: &DnsConfig) -> anyhow::Result<()> {
+        async fn update(
+            &self,
+            dns_config: &DnsConfigParams,
+        ) -> anyhow::Result<()> {
             self.config_client
                 .dns_config_put(&dns_config)
                 .await

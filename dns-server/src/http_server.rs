@@ -5,7 +5,7 @@
 //! Dropshot server for configuring DNS namespace
 // XXX-dap should this use HTTP conditional requests?
 
-use crate::dns_types::DnsConfig;
+use crate::dns_types::{DnsConfig, DnsConfigParams};
 use crate::storage;
 use dropshot::{endpoint, RequestContext};
 
@@ -51,7 +51,7 @@ async fn dns_config_get(
 )]
 async fn dns_config_put(
     rqctx: RequestContext<Context>,
-    rq: dropshot::TypedBody<DnsConfig>,
+    rq: dropshot::TypedBody<DnsConfigParams>,
 ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError> {
     let apictx = rqctx.context();
     apictx

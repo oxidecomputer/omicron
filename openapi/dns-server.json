@@ -33,7 +33,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DnsConfig"
+                "$ref": "#/components/schemas/DnsConfigParams"
               }
             }
           },
@@ -75,6 +75,14 @@
             "format": "uint64",
             "minimum": 0
           },
+          "time_applied": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
           "zones": {
             "type": "array",
             "items": {
@@ -84,6 +92,33 @@
         },
         "required": [
           "generation",
+          "time_applied",
+          "time_created",
+          "zones"
+        ]
+      },
+      "DnsConfigParams": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsConfigZone"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "time_created",
           "zones"
         ]
       },

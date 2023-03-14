@@ -1615,6 +1615,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "chrono",
  "clap 4.1.6",
  "dns-service-client",
  "dropshot",
@@ -1647,6 +1648,7 @@ dependencies = [
 name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "progenitor",
  "reqwest",
@@ -2944,6 +2946,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "chrono",
  "dns-server",
  "dns-service-client",
  "dropshot",

@@ -8,10 +8,18 @@ use serde::{Deserialize, Serialize};
 use std::net::Ipv6Addr;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DnsConfigParams {
+    pub generation: u64,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub zones: Vec<DnsConfigZone>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfig {
     pub generation: u64,
-    // XXX-dap add time_created
+    pub time_created: chrono::DateTime<chrono::Utc>,
     pub zones: Vec<DnsConfigZone>,
+    pub time_applied: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

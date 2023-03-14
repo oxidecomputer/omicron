@@ -4,7 +4,9 @@
 
 use anyhow::{Context, Result};
 use dns_service_client::{
-    types::{DnsConfig, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv},
+    types::{
+        DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv,
+    },
     Client,
 };
 use dropshot::test_util::LogContext;
@@ -441,7 +443,11 @@ async fn dns_records_create(
 
     let zones =
         other_zones.into_iter().chain(std::iter::once(new_zone)).collect();
-    let after = DnsConfig { generation: before.generation + 1, zones };
+    let after = DnsConfigParams {
+        generation: before.generation + 1,
+        zones,
+        time_created: chrono::Utc::now(),
+    };
     client.dns_config_put(&after).await.context("updating generation")?;
     Ok(())
 }

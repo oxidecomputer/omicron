@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true

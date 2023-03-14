@@ -8,7 +8,7 @@
 use crate::names::{BackendName, ServiceName, DNS_ZONE};
 use anyhow::anyhow;
 use dns_service_client::types::{
-    DnsConfig, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey,
+    DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey,
 };
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
@@ -136,7 +136,7 @@ impl DnsConfigBuilder {
         }
     }
 
-    pub fn build(self) -> DnsConfig {
+    pub fn build(self) -> DnsConfigParams {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled_id, sled_ip)| {
             let name = AAAA::Sled(sled_id).dns_name();
@@ -186,8 +186,9 @@ impl DnsConfigBuilder {
         let all_records =
             sled_records.chain(zone_records).chain(srv_records).collect();
 
-        DnsConfig {
+        DnsConfigParams {
             generation: 1,
+            time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: DNS_ZONE.to_owned(),
                 records: all_records,

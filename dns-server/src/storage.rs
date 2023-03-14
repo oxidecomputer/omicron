@@ -130,6 +130,8 @@ pub struct Store {
 struct CurrentConfig {
     generation: u64,
     zones: Vec<String>,
+    time_created: chrono::DateTime<chrono::Utc>,
+    time_applied: chrono::DateTime<chrono::Utc>,
 }
 
 impl Store {
@@ -160,9 +162,12 @@ impl Store {
             updating: Arc::new(Mutex::new(None)),
         };
         if store.read_config_optional()?.is_none() {
+            let now = chrono::Utc::now();
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
                 generation: 0,
                 zones: vec![],
+                time_created: now,
+                time_applied: now,
             })
             .context("serializing initial config")?;
             store
@@ -250,7 +255,12 @@ impl Store {
 
         // XXX-dap what happens if any of these trees are removed while this is
         // going on?
-        Ok(DnsConfig { generation: config.generation, zones })
+        Ok(DnsConfig {
+            generation: config.generation,
+            time_created: config.time_created,
+            time_applied: config.time_applied,
+            zones,
+        })
     }
 
     async fn begin_update<'a, 'b>(
@@ -286,7 +296,7 @@ impl Store {
     /// See module-level documentation for constraints and design.
     pub(crate) async fn dns_config_update(
         &self,
-        config: &DnsConfig,
+        config: &DnsConfigParams,
         req_id: &str,
     ) -> Result<(), anyhow::Error> {
         let log = &self.log.new(o!(
@@ -315,7 +325,10 @@ impl Store {
         result
     }
 
-    async fn do_update(&self, config: &DnsConfig) -> Result<(), anyhow::Error> {
+    async fn do_update(
+        &self,
+        config: &DnsConfigParams,
+    ) -> Result<(), anyhow::Error> {
         let log = &self.log;
         let generation = config.generation;
 
@@ -370,6 +383,8 @@ impl Store {
         let new_config = CurrentConfig {
             generation,
             zones: config.zones.iter().map(|z| z.zone_name.clone()).collect(),
+            time_created: config.time_created,
+            time_applied: chrono::Utc::now(),
         };
         let new_config_bytes = sled::IVec::from(
             serde_json::to_vec(&new_config)
