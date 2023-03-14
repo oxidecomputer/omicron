@@ -5,7 +5,9 @@
 //! Bootstrap-related APIs.
 
 use super::client::Client as BootstrapAgentClient;
-use super::config::{Config, BOOTSTRAP_AGENT_PORT};
+use super::config::{
+    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
+};
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
 use super::params::SledAgentRequest;
@@ -20,6 +22,7 @@ use crate::config::Config as SledConfig;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
+use crate::updates::UpdateManager;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::dladm::{self, Dladm, GetMacError, PhysicalLink};
 use illumos_utils::zfs::{
@@ -99,6 +102,9 @@ pub enum BootstrapError {
 
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
+
+    #[error("Error accessing version information: {0}")]
+    Version(#[from] crate::updates::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -126,7 +132,9 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    address: SocketAddrV6,
+
+    /// Bootstrap network address.
+    ip: Ipv6Addr,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
@@ -159,23 +167,14 @@ fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
     )
 }
 
+// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+// could be randomly generated when it no longer needs to be durable.
 fn bootstrap_ip(
     link: PhysicalLink,
     interface_id: u64,
 ) -> Result<Ipv6Addr, dladm::GetMacError> {
     let mac = Dladm::get_mac(link)?;
     Ok(mac_to_bootstrap_ip(mac, interface_id))
-}
-
-// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
-// could be randomly generated when it no longer needs to be durable.
-fn bootstrap_address(
-    link: PhysicalLink,
-    interface_id: u64,
-    port: u16,
-) -> Result<SocketAddrV6, dladm::GetMacError> {
-    let ip = bootstrap_ip(link, interface_id)?;
-    Ok(SocketAddrV6::new(ip, port, 0, 0))
 }
 
 // Deletes all state which may be left-over from a previous execution of the
@@ -244,7 +243,7 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
 
-        let address = bootstrap_address(link.clone(), 1, BOOTSTRAP_AGENT_PORT)?;
+        let ip = bootstrap_ip(link.clone(), 1)?;
 
         // The only zone with a bootstrap ip address besides the global zone,
         // is the switch zone. We allocate this address here since we have
@@ -294,7 +293,7 @@ impl Agent {
 
         Zones::ensure_has_global_zone_v6_address(
             bootstrap_etherstub_vnic.clone(),
-            *address.ip(),
+            ip,
             "bootstrap6",
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
@@ -302,7 +301,7 @@ impl Agent {
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::new(log.clone())?;
-        ddmd_client.advertise_prefix(Ipv6Subnet::new(*address.ip()));
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -360,7 +359,7 @@ impl Agent {
         let agent = Agent {
             log: ba_log,
             parent_log: log,
-            address,
+            ip,
             share: Mutex::new(None),
             rss: Mutex::new(None),
             sled_state: Mutex::new(SledAgentState::Before(Some(
@@ -633,7 +632,7 @@ impl Agent {
                     .map(|addr| {
                         let addr = SocketAddrV6::new(
                             addr,
-                            BOOTSTRAP_AGENT_PORT,
+                            BOOTSTRAP_AGENT_SPROCKETS_PORT,
                             0,
                             0,
                         );
@@ -714,7 +713,7 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                *self.address.ip(),
+                self.ip,
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.
@@ -729,9 +728,22 @@ impl Agent {
         Ok(())
     }
 
-    /// Return the global zone address that the bootstrap agent binds to.
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
+    pub async fn components_get(
+        &self,
+    ) -> Result<Vec<crate::updates::Component>, BootstrapError> {
+        let updates = UpdateManager::new(self.sled_config.updates.clone());
+        let components = updates.components_get().await?;
+        Ok(components)
+    }
+
+    /// The GZ address used by the bootstrap agent for Sprockets.
+    pub fn sprockets_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0)
+    }
+
+    /// The address used by the bootstrap agent to serve a dropshot interface.
+    pub fn http_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
     }
 }
 
