@@ -331,11 +331,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(role_list)?;
         api.register(role_view)?;
 
-        api.register(session_sshkey_list)?;
-        api.register(session_sshkey_view)?;
-        api.register(session_sshkey_create)?;
-        api.register(session_sshkey_delete)?;
-
         api.register(current_user_view_v1)?;
         api.register(current_user_groups_v1)?;
         api.register(current_user_ssh_key_list_v1)?;
@@ -8951,46 +8946,6 @@ pub async fn current_user_groups_v1(
 /// Lists SSH public keys for the currently authenticated user.
 #[endpoint {
     method = GET,
-    path = "/session/me/sshkeys",
-    tags = ["session"],
-}]
-async fn session_sshkey_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("listing current user's ssh keys")?;
-        let ssh_keys = nexus
-            .ssh_keys_list(
-                &opctx,
-                actor.actor_id(),
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(SshKey::from)
-            .collect::<Vec<SshKey>>();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            ssh_keys,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List SSH public keys
-///
-/// Lists SSH public keys for the currently authenticated user.
-#[endpoint {
-    method = GET,
     path = "/v1/me/ssh-keys",
     tags = ["session"],
 }]
@@ -9021,34 +8976,6 @@ async fn current_user_ssh_key_list_v1(
             ssh_keys,
             &marker_for_name_or_id,
         )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create an SSH public key
-///
-/// Create an SSH public key for the currently authenticated user.
-#[endpoint {
-    method = POST,
-    path = "/session/me/sshkeys",
-    tags = ["session"],
-}]
-async fn session_sshkey_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_key: TypedBody<params::SshKeyCreate>,
-) -> Result<HttpResponseCreated<SshKey>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("creating ssh key for current user")?;
-        let ssh_key = nexus
-            .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
-            .await?;
-        Ok(HttpResponseCreated(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -9090,42 +9017,6 @@ struct SshKeyPathParams {
 /// Fetch an SSH public key
 ///
 /// Fetch an SSH public key associated with the currently authenticated user.
-/// Use `GET /v1/me/ssh-keys` instead
-#[endpoint {
-    method = GET,
-    path = "/session/me/sshkeys/{ssh_key_name}",
-    tags = ["session"],
-    deprecated = true,
-}]
-async fn session_sshkey_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SshKeyPathParams>,
-) -> Result<HttpResponseOk<SshKey>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("fetching one of current user's ssh keys")?;
-        let ssh_key_selector = params::SshKeySelector {
-            silo_user_id: actor.actor_id(),
-            ssh_key: path.ssh_key_name.into(),
-        };
-        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-        let (.., silo_user, _, ssh_key) = ssh_key_lookup.fetch().await?;
-        // Ensure the SSH key exists in the current silo
-        assert_eq!(silo_user.id(), actor.actor_id());
-        Ok(HttpResponseOk(ssh_key.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch an SSH public key
-///
-/// Fetch an SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = GET,
     path = "/v1/me/ssh-keys/{ssh_key}",
@@ -9153,38 +9044,6 @@ async fn current_user_ssh_key_view_v1(
         // Ensure the SSH key exists in the current silo
         assert_eq!(silo_user.id(), actor.actor_id());
         Ok(HttpResponseOk(ssh_key.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete an SSH public key
-///
-/// Delete an SSH public key associated with the currently authenticated user.
-#[endpoint {
-    method = DELETE,
-    path = "/session/me/sshkeys/{ssh_key_name}",
-    tags = ["session"],
-}]
-async fn session_sshkey_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SshKeyPathParams>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("deleting one of current user's ssh keys")?;
-        let ssh_key_selector = params::SshKeySelector {
-            silo_user_id: actor.actor_id(),
-            ssh_key: path.ssh_key_name.into(),
-        };
-        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-        nexus.ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup).await?;
-        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
