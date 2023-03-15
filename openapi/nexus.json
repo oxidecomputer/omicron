@@ -10081,7 +10081,7 @@
           "silos"
         ],
         "summary": "Fetch the current silo's IAM policy",
-        "operationId": "policy_view_v1",
+        "operationId": "policy_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -10106,7 +10106,7 @@
           "silos"
         ],
         "summary": "Update the current silo's IAM policy",
-        "operationId": "policy_update_v1",
+        "operationId": "policy_update",
         "requestBody": {
           "content": {
             "application/json": {
