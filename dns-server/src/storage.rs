@@ -405,6 +405,15 @@ impl Store {
                 })?;
             }
 
+            // Flush this tree.  We do this here to make sure the tree is fully
+            // written before we update the config in the main tree below.
+            // Otherwise, if Sled reorders writes between flush points, it's
+            // possible that if we crash between here and the final flush below,
+            // then we could come back up having updated config that refers to a
+            // tree that was never flushed.  It's not clear if sled _does_ allow
+            // this, but it's not clear that it doesn't.  It's safer to just
+            // flush here.  This code path is assumed not to be particularly
+            // latency-sensitive.
             tree.flush_async()
                 .await
                 .with_context(|| format!("flush tree {:?}", tree_name))?;
@@ -421,9 +430,6 @@ impl Store {
                 .context("serializing current config")?,
         );
 
-        // XXX-dap does Sled guarantee that keys will be persisted in order
-        // (i.e., this won't show up before some of the changes to the other
-        // tree, will it?)
         debug!(&log, "updating current config");
         let result = self.db.transaction(move |t| {
             // Double-check that the generation we're replacing is older.
