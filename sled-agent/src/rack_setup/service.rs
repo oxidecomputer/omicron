@@ -379,17 +379,17 @@ impl ServiceInner {
             );
 
             let do_update = || async {
-                // XXX-dap We need to determine if this error really is
-                // transient or not.  We also need to make sure we properly
-                // handle the case where we're writing the same generation to a
-                // server that already knows about it.  (That might be solved on
-                // the server side, but either way, we should make sure it
-                // works.)
-                dns_config_client
-                    .dns_config_put(dns_config)
-                    .await
-                    .map(|_| ())
-                    .map_err(BackoffError::transient)
+                let result = dns_config_client.dns_config_put(dns_config).await;
+                match result {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        if dns_service_client::is_retryable(&e) {
+                            Err(BackoffError::transient(e))
+                        } else {
+                            Err(BackoffError::permanent(e))
+                        }
+                    }
+                }
             };
             let log_failure = move |error, duration| {
                 warn!(

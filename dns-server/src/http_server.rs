@@ -7,6 +7,9 @@
 
 use crate::dns_types::{DnsConfig, DnsConfigParams};
 use crate::storage::{self, UpdateError};
+use dns_service_client::{
+    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
+};
 use dropshot::{endpoint, RequestContext};
 
 pub struct Context {
@@ -64,14 +67,16 @@ impl From<UpdateError> for dropshot::HttpError {
         match &error {
             UpdateError::BadUpdateGeneration { .. } => dropshot::HttpError {
                 status_code: http::StatusCode::CONFLICT,
-                error_code: Some(String::from("BadUpdateGeneration")),
+                error_code: Some(String::from(
+                    ERROR_CODE_BAD_UPDATE_GENERATION,
+                )),
                 external_message: message.clone(),
                 internal_message: message,
             },
 
             UpdateError::UpdateInProgress { .. } => dropshot::HttpError {
                 status_code: http::StatusCode::CONFLICT,
-                error_code: Some(String::from("UpdateInProgress")),
+                error_code: Some(String::from(ERROR_CODE_UPDATE_IN_PROGRESS)),
                 external_message: message.clone(),
                 internal_message: message,
             },

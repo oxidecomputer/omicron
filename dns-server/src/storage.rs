@@ -409,14 +409,19 @@ impl Store {
         // now, it shouldn't be possible for this to change after we've checked
         // it.
         let old_config = self.read_config()?;
-        if old_config.generation > generation
-            || (self.same_generation_update == SameGenerationUpdate::Disallow
-                && old_config.generation == generation)
-        {
+        if old_config.generation > generation {
             return Err(UpdateError::BadUpdateGeneration {
                 current_generation: old_config.generation,
                 attempted_generation: config.generation,
             });
+        }
+        if old_config.generation == generation
+            && self.same_generation_update == SameGenerationUpdate::Disallow
+        {
+            // Do nothing -- we're all done. ("disallow" is more like
+            // "ignore" -- we treat these updates as successful without
+            // doing anything.)
+            return Ok(());
         }
 
         // Prune any trees in the db that are newer than the current

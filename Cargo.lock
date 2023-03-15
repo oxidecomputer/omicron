@@ -1651,6 +1651,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "http",
  "progenitor",
  "reqwest",
  "serde",
