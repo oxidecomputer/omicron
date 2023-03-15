@@ -7,11 +7,12 @@
 //! This is primarily a development and debugging tool.  Writes have two big
 //! caveats:
 //!
-//! - Writes are not supported at all for a deployed server (one configured with
-//!  `same_generation_update = "disallow"`).
+//! - Writes are only supported to a special namespace of test zones ending in
+//!   ".oxide.test" to avoid ever conflicting with a deployed server
 //! - All writes involve a read-modify-write with no ability to avoid clobbering
 //!   a concurrent write.
 
+use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -53,7 +54,7 @@ enum SubCommand {
 
 #[derive(Debug, Args)]
 struct AddAAAACommand {
-    /// name of one of the server's DNS zones
+    /// name of one of the server's DNS zones (under ".oxide.test")
     #[clap(action)]
     zone_name: String,
     /// name under which the new record should be added
@@ -66,7 +67,7 @@ struct AddAAAACommand {
 
 #[derive(Debug, Args)]
 struct AddSRVCommand {
-    /// name of one of the server's DNS zones
+    /// name of one of the server's DNS zones (under ".oxide.test")
     #[clap(action)]
     zone_name: String,
     /// name under which the new record should be added
@@ -88,7 +89,7 @@ struct AddSRVCommand {
 
 #[derive(Debug, Args)]
 struct DeleteRecordCommand {
-    /// name of one of the server's DNS zones
+    /// name of one of the server's DNS zones (under ".oxide.test")
     #[clap(action)]
     zone_name: String,
     /// name whose records should be deleted
@@ -150,7 +151,7 @@ async fn main() -> Result<()> {
                 &cmd.zone_name,
                 &cmd.name,
                 DnsRecord::Aaaa(cmd.addr),
-            );
+            )?;
             client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
 
@@ -166,12 +167,13 @@ async fn main() -> Result<()> {
                     port: cmd.port,
                     target: cmd.target,
                 }),
-            );
+            )?;
             client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
 
         SubCommand::DeleteRecord(cmd) => {
             let old_config = client.dns_config_get().await?.into_inner();
+            verify_zone_name(&cmd.zone_name)?;
             let zones = old_config
                 .zones
                 .into_iter()
@@ -191,9 +193,8 @@ async fn main() -> Result<()> {
                 })
                 .collect();
 
-            // See the comment in add_record() about the generation number.
             let new_config = DnsConfigParams {
-                generation: old_config.generation,
+                generation: old_config.generation + 1,
                 time_created: chrono::Utc::now(),
                 zones,
             };
@@ -201,6 +202,17 @@ async fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Verify that the given DNS zone name provided by the user falls under the
+/// ".oxide.test" name to ensure that it can never conflict with a real deployed
+/// zone name.
+fn verify_zone_name(zone_name: &str) -> Result<()> {
+    ensure!(
+        zone_name.trim_end_matches(".").ends_with(".oxide.test"),
+        "zone name must be under \".oxide.test\""
+    );
     Ok(())
 }
 
@@ -217,7 +229,9 @@ fn add_record(
     zone_name: &str,
     name: &str,
     record: DnsRecord,
-) -> DnsConfigParams {
+) -> Result<DnsConfigParams> {
+    verify_zone_name(zone_name)?;
+
     let generation = config.generation;
     let (our_zone, other_zones): (Vec<_>, Vec<_>) =
         config.zones.into_iter().partition(|z| z.zone_name == zone_name);
@@ -231,12 +245,8 @@ fn add_record(
     });
     our_kv.records.push(record);
 
-    // We use the same generation number here as what we're replacing.  This
-    // will only work if the server is configured with `same_generation_update =
-    // "replace".  This is only intended for development.  In production,
-    // `same_generation_update = "disallow"`, and this update will fail.
-    DnsConfigParams {
-        generation,
+    Ok(DnsConfigParams {
+        generation: generation + 1,
         time_created: chrono::Utc::now(),
         zones: other_zones
             .into_iter()
@@ -245,5 +255,5 @@ fn add_record(
                 records: other_kvs.into_iter().chain(once(our_kv)).collect(),
             }))
             .collect(),
-    }
+    })
 }

@@ -114,55 +114,8 @@ const KEY_CONFIG: &'static str = "config";
 pub struct Config {
     /// The path for the embedded "sled" kv store
     pub storage_path: Utf8PathBuf,
-    /// Behavior when receiving an update to the current generation
-    pub same_generation_update: SameGenerationUpdate,
     /// How many previous generations' DNS data to keep
     pub keep_old_generations: usize,
-}
-
-// This is a cheesy mechanism for enabling developers to mess around with the
-// data in a local DNS server using `dnsadm` while keeping production systems
-// safe.
-//
-// The whole idea behind applying generation numbers to DNS data is that we can
-// reliably tell exactly what data a DNS server has based on the generation
-// number.  In deployed servers, Nexus (the client of the DNS server's
-// configuration API) is always the source of truth.  It (and it alone) decides
-// when to increment the generation number and distribute a new set of data.  If
-// something else ever incremented the generation number behind its back and
-// deployed that to the DNS servers, the next update from Nexus would not get
-// propagated correctly, and potentially all future generations could be wrong
-// too.
-//
-// But in development, it's useful to be able to manipulate the DNS data and see
-// how the server will behave.  The `dnsadm` tool helps us do this.
-//
-// The trick is: how do we enable `dnsadm` in development without making it easy
-// to accidentally use it on a production system?
-//
-// This is arguably just a question of client authentication and authorization.
-// In a production system, Nexus is authorized to make changes, and nobody else
-// is.  However, we have no means of authentication today.
-//
-// So instead, we do two things:
-//
-// - dnsadm always updates DNS data _using the same generation number as what's
-//   currently deployed_
-// - a configuration option (SameGenerationUpdate) determines whether Nexus
-//   accepts updates having the same generation that it currently has.  In
-//   production, such updates are always rejected.
-//
-// This is decidedly janky, but it supports what we need and also fails safely.
-#[derive(Clone, Copy, Deserialize, Debug, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SameGenerationUpdate {
-    /// Disallow attempts to update to the same generation that we're already at
-    /// (intended for production)
-    Disallow,
-
-    /// Accept the update, replacing whatever data we currently have
-    /// (intended for development, when using `dnsadm`)
-    Replace,
 }
 
 /// Encapsulates persistent storage of DNS data
@@ -172,7 +125,6 @@ pub struct Store {
     db: Arc<sled::Db>,
     keep: usize,
     updating: Arc<Mutex<Option<UpdateInfo>>>,
-    same_generation_update: SameGenerationUpdate,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -233,7 +185,6 @@ impl Store {
             db,
             keep: config.keep_old_generations,
             updating: Arc::new(Mutex::new(None)),
-            same_generation_update: config.same_generation_update,
         };
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
@@ -415,12 +366,7 @@ impl Store {
                 attempted_generation: config.generation,
             });
         }
-        if old_config.generation == generation
-            && self.same_generation_update == SameGenerationUpdate::Disallow
-        {
-            // Do nothing -- we're all done. ("disallow" is more like
-            // "ignore" -- we treat these updates as successful without
-            // doing anything.)
+        if old_config.generation == generation {
             return Ok(());
         }
 
@@ -495,11 +441,7 @@ impl Store {
                     ))
                 })?;
 
-            if old_config.generation > generation
-                || (self.same_generation_update
-                    == SameGenerationUpdate::Disallow
-                    && old_config.generation == generation)
-            {
+            if old_config.generation >= generation {
                 return Err(ConflictableTransactionError::Abort(anyhow!(
                     "unexpectedly found newer generation {}",
                     old_config.generation

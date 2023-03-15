@@ -11,7 +11,6 @@ use super::storage::PantryServer;
 use crate::nexus::NexusClient;
 use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
-use dns_server::storage::SameGenerationUpdate;
 use internal_dns::{ServiceName, SRV};
 use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
@@ -160,7 +159,6 @@ impl Server {
             log.new(o!("component" => "store")),
             &dns_server::storage::Config {
                 keep_old_generations: 3,
-                same_generation_update: SameGenerationUpdate::Disallow,
                 storage_path: dns_server_storage_dir
                     .path()
                     .to_string_lossy()

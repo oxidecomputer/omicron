@@ -11,9 +11,3 @@ if_exists = "append"
 [storage]
 storage_path = "./dns-storage"
 keep_old_generations = 3
-# If a request comes up in to update to a DNS data generation that we're already
-# at, do we disallow it ("disallow") or replace what we have ("replace")?  In
-# production, it is illegal for the contents of a generation to change, and we
-# expect to get duplicate updates with some regularity, so we set this to
-# "disallow".  The "replace" option is intended only for development.
-same_generation_update = "replace"
