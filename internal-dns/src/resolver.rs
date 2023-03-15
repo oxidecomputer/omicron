@@ -305,7 +305,7 @@ mod test {
         let ip = Ipv6Addr::from_str("ff::01").unwrap();
         let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
         dns_config
-            .service_backend(SRV::Service(ServiceName::Cockroach), &zone, 12345)
+            .service_backend_zone(SRV::Service(ServiceName::Cockroach), &zone, 12345)
             .unwrap();
         let dns_config = dns_config.build();
         dns_server.update(&dns_config).await.unwrap();
@@ -368,7 +368,7 @@ mod test {
             let zone =
                 dns_builder.host_zone(Uuid::new_v4(), *db_ip.ip()).unwrap();
             dns_builder
-                .service_backend(srv_crdb.clone(), &zone, db_ip.port())
+                .service_backend_zone(srv_crdb.clone(), &zone, db_ip.port())
                 .unwrap();
         }
 
@@ -376,7 +376,7 @@ mod test {
             .host_zone(Uuid::new_v4(), *clickhouse_addr.ip())
             .unwrap();
         dns_builder
-            .service_backend(
+            .service_backend_zone(
                 srv_clickhouse.clone(),
                 &zone,
                 clickhouse_addr.port(),
@@ -386,7 +386,7 @@ mod test {
         let zone =
             dns_builder.host_zone(Uuid::new_v4(), *crucible_addr.ip()).unwrap();
         dns_builder
-            .service_backend(srv_backend.clone(), &zone, crucible_addr.port())
+            .service_backend_zone(srv_backend.clone(), &zone, crucible_addr.port())
             .unwrap();
 
         let mut dns_config = dns_builder.build();
@@ -456,7 +456,7 @@ mod test {
         let ip1 = Ipv6Addr::from_str("ff::01").unwrap();
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip1).unwrap();
         let srv_crdb = SRV::Service(ServiceName::Cockroach);
-        dns_builder.service_backend(srv_crdb.clone(), &zone, 12345).unwrap();
+        dns_builder.service_backend_zone(srv_crdb.clone(), &zone, 12345).unwrap();
         let dns_config = dns_builder.build();
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
@@ -471,7 +471,7 @@ mod test {
         let ip2 = Ipv6Addr::from_str("ee::02").unwrap();
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip2).unwrap();
         let srv_crdb = SRV::Service(ServiceName::Cockroach);
-        dns_builder.service_backend(srv_crdb.clone(), &zone, 54321).unwrap();
+        dns_builder.service_backend_zone(srv_crdb.clone(), &zone, 54321).unwrap();
         let mut dns_config = dns_builder.build();
         dns_config.generation += 1;
         dns_server.update(&dns_config).await.unwrap();

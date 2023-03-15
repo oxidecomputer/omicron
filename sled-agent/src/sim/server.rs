@@ -195,7 +195,7 @@ impl Server {
         let pantry_zone = dns
             .host_zone(pantry_zone_id, *pantry_addr.ip())
             .expect("failed to set up DNS");
-        dns.service_backend(
+        dns.service_backend_zone(
             SRV::Service(ServiceName::CruciblePantry),
             &pantry_zone,
             pantry_addr.port(),

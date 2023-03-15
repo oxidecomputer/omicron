@@ -207,7 +207,7 @@ impl Plan {
                 let address = addr_alloc.next().expect("Not enough addrs");
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend(
+                    .service_backend_zone(
                         SRV::Service(ServiceName::Nexus),
                         &zone,
                         omicron_common::address::NEXUS_INTERNAL_PORT,
@@ -231,7 +231,7 @@ impl Plan {
                 let address = addr_alloc.next().expect("Not enough addrs");
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend(
+                    .service_backend_zone(
                         SRV::Service(ServiceName::Oximeter),
                         &zone,
                         omicron_common::address::OXIMETER_PORT,
@@ -254,7 +254,7 @@ impl Plan {
                 let port = omicron_common::address::COCKROACH_PORT;
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend(
+                    .service_backend_zone(
                         SRV::Service(ServiceName::Cockroach),
                         &zone,
                         port,
@@ -278,7 +278,7 @@ impl Plan {
                 let port = omicron_common::address::CLICKHOUSE_PORT;
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend(
+                    .service_backend_zone(
                         SRV::Service(ServiceName::Clickhouse),
                         &zone,
                         port,
@@ -306,7 +306,7 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, *address.ip()).unwrap();
                 dns_builder
-                    .service_backend(
+                    .service_backend_zone(
                         SRV::Backend(BackendName::Crucible, id),
                         &zone,
                         address.port(),
@@ -329,7 +329,7 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, dns_addr).unwrap();
                 dns_builder
-                    .service_backend(
+                    .service_backend_zone(
                         SRV::Service(ServiceName::InternalDNS),
                         &zone,
                         DNS_SERVER_PORT,
@@ -361,7 +361,7 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend(
+                    .service_backend_zone(
                         SRV::Service(ServiceName::InternalDNS),
                         &zone,
                         port,
