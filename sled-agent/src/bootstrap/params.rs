@@ -161,6 +161,27 @@ mod tests {
     use crate::bootstrap::trust_quorum::RackSecret;
     use crate::bootstrap::trust_quorum::ShareDistribution;
     use macaddr::MacAddr6;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_rack_initialization() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cannot access manifest directory");
+        let path = PathBuf::from(manifest)
+            .join("../smf/sled-agent/nongimlet/config-rss.toml");
+        let contents = std::fs::read_to_string(path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+    }
+
+    #[test]
+    fn parse_gateway() {
+        let _: Gateway = toml::from_str(
+            r#"
+            mac = "18:c0:4d:d:a0:2a"
+        "#,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn json_serialization_round_trips() {
