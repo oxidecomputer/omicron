@@ -394,25 +394,43 @@ impl UpdateDriver {
         plan: UpdatePlan,
         ipr_start_receiver: IprStartReceiver,
     ) -> Result<(), UpdateTerminalEventKind> {
-        // TODO-correctness Is the general order here correct? Host then SP then
-        // RoT, then reboot the SP/RoT?
-        if self.sp.type_ == SpType::Sled {
-            self.run_sled(&plan, ipr_start_receiver).await?;
-        }
+        // TODO: We currently do updates in the order RoT -> SP -> host. This is
+        // generally the correct order, but in some cases there might be a bug
+        // which forces us to update components in the order SP -> RoT -> host.
+        // How do we handle that?
+        //
+        // Broadly, there are two ways to do this:
+        //
+        // 1. Add metadata to artifacts.json indicating the order in which
+        //    components should be updated. There are a lot of options in the
+        //    design space here, from a simple boolean to a list or DAG
+        //    expressing the order, or something even more dynamic than that.
+        //
+        // 2. Skip updating components that match the same version. This would
+        //    let us ship two separate archives in case there's a bug: one with
+        //    the newest components for the SP and RoT, and one without.
 
-        let sp_artifact = match self.sp.type_ {
-            SpType::Sled => &plan.gimlet_sp,
-            SpType::Power => &plan.psc_sp,
-            SpType::Switch => &plan.sidecar_sp,
+        let (rot_artifact, sp_artifact) = match self.sp.type_ {
+            SpType::Sled => (&plan.gimlet_rot, &plan.gimlet_sp),
+            SpType::Power => (&plan.psc_rot, &plan.psc_sp),
+            SpType::Switch => (&plan.sidecar_rot, &plan.sidecar_sp),
         };
 
+        info!(self.log, "starting RoT update"; "artifact" => ?rot_artifact.id);
+        self.update_sp_component(rot_artifact, SpComponent::ROT)
+            .await
+            .map_err(|err| UpdateTerminalEventKind::ArtifactUpdateFailed {
+                artifact: rot_artifact.id.clone(),
+                reason: format!("{err:#}"),
+            })?;
+
         info!(self.log, "starting SP update"; "artifact" => ?sp_artifact.id);
-        self.update_sp(sp_artifact).await.map_err(|err| {
-            UpdateTerminalEventKind::ArtifactUpdateFailed {
+        self.update_sp_component(sp_artifact, SpComponent::SP_ITSELF)
+            .await
+            .map_err(|err| UpdateTerminalEventKind::ArtifactUpdateFailed {
                 artifact: sp_artifact.id.clone(),
                 reason: format!("{err:#}"),
-            }
-        })?;
+            })?;
         self.push_update_normal_event_now(
             UpdateNormalEventKind::ArtifactUpdateComplete {
                 artifact: sp_artifact.id.clone(),
@@ -430,6 +448,10 @@ impl UpdateDriver {
             UpdateNormalEventKind::SpResetComplete,
             None,
         );
+
+        if self.sp.type_ == SpType::Sled {
+            self.run_sled(&plan, ipr_start_receiver).await?;
+        }
 
         Ok(())
     }
@@ -949,9 +971,12 @@ impl UpdateDriver {
             .map(|response| response.into_inner())
     }
 
-    async fn update_sp(&self, artifact: &ArtifactIdData) -> anyhow::Result<()> {
-        const SP_COMPONENT: &str = SpComponent::SP_ITSELF.const_as_str();
-
+    async fn update_sp_component(
+        &self,
+        artifact: &ArtifactIdData,
+        component: SpComponent,
+    ) -> anyhow::Result<()> {
+        let component_name = component.const_as_str();
         let update_id = Uuid::new_v4();
 
         // The SP only has one updateable firmware slot ("the inactive bank") -
@@ -965,7 +990,7 @@ impl UpdateDriver {
             .sp_component_update(
                 self.sp.type_,
                 self.sp.slot,
-                SP_COMPONENT,
+                component_name,
                 firmware_slot,
                 &update_id,
                 reqwest::Body::wrap_stream(buf_list_to_try_stream(
@@ -982,7 +1007,7 @@ impl UpdateDriver {
         self.poll_for_component_update_completion(
             &artifact.id,
             update_id,
-            SP_COMPONENT,
+            component_name,
         )
         .await?;
 
