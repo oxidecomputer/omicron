@@ -375,11 +375,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(local_idp_user_delete_v1)?;
         api.register(local_idp_user_set_password_v1)?;
 
-        api.register(certificate_list)?;
-        api.register(certificate_create)?;
-        api.register(certificate_view)?;
-        api.register(certificate_delete)?;
-
         api.register(certificate_list_v1)?;
         api.register(certificate_create_v1)?;
         api.register(certificate_view_v1)?;
@@ -4611,45 +4606,6 @@ async fn certificate_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List system-wide certificates
-///
-/// Returns a list of all the system-wide certificates. System-wide certificates
-/// are returned sorted by creation date, with the most recent certificates
-/// appearing first.
-/// Use `GET /v1/system/certificates` instead
-#[endpoint {
-    method = GET,
-    path = "/system/certificates",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pag_params = data_page_params_for(&rqctx, &query)?;
-    let scan_params = ScanByNameOrId::from_query(&query)?;
-    let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let certs = nexus
-            .certificates_list(&opctx, &paginated_by)
-            .await?
-            .into_iter()
-            .map(|d| d.try_into())
-            .collect::<Result<Vec<_>, Error>>()?;
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            certs,
-            &marker_for_name_or_id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a new system-wide x.509 certificate.
 ///
 /// This certificate is automatically used by the Oxide Control plane to serve
@@ -4667,32 +4623,6 @@ async fn certificate_create_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let new_cert_params = new_cert.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
-        Ok(HttpResponseCreated(cert.try_into()?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a new system-wide x.509 certificate.
-///
-/// This certificate is automatically used by the Oxide Control plane to serve
-/// external connections.
-/// Use `POST /v1/system/certificates` instead
-#[endpoint {
-    method = POST,
-    path = "/system/certificates",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_cert: TypedBody<params::CertificateCreate>,
-) -> Result<HttpResponseCreated<Certificate>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let new_cert_params = new_cert.into_inner();
-    let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
         Ok(HttpResponseCreated(cert.try_into()?))
@@ -4730,32 +4660,6 @@ async fn certificate_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a certificate
-///
-/// Returns the details of a specific certificate
-/// Use `GET /v1/system/certificates/{certificate}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/certificates/{certificate}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<CertificatePathParam>,
-) -> Result<HttpResponseOk<Certificate>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let (.., cert) =
-            nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
-        Ok(HttpResponseOk(cert.try_into()?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete a certificate
 ///
 /// Permanently delete a certificate. This operation cannot be undone.
@@ -4772,36 +4676,6 @@ async fn certificate_delete_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus
-            .certificate_delete(
-                &opctx,
-                nexus.certificate_lookup(&opctx, &path.certificate),
-            )
-            .await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete a certificate
-///
-/// Permanently delete a certificate. This operation cannot be undone.
-/// Use `DELETE /v1/system/certificates/{certificate}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/system/certificates/{certificate}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<CertificatePathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus
             .certificate_delete(
