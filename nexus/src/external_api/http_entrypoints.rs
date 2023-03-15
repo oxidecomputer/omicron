@@ -174,21 +174,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_delete_v1)?;
         api.register(disk_metrics_list_v1)?;
 
-        api.register(instance_list)?;
-        api.register(instance_create)?;
-        api.register(instance_view)?;
-        api.register(instance_view_by_id)?;
-        api.register(instance_delete)?;
-        api.register(instance_migrate)?;
-        api.register(instance_reboot)?;
-        api.register(instance_start)?;
-        api.register(instance_stop)?;
-        api.register(instance_disk_list)?;
-        api.register(instance_disk_attach)?;
-        api.register(instance_disk_detach)?;
-        api.register(instance_serial_console)?;
-        api.register(instance_serial_console_stream)?;
-
         api.register(instance_list_v1)?;
         api.register(instance_view_v1)?;
         api.register(instance_create_v1)?;
@@ -3709,47 +3694,6 @@ async fn instance_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List instances
-/// Use `GET /v1/instances` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let paginated_by = PaginatedBy::Name(pag_params);
-        let path = path_params.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let instances = nexus
-            .instance_list(&opctx, &project_lookup, &paginated_by)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            instances,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create an instance
 #[endpoint {
     method = POST,
@@ -3765,49 +3709,6 @@ async fn instance_create_v1(
     let nexus = &apictx.nexus;
     let project_selector = query_params.into_inner();
     let new_instance_params = &new_instance.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let instance = nexus
-            .project_create_instance(
-                &opctx,
-                &project_lookup,
-                &new_instance_params,
-            )
-            .await?;
-        Ok(HttpResponseCreated(instance.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create an instance
-/// Use `POST /v1/instances` instead
-// TODO-correctness This is supposed to be async.  Is that right?  We can create
-// the instance immediately -- it's just not booted yet.  Maybe the boot
-// operation is what's a separate operation_id.  What about the response code
-// (201 Created vs 202 Accepted)?  Is that orthogonal?  Things can return a
-// useful response, including an operation id, with either response code.  Maybe
-// a "reboot" operation would return a 202 Accepted because there's no actual
-// resource created?
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    new_instance: TypedBody<params::InstanceCreate>,
-) -> Result<HttpResponseCreated<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let new_instance_params = &new_instance.into_inner();
-    let project_selector = params::ProjectSelector::new(
-        Some(path.organization_name.into()),
-        path.project_name.into(),
-    );
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
@@ -3860,65 +3761,6 @@ struct InstancePathParam {
     instance_name: Name,
 }
 
-/// Fetch an instance
-/// Use `GET /v1/instances/{instance}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let (.., instance) = instance_lookup.fetch().await?;
-        Ok(HttpResponseOk(instance.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch an instance by id
-/// Use `GET /v1/instances/{instance}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/instances/{id}",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let (.., instance) = nexus
-            .instance_lookup(
-                &opctx,
-                &params::InstanceSelector::new(None, None, path.id.into()),
-            )?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(instance.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete an instance
 #[endpoint {
     method = DELETE,
@@ -3938,35 +3780,6 @@ async fn instance_delete_v1(
         project_selector: query.project_selector,
         instance: path.instance,
     };
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        nexus.project_destroy_instance(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete an instance
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -4015,45 +3828,6 @@ async fn instance_migrate_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO should this be in the public API?
-/// Migrate an instance
-/// Use `POST /v1/instances/{instance}/migrate` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_migrate(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-    migrate_params: TypedBody<params::InstanceMigrate>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let migrate_instance_params = migrate_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let instance = nexus
-            .project_instance_migrate(
-                &opctx,
-                &instance_lookup,
-                migrate_instance_params,
-            )
-            .await?;
-        Ok(HttpResponseOk(instance.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Reboot an instance
 #[endpoint {
     method = POST,
@@ -4073,36 +3847,6 @@ async fn instance_reboot_v1(
         project_selector: query.project_selector,
         instance: path.instance,
     };
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let instance = nexus.instance_reboot(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseAccepted(instance.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Reboot an instance
-/// Use `POST /v1/instances/{instance}/reboot` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_reboot(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -4142,36 +3886,6 @@ async fn instance_start_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Boot an instance
-/// Use `POST /v1/instances/{instance}/start` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_start(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let instance = nexus.instance_start(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseAccepted(instance.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Stop an instance
 #[endpoint {
     method = POST,
@@ -4191,36 +3905,6 @@ async fn instance_stop_v1(
         project_selector: query.project_selector,
         instance: path.instance,
     };
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let instance = nexus.instance_stop(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseAccepted(instance.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Halt an instance
-/// Use `POST /v1/instances/{instance}/stop` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_stop(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let instance_lookup =
@@ -4264,42 +3948,6 @@ async fn instance_serial_console_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an instance's serial console
-/// Use `GET /v1/instances/{instance}/serial-console` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_serial_console(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-    query_params: Query<params::InstanceSerialConsoleRequest>,
-) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let data = nexus
-            .instance_serial_console_data(
-                &instance_lookup,
-                &query_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseOk(data))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Stream an instance's serial console
 #[channel {
     protocol = WEBSOCKETS,
@@ -4321,33 +3969,6 @@ async fn instance_serial_console_stream_v1(
         project_selector: query.project_selector,
         instance: path.instance,
     };
-    let instance_lookup = nexus.instance_lookup(&opctx, &instance_selector)?;
-    nexus.instance_serial_console_stream(conn, &instance_lookup).await?;
-    Ok(())
-}
-
-/// Connect to an instance's serial console
-/// Use `GET /v1/instances/{instance}/serial-console/stream` instead
-#[channel {
-    protocol = WEBSOCKETS,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_serial_console_stream(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-    conn: WebsocketConnection,
-) -> WebsocketChannelResult {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.into()),
-        Some(path.project_name.into()),
-        path.instance_name.into(),
-    );
     let instance_lookup = nexus.instance_lookup(&opctx, &instance_selector)?;
     nexus.instance_serial_console_stream(conn, &instance_lookup).await?;
     Ok(())
@@ -4394,52 +4015,6 @@ async fn instance_disk_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List an instance's disks
-/// Use `GET /v1/instances/{instance}/disks` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks",
-    tags = ["instances"],
-    deprecated = true
-}]
-async fn instance_disk_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let path = path_params.into_inner();
-        let instance_selector = params::InstanceSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.instance_name.into(),
-        );
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let disks = nexus
-            .instance_list_disks(
-                &opctx,
-                &instance_lookup,
-                &PaginatedBy::Name(pag_params),
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            disks,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Attach a disk to an instance
 #[endpoint {
     method = POST,
@@ -4472,40 +4047,6 @@ async fn instance_disk_attach_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Attach a disk to an instance
-/// Use `POST /v1/instances/{instance}/disks/attach` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
-    tags = ["instances"],
-    deprecated = true
-}]
-async fn instance_disk_attach(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-    disk_to_attach: TypedBody<params::DiskIdentifier>,
-) -> Result<HttpResponseAccepted<Disk>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let disk = disk_to_attach.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.clone().into()),
-        Some(path.project_name.clone().into()),
-        path.instance_name.into(),
-    );
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let disk = nexus
-            .instance_attach_disk(&opctx, &instance_lookup, disk.name.into())
-            .await?;
-        Ok(HttpResponseAccepted(disk.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Detach a disk from an instance
 #[endpoint {
     method = POST,
@@ -4533,40 +4074,6 @@ async fn instance_disk_detach_v1(
             nexus.instance_lookup(&opctx, &instance_selector)?;
         let disk =
             nexus.instance_detach_disk(&opctx, &instance_lookup, disk).await?;
-        Ok(HttpResponseAccepted(disk.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Detach a disk from an instance
-/// Use `POST /v1/disks/{disk}/detach` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
-    tags = ["instances"],
-    deprecated = true
-}]
-async fn instance_disk_detach(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-    disk_to_detach: TypedBody<params::DiskIdentifier>,
-) -> Result<HttpResponseAccepted<Disk>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let disk = disk_to_detach.into_inner();
-    let instance_selector = params::InstanceSelector::new(
-        Some(path.organization_name.clone().into()),
-        Some(path.project_name.clone().into()),
-        path.instance_name.into(),
-    );
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let disk = nexus
-            .instance_detach_disk(&opctx, &instance_lookup, disk.name.into())
-            .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
