@@ -174,19 +174,19 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_delete_v1)?;
         api.register(disk_metrics_list_v1)?;
 
-        api.register(instance_list_v1)?;
-        api.register(instance_view_v1)?;
-        api.register(instance_create_v1)?;
-        api.register(instance_delete_v1)?;
-        api.register(instance_migrate_v1)?;
-        api.register(instance_reboot_v1)?;
-        api.register(instance_start_v1)?;
-        api.register(instance_stop_v1)?;
-        api.register(instance_disk_list_v1)?;
-        api.register(instance_disk_attach_v1)?;
-        api.register(instance_disk_detach_v1)?;
-        api.register(instance_serial_console_v1)?;
-        api.register(instance_serial_console_stream_v1)?;
+        api.register(instance_list)?;
+        api.register(instance_view)?;
+        api.register(instance_create)?;
+        api.register(instance_delete)?;
+        api.register(instance_migrate)?;
+        api.register(instance_reboot)?;
+        api.register(instance_start)?;
+        api.register(instance_stop)?;
+        api.register(instance_disk_list)?;
+        api.register(instance_disk_attach)?;
+        api.register(instance_disk_detach)?;
+        api.register(instance_serial_console)?;
+        api.register(instance_serial_console_stream)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -3665,7 +3665,7 @@ async fn disk_metrics_list_v1(
     path = "/v1/instances",
     tags = ["instances"],
 }]
-async fn instance_list_v1(
+async fn instance_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
@@ -3700,7 +3700,7 @@ async fn instance_list_v1(
     path = "/v1/instances",
     tags = ["instances"],
 }]
-async fn instance_create_v1(
+async fn instance_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     new_instance: TypedBody<params::InstanceCreate>,
@@ -3730,7 +3730,7 @@ async fn instance_create_v1(
     path = "/v1/instances/{instance}",
     tags = ["instances"],
 }]
-async fn instance_view_v1(
+async fn instance_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
@@ -3767,7 +3767,7 @@ struct InstancePathParam {
     path = "/v1/instances/{instance}",
     tags = ["instances"],
 }]
-async fn instance_delete_v1(
+async fn instance_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
@@ -3797,7 +3797,7 @@ async fn instance_delete_v1(
     path = "/v1/instances/{instance}/migrate",
     tags = ["instances"],
 }]
-async fn instance_migrate_v1(
+async fn instance_migrate(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
@@ -3834,7 +3834,7 @@ async fn instance_migrate_v1(
     path = "/v1/instances/{instance}/reboot",
     tags = ["instances"],
 }]
-async fn instance_reboot_v1(
+async fn instance_reboot(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
@@ -3863,7 +3863,7 @@ async fn instance_reboot_v1(
     path = "/v1/instances/{instance}/start",
     tags = ["instances"],
 }]
-async fn instance_start_v1(
+async fn instance_start(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
@@ -3892,7 +3892,7 @@ async fn instance_start_v1(
     path = "/v1/instances/{instance}/stop",
     tags = ["instances"],
 }]
-async fn instance_stop_v1(
+async fn instance_stop(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
@@ -3921,7 +3921,7 @@ async fn instance_stop_v1(
     path = "/v1/instances/{instance}/serial-console",
     tags = ["instances"],
 }]
-async fn instance_serial_console_v1(
+async fn instance_serial_console(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::InstanceSerialConsoleRequest>,
@@ -3954,7 +3954,7 @@ async fn instance_serial_console_v1(
     path = "/v1/instances/{instance}/serial-console/stream",
     tags = ["instances"],
 }]
-async fn instance_serial_console_stream_v1(
+async fn instance_serial_console_stream(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -3980,7 +3980,7 @@ async fn instance_serial_console_stream_v1(
     path = "/v1/instances/{instance}/disks",
     tags = ["instances"],
 }]
-async fn instance_disk_list_v1(
+async fn instance_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
     path_params: Path<params::InstancePath>,
@@ -4021,7 +4021,7 @@ async fn instance_disk_list_v1(
     path = "/v1/instances/{instance}/disks/attach",
     tags = ["instances"],
 }]
-async fn instance_disk_attach_v1(
+async fn instance_disk_attach(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -4053,7 +4053,7 @@ async fn instance_disk_attach_v1(
     path = "/v1/instances/{instance}/disks/detach",
     tags = ["instances"],
 }]
-async fn instance_disk_detach_v1(
+async fn instance_disk_detach(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::OptionalProjectSelector>,
