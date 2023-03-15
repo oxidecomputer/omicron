@@ -830,3 +830,48 @@ impl ServiceInner {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::bootstrap::params::{
+        RackInitializeRequest, Gateway
+    };
+    use crate::bootstrap::rss_handle::rss_channel;
+    use macaddr::MacAddr6;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::net::{Ipv4Addr, Ipv6Addr, IpAddr};
+
+    #[tokio::test]
+    async fn rack_initialize_one_sled() {
+        let logctx = test_setup_log("rack_initialize_one_sled");
+        let log = &logctx.log;
+
+        let our_bootstrap_address = Ipv6Addr::LOCALHOST;
+        let (tx, rx) = rss_channel(our_bootstrap_address);
+
+        let request = RackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            rack_secret_threshold: 1,
+            gateway: Gateway {
+                address: None,
+                mac: MacAddr6::nil().into(),
+            },
+            nexus_external_address: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        };
+
+        let rss = RackSetupService::new(
+            log.new(o!("component" => "RSS")),
+            request,
+            tx,
+            vec![],
+        );
+        let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
+        let sp = None;
+        rx.initialize_sleds(&log, &sp).await;
+        rss.join().await.unwrap();
+
+        logctx.cleanup_successful();
+    }
+}

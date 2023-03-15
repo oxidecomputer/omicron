@@ -113,7 +113,7 @@ async fn initialize_sled_agent(
 // communication in the types below to avoid using tokio channels directly and
 // leave a breadcrumb for where the work will need to be done to switch the
 // communication mechanism.
-fn rss_channel(
+pub(crate) fn rss_channel(
     our_bootstrap_address: Ipv6Addr,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
@@ -167,12 +167,12 @@ impl BootstrapAgentHandle {
     }
 }
 
-struct BootstrapAgentHandleReceiver {
+pub(crate) struct BootstrapAgentHandleReceiver {
     inner: mpsc::Receiver<InnerInitRequest>,
 }
 
 impl BootstrapAgentHandleReceiver {
-    async fn initialize_sleds(mut self, log: &Logger, sp: &Option<SpHandle>) {
+    pub(crate) async fn initialize_sleds(mut self, log: &Logger, sp: &Option<SpHandle>) {
         let (requests, tx_response) = match self.inner.recv().await {
             Some(requests) => requests,
             None => {
