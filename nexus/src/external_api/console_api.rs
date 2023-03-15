@@ -25,9 +25,8 @@ use crate::{
 use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
-    HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseSeeOther, HttpResponseUpdatedNoContent, Path, Query,
-    RequestContext, ResultsPage, TypedBody,
+    HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
@@ -35,9 +34,6 @@ use lazy_static::lazy_static;
 use mime_guess;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
-use omicron_common::api::external::http_pagination::{
-    data_page_params_for, PaginatedById, ScanById, ScanParams,
-};
 use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -611,68 +607,6 @@ pub async fn login_begin(
         let redirect_url = query.state.filter(|s| !s.trim().is_empty());
         let login_url = get_login_url(redirect_url);
         http_response_found(login_url)
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch the user associated with the current session
-/// Use `GET /v1/me` instead
-#[endpoint {
-   method = GET,
-   path = "/session/me",
-   tags = ["hidden"],
-   deprecated = true
-}]
-pub async fn session_me(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::User>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        // We don't care about authentication method, as long as they are authed
-        // as _somebody_. We could restrict this to session auth only, but it's
-        // not clear what the advantage would be.
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let user = nexus.silo_user_fetch_self(&opctx).await?;
-        Ok(HttpResponseOk(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch the silo groups the current user belongs to
-/// Use `GET /v1/me/groups` instead
-#[endpoint {
-    method = GET,
-    path = "/session/me/groups",
-    tags = ["hidden"],
-    deprecated = true
- }]
-pub async fn session_me_groups(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let handler = async {
-        // We don't care about authentication method, as long as they are authed
-        // as _somebody_. We could restrict this to session auth only, but it's
-        // not clear what the advantage would be.
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let groups = nexus
-            .silo_user_fetch_groups_for_self(
-                &opctx,
-                &data_page_params_for(&rqctx, &query)?,
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            groups,
-            &|_, group: &views::Group| group.id,
-        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

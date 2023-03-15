@@ -419,8 +419,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
-        api.register(console_api::session_me)?;
-        api.register(console_api::session_me_groups)?;
         api.register(console_api::console_page)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
@@ -9006,12 +9004,6 @@ async fn current_user_ssh_key_create_v1(
         Ok(HttpResponseCreated(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for SSH key requests by name
-#[derive(Deserialize, JsonSchema)]
-struct SshKeyPathParams {
-    ssh_key_name: Name,
 }
 
 /// Fetch an SSH public key

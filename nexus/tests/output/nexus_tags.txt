@@ -19,8 +19,6 @@ device_auth_confirm                      /device/confirm
 device_auth_request                      /device/auth
 login_spoof                              /login
 logout                                   /logout
-session_me                               /session/me
-session_me_groups                        /session/me/groups
 
 API operations found with tag "images"
 OPERATION ID                             URL PATH
@@ -143,10 +141,6 @@ current_user_ssh_key_delete_v1           /v1/me/ssh-keys/{ssh_key}
 current_user_ssh_key_list_v1             /v1/me/ssh-keys
 current_user_ssh_key_view_v1             /v1/me/ssh-keys/{ssh_key}
 current_user_view_v1                     /v1/me
-session_sshkey_create                    /session/me/sshkeys
-session_sshkey_delete                    /session/me/sshkeys/{ssh_key_name}
-session_sshkey_list                      /session/me/sshkeys
-session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
