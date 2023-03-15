@@ -4,8 +4,7 @@
 
 // Copyright 2022 Oxide Computer Company
 
-mod bulk_state_get;
-mod commands;
-mod component_list;
-mod location_discovery;
-mod serial_console;
+pub mod setup;
+mod sim_state;
+
+pub use sim_state::*;
