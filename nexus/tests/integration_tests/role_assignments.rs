@@ -280,7 +280,7 @@ async fn test_role_assignments_organization(
     let client = &cptestctx.external_client;
     let org_name = "test-org";
     create_organization(client, org_name).await;
-    let org_url = format!("/organizations/{}", org_name);
+    let org_url = format!("/v1/organizations/{}", org_name);
 
     struct OrganizationRoleAssignmentTest {
         org_name: String,

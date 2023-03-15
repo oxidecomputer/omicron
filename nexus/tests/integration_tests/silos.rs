@@ -130,7 +130,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // that's possible.
     let new_org_in_our_silo = NexusRequest::objects_post(
         client,
-        "/organizations",
+        "/v1/organizations",
         &params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: org_name.clone(),
@@ -155,7 +155,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // Delete it so that we can delete the Silo later.
     NexusRequest::object_delete(
         client,
-        &format!("/organizations/{}", org_name),
+        &format!("/v1/organizations/{}", org_name),
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()
@@ -164,7 +164,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify GET /organizations works with built-in user auth
     let organizations =
-        objects_list_page_authz::<Organization>(client, "/organizations")
+        objects_list_page_authz::<Organization>(client, "/v1/organizations")
             .await
             .items;
     assert_eq!(organizations.len(), 1);
@@ -197,7 +197,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to make request");
 
     // Delete organization
-    NexusRequest::object_delete(&client, &"/organizations/someorg")
+    NexusRequest::object_delete(&client, &"/v1/organizations/someorg")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -289,7 +289,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     // Create an organization
     let _org = NexusRequest::objects_post(
         client,
-        "/organizations",
+        "/v1/organizations",
         &params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: "myorg".parse().unwrap(),
