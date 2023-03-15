@@ -100,19 +100,30 @@ async fn do_run() -> Result<(), CmdError> {
                 link,
                 log: config.log.clone(),
                 updates: config.updates.clone(),
-                rss_config,
                 sp_config,
             };
 
             // TODO: It's a little silly to pass the config this way - namely,
             // that we construct the bootstrap config from `config`, but then
             // pass it separately just so the sled agent can ingest it later on.
-            bootstrap_server::Server::start(bootstrap_config, config)
-                .await
-                .map_err(CmdError::Failure)?
-                .wait_for_finish()
-                .await
-                .map_err(CmdError::Failure)?;
+            let server =
+                bootstrap_server::Server::start(bootstrap_config, config)
+                    .await
+                    .map_err(CmdError::Failure)?;
+
+            // If requested, automatically supply the RSS configuration.
+            //
+            // This should remain equivalent to the HTTP request which can
+            // be invoked by Wicket.
+            if let Some(rss_config) = rss_config {
+                server
+                    .agent()
+                    .rack_initialize(rss_config)
+                    .await
+                    .map_err(|e| CmdError::Failure(e.to_string()))?;
+            }
+
+            server.wait_for_finish().await.map_err(CmdError::Failure)?;
 
             Ok(())
         }

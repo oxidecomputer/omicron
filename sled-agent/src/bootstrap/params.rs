@@ -5,19 +5,43 @@
 //! Request types for the bootstrap agent
 
 use super::trust_quorum::SerializableShareDistribution;
-use macaddr::MacAddr6;
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
-use serde::{Deserialize, Deserializer, Serialize};
+use omicron_common::api::external::MacAddr;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use serde_with::DeserializeAs;
-use serde_with::PickFirst;
 use std::borrow::Cow;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
+
+/// Configuration for the "rack setup service".
+///
+/// The Rack Setup Service should be responsible for one-time setup actions,
+/// such as CockroachDB placement and initialization.  Without operator
+/// intervention, however, these actions need a way to be automated in our
+/// deployment.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackInitializeRequest {
+    pub rack_subnet: Ipv6Addr,
+
+    /// The minimum number of sleds required to unlock the rack secret.
+    ///
+    /// If this value is less than 2, no rack secret will be created on startup;
+    /// this is the typical case for single-server test/development.
+    pub rack_secret_threshold: usize,
+
+    /// Internet gateway information.
+    pub gateway: Gateway,
+
+    /// The address on which Nexus should serve an external interface.
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
+    // this should be pulled from a pool of addresses.
+    pub nexus_external_address: IpAddr,
+}
 
 /// Information about the internet gateway used for externally-facing services.
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct Gateway {
     /// IP address of the Internet gateway, which is particularly
     /// relevant for external-facing services (such as Nexus).
@@ -26,31 +50,7 @@ pub struct Gateway {
     /// MAC address of the internet gateway above. This is used to provide
     /// external connectivity into guests, by allowing OPTE to forward traffic
     /// destined for the broader network to the gateway.
-    // This uses the `serde_with` crate's `serde_as` attribute, which tries
-    // each of the listed serialization types (starting with the default) until
-    // one succeeds. This supports deserialization from either an array of u8,
-    // or the display-string representation. (Our custom `ZeroPadded` adapter
-    // works around non-zero-padded MAC address bytes as seen in illumos
-    // `dladm`, which the macaddr crate refuses to parse.)
-    #[serde_as(as = "PickFirst<(_, ZeroPadded)>")]
-    pub mac: MacAddr6,
-}
-
-struct ZeroPadded;
-
-impl<'de> DeserializeAs<'de, MacAddr6> for ZeroPadded {
-    fn deserialize_as<D>(deserializer: D) -> Result<MacAddr6, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        String::deserialize(deserializer)?
-            .split(':')
-            .map(|segment| format!("{:0>2}", segment))
-            .collect::<Vec<String>>()
-            .join(":")
-            .parse()
-            .map_err(serde::de::Error::custom)
-    }
+    pub mac: MacAddr,
 }
 
 /// Configuration information for launching a Sled Agent.
@@ -160,6 +160,7 @@ mod tests {
     use super::*;
     use crate::bootstrap::trust_quorum::RackSecret;
     use crate::bootstrap::trust_quorum::ShareDistribution;
+    use macaddr::MacAddr6;
 
     #[test]
     fn json_serialization_round_trips() {
@@ -172,7 +173,10 @@ mod tests {
                 Cow::Owned(SledAgentRequest {
                     id: Uuid::new_v4(),
                     rack_id: Uuid::new_v4(),
-                    gateway: Gateway { address: None, mac: MacAddr6::nil() },
+                    gateway: Gateway {
+                        address: None,
+                        mac: MacAddr6::nil().into(),
+                    },
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 }),
                 Some(

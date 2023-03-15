@@ -261,7 +261,7 @@ impl SledAgent {
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
-            request.gateway.mac,
+            request.gateway.mac.0,
         )?;
 
         let svc_config = services::Config::new(

@@ -8,9 +8,11 @@
 //! and has a separate interface for establishing the trust quorum.
 
 use crate::bootstrap::agent::Agent;
+use crate::bootstrap::params::RackInitializeRequest;
 use crate::updates::Component;
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseOk, RequestContext,
+    endpoint, ApiDescription, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Error;
 use std::sync::Arc;
@@ -23,6 +25,7 @@ pub(crate) fn api() -> BootstrapApiDescription {
         api: &mut BootstrapApiDescription,
     ) -> Result<(), String> {
         api.register(components_get)?;
+        api.register(rack_initialize)?;
         Ok(())
     }
 
@@ -47,4 +50,19 @@ async fn components_get(
     let ba = rqctx.context();
     let components = ba.components_get().await.map_err(|e| Error::from(e))?;
     Ok(HttpResponseOk(components))
+}
+
+/// Initializes the rack with the provided configuration.
+#[endpoint {
+    method = POST,
+    path = "/rack-initailize",
+}]
+async fn rack_initialize(
+    rqctx: RequestContext<Arc<Agent>>,
+    body: TypedBody<RackInitializeRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ba = rqctx.context();
+    let request = body.into_inner();
+    ba.rack_initialize(request).await.map_err(|e| Error::from(e))?;
+    Ok(HttpResponseUpdatedNoContent())
 }

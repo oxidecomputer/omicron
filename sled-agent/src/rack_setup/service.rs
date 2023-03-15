@@ -170,11 +170,7 @@ impl RackSetupService {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .inject_rack_setup_requests(
-                    &config,
-                    local_bootstrap_agent,
-                    &member_device_id_certs,
-                )
+                .run(&config, local_bootstrap_agent, &member_device_id_certs)
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -584,10 +580,6 @@ impl ServiceInner {
         Ok(())
     }
 
-    // In lieu of having an operator send requests to all sleds via an
-    // initialization service, the sled-agent configuration may allow for the
-    // automated injection of setup requests from a sled.
-    //
     // This method has a few distinct phases, identified by files in durable
     // storage:
     //
@@ -599,7 +591,7 @@ impl ServiceInner {
     //    requests to the sleds enumerated within the "allocation plan".
     //
     // 3. SERVICE ALLOCATION PLAN CREATION. Now that Sled Agents are executing
-    //    on their respsective subnets, they can be queried to create an
+    //    on their respective subnets, they can be queried to create an
     //    allocation plan for services.
     //
     // 4. SERVICE ALLOCATION PLAN EXECUTION. RSS requests that the services
@@ -608,7 +600,7 @@ impl ServiceInner {
     // 5. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
     //    rack, a marker file is created at "rss_completed_marker_path()". This
     //    indicates that the plan executed successfully, and no work remains.
-    async fn inject_rack_setup_requests(
+    async fn run(
         &self,
         config: &Config,
         local_bootstrap_agent: BootstrapAgentHandle,

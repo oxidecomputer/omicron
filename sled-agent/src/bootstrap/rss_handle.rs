@@ -9,6 +9,7 @@ use super::params::SledAgentRequest;
 use super::trust_quorum::ShareDistribution;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
+use crate::rack_setup::service::SetupServiceError;
 use crate::sp::SpHandle;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -40,14 +41,14 @@ impl Drop for RssHandle {
 }
 
 impl RssHandle {
-    // Start the Rack setup service.
-    pub(super) fn start_rss(
+    /// Executes the rack setup service until it has completed
+    pub(super) async fn run_rss(
         log: &Logger,
         config: SetupServiceConfig,
         our_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
         member_device_id_certs: Vec<Ed25519Certificate>,
-    ) -> Self {
+    ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = RackSetupService::new(
@@ -57,10 +58,8 @@ impl RssHandle {
             member_device_id_certs,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        let task = tokio::spawn(async move {
-            rx.initialize_sleds(&log, &sp).await;
-        });
-        Self { _rss: rss, task }
+        rx.initialize_sleds(&log, &sp).await;
+        rss.join().await
     }
 }
 
