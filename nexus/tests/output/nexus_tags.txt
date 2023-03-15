@@ -137,6 +137,12 @@ role_view                                /roles/{role_name}
 
 API operations found with tag "session"
 OPERATION ID                             URL PATH
+current_user_groups_v1                   /v1/me/groups
+current_user_ssh_key_create_v1           /v1/me/ssh-keys
+current_user_ssh_key_delete_v1           /v1/me/ssh-keys/{ssh_key}
+current_user_ssh_key_list_v1             /v1/me/ssh-keys
+current_user_ssh_key_view_v1             /v1/me/ssh-keys/{ssh_key}
+current_user_view_v1                     /v1/me
 session_sshkey_create                    /session/me/sshkeys
 session_sshkey_delete                    /session/me/sshkeys/{ssh_key_name}
 session_sshkey_list                      /session/me/sshkeys
@@ -231,10 +237,10 @@ silo_policy_update                       /system/silos/{silo_name}/policy
 silo_policy_update_v1                    /v1/system/silos/{silo}/policy
 silo_policy_view                         /system/silos/{silo_name}/policy
 silo_policy_view_v1                      /v1/system/silos/{silo}/policy
+silo_user_list_v1                        /v1/system/users
 silo_user_view                           /system/silos/{silo_name}/users/id/{user_id}
 silo_user_view_v1                        /v1/system/users/{user_id}
 silo_users_list                          /system/silos/{silo_name}/users/all
-silo_users_list_v1                       /v1/system/users
 silo_view                                /system/silos/{silo_name}
 silo_view_by_id                          /system/by-id/silos/{id}
 silo_view_v1                             /v1/system/silos/{silo}
