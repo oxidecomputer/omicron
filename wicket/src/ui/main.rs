@@ -200,12 +200,18 @@ impl MainScreen {
         let main = Paragraph::new(Spans::from(spans));
         frame.render_widget(main, rect);
 
+        let system_version = state
+            .update_state
+            .system_version
+            .as_ref()
+            .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string());
+
         let test = Paragraph::new(Spans::from(vec![
             Span::styled(
                 "UPDATE VERSION: ",
                 Style::default().fg(TUI_GREEN_DARK),
             ),
-            Span::styled("UNKNOWN", style::plain_text()),
+            Span::styled(system_version, style::plain_text()),
         ]))
         .alignment(Alignment::Right);
         frame.render_widget(test, rect);
