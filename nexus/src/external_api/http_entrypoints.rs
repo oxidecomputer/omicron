@@ -84,8 +84,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_policy_view_v1)?;
         api.register(system_policy_update_v1)?;
 
-        api.register(policy_view_v1)?;
-        api.register(policy_update_v1)?;
+        api.register(policy_view)?;
+        api.register(policy_update)?;
 
         api.register(organization_list)?;
         api.register(organization_create)?;
@@ -588,7 +588,7 @@ async fn system_policy_update(
     path = "/v1/policy",
     tags = ["silos"],
  }]
-pub async fn policy_view_v1(
+pub async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -615,7 +615,7 @@ pub async fn policy_view_v1(
     path = "/v1/policy",
     tags = ["silos"],
 }]
-async fn policy_update_v1(
+async fn policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
