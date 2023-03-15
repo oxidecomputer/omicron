@@ -404,11 +404,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(update_deployments_list)?;
         api.register(update_deployment_view)?;
 
-        api.register(user_list)?;
-        api.register(silo_users_list)?;
-        api.register(silo_user_view)?;
-        api.register(group_list)?;
-
         api.register(user_list_v1)?;
         api.register(silo_user_list_v1)?;
         api.register(silo_user_view_v1)?;
@@ -1100,42 +1095,6 @@ async fn silo_user_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List users in a silo
-/// Use `GET /v1/system/users` instead.
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/users/all",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn silo_users_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let silo = path_params.into_inner().silo_name.into();
-        let query = query_params.into_inner();
-        let pagparams = data_page_params_for(&rqctx, &query)?;
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let users = nexus
-            .silo_list_users(&opctx, &silo_lookup, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            users,
-            &|_, user: &User| user.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Path parameters for Silo User requests
 #[derive(Deserialize, JsonSchema)]
 struct UserParam {
@@ -1175,32 +1134,6 @@ struct UserPathParam {
     silo_name: Name,
     /// The user's internal id
     user_id: Uuid,
-}
-
-/// Fetch a user
-/// Use `GET /v1/system/users/{user_id}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/users/id/{user_id}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn silo_user_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-) -> Result<HttpResponseOk<User>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let user =
-            nexus.silo_user_fetch(&opctx, &silo_lookup, path.user_id).await?;
-        Ok(HttpResponseOk(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Silo identity providers
@@ -8560,39 +8493,6 @@ async fn saga_view(
 // Silo users
 
 /// List users
-/// Use `GET /v1/users` instead
-#[endpoint {
-    method = GET,
-    path = "/users",
-    tags = ["silos"],
-    deprecated = true,
-}]
-async fn user_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let users = nexus
-            .silo_users_list_current(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            users,
-            &|_, user: &User| user.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List users
 #[endpoint {
     method = GET,
     path = "/v1/users",
@@ -8632,39 +8532,6 @@ async fn user_list_v1(
 }
 
 // Silo groups
-
-/// List groups
-/// Use `GET /v1/groups` instead
-#[endpoint {
-    method = GET,
-    path = "/groups",
-    tags = ["silos"],
-    deprecated = true,
-}]
-async fn group_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let groups = nexus
-            .silo_groups_list(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            groups,
-            &|_, group: &Group| group.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 /// List groups
 #[endpoint {
