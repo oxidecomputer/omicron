@@ -63,32 +63,15 @@ done
 #
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-pfexec mkdir -p /work
-cd /work
-
-# /work/gz: Global Zone artifacts to be placed in the Helios image.
-mkdir gz && cd gz
-ptime -m tar xvzf /input/package/work/global-zone-packages.tar.gz
-cd -
-
 # TODO: Consider importing zones here too?
 
-# Checkout helios at a pinned commit
+# Checkout helios at a pinned commit into /work/helios
+pfexec mkdir -p /work
+pushd /work
 git clone https://github.com/oxidecomputer/helios.git
 cd helios
-
 git checkout "$COMMIT"
+popd
 
-# Create the "./helios-build" command, which lets us build images
-gmake setup
-
-# Commands that "./helios-build" would ask us to run (either explicitly
-# or implicitly, to avoid an error).
-pfexec pkg install /system/zones/brand/omicron1/tools
-pfexec zfs create -p rpool/images/build
-
-./helios-build experiment-image \
-	-p helios-netdev=https://pkg.oxide.computer/helios-netdev \
-	-F optever=0.21 \
-	-P /work/gz/root \
-	-B
+# TODO: Consider importing zones here too?
+./tools/build-host-image.sh -B /work/helios /input/package/work/global-zone-packages.tar.gz
