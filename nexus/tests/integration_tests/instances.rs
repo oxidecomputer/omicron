@@ -1266,7 +1266,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Verify there are no interfaces
     let url_interfaces = format!(
-        "/organizations/{}/projects/{}/instances/{}/network-interfaces",
+        "/v1/network-interfaces?organization={}&project={}&instance={}",
         ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
     );
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
@@ -1506,7 +1506,7 @@ async fn test_instance_update_network_interfaces(
             .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
     let url_interfaces = format!(
-        "/organizations/{}/projects/{}/instances/{}/network-interfaces",
+        "/v1/network-interfaces?organization={}&project={}&instance={}",
         ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
     );
 
