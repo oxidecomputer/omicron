@@ -124,7 +124,7 @@ fn write_generic_fake_artifact<W: Write>(
 ) -> io::Result<()> {
     let mut buf_writer = BufWriter::new(writer);
     // Don't need to get the size exactly right, capping to the nearest 16 is fine.
-    let times = size as usize % FILLER_TEXT.len();
+    let times = (size as usize) / FILLER_TEXT.len();
     for _ in 0..times {
         buf_writer.write_all(FILLER_TEXT)?;
     }
@@ -138,10 +138,9 @@ fn write_host_tarball_fake_artifact<W: Write>(
 ) -> Result<()> {
     let mut builder = tar::Builder::new(BufWriter::new(writer));
 
-    // Declare the phase 1 size to be 1/8 and phase 2 to be 7/8 of the text.
-    let times = (size as usize) % FILLER_TEXT.len();
-    let phase_1_times = times / 8;
-    let phase_2_times = times - phase_1_times;
+    // The phase 1 image is always 32MB. Treat size as the size of the phase 2 image.
+    let phase_1_times = 32 * 1024 * 1024 / FILLER_TEXT.len();
+    let phase_2_times = (size as usize) / FILLER_TEXT.len();
 
     {
         let mut header = tar::Header::new_gnu();

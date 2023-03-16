@@ -5,3 +5,4 @@
 mod commands;
 mod setup;
 mod inventory;
+mod updates;

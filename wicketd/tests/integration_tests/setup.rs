@@ -70,7 +70,6 @@ impl WicketdTestContext {
         Self { wicketd_client, artifact_client, server, gateway }
     }
 
-    #[allow(unused)]
     pub fn log(&self) -> &slog::Logger {
         &self.gateway.logctx.log
     }

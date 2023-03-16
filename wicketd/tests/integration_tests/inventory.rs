@@ -14,7 +14,7 @@ use wicketd_client::GetInventoryResponse;
 #[tokio::test(start_paused = true)]
 async fn test_inventory() {
     let gateway =
-        gateway_setup::test_setup("test_wicket_updates", SpPort::One).await;
+        gateway_setup::test_setup("test_inventory", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
 
     let inventory_fut = async {
@@ -23,7 +23,7 @@ async fn test_inventory() {
                 .wicketd_client
                 .get_inventory()
                 .await
-                .expect("get_inventory failed")
+                .expect("get_inventory succeeded")
                 .into_inner();
             match response.into() {
                 GetInventoryResponse::Response { inventory, .. } => {
@@ -39,7 +39,7 @@ async fn test_inventory() {
     let inventory =
         tokio::time::timeout(Duration::from_secs(10), inventory_fut)
             .await
-            .expect("get_inventory timed out");
+            .expect("get_inventory completed within 10 seconds");
 
     // 4 SPs attached to the inventory.
     assert_eq!(inventory.sps.len(), 4);
