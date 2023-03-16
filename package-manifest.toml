@@ -293,7 +293,8 @@ output.intermediate_only = true
 
 [package.dendrite-softnpu]
 service_name = "dendrite"
-only_for_targets.switch_variant = "softnpu"
+only_for_targets.switch = "softnpu"
+only_for_targets.image = "standard"
 # To manually override the package source:
 #
 # 1. Build the zone image manually
@@ -345,7 +346,8 @@ output.type = "zone"
 # $ pfexec ./target/release/omicron-package -t switch_variant=softnpu install
 [package.switch-softnpu]
 service_name = "switch"
-only_for_targets.switch_variant = "softnpu"
+only_for_targets.switch = "softnpu"
+only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [ "omicron-gateway.tar.gz", "dendrite-softnpu.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
 output.type = "zone"
