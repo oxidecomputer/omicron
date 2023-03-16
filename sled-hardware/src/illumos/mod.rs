@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
+    Baseboard, DiskIdentity, DiskVariant, HardwareUpdate, ScrimletMode,
+    UnparsedDisk,
 };
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
-use serde::Deserialize;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -24,20 +24,6 @@ mod disk;
 mod gpt;
 
 pub use disk::ensure_partition_layout;
-
-/// Configuration for forcing a sled to run as a Scrimlet
-#[derive(Clone, Debug, Deserialize, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum ScrimletMode {
-    /// Force sled to run as a Gimlet
-    /// this is to preserve the old behavior of `scrimlet_override = false`,
-    /// but I haven't found where that logic has actually been leveraged...
-    Disabled,
-    /// Force sled to run in Scrimlet mode with a stub switch
-    Stub,
-    /// Force sled to run in Scrimlet mode with a Softnpu switch
-    Softnpu,
-}
 
 #[derive(thiserror::Error, Debug)]
 enum Error {

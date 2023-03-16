@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DiskError, DiskPaths, DiskVariant, Partition, UnparsedDisk,
+    Baseboard, DiskError, DiskPaths, DiskVariant, Partition, ScrimletMode,
+    UnparsedDisk,
 };
 use slog::Logger;
 use std::collections::HashSet;
