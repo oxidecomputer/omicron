@@ -113,13 +113,9 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: delete an instance with an invalid name
         TestCase {
             method: Method::DELETE,
-            uri: "/organizations/test-org/projects/nonexistent/instances/my_instance",
-            // TODO
-            // uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
+            uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
             expected_code: StatusCode::BAD_REQUEST,
-            expected_error: "bad parameter in URL path: name contains \
-                invalid character: \"_\" (allowed characters are lowercase \
-                ASCII, digits, and \"-\")",
+            expected_error: "bad parameter in URL path: data did not match any variant of untagged enum NameOrId",
             body: Some("".into()),
         },
     ];
