@@ -17,17 +17,17 @@ source = { kind = "fake", size = "1MiB" }
 [artifact.host]
 name = "fake-host"
 version = "1.0.0"
-source = { kind = "fake", size = "32MiB" }
+source = { kind = "fake", size = "4MiB" }
 
 [artifact.trampoline]
 name = "fake-trampoline"
 version = "1.0.0"
-source = { kind = "fake", size = "32MiB" }
+source = { kind = "fake", size = "4MiB" }
 
 [artifact.control_plane]
 name = "fake-control-plane"
 version = "1.0.0"
-source = { kind = "fake", size = "32MiB" }
+source = { kind = "fake", size = "1MiB" }
 
 [artifact.psc_sp]
 name = "fake-psc-sp"
