@@ -473,7 +473,7 @@ pub struct VerifyEndpoint {
     /// Specifies whether an HTTP resource handled by this endpoint is visible
     /// to unauthenticated or unauthorized users
     ///
-    /// If it's [`Visibility::Public`] (like "/organizations"), unauthorized
+    /// If it's [`Visibility::Public`] (like "/v1/organizations"), unauthorized
     /// users can expect to get back a 401 or 403 when they attempt to access
     /// it.  If it's [`Visibility::Protected`] (like a specific Organization),
     /// unauthorized users will get a 404.
@@ -513,7 +513,7 @@ pub enum Visibility {
     /// All users can see the resource (including unauthenticated or
     /// unauthorized users)
     ///
-    /// "/organizations" is Public, for example.
+    /// "/v1/organizations" is Public, for example.
     Public,
 
     /// Only users with certain privileges can see this endpoint

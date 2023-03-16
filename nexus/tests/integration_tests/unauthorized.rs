@@ -311,7 +311,7 @@ struct IdMetadata {
 /// Verifies a single API endpoint, described with `endpoint`
 ///
 /// (Technically, a single `VerifyEndpoint` struct describes an HTTP resource,
-/// like "/organizations".  There are several API endpoints there, like "GET
+/// like "/v1/organizations".  There are several API endpoints there, like "GET
 /// /organizations" and "POST /organizations".  We're a little loose with the
 /// terminology here.)
 ///
@@ -337,7 +337,7 @@ struct IdMetadata {
 /// - If the resource is publicly visible (based on `endpoint.visibility`), then
 ///   we expect a 401 for unauthenticated users and a 403 for unauthenticated,
 ///   unauthorized users.  Note that "visible" here doesn't mean "accessible".
-///   We assume that everybody is allowed to know that "/organizations" exists.
+///   We assume that everybody is allowed to know that "/v1/organizations" exists.
 ///   But they're not necessarily allowed to _use_ it.  That's why it's correct
 ///   to get 401/403 on "GET /organizations", even though it's a GET and you
 ///   might think all GETs to things you can't access should be 404s.

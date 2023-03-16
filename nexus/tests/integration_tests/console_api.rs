@@ -52,7 +52,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
         .body(Some(&org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -90,7 +90,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // now make same requests with cookie
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
         .header(header::COOKIE, &session_token)
         .body(Some(&org_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
@@ -127,7 +127,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
         .header(header::COOKIE, &session_token)
         .body(Some(&org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
