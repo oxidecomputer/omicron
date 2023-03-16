@@ -11,6 +11,7 @@ members = [
     "gateway",
     "gateway-cli",
     "gateway-client",
+    "gateway-test-utils",
     "illumos-utils",
     "installinator",
     "installinator-artifact-client",
@@ -61,6 +62,7 @@ default-members = [
     "gateway",
     "gateway-cli",
     "gateway-client",
+    "gateway-test-utils",
     "illumos-utils",
     "installinator",
     "installinator-artifact-client",
@@ -147,6 +149,7 @@ futures = "0.3.27"
 gateway-client = { path = "gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "a15a3f8f58bb7b2fadc94f42a4747022ae6d401d" }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a15a3f8f58bb7b2fadc94f42a4747022ae6d401d" }
+gateway-test-utils = { path = "gateway-test-utils" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -182,6 +185,7 @@ nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 omicron-common = { path = "common" }
+omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
