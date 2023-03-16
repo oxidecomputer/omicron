@@ -249,46 +249,6 @@
         "deprecated": true
       }
     },
-    "/by-id/snapshots/{id}": {
-      "get": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Fetch a snapshot by id",
-        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
-        "operationId": "snapshot_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Snapshot"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/by-id/vpc-router-routes/{id}": {
       "get": {
         "tags": [
@@ -3242,241 +3202,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/snapshots": {
-      "get": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "List snapshots",
-        "description": "Use `GET /v1/snapshots` instead.",
-        "operationId": "snapshot_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Create a snapshot",
-        "description": "Use `POST /v1/snapshots` instead.",
-        "operationId": "snapshot_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Snapshot"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}": {
-      "get": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Fetch a snapshot",
-        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
-        "operationId": "snapshot_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "snapshot_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Snapshot"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Delete a snapshot",
-        "description": "Use `DELETE /v1/snapshots/{snapshot}` instead.",
-        "operationId": "snapshot_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "snapshot_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
@@ -10545,7 +10270,7 @@
           "snapshots"
         ],
         "summary": "List snapshots",
-        "operationId": "snapshot_list_v1",
+        "operationId": "snapshot_list",
         "parameters": [
           {
             "in": "query",
@@ -10615,7 +10340,7 @@
         ],
         "summary": "Create a snapshot",
         "description": "Creates a point-in-time snapshot from a disk.",
-        "operationId": "snapshot_create_v1",
+        "operationId": "snapshot_create",
         "parameters": [
           {
             "in": "query",
@@ -10669,7 +10394,7 @@
           "snapshots"
         ],
         "summary": "Fetch a snapshot",
-        "operationId": "snapshot_view_v1",
+        "operationId": "snapshot_view",
         "parameters": [
           {
             "in": "path",
@@ -10718,7 +10443,7 @@
           "snapshots"
         ],
         "summary": "Delete a snapshot",
-        "operationId": "snapshot_delete_v1",
+        "operationId": "snapshot_delete",
         "parameters": [
           {
             "in": "path",

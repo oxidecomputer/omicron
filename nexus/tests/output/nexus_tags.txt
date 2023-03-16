@@ -162,15 +162,10 @@ user_list_v1                             /v1/users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
-snapshot_create                          /organizations/{organization_name}/projects/{project_name}/snapshots
-snapshot_create_v1                       /v1/snapshots
-snapshot_delete                          /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
-snapshot_delete_v1                       /v1/snapshots/{snapshot}
-snapshot_list                            /organizations/{organization_name}/projects/{project_name}/snapshots
-snapshot_list_v1                         /v1/snapshots
-snapshot_view                            /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
-snapshot_view_by_id                      /by-id/snapshots/{id}
-snapshot_view_v1                         /v1/snapshots/{snapshot}
+snapshot_create                          /v1/snapshots
+snapshot_delete                          /v1/snapshots/{snapshot}
+snapshot_list                            /v1/snapshots
+snapshot_view                            /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
