@@ -534,7 +534,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let organization_id =
         create_organization(&client, ORGANIZATION_NAME).await.identity.id;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
@@ -709,7 +709,7 @@ async fn test_instances_create_stopped_start(
 
     create_org_and_project(&client).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -819,7 +819,7 @@ async fn test_instances_invalid_creation_returns_bad_request(
 
     let client = &cptestctx.external_client;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -878,7 +878,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     // Create test IP pool, organization and project
     create_org_and_project(&client).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -988,7 +988,7 @@ async fn test_instance_with_single_explicit_ip_address(
 
     create_org_and_project(&client).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -1061,7 +1061,7 @@ async fn test_instance_with_new_custom_network_interfaces(
 
     create_org_and_project(&client).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -1217,7 +1217,7 @@ async fn test_instance_create_delete_network_interface(
 
     create_org_and_project(&client).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -1851,7 +1851,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
@@ -2068,7 +2068,7 @@ async fn test_instance_fails_to_boot_with_disk(
     };
 
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -2153,7 +2153,7 @@ async fn test_instance_create_attach_disks(
     };
 
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -2274,7 +2274,7 @@ async fn test_instance_create_attach_disks_undo(
     };
 
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -2372,7 +2372,7 @@ async fn test_attach_eight_disks_to_instance(
     };
 
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -2478,7 +2478,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
     };
 
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -2600,7 +2600,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     };
 
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -2743,7 +2743,7 @@ async fn test_disks_detached_when_instance_destroyed(
 
     // Stop and delete instance
     let instance_url = format!(
-        "/organizations/{}/projects/{}/instances/nfs",
+        "/v1/instances/nfs?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
 
@@ -2981,7 +2981,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     // Create test organization and projects.
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
@@ -3137,7 +3137,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         start: true,
     };
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     NexusRequest::objects_post(client, &url_instances, &instance_params)

@@ -94,7 +94,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: list instances in a nonexistent project
         TestCase {
             method: Method::GET,
-            uri: "/organizations/test-org/projects/nonexistent/instances",
+            uri: "/v1/instances?organization=test-org&project=nonexistent",
             expected_code: StatusCode::NOT_FOUND,
             expected_error: "not found: project with name \"nonexistent\"",
             body: Some("".into()),
@@ -102,7 +102,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: fetch an instance in a nonexistent project
         TestCase {
             method: Method::GET,
-            uri: "/organizations/test-org/projects/nonexistent/instances/my-instance",
+            uri: "/v1/instances/my-instance?organization=test-org&project=nonexistent",
             expected_code: StatusCode::NOT_FOUND,
             expected_error: "not found: project with name \"nonexistent\"",
             body: Some("".into()),
@@ -110,7 +110,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: fetch an instance with an invalid name
         TestCase {
             method: Method::GET,
-            uri: "/organizations/test-org/projects/nonexistent/instances/my_instance",
+            uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
             expected_code: StatusCode::BAD_REQUEST,
             expected_error: "bad parameter in URL path: name contains \
                 invalid character: \"_\" (allowed characters are lowercase \
@@ -120,7 +120,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: delete an instance with an invalid name
         TestCase {
             method: Method::DELETE,
-            uri: "/organizations/test-org/projects/nonexistent/instances/my_instance",
+            uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
             expected_code: StatusCode::BAD_REQUEST,
             expected_error: "bad parameter in URL path: name contains \
                 invalid character: \"_\" (allowed characters are lowercase \

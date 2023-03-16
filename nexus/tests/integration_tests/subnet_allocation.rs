@@ -89,7 +89,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, organization_name).await;
     create_project(&client, organization_name, project_name).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         organization_name, project_name
     );
 
