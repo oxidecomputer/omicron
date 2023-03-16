@@ -4,59 +4,19 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use super::current_simulator_state;
-use super::setup;
-use super::SpStateExt;
 use dropshot::Method;
 use futures::prelude::*;
 use gateway_messages::SpPort;
+use gateway_test_utils::current_simulator_state;
+use gateway_test_utils::setup;
+use gateway_test_utils::sim_sp_serial_console;
+use gateway_test_utils::SpStateExt;
 use http::uri::Scheme;
 use http::StatusCode;
 use http::Uri;
 use omicron_gateway::http_entrypoints::SpType;
-use sp_sim::Gimlet;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
-use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::protocol::Message;
-
-// simulated gimlets expose their serial console over TCP; this function spawns
-// a task to read/write on the serial console, returning channels for the caller
-async fn sim_sp_serial_console(
-    gimlet: &Gimlet,
-) -> (mpsc::Sender<Vec<u8>>, mpsc::Receiver<Vec<u8>>) {
-    let mut conn =
-        TcpStream::connect(gimlet.serial_console_addr("sp3-host-cpu").unwrap())
-            .await
-            .unwrap();
-
-    let (console_write, mut console_write_rx) = mpsc::channel::<Vec<u8>>(16);
-    let (console_read_tx, console_read) = mpsc::channel::<Vec<u8>>(16);
-    tokio::spawn(async move {
-        let mut buf = [0; 128];
-        loop {
-            tokio::select! {
-                to_write = console_write_rx.recv() => {
-                    match to_write {
-                        Some(data) => {
-                            conn.write_all(&data).await.unwrap();
-                        }
-                        None => return,
-                    }
-                }
-
-                read_success = conn.read(&mut buf) => {
-                    let n = read_success.unwrap();
-                    console_read_tx.send(buf[..n].to_vec()).await.unwrap();
-                }
-            }
-        }
-    });
-
-    (console_write, console_read)
-}
 
 #[tokio::test]
 async fn serial_console_communication() {

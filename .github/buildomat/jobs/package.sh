@@ -50,6 +50,7 @@ files=(
 	tools/create_virtual_hardware.sh
 )
 
+pfexec mkdir -p /work && pfexec chown $USER /work
 ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
 
 # Build necessary for the global zone
@@ -86,7 +87,6 @@ cd "$pkg_dir"
 tar -xvfz "$tarball_src_dir/maghemite.tar"
 cd -
 
-mkdir -p /work
 cd "$tmp_gz" && tar cvfz /work/global-zone-packages.tar.gz oxide.json root
 cd -
 
