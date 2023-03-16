@@ -61,18 +61,16 @@ type ControlPlaneTestContext =
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
+fn get_project_selector() -> String {
+    format!("organization={}&project={}", ORGANIZATION_NAME, PROJECT_NAME)
+}
+
 fn get_instances_url() -> String {
-    format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    )
+    format!("/v1/instances?{}", get_project_selector())
 }
 
 fn get_instance_url(instance_name: &str) -> String {
-    format!(
-        "/v1/instances/{}?organization={}&project={}",
-        instance_name, ORGANIZATION_NAME, PROJECT_NAME
-    )
+    format!("/v1/instances/{}?{}", instance_name, get_project_selector())
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -533,10 +531,6 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     populate_ip_pool(&client, "default", None).await;
     let organization_id =
         create_organization(&client, ORGANIZATION_NAME).await.identity.id;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
     let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
         .await
         .identity
@@ -590,7 +584,6 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance.
     let instance_name = "just-rainsticks";
-    let instance_url = format!("{url_instances}/{instance_name}");
     create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
         .await;
     let virtual_provisioning_collection = datastore
@@ -607,7 +600,8 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
-    let instance = instance_get(&client, &instance_url).await;
+    let instance =
+        instance_get(&client, &get_instance_url(&instance_name)).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
     // NOTE: I think it's arguably "more correct" to identify that the
     // number of CPUs being used by guests at this point is actually "0",
@@ -657,7 +651,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Stop the instance
-    NexusRequest::object_delete(client, &instance_url)
+    NexusRequest::object_delete(client, &get_instance_url(&instance_name))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -708,15 +702,11 @@ async fn test_instances_create_stopped_start(
     let instance_name = "just-rainsticks";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create an instance in a stopped state.
     let instance: Instance = object_create(
         client,
-        &url_instances,
+        &get_instances_url(),
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
@@ -818,15 +808,11 @@ async fn test_instances_invalid_creation_returns_bad_request(
     // passed through properly.
 
     let client = &cptestctx.external_client;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     let error = client
         .make_request_with_body(
             Method::POST,
-            &url_instances,
+            &get_instances_url(),
             "{".into(),
             StatusCode::BAD_REQUEST,
         )
@@ -848,7 +834,7 @@ async fn test_instances_invalid_creation_returns_bad_request(
     let error = client
         .make_request_with_body(
             Method::POST,
-            &url_instances,
+            &get_instances_url(),
             request_body.into(),
             StatusCode::BAD_REQUEST,
         )
@@ -877,10 +863,6 @@ async fn test_instance_create_saga_removes_instance_database_record(
 
     // Create test IP pool, organization and project
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
@@ -914,12 +896,15 @@ async fn test_instance_create_saga_removes_instance_database_record(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create first instance");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create first instance");
     let _ = response.parsed_body::<Instance>().unwrap();
 
     // Try to create a _new_ instance, with the same IP address. Note that the
@@ -938,15 +923,18 @@ async fn test_instance_create_saga_removes_instance_database_record(
         disks: vec![],
         start: true,
     };
-    let _ =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect_err(
-                "Should have failed to create second instance with \
+    let _ = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect_err(
+        "Should have failed to create second instance with \
                 the same IP address as the first",
-            );
+    );
 
     // Update the IP address to one that will succeed, but leave the other data
     // as-is. This would fail with a conflict on the instance name, if we don't
@@ -969,12 +957,15 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params,
         ..instance_params.clone()
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Creating a new instance should succeed");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Creating a new instance should succeed");
     let instance = response.parsed_body::<Instance>().unwrap();
     assert_eq!(instance.identity.name, instance_params.identity.name);
 }
@@ -987,10 +978,6 @@ async fn test_instance_with_single_explicit_ip_address(
     let client = &cptestctx.external_client;
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
@@ -1024,18 +1011,23 @@ async fn test_instance_with_single_explicit_ip_address(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create instance with two network interfaces");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Get the interface, and verify it has the requested address
     let url_interface = format!(
-        "{}/{}/network-interfaces/{}",
-        url_instances, instance_params.identity.name, if0_params.identity.name,
+        "/v1/network-interfaces/{}?{}&instance={}",
+        if0_params.identity.name,
+        get_project_selector(),
+        instance_params.identity.name,
     );
     let interface = NexusRequest::object_get(client, &url_interface)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -1216,10 +1208,6 @@ async fn test_instance_create_delete_network_interface(
     let instance_name = "nic-attach-test-inst";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1256,12 +1244,15 @@ async fn test_instance_create_delete_network_interface(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create instance with two network interfaces");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Verify there are no interfaces
@@ -1375,13 +1366,11 @@ async fn test_instance_create_delete_network_interface(
 
     // Verify we cannot delete either interface while the instance is running
     for iface in interfaces.iter() {
-        let url_interface =
-            format!("{}/{}", url_interfaces, iface.identity.name.as_str());
         let err = NexusRequest::expect_failure(
             client,
             http::StatusCode::BAD_REQUEST,
             http::Method::DELETE,
-            url_interface.as_str(),
+            &format!("/v1/network-interfaces/{}", iface.identity.id),
         )
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1405,7 +1394,7 @@ async fn test_instance_create_delete_network_interface(
     // We should not be able to delete the primary interface, while the
     // secondary still exists
     let url_interface =
-        format!("{}/{}", url_interfaces, interfaces[0].identity.name.as_str());
+        format!("/v1/network-interfaces/{}", interfaces[0].identity.id);
     let err = NexusRequest::expect_failure(
         client,
         http::StatusCode::BAD_REQUEST,
@@ -1433,7 +1422,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Verify that we can delete the secondary.
     let url_interface =
-        format!("{}/{}", url_interfaces, interfaces[1].identity.name.as_str());
+        format!("/v1/network-interfaces/{}", interfaces[1].identity.id);
     NexusRequest::object_delete(client, url_interface.as_str())
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1442,7 +1431,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Now verify that we can delete the primary
     let url_interface =
-        format!("{}/{}", url_interfaces, interfaces[0].identity.name.as_str());
+        format!("/v1/network-interfaces/{}", interfaces[0].identity.id);
     NexusRequest::object_delete(client, url_interface.as_str())
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1461,7 +1450,6 @@ async fn test_instance_update_network_interfaces(
     let instance_name = "nic-update-test-inst";
 
     create_org_and_project(&client).await;
-    let url_instances = get_instances_url();
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1498,12 +1486,15 @@ async fn test_instance_update_network_interfaces(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create instance with two network interfaces");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
     let url_interfaces = format!(
         "/v1/network-interfaces?organization={}&project={}&instance={}",
@@ -1574,7 +1565,7 @@ async fn test_instance_update_network_interfaces(
     // NOTE: Need to use RequestBuilder manually because `expect_failure` does
     // not allow setting the body.
     let url_interface =
-        format!("{}/{}", url_interfaces, primary_iface.identity.name.as_str());
+        format!("/v1/network-interfaces/{}", primary_iface.identity.id);
     let builder =
         RequestBuilder::new(client, http::Method::PUT, url_interface.as_str())
             .body(Some(&updates))
@@ -1597,8 +1588,7 @@ async fn test_instance_update_network_interfaces(
     instance_simulate(nexus, &instance.identity.id).await;
     let updated_primary_iface = NexusRequest::object_put(
         client,
-        format!("{}/{}", url_interfaces.as_str(), primary_iface.identity.name)
-            .as_str(),
+        &format!("/v1/network-interfaces/{}", primary_iface.identity.id),
         Some(&updates),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1646,12 +1636,10 @@ async fn test_instance_update_network_interfaces(
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
-        format!(
-            "{}/{}",
-            url_interfaces.as_str(),
-            updated_primary_iface.identity.name
-        )
-        .as_str(),
+        &format!(
+            "/v1/network-interfaces/{}",
+            updated_primary_iface.identity.id
+        ),
         Some(&updates),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1702,10 +1690,10 @@ async fn test_instance_update_network_interfaces(
         instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
-    for if_name in
-        [&updated_primary_iface.identity.name, &secondary_iface.identity.name]
+    for if_id in
+        [&updated_primary_iface.identity.id, &secondary_iface.identity.id]
     {
-        let url_interface = format!("{}/{}", url_interfaces, if_name.as_str());
+        let url_interface = format!("/v1/network-interfaces/{}", if_id);
         let builder = RequestBuilder::new(
             client,
             http::Method::PUT,
@@ -1742,12 +1730,7 @@ async fn test_instance_update_network_interfaces(
     };
     let new_primary_iface = NexusRequest::object_put(
         client,
-        format!(
-            "{}/{}",
-            url_interfaces.as_str(),
-            secondary_iface.identity.name
-        )
-        .as_str(),
+        &format!("/v1/network-interfaces/{}", secondary_iface.identity.id),
         Some(&updates),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1771,12 +1754,10 @@ async fn test_instance_update_network_interfaces(
     // Get the newly-made secondary interface to test
     let new_secondary_iface = NexusRequest::object_get(
         client,
-        format!(
-            "{}/{}",
-            url_interfaces.as_str(),
-            updated_primary_iface.identity.name
-        )
-        .as_str(),
+        &format!(
+            "/v1/network-interfaces/{}",
+            updated_primary_iface.identity.id
+        ),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -1805,7 +1786,7 @@ async fn test_instance_update_network_interfaces(
     // Let's delete the original primary, and verify that we've still got the
     // secondary.
     let url_interface =
-        format!("{}/{}", url_interfaces, new_secondary_iface.identity.name);
+        format!("/v1/network-interfaces/{}", new_secondary_iface.identity.id);
     NexusRequest::object_delete(&client, &url_interface)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
