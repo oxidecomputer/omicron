@@ -7,7 +7,6 @@
 //! This was originally conceived as a separate dropshot server from the
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
-use super::views;
 use crate::authn::{
     silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
 };
