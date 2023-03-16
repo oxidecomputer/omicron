@@ -253,7 +253,8 @@ pub async fn create_local_user(
     password: params::UserPassword,
 ) -> User {
     let silo_name = &silo.identity.name;
-    let url = format!("/v1/identity-providers/local/users?silo={}", silo_name);
+    let url =
+        format!("/v1/system/identity-providers/local/users?silo={}", silo_name);
     object_create(
         client,
         &url,
