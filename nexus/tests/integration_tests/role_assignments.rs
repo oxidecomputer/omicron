@@ -231,7 +231,7 @@ async fn test_role_assignments_silo_implicit(
         const ROLE: Self::RoleType = authz::SiloRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
-            "/policy".to_string()
+            "/v1/policy".to_string()
         }
 
         fn verify_initial<'a, 'b, 'c, 'd>(
