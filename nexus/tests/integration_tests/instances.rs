@@ -3074,7 +3074,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .id;
     grant_iam(
         client,
-        "/system/silos/authz",
+        "/v1/system/silos/authz",
         SiloRole::Collaborator,
         user_id,
         AuthnMode::PrivilegedUser,

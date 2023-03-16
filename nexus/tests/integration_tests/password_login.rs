@@ -45,7 +45,7 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     test_local_user_with_no_initial_password(client, &silo).await;
     NexusRequest::object_delete(
         client,
-        &format!("/system/silos/{}", silo_name),
+        &format!("/v1/system/silos/{}", silo_name),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -105,7 +105,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     let test_password2 =
         params::Password::from_str("as was the style at the time").unwrap();
     let user_password_url = format!(
-        "/system/silos/{}/identity-providers/local/users/{}/set-password",
+        "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
         silo_name, created_user.id
     );
     NexusRequest::new(
@@ -170,11 +170,11 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     )
     .await;
     let admin_password_url = format!(
-        "/system/silos/{}/identity-providers/local/users/{}/set-password",
+        "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
         silo_name, admin_user_obj.id
     );
 
-    let silo_url = format!("/system/silos/{}", silo_name);
+    let silo_url = format!("/v1/system/silos/{}", silo_name);
     grant_iam(
         client,
         &silo_url,
@@ -328,7 +328,7 @@ async fn test_local_user_with_no_initial_password(
     // Now, set a password.
     let test_password2 = params::Password::from_str("joshua").unwrap();
     let user_password_url = format!(
-        "/system/silos/{}/identity-providers/local/users/{}/set-password",
+        "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
         silo_name, created_user.id
     );
     NexusRequest::new(
