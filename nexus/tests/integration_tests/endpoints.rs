@@ -442,7 +442,7 @@ lazy_static! {
 
     pub static ref DEMO_SYSTEM_METRICS_URL: String =
         format!(
-            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
+            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
             Utc::now(),
             Utc::now(),
             "3aaf22ae-5691-4f6d-b62c-aa532512fa78",
@@ -593,7 +593,7 @@ impl AllowedMethod {
 
 lazy_static! {
     pub static ref URL_USERS_DB_INIT: String =
-        format!("/system/user/{}", authn::USER_DB_INIT.name);
+        format!("/v1/system/user/{}", authn::USER_DB_INIT.name);
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
@@ -1385,7 +1385,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/system/user",
+            url: "/v1/system/user",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],

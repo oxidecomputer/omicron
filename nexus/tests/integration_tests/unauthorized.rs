@@ -190,7 +190,7 @@ lazy_static! {
         SetupReq::Post {
             url: "/v1/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
-            id_routes: vec!["/system/by-id/silos/{id}"],
+            id_routes: vec![],
         },
         // Create a local User
         SetupReq::Post {
@@ -205,7 +205,7 @@ lazy_static! {
         // Get the default IP pool
         SetupReq::Get {
             url: &DEMO_IP_POOL_URL,
-            id_routes: vec!["/system/by-id/ip-pools/{id}"],
+            id_routes: vec![],
         },
         // Create an IP pool range
         SetupReq::Post {
