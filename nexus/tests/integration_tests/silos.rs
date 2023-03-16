@@ -197,7 +197,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to make request");
 
     // Delete organization
-    NexusRequest::object_delete(&client, &"/organizations/someorg")
+    NexusRequest::object_delete(&client, &"/v1/organizations/someorg")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -1559,10 +1559,6 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     let mut output = String::new();
     for test_silo in [test_silo1, test_silo2] {
         let silo_name = &test_silo.silo.identity().name;
-        let silo_users_url = &format!(
-            "/v1/system/users?silo={}",
-            test_silo.silo.identity().name
-        );
 
         write!(&mut output, "SILO: {}\n", silo_name).unwrap();
 
@@ -1582,7 +1578,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
             let test_response = NexusRequest::new(RequestBuilder::new(
                 client,
                 Method::GET,
-                &format!("{}/all", silo_users_url),
+                &format!("/v1/system/users?silo={}", silo_name),
             ))
             .authn_as(calling_user.clone())
             .execute()
@@ -1616,7 +1612,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
                 let test_response = NexusRequest::new(RequestBuilder::new(
                     client,
                     Method::GET,
-                    &format!("{}/id/{}", silo_users_url, user_id),
+                    &format!("/v1/system/users/{}?silo={}", user_id, silo_name),
                 ))
                 .authn_as(calling_user.clone())
                 .execute()
@@ -1964,10 +1960,9 @@ async fn run_user_tests(
     authn_mode: &AuthnMode,
     existing_users: &[views::User],
 ) {
-    let url_all_users =
-        format!("/v1/system/users/all?silo={}", silo.identity.name);
+    let url_all_users = format!("/v1/system/users?silo={}", silo.identity.name);
     let url_local_idp_users = format!(
-        "/system/identity-providers/local/users?silo={}",
+        "/v1/system/identity-providers/local/users?silo={}",
         silo.identity.name
     );
     let url_user_create = url_local_idp_users.to_string();
@@ -2005,7 +2000,7 @@ async fn run_user_tests(
 
     // Fetch the user we just created.
     let user_url_get = format!(
-        "/v1/system/users/id/{}?silo={}",
+        "/v1/system/users/{}?silo={}",
         user_created.id, silo.identity.name,
     );
     let user_found = NexusRequest::object_get(client, &user_url_get)
@@ -2035,7 +2030,7 @@ async fn run_user_tests(
 
     // Delete the user that we created.
     let user_url_delete = format!(
-        "/system/identity-providers/local/users/{}?silo={}",
+        "/v1/system/identity-providers/local/users/{}?silo={}",
         user_created.id, silo.identity.name,
     );
     NexusRequest::object_delete(client, &user_url_delete)
