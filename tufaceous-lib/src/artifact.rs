@@ -138,9 +138,9 @@ fn write_host_tarball_fake_artifact<W: Write>(
 ) -> Result<()> {
     let mut builder = tar::Builder::new(BufWriter::new(writer));
 
-    // The phase 1 image is always 32MB. Treat size as the size of the phase 2 image.
-    let phase_1_times = 32 * 1024 * 1024 / FILLER_TEXT.len();
-    let phase_2_times = (size as usize) / FILLER_TEXT.len();
+    let times = (size as usize) / FILLER_TEXT.len();
+    let phase_1_times = times / 8;
+    let phase_2_times = times - phase_1_times;
 
     {
         let mut header = tar::Header::new_gnu();
