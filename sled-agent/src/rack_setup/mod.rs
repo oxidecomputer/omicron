@@ -9,3 +9,8 @@ pub mod config;
 mod plan;
 /// The main implementation of the RSS service.
 pub mod service;
+
+// Interfaces to help testing access to external services
+mod dns_interface;
+mod nexus_interface;
+mod sled_interface;

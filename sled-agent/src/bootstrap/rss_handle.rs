@@ -143,7 +143,7 @@ impl BootstrapAgentHandle {
     /// immediately (i.e., the error message will pertain only to the first sled
     /// that failed to initialize).
     pub(crate) async fn initialize_sleds(
-        self,
+        &self,
         requests: Vec<(
             SocketAddrV6,
             SledAgentRequest,
@@ -172,7 +172,11 @@ pub(crate) struct BootstrapAgentHandleReceiver {
 }
 
 impl BootstrapAgentHandleReceiver {
-    pub(crate) async fn initialize_sleds(mut self, log: &Logger, sp: &Option<SpHandle>) {
+    pub(crate) async fn initialize_sleds(
+        mut self,
+        log: &Logger,
+        sp: &Option<SpHandle>,
+    ) {
         let (requests, tx_response) = match self.inner.recv().await {
             Some(requests) => requests,
             None => {
