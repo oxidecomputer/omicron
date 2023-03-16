@@ -329,7 +329,7 @@ async fn test_local_user_with_no_initial_password(
     let test_password2 = params::Password::from_str("joshua").unwrap();
     let user_password_url = format!(
         "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
-        silo_name, created_user.id
+        created_user.id, silo_name,
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
