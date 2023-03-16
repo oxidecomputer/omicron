@@ -16946,8 +16946,8 @@
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
         "type": "string",
-        "pattern": "^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$",
-        "minLength": 17,
+        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
+        "minLength": 5,
         "maxLength": 17
       },
       "Measurement": {
