@@ -106,7 +106,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         params::Password::from_str("as was the style at the time").unwrap();
     let user_password_url = format!(
         "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
-        silo_name, created_user.id
+        created_user.id, silo_name
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
