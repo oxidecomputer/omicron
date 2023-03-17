@@ -4,6 +4,7 @@
 
 //! Tests images support in the API
 
+use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -15,16 +16,40 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::GlobalImage;
+use omicron_nexus::external_api::{params, views};
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+const ORG_NAME: &str = "myorg";
+const PROJECT_NAME: &str = "myproj";
+
+const ORG_NAME_2: &str = "myorg2";
+const PROJECT_NAME_2: &str = "myproj2";
+
+fn get_images_url(org_name: &str, project_name: &str) -> String {
+    format!("/v1/images?organization={}&project={}", org_name, project_name)
+}
+
+fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
+    params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "alpine-edge".parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+        block_size: params::BlockSize::try_from(512).unwrap(),
+        source,
+    }
+}
+
 #[nexus_test]
-async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
+async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
@@ -40,54 +65,77 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    // No global images yet
-    let global_images: Vec<GlobalImage> =
-        NexusRequest::iter_collection_authn(client, "/system/images", "", None)
-            .await
-            .expect("failed to list images")
-            .all_items;
+    let images_url = get_images_url(ORG_NAME, PROJECT_NAME);
 
-    assert_eq!(global_images.len(), 0);
+    // Before project exists, image list 404s
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &images_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Expected 404");
 
-    // Create one!
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-        },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
+    // create the project, now we expect an empty list
+    create_organization(client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
-    NexusRequest::objects_post(client, "/system/images", &image_create_params)
+    let images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await
-        .unwrap();
+        .items;
 
-    // Verify one global image
-    let global_images: Vec<GlobalImage> =
-        NexusRequest::iter_collection_authn(client, "/system/images", "", None)
-            .await
-            .expect("failed to list images")
-            .all_items;
+    assert_eq!(images.len(), 0);
 
-    assert_eq!(global_images.len(), 1);
-    assert_eq!(global_images[0].identity.name, "alpine-edge");
+    // Create an image in the project
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/image.raw").to_string(),
+    });
+
+    NexusRequest::objects_post(client, &images_url, &image_create_params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    // one image in the project
+    let images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].identity.name, "alpine-edge");
+
+    // create another project, which is empty until we promote the image to global
+    create_organization(client, ORG_NAME_2).await;
+    create_project(client, ORG_NAME_2, PROJECT_NAME_2).await;
+
+    let project_2_images_url = get_images_url(ORG_NAME_2, PROJECT_NAME_2);
+
+    let images = NexusRequest::object_get(client, &project_2_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+    assert_eq!(images.len(), 0);
+
+    // TODO: once we reimplement promote, promote image to global and check that
+    // it shows up in the other project
 }
 
 #[nexus_test]
-async fn test_global_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
+async fn test_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+
+    // need a project to post to
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
     server.expect(
@@ -96,25 +144,14 @@ async fn test_global_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
             .respond_with(status_code(404)),
     );
 
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-        },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/image.raw").to_string(),
+    });
+
+    let images_url = get_images_url(ORG_NAME, PROJECT_NAME);
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/system/images")
+        RequestBuilder::new(client, Method::POST, &images_url)
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -131,27 +168,22 @@ async fn test_global_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_global_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
+async fn test_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url { url: "not_a_url".to_string() },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
+    // need a project to post to
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
+
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: "not_a_url".to_string(),
+    });
+
+    let images_url = get_images_url(ORG_NAME, PROJECT_NAME);
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/system/images")
+        RequestBuilder::new(client, Method::POST, &images_url)
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -168,11 +200,15 @@ async fn test_global_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_global_image_create_bad_content_length(
+async fn test_image_create_bad_content_length(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+
+    // need a project to post to
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
     server.expect(
@@ -183,25 +219,14 @@ async fn test_global_image_create_bad_content_length(
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-        },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/image.raw").to_string(),
+    });
+
+    let images_url = get_images_url(ORG_NAME, PROJECT_NAME);
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/system/images")
+        RequestBuilder::new(client, Method::POST, &images_url)
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -218,11 +243,13 @@ async fn test_global_image_create_bad_content_length(
 }
 
 #[nexus_test]
-async fn test_global_image_create_bad_image_size(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_image_create_bad_image_size(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+
+    // need a project to post to
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
     server.expect(
@@ -234,25 +261,14 @@ async fn test_global_image_create_bad_image_size(
             )),
     );
 
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-        },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/image.raw").to_string(),
+    });
+
+    let images_url = get_images_url(ORG_NAME, PROJECT_NAME);
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/system/images")
+        RequestBuilder::new(client, Method::POST, &images_url)
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -269,9 +285,13 @@ async fn test_global_image_create_bad_image_size(
 }
 
 #[nexus_test]
-async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
+async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+
+    // need a project to post both disk and image to
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
     server.expect(
@@ -285,66 +305,49 @@ async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url {
-            url: server.url("/alpine/edge.raw").to_string(),
-        },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
+    // Create an image in the project
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/alpine/edge.raw").to_string(),
+    });
 
-    let alpine_image: GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let images_url = get_images_url(ORG_NAME, PROJECT_NAME);
 
-    create_organization(&client, "myorg").await;
-    create_project(client, "myorg", "myproj").await;
+    let alpine_image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
 
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
+        disk_source: params::DiskSource::Image {
             image_id: alpine_image.identity.id,
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
 
-    NexusRequest::objects_post(
-        client,
-        "/organizations/myorg/projects/myproj/disks",
-        &new_disk,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    let disks_url =
+        format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME);
+    NexusRequest::objects_post(client, &disks_url, &new_disk)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 }
 
 #[nexus_test]
-async fn test_make_disk_from_global_image_too_small(
+async fn test_make_disk_from_image_too_small(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+
+    // need a project to post both disk and image to
+    create_organization(&client, ORG_NAME).await;
+    create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
     server.expect(
@@ -358,57 +361,36 @@ async fn test_make_disk_from_global_image_too_small(
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url {
-            url: server.url("/alpine/edge.raw").to_string(),
-        },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
+    // Create an image in the project
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/alpine/edge.raw").to_string(),
+    });
 
-    let alpine_image: GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let images_url = get_images_url(ORG_NAME, PROJECT_NAME);
 
-    create_organization(&client, "myorg").await;
-    create_project(client, "myorg", "myproj").await;
+    let alpine_image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
 
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
+        disk_source: params::DiskSource::Image {
             image_id: alpine_image.identity.id,
         },
         size: ByteCount::from(4096 * 500),
     };
 
+    let disks_url =
+        format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME);
     let error = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &"/organizations/myorg/projects/myproj/disks",
-        )
-        .body(Some(&new_disk))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

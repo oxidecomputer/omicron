@@ -82,7 +82,7 @@
             "description": "The artifact's version.",
             "required": true,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/SemverVersion"
             }
           }
         ],
@@ -801,6 +801,10 @@
           "progress_events",
           "total_elapsed"
         ]
+      },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       }
     }
   }

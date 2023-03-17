@@ -1,0 +1,50 @@
+# This is an artifact manifest that generates fake entries for all components.
+# This is completely non-functional and is only useful for testing archive
+# extraction in other parts of the repository.
+
+system_version = "1.0.0"
+
+[artifact.gimlet_sp]
+name = "fake-gimlet-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[artifact.gimlet_rot]
+name = "fake-gimlet-rot"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[artifact.host]
+name = "fake-host"
+version = "1.0.0"
+source = { kind = "fake", size = "4MiB" }
+
+[artifact.trampoline]
+name = "fake-trampoline"
+version = "1.0.0"
+source = { kind = "fake", size = "4MiB" }
+
+[artifact.control_plane]
+name = "fake-control-plane"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[artifact.psc_sp]
+name = "fake-psc-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[artifact.psc_rot]
+name = "fake-psc-rot"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[artifact.switch_sp]
+name = "fake-switch-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[artifact.switch_rot]
+name = "fake-switch-rot"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }

@@ -7,12 +7,14 @@
 mod inventory;
 mod rack;
 mod status;
+mod update;
 
 pub use inventory::{
     Component, ComponentId, Inventory, PowerState, Sp, ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
+pub use update::{artifact_title, RackUpdateState, UpdateState};
 
 /// The global state of wicket
 ///
@@ -20,9 +22,12 @@ pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
 /// receipt.
 #[derive(Debug)]
 pub struct State {
+    pub screen_width: u16,
+    pub screen_height: u16,
     pub inventory: Inventory,
     pub rack_state: RackState,
     pub service_status: ServiceStatus,
+    pub update_state: RackUpdateState,
 }
 
 impl Default for State {
@@ -34,9 +39,12 @@ impl Default for State {
 impl State {
     pub fn new() -> State {
         State {
+            screen_height: 0,
+            screen_width: 0,
             inventory: Inventory::default(),
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
+            update_state: RackUpdateState::new(),
         }
     }
 }

@@ -9,7 +9,8 @@ mod panes;
 mod splash;
 mod widgets;
 
-use crate::{Action, Event, State, Term};
+use crate::{Action, Cmd, State, Term};
+use slog::{o, Logger};
 use tui::widgets::ListState;
 
 use main::MainScreen;
@@ -17,28 +18,29 @@ use splash::SplashScreen;
 
 pub use controls::Control;
 pub use panes::OverviewPane;
+pub use panes::UpdatePane;
 
-/// The primary display representation. It's sole purpose is to dispatch events
-/// to the underlying splash and main screens.
+/// The primary display representation. It's sole purpose is to dispatch
+/// [`Cmd`]s to the underlying splash and main screens.
 ///
 // Note: It would be nice to use an enum here, but swapping between enum
 // variants requires taking the screen by value or having a wrapper struct with
 // an option so we can `take` the inner value. This is unergomic, so we just go
 // with the simple solution.
 pub struct Screen {
+    #[allow(unused)]
+    log: slog::Logger,
     splash: Option<SplashScreen>,
     main: MainScreen,
-    width: u16,
-    height: u16,
 }
 
 impl Screen {
-    pub fn new() -> Screen {
+    pub fn new(log: &Logger) -> Screen {
+        let log = log.new(o!("component" => "Screen"));
         Screen {
             splash: Some(SplashScreen::new()),
-            main: MainScreen::new(),
-            width: 0,
-            height: 0,
+            main: MainScreen::new(&log),
+            log,
         }
     }
 
@@ -46,21 +48,21 @@ impl Screen {
     ///
     // A draw is issued after every resize, so no need to return an Action
     pub fn resize(&mut self, state: &mut State, width: u16, height: u16) {
-        self.width = width;
-        self.height = height;
+        state.screen_width = width;
+        state.screen_height = height;
 
         // Size the main screen
         self.main.resize(state, width, height);
     }
 
-    pub fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
+    pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         if let Some(splash) = &mut self.splash {
-            if splash.on(event) {
+            if splash.on(cmd) {
                 self.splash = None;
             }
             Some(Action::Redraw)
         } else {
-            self.main.on(state, event)
+            self.main.on(state, cmd)
         }
     }
 

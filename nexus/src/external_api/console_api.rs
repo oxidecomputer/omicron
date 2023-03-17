@@ -11,7 +11,6 @@ use super::views;
 use crate::authn::{
     silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
 };
-use crate::context::OpContext;
 use crate::ServerContext;
 use crate::{
     authn::external::{
@@ -34,6 +33,7 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::{
     data_page_params_for, PaginatedById, ScanById, ScanParams,
@@ -412,16 +412,16 @@ pub async fn login_local(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let path_params = path_params.into_inner();
+        let path = path_params.into_inner();
         let credentials = credentials.into_inner();
+        let silo = path.silo_name.into();
 
         // By definition, this request is not authenticated.  These operations
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
-        let user = nexus
-            .login_local(&opctx, &path_params.silo_name, credentials)
-            .await?;
+        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
         login_finish(&opctx, apictx, user, None).await
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -484,7 +484,7 @@ pub async fn logout(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let opctx = OpContext::for_external_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await;
         let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
         if let Ok(opctx) = opctx {
@@ -616,10 +616,12 @@ pub async fn login_begin(
 }
 
 /// Fetch the user associated with the current session
+/// Use `GET /v1/me` instead
 #[endpoint {
    method = GET,
    path = "/session/me",
    tags = ["hidden"],
+   deprecated = true
 }]
 pub async fn session_me(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -630,7 +632,7 @@ pub async fn session_me(
         // We don't care about authentication method, as long as they are authed
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
         Ok(HttpResponseOk(user.into()))
     };
@@ -638,10 +640,12 @@ pub async fn session_me(
 }
 
 /// Fetch the silo groups the current user belongs to
+/// Use `GET /v1/me/groups` instead
 #[endpoint {
     method = GET,
     path = "/session/me/groups",
     tags = ["hidden"],
+    deprecated = true
  }]
 pub async fn session_me_groups(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -654,7 +658,7 @@ pub async fn session_me_groups(
         // We don't care about authentication method, as long as they are authed
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
-        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let groups = nexus
             .silo_user_fetch_groups_for_self(
                 &opctx,
@@ -676,7 +680,7 @@ pub async fn session_me_groups(
 pub async fn console_index_or_login_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
-    let opctx = OpContext::for_external_api(&rqctx).await;
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await;
 
     // if authed, serve console index.html with JS bundle in script tag
     if let Ok(opctx) = opctx {

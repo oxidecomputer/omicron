@@ -8,6 +8,7 @@ use camino::Utf8PathBuf;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::PowerState;
 use gateway_client::types::UpdatePreparationProgress;
+use installinator_common::CompletionEventKind;
 use omicron_common::update::ArtifactId;
 use omicron_common::update::ArtifactKind;
 use schemars::gen::SchemaGenerator;
@@ -52,7 +53,7 @@ pub enum UpdateStateKind {
     ArtifactWriteProgress {
         attempt: usize,
         kind: ArtifactKind,
-        #[schemars(schema_with = "path_schema")]
+        #[schemars(schema_with = "path_opt_schema")]
         destination: Option<Utf8PathBuf>,
         written_bytes: u64,
         total_bytes: u64,
@@ -89,20 +90,21 @@ pub struct UpdateEvent {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
 pub enum UpdateEventKind {
-    Success(UpdateEventSuccessKind),
-    Failure(UpdateEventFailureKind),
+    Normal(UpdateNormalEventKind),
+    Terminal(UpdateTerminalEventKind),
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
-pub enum UpdateEventSuccessKind {
+pub enum UpdateNormalEventKind {
     SpResetComplete,
     ArtifactUpdateComplete { artifact: ArtifactId },
+    InstallinatorEvent(CompletionEventKind),
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
-pub enum UpdateEventFailureKind {
+pub enum UpdateTerminalEventKind {
     SpResetFailed { reason: String },
     ArtifactUpdateFailed { artifact: ArtifactId, reason: String },
 }
@@ -116,6 +118,12 @@ pub struct UpdateLog {
 
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
+}
+
+fn path_opt_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Option<String>>::json_schema(gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

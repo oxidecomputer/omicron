@@ -75,7 +75,7 @@ impl RackSecret {
     pub fn new() -> RackSecret {
         let mut rng = OsRng::default();
         let sk = SecretKey::random(&mut rng);
-        RackSecret { secret: sk.to_secret_scalar() }
+        RackSecret { secret: sk.to_nonzero_scalar() }
     }
 
     /// Split a secert into `total_shares` number of shares, where combining
@@ -101,7 +101,7 @@ impl RackSecret {
             .combine_shares::<Scalar>(shares)?;
         let nzs = NonZeroScalar::from_repr(scalar.to_repr()).unwrap();
         let sk = SecretKey::from(nzs);
-        Ok(RackSecret { secret: sk.to_secret_scalar() })
+        Ok(RackSecret { secret: sk.to_nonzero_scalar() })
     }
 }
 

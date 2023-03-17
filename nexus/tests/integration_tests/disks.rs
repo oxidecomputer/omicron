@@ -14,6 +14,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -36,7 +37,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
 use omicron_nexus::TestInterfaces as _;
-use omicron_nexus::{context::OpContext, external_api::params, Nexus};
+use omicron_nexus::{external_api::params, Nexus};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -1413,7 +1414,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Check the utilization info for the whole project too.
     let utilization_url = |id: Uuid| {
         format!(
-            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
+            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
             Utc::now() - chrono::Duration::seconds(10),
             Utc::now() + chrono::Duration::seconds(10),
             id,

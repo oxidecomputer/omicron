@@ -9,10 +9,10 @@ use crate::artifacts::UpdatePlan;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
-use crate::update_events::UpdateEventFailureKind;
 use crate::update_events::UpdateEventKind;
-use crate::update_events::UpdateEventSuccessKind;
+use crate::update_events::UpdateNormalEventKind;
 use crate::update_events::UpdateStateKind;
+use crate::update_events::UpdateTerminalEventKind;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
@@ -338,7 +338,7 @@ impl UpdateDriver {
     ) {
         if let Err(err) = self.run_impl(plan, ipr_start_receiver).await {
             error!(self.log, "update failed"; "err" => ?err);
-            self.push_update_failure(err);
+            self.push_update_terminal_failure(err);
         }
     }
 
@@ -347,54 +347,97 @@ impl UpdateDriver {
         self.update_log.lock().unwrap().current = Some(state);
     }
 
-    fn push_update_success(
+    // While the update log is held:
+    //
+    // * Push all the completion events described by `events` (possibly none)
+    // * Set the current state to `new_current` (also possibly `None`, if this
+    //   update is complete).
+    fn push_update_events(
         &self,
-        kind: UpdateEventSuccessKind,
+        events: impl Iterator<Item = (Instant, UpdateEventKind)>,
+        new_current: Option<UpdateState>,
+    ) {
+        let mut update_log = self.update_log.lock().unwrap();
+        for (timestamp, kind) in events {
+            let event = UpdateEvent { timestamp, kind };
+            update_log.events.push(event);
+        }
+        update_log.current = new_current;
+    }
+
+    fn push_update_event_now(
+        &self,
+        kind: UpdateEventKind,
         new_current: Option<UpdateStateKind>,
     ) {
         let timestamp = Instant::now();
-        let kind = UpdateEventKind::Success(kind);
-        let event = UpdateEvent { timestamp, kind };
-        let mut update_log = self.update_log.lock().unwrap();
-        update_log.events.push(event);
-        update_log.current =
+        let new_current =
             new_current.map(|kind| UpdateState { timestamp, kind });
+        let events = [(timestamp, kind)];
+        self.push_update_events(events.into_iter(), new_current);
     }
 
-    fn push_update_failure(&self, kind: UpdateEventFailureKind) {
-        let kind = UpdateEventKind::Failure(kind);
-        let event = UpdateEvent { timestamp: Instant::now(), kind };
-        let mut update_log = self.update_log.lock().unwrap();
-        update_log.events.push(event);
-        update_log.current = None;
+    fn push_update_normal_event_now(
+        &self,
+        kind: UpdateNormalEventKind,
+        new_current: Option<UpdateStateKind>,
+    ) {
+        self.push_update_event_now(UpdateEventKind::Normal(kind), new_current);
+    }
+
+    fn push_update_terminal_failure(&self, kind: UpdateTerminalEventKind) {
+        self.push_update_event_now(UpdateEventKind::Terminal(kind), None);
     }
 
     async fn run_impl(
         &mut self,
         plan: UpdatePlan,
         ipr_start_receiver: IprStartReceiver,
-    ) -> Result<(), UpdateEventFailureKind> {
-        // TODO-correctness Is the general order here correct? Host then SP then
-        // RoT, then reboot the SP/RoT?
-        if self.sp.type_ == SpType::Sled {
-            self.run_sled(&plan, ipr_start_receiver).await?;
-        }
+    ) -> Result<(), UpdateTerminalEventKind> {
+        // TODO: We currently do updates in the order RoT -> SP -> host. This is
+        // generally the correct order, but in some cases there might be a bug
+        // which forces us to update components in the order SP -> RoT -> host.
+        // How do we handle that?
+        //
+        // Broadly, there are two ways to do this:
+        //
+        // 1. Add metadata to artifacts.json indicating the order in which
+        //    components should be updated. There are a lot of options in the
+        //    design space here, from a simple boolean to a list or DAG
+        //    expressing the order, or something even more dynamic than that.
+        //
+        // 2. Skip updating components that match the same version. This would
+        //    let us ship two separate archives in case there's a bug: one with
+        //    the newest components for the SP and RoT, and one without.
 
-        let sp_artifact = match self.sp.type_ {
-            SpType::Sled => &plan.gimlet_sp,
-            SpType::Power => &plan.psc_sp,
-            SpType::Switch => &plan.sidecar_sp,
+        let (rot_artifact, sp_artifact) = match self.sp.type_ {
+            SpType::Sled => (&plan.gimlet_rot, &plan.gimlet_sp),
+            SpType::Power => (&plan.psc_rot, &plan.psc_sp),
+            SpType::Switch => (&plan.sidecar_rot, &plan.sidecar_sp),
         };
 
+        info!(self.log, "starting RoT update"; "artifact" => ?rot_artifact.id);
+        self.update_sp_component(rot_artifact, SpComponent::ROT.const_as_str())
+            .await
+            .map_err(|err| UpdateTerminalEventKind::ArtifactUpdateFailed {
+                artifact: rot_artifact.id.clone(),
+                reason: format!("{err:#}"),
+            })?;
+
         info!(self.log, "starting SP update"; "artifact" => ?sp_artifact.id);
-        self.update_sp(sp_artifact).await.map_err(|err| {
-            UpdateEventFailureKind::ArtifactUpdateFailed {
+        self.update_sp_component(
+            sp_artifact,
+            SpComponent::SP_ITSELF.const_as_str(),
+        )
+        .await
+        .map_err(|err| {
+            UpdateTerminalEventKind::ArtifactUpdateFailed {
                 artifact: sp_artifact.id.clone(),
                 reason: format!("{err:#}"),
             }
         })?;
-        self.push_update_success(
-            UpdateEventSuccessKind::ArtifactUpdateComplete {
+        self.push_update_normal_event_now(
+            UpdateNormalEventKind::ArtifactUpdateComplete {
                 artifact: sp_artifact.id.clone(),
             },
             Some(UpdateStateKind::ResettingSp),
@@ -402,9 +445,18 @@ impl UpdateDriver {
 
         info!(self.log, "all updates complete; resetting SP");
         self.reset_sp().await.map_err(|err| {
-            UpdateEventFailureKind::SpResetFailed { reason: format!("{err:#}") }
+            UpdateTerminalEventKind::SpResetFailed {
+                reason: format!("{err:#}"),
+            }
         })?;
-        self.push_update_success(UpdateEventSuccessKind::SpResetComplete, None);
+        self.push_update_normal_event_now(
+            UpdateNormalEventKind::SpResetComplete,
+            None,
+        );
+
+        if self.sp.type_ == SpType::Sled {
+            self.run_sled(&plan, ipr_start_receiver).await?;
+        }
 
         Ok(())
     }
@@ -413,12 +465,12 @@ impl UpdateDriver {
         &mut self,
         plan: &UpdatePlan,
         ipr_start_receiver: IprStartReceiver,
-    ) -> Result<(), UpdateEventFailureKind> {
+    ) -> Result<(), UpdateTerminalEventKind> {
         info!(self.log, "starting host recovery via trampoline image");
 
         let uploaded_trampoline_phase2_id =
             self.install_trampoline_image(plan).await.map_err(|err| {
-                UpdateEventFailureKind::ArtifactUpdateFailed {
+                UpdateTerminalEventKind::ArtifactUpdateFailed {
                     // `trampoline_phase_1` and `trampoline_phase_2` have the same
                     // artifact ID, so the choice here is arbitrary.
                     artifact: plan.trampoline_phase_1.id.clone(),
@@ -434,7 +486,7 @@ impl UpdateDriver {
             )
             .await
             .map_err(|err| {
-                UpdateEventFailureKind::ArtifactUpdateFailed {
+                UpdateTerminalEventKind::ArtifactUpdateFailed {
                     // `trampoline_phase_1` and `trampoline_phase_2` have the
                     // same artifact ID, so the choice here is arbitrary.
                     artifact: plan.trampoline_phase_1.id.clone(),
@@ -451,7 +503,7 @@ impl UpdateDriver {
         // Installinator is done: install the host phase 1 that matches the host
         // phase 2 it installed, and boot our newly-recovered sled.
         self.install_host_phase_1_and_boot(plan).await.map_err(|err| {
-            UpdateEventFailureKind::ArtifactUpdateFailed {
+            UpdateTerminalEventKind::ArtifactUpdateFailed {
                 artifact: plan.host_phase_1.id.clone(),
                 reason: format!("{err:#}"),
             }
@@ -588,60 +640,88 @@ impl UpdateDriver {
         &mut self,
         mut report: ProgressReport,
     ) {
+        let now = Instant::now();
+
         // Currently, progress reports have zero or one progress events. Don't
         // assert that here, in case this version of wicketd is updating a
         // future installinator which reports multiple progress events.
-        let kind = if let Some(event) = report.progress_events.drain(..).next()
-        {
-            match event.kind {
-                ProgressEventKind::DownloadProgress {
-                    attempt,
-                    kind,
-                    peer: _peer,
-                    downloaded_bytes,
-                    total_bytes,
-                    elapsed,
-                } => UpdateStateKind::ArtifactDownloadProgress {
-                    attempt,
-                    kind,
-                    downloaded_bytes,
-                    total_bytes,
-                    elapsed,
-                },
-                ProgressEventKind::FormatProgress {
-                    attempt,
-                    path,
-                    percentage,
-                    elapsed,
-                } => UpdateStateKind::InstallinatorFormatProgress {
-                    attempt,
-                    path,
-                    percentage,
-                    elapsed,
-                },
-                ProgressEventKind::WriteProgress {
-                    attempt,
-                    kind,
-                    destination,
-                    written_bytes,
-                    total_bytes,
-                    elapsed,
-                } => UpdateStateKind::ArtifactWriteProgress {
-                    attempt,
-                    kind,
-                    destination: Some(destination),
-                    written_bytes,
-                    total_bytes,
-                    elapsed,
-                },
-            }
-        } else {
-            UpdateStateKind::WaitingForProgress {
-                component: "installinator".to_owned(),
-            }
-        };
+        let new_state =
+            if let Some(event) = report.progress_events.drain(..).next() {
+                let timestamp = report
+                    .total_elapsed
+                    .checked_sub(event.total_elapsed)
+                    .and_then(|age| now.checked_sub(age))
+                    .unwrap_or(now);
 
-        self.set_current_update_state(kind);
+                let kind = match event.kind {
+                    ProgressEventKind::DownloadProgress {
+                        attempt,
+                        kind,
+                        peer: _peer,
+                        downloaded_bytes,
+                        total_bytes,
+                        elapsed,
+                    } => UpdateStateKind::ArtifactDownloadProgress {
+                        attempt,
+                        kind,
+                        downloaded_bytes,
+                        total_bytes,
+                        elapsed,
+                    },
+                    ProgressEventKind::FormatProgress {
+                        attempt,
+                        path,
+                        percentage,
+                        elapsed,
+                    } => UpdateStateKind::InstallinatorFormatProgress {
+                        attempt,
+                        path,
+                        percentage,
+                        elapsed,
+                    },
+                    ProgressEventKind::WriteProgress {
+                        attempt,
+                        kind,
+                        destination,
+                        written_bytes,
+                        total_bytes,
+                        elapsed,
+                    } => UpdateStateKind::ArtifactWriteProgress {
+                        attempt,
+                        kind,
+                        destination: Some(destination),
+                        written_bytes,
+                        total_bytes,
+                        elapsed,
+                    },
+                };
+                UpdateState { timestamp, kind }
+            } else {
+                UpdateState {
+                    timestamp: now,
+                    kind: UpdateStateKind::WaitingForProgress {
+                        component: "installinator".to_owned(),
+                    },
+                }
+            };
+
+        let events = report.completion_events.into_iter().map(|event| {
+            let event_kind =
+                UpdateNormalEventKind::InstallinatorEvent(event.kind);
+
+            // Convert the agent of this event from installinator into
+            // an `Instant`; if we can't, log it and lie that the event
+            // occurred "now".
+            let timestamp = report
+                .total_elapsed
+                .checked_sub(event.total_elapsed)
+                .and_then(|age| now.checked_sub(age))
+                .unwrap_or(now);
+
+            (timestamp, UpdateEventKind::Normal(event_kind))
+        });
+
+        self.push_update_events(events, Some(new_state));
     }
 
     // Installs the installinator phase 1 and configures the host to fetch phase
@@ -831,7 +911,11 @@ impl UpdateDriver {
         const HOST_BOOT_FLASH: &str =
             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
 
-        let phase1_image = buf_list_to_try_stream(artifact.data.0.clone());
+        let phase1_image =
+            buf_list_to_try_stream(BufList::from_iter([artifact
+                .data
+                .0
+                .clone()]));
 
         // Ensure host is in A2.
         self.set_host_power_state(PowerState::A2).await?;
@@ -892,9 +976,11 @@ impl UpdateDriver {
             .map(|response| response.into_inner())
     }
 
-    async fn update_sp(&self, artifact: &ArtifactIdData) -> anyhow::Result<()> {
-        const SP_COMPONENT: &str = SpComponent::SP_ITSELF.const_as_str();
-
+    async fn update_sp_component(
+        &self,
+        artifact: &ArtifactIdData,
+        component_name: &str,
+    ) -> anyhow::Result<()> {
         let update_id = Uuid::new_v4();
 
         // The SP only has one updateable firmware slot ("the inactive bank") -
@@ -908,11 +994,11 @@ impl UpdateDriver {
             .sp_component_update(
                 self.sp.type_,
                 self.sp.slot,
-                SP_COMPONENT,
+                component_name,
                 firmware_slot,
                 &update_id,
                 reqwest::Body::wrap_stream(buf_list_to_try_stream(
-                    artifact.data.0.clone(),
+                    BufList::from_iter([artifact.data.0.clone()]),
                 )),
             )
             .await
@@ -925,7 +1011,7 @@ impl UpdateDriver {
         self.poll_for_component_update_completion(
             &artifact.id,
             update_id,
-            SP_COMPONENT,
+            component_name,
         )
         .await?;
 
@@ -1026,7 +1112,8 @@ async fn upload_trampoline_phase_2_to_mgs(
     let data = artifact.data;
     let upload_task = move || {
         let mgs_client = mgs_client.clone();
-        let image = buf_list_to_try_stream(data.0.clone());
+        let image =
+            buf_list_to_try_stream(BufList::from_iter([data.0.clone()]));
 
         async move {
             mgs_client

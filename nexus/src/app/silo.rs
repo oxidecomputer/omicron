@@ -5,31 +5,50 @@
 //! Silos, Users, and SSH Keys.
 
 use crate::authz::ApiResource;
-use crate::context::OpContext;
-use crate::db;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::SshKey;
+use crate::db::{self, lookup};
 use crate::external_api::params;
 use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
+use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::bail_unless;
+use ref_cast::RefCast;
 use std::str::FromStr;
 use uuid::Uuid;
 
 impl super::Nexus {
     // Silos
+    pub fn silo_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        silo: &'a NameOrId,
+    ) -> LookupResult<lookup::Silo<'a>> {
+        match silo {
+            NameOrId::Id(id) => {
+                let silo =
+                    LookupPath::new(opctx, &self.db_datastore).silo_id(*id);
+                Ok(silo)
+            }
+            NameOrId::Name(name) => {
+                let silo = LookupPath::new(opctx, &self.db_datastore)
+                    .silo_name(Name::ref_cast(name));
+                Ok(silo)
+            }
+        }
+    }
 
     pub async fn silo_create(
         &self,
@@ -54,40 +73,13 @@ impl super::Nexus {
         self.db_datastore.silos_list(opctx, pagparams).await
     }
 
-    pub async fn silo_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<db::model::Silo> {
-        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(name)
-            .fetch()
-            .await?;
-        Ok(db_silo)
-    }
-
-    pub async fn silo_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        silo_id: &Uuid,
-    ) -> LookupResult<db::model::Silo> {
-        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_id(*silo_id)
-            .fetch()
-            .await?;
-        Ok(db_silo)
-    }
-
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,
-        name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
     ) -> DeleteResult {
         let (.., authz_silo, db_silo) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .silo_name(name)
-                .fetch_for(authz::Action::Delete)
-                .await?;
+            silo_lookup.fetch_for(authz::Action::Delete).await?;
         self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
     }
 
@@ -96,7 +88,7 @@ impl super::Nexus {
     pub async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
-        silo_lookup: db::lookup::Silo<'_>,
+        silo_lookup: &lookup::Silo<'_>,
     ) -> LookupResult<shared::Policy<authz::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
@@ -114,7 +106,7 @@ impl super::Nexus {
     pub async fn silo_update_policy(
         &self,
         opctx: &OpContext,
-        silo_lookup: db::lookup::Silo<'_>,
+        silo_lookup: &lookup::Silo<'_>,
         policy: &shared::Policy<authz::SiloRole>,
     ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
         let (.., authz_silo) =
@@ -164,13 +156,10 @@ impl super::Nexus {
     pub async fn silo_list_users(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SiloUser> {
-        let (authz_silo,) = LookupPath::new(opctx, self.datastore())
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::Read)
-            .await?;
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
         self.db_datastore
             .silo_users_list(opctx, &authz_silo_user_list, pagparams)
@@ -181,13 +170,10 @@ impl super::Nexus {
     pub async fn silo_user_fetch(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         silo_user_id: Uuid,
     ) -> LookupResult<db::model::SiloUser> {
-        let (authz_silo,) = LookupPath::new(opctx, self.datastore())
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::Read)
-            .await?;
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         let (_, db_silo_user) = self
             .silo_user_lookup_by_id(
                 opctx,
@@ -208,13 +194,9 @@ impl super::Nexus {
     /// provider.
     async fn local_idp_fetch_silo(
         &self,
-        opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
     ) -> LookupResult<(authz::Silo, db::model::Silo)> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
+        let (authz_silo, db_silo) = silo_lookup.fetch().await?;
         if db_silo.user_provision_type != UserProvisionType::ApiOnly {
             return Err(Error::not_found_by_name(
                 ResourceType::IdentityProvider,
@@ -229,11 +211,11 @@ impl super::Nexus {
     pub async fn local_idp_create_user(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         new_user_params: params::UserCreate,
     ) -> CreateResult<db::model::SiloUser> {
         let (authz_silo, db_silo) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+            self.local_idp_fetch_silo(silo_lookup).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         // TODO-cleanup This authz check belongs in silo_user_create().
         opctx
@@ -267,11 +249,11 @@ impl super::Nexus {
     pub async fn local_idp_delete_user(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         silo_user_id: Uuid,
     ) -> DeleteResult {
-        let (authz_silo, _) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
+
         let (authz_silo_user, _) = self
             .silo_user_lookup_by_id(
                 opctx,
@@ -394,12 +376,12 @@ impl super::Nexus {
     pub async fn local_idp_user_set_password(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         silo_user_id: Uuid,
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
         let (authz_silo, db_silo) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+            self.local_idp_fetch_silo(silo_lookup).await?;
         let (authz_silo_user, db_silo_user) = self
             .silo_user_lookup_by_id(
                 opctx,
@@ -506,11 +488,10 @@ impl super::Nexus {
     pub async fn login_local(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         credentials: params::UsernamePasswordCredentials,
     ) -> Result<Option<db::model::SiloUser>, Error> {
-        let (authz_silo, _) =
-            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
         // NOTE: It's very important that we not bail out early if we fail to
         // find a user with this external id.  See the note in
@@ -577,6 +558,31 @@ impl super::Nexus {
     }
 
     // SSH Keys
+    pub fn ssh_key_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        ssh_key_selector: &'a params::SshKeySelector,
+    ) -> LookupResult<lookup::SshKey<'a>> {
+        match ssh_key_selector {
+            params::SshKeySelector {
+                silo_user_id: _,
+                ssh_key: NameOrId::Id(id),
+            } => {
+                let ssh_key =
+                    LookupPath::new(opctx, &self.db_datastore).ssh_key_id(*id);
+                Ok(ssh_key)
+            }
+            params::SshKeySelector {
+                silo_user_id,
+                ssh_key: NameOrId::Name(name),
+            } => {
+                let ssh_key = LookupPath::new(opctx, &self.db_datastore)
+                    .silo_user_id(*silo_user_id)
+                    .ssh_key_name(Name::ref_cast(name));
+                Ok(ssh_key)
+            }
+        }
+    }
 
     pub async fn ssh_key_create(
         &self,
@@ -597,7 +603,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-        page_params: &DataPageParams<'_, Name>,
+        page_params: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
         let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
             .silo_user_id(silo_user_id)
@@ -607,49 +613,60 @@ impl super::Nexus {
         self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
     }
 
-    pub async fn ssh_key_fetch(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-        ssh_key_name: &Name,
-    ) -> LookupResult<SshKey> {
-        let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(silo_user_id)
-            .ssh_key_name(ssh_key_name)
-            .fetch()
-            .await?;
-        assert_eq!(ssh_key.name(), &ssh_key_name.0);
-        Ok(ssh_key)
-    }
-
     pub async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-        ssh_key_name: &Name,
+        ssh_key_lookup: &lookup::SshKey<'_>,
     ) -> DeleteResult {
-        let (.., authz_user, authz_ssh_key) =
-            LookupPath::new(opctx, &self.datastore())
-                .silo_user_id(silo_user_id)
-                .ssh_key_name(ssh_key_name)
-                .lookup_for(authz::Action::Delete)
-                .await?;
-        assert_eq!(authz_user.id(), silo_user_id);
+        let (.., authz_silo_user, authz_ssh_key) =
+            ssh_key_lookup.lookup_for(authz::Action::Delete).await?;
+        assert_eq!(authz_silo_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
     }
 
     // identity providers
 
+    pub fn saml_identity_provider_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        saml_identity_provider_selector: &'a params::SamlIdentityProviderSelector,
+    ) -> LookupResult<lookup::SamlIdentityProvider<'a>> {
+        match saml_identity_provider_selector {
+            params::SamlIdentityProviderSelector {
+                saml_identity_provider: NameOrId::Id(id),
+                silo_selector: None,
+            } => {
+
+                let saml_provider = LookupPath::new(opctx, &self.db_datastore)
+                    .saml_identity_provider_id(*id);
+                Ok(saml_provider)
+            }
+            params::SamlIdentityProviderSelector {
+                saml_identity_provider: NameOrId::Name(name),
+                silo_selector: Some(silo_selector),
+            } => {
+                let saml_provider = self
+                    .silo_lookup(opctx, &silo_selector.silo)?
+                    .saml_identity_provider_name(Name::ref_cast(name));
+                Ok(saml_provider)
+            }
+            params::SamlIdentityProviderSelector {
+                saml_identity_provider: NameOrId::Id(_),
+                silo_selector: Some(_),
+            } => Err(Error::invalid_request("when providing provider as an ID, silo should not be specified")),
+            _ => Err(Error::invalid_request("provider should either be a UUID or silo should be specified"))
+        }
+    }
+
     pub async fn identity_provider_list(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::IdentityProvider> {
-        let (authz_silo, ..) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
+        // TODO-security: This should likely be lookup_for ListChildren on the silo
+        let (.., authz_silo, _) = silo_lookup.fetch().await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
         self.db_datastore
             .identity_provider_list(opctx, &authz_idp_list, pagparams)
@@ -661,13 +678,11 @@ impl super::Nexus {
     pub async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: &lookup::Silo<'_>,
         params: params::SamlIdentityProviderCreate,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
+        // TODO-security: This should likely be fetch_for CreateChild on the silo
+        let (authz_silo, db_silo) = silo_lookup.fetch().await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
 
         if db_silo.user_provision_type != UserProvisionType::Jit {
@@ -790,21 +805,6 @@ impl super::Nexus {
         self.db_datastore
             .saml_identity_provider_create(opctx, &authz_idp_list, provider)
             .await
-    }
-
-    pub async fn saml_identity_provider_fetch(
-        &self,
-        opctx: &OpContext,
-        silo_name: &Name,
-        provider_name: &Name,
-    ) -> LookupResult<db::model::SamlIdentityProvider> {
-        let (.., saml_identity_provider) =
-            LookupPath::new(opctx, &self.datastore())
-                .silo_name(silo_name)
-                .saml_identity_provider_name(provider_name)
-                .fetch()
-                .await?;
-        Ok(saml_identity_provider)
     }
 
     pub fn silo_group_lookup<'a>(

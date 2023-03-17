@@ -13,12 +13,9 @@
 #![allow(clippy::style)]
 
 pub mod app; // Public for documentation examples
-pub mod authn; // Public only for testing
-pub mod authz; // Public for documentation examples
 mod cidata;
 pub mod config; // Public for testing
 pub mod context; // Public for documentation examples
-pub mod db; // Public for documentation examples
 pub mod external_api; // Public for testing
 pub mod internal_api; // Public for testing
 mod populate;
@@ -37,13 +34,12 @@ use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
+// These modules used to be within nexus, but have been moved to
+// nexus-db-queries. Keeping these around temporarily for migration reasons.
+pub use nexus_db_queries::{authn, authz, db};
+
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate newtype_derive;
-#[cfg(test)]
-#[macro_use]
-extern crate diesel;
 
 /// Run the OpenAPI generator for the external API, which emits the OpenAPI spec
 /// to stdout.

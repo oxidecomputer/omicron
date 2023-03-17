@@ -35,7 +35,7 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pools_url = "/system/ip-pools";
+    let ip_pools_url = "/v1/system/ip-pools";
     let pool_name = "p0";
     let description = "an ip pool";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
@@ -279,7 +279,7 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let ip_pools_url = "/system/ip-pools";
+    let ip_pools_url = "/v1/system/ip-pools";
     let pool_name = "p0";
     let description = "an ip pool";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
@@ -460,7 +460,7 @@ async fn test_bad_ip_ranges(
 #[nexus_test]
 async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pools_url = "/system/ip-pools";
+    let ip_pools_url = "/v1/system/ip-pools";
     let pool_name = "p0";
     let description = "an ip pool";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
@@ -560,7 +560,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
-    let ip_pools_url = "/system/ip-pools";
+    let ip_pools_url = "/v1/system/ip-pools";
     let pool_name = "default";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
@@ -619,10 +619,13 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 
     // Stop the instance, wait until it is in fact stopped.
     let instance_url = format!(
-        "/organizations/{}/projects/{}/instances/{}",
-        ORG_NAME, PROJECT_NAME, INSTANCE_NAME,
+        "/v1/instances/{}?organization={}&project={}",
+        INSTANCE_NAME, ORG_NAME, PROJECT_NAME,
     );
-    let instance_stop_url = format!("{}/stop", instance_url);
+    let instance_stop_url = format!(
+        "/v1/instances/{}/stop?organization={}&project={}",
+        INSTANCE_NAME, ORG_NAME, PROJECT_NAME,
+    );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instance_stop_url)
             .body(None as Option<&serde_json::Value>)
@@ -661,7 +664,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 #[nexus_test]
 async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pool_url = "/system/ip-pools-service".to_string();
+    let ip_pool_url = "/v1/system/ip-pools-service".to_string();
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
     let ip_pool_remove_range_url = format!("{}/remove", ip_pool_ranges_url);

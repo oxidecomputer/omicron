@@ -25,10 +25,14 @@ session_me_groups                        /session/me/groups
 API operations found with tag "images"
 OPERATION ID                             URL PATH
 image_create                             /organizations/{organization_name}/projects/{project_name}/images
+image_create_v1                          /v1/images
 image_delete                             /organizations/{organization_name}/projects/{project_name}/images/{image_name}
+image_delete_v1                          /v1/images/{image}
 image_list                               /organizations/{organization_name}/projects/{project_name}/images
+image_list_v1                            /v1/images
 image_view                               /organizations/{organization_name}/projects/{project_name}/images/{image_name}
 image_view_by_id                         /by-id/images/{id}
+image_view_v1                            /v1/images/{image}
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
@@ -79,10 +83,6 @@ login_local                              /login/{silo_name}/local
 login_saml                               /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
-API operations found with tag "metrics"
-OPERATION ID                             URL PATH
-timeseries_schema_get                    /timeseries/schema
-
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
 organization_create                      /organizations
@@ -129,10 +129,18 @@ project_view_v1                          /v1/projects/{project}
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
 role_list                                /roles
+role_list_v1                             /v1/system/roles
 role_view                                /roles/{role_name}
+role_view_v1                             /v1/system/roles/{role_name}
 
 API operations found with tag "session"
 OPERATION ID                             URL PATH
+current_user_groups_v1                   /v1/me/groups
+current_user_ssh_key_create_v1           /v1/me/ssh-keys
+current_user_ssh_key_delete_v1           /v1/me/ssh-keys/{ssh_key}
+current_user_ssh_key_list_v1             /v1/me/ssh-keys
+current_user_ssh_key_view_v1             /v1/me/ssh-keys/{ssh_key}
+current_user_view_v1                     /v1/me
 session_sshkey_create                    /session/me/sshkeys
 session_sshkey_delete                    /session/me/sshkeys/{ssh_key_name}
 session_sshkey_list                      /session/me/sshkeys
@@ -173,21 +181,36 @@ certificate_list_v1                      /v1/system/certificates
 certificate_view                         /system/certificates/{certificate}
 certificate_view_v1                      /v1/system/certificates/{certificate}
 ip_pool_create                           /system/ip-pools
+ip_pool_create_v1                        /v1/system/ip-pools
 ip_pool_delete                           /system/ip-pools/{pool_name}
+ip_pool_delete_v1                        /v1/system/ip-pools/{pool}
 ip_pool_list                             /system/ip-pools
+ip_pool_list_v1                          /v1/system/ip-pools
 ip_pool_range_add                        /system/ip-pools/{pool_name}/ranges/add
+ip_pool_range_add_v1                     /v1/system/ip-pools/{pool}/ranges/add
 ip_pool_range_list                       /system/ip-pools/{pool_name}/ranges
+ip_pool_range_list_v1                    /v1/system/ip-pools/{pool}/ranges
 ip_pool_range_remove                     /system/ip-pools/{pool_name}/ranges/remove
+ip_pool_range_remove_v1                  /v1/system/ip-pools/{pool}/ranges/remove
 ip_pool_service_range_add                /system/ip-pools-service/ranges/add
+ip_pool_service_range_add_v1             /v1/system/ip-pools-service/ranges/add
 ip_pool_service_range_list               /system/ip-pools-service/ranges
+ip_pool_service_range_list_v1            /v1/system/ip-pools-service/ranges
 ip_pool_service_range_remove             /system/ip-pools-service/ranges/remove
+ip_pool_service_range_remove_v1          /v1/system/ip-pools-service/ranges/remove
 ip_pool_service_view                     /system/ip-pools-service
+ip_pool_service_view_v1                  /v1/system/ip-pools-service
 ip_pool_update                           /system/ip-pools/{pool_name}
+ip_pool_update_v1                        /v1/system/ip-pools/{pool}
 ip_pool_view                             /system/ip-pools/{pool_name}
 ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
+ip_pool_view_v1                          /v1/system/ip-pools/{pool}
 local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
+local_idp_user_create_v1                 /v1/system/identity-providers/local/users
 local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
+local_idp_user_delete_v1                 /v1/system/identity-providers/local/users/{user_id}
 local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
+local_idp_user_set_password_v1           /v1/system/identity-providers/local/users/{user_id}/set-password
 physical_disk_list                       /system/hardware/disks
 physical_disk_list_v1                    /v1/system/hardware/disks
 rack_list                                /system/hardware/racks
@@ -199,17 +222,28 @@ saga_list_v1                             /v1/system/sagas
 saga_view                                /system/sagas/{saga_id}
 saga_view_v1                             /v1/system/sagas/{saga_id}
 saml_identity_provider_create            /system/silos/{silo_name}/identity-providers/saml
+saml_identity_provider_create_v1         /v1/system/identity-providers/saml
 saml_identity_provider_view              /system/silos/{silo_name}/identity-providers/saml/{provider_name}
+saml_identity_provider_view_v1           /v1/system/identity-providers/saml/{provider}
 silo_create                              /system/silos
+silo_create_v1                           /v1/system/silos
 silo_delete                              /system/silos/{silo_name}
+silo_delete_v1                           /v1/system/silos/{silo}
 silo_identity_provider_list              /system/silos/{silo_name}/identity-providers
+silo_identity_provider_list_v1           /v1/system/identity-providers
 silo_list                                /system/silos
+silo_list_v1                             /v1/system/silos
 silo_policy_update                       /system/silos/{silo_name}/policy
+silo_policy_update_v1                    /v1/system/silos/{silo}/policy
 silo_policy_view                         /system/silos/{silo_name}/policy
+silo_policy_view_v1                      /v1/system/silos/{silo}/policy
+silo_user_list_v1                        /v1/system/users
 silo_user_view                           /system/silos/{silo_name}/users/id/{user_id}
+silo_user_view_v1                        /v1/system/users/{user_id}
 silo_users_list                          /system/silos/{silo_name}/users/all
 silo_view                                /system/silos/{silo_name}
 silo_view_by_id                          /system/by-id/silos/{id}
+silo_view_v1                             /v1/system/silos/{silo}
 sled_list                                /system/hardware/sleds
 sled_list_v1                             /v1/system/hardware/sleds
 sled_physical_disk_list                  /system/hardware/sleds/{sled_id}/disks
@@ -222,7 +256,7 @@ system_image_delete                      /system/images/{image_name}
 system_image_list                        /system/images
 system_image_view                        /system/images/{image_name}
 system_image_view_by_id                  /system/by-id/images/{id}
-system_metric                            /system/metrics/{metric_name}
+system_metric                            /v1/system/metrics/{metric_name}
 system_update_components_list            /v1/system/update/updates/{version}/components
 system_update_list                       /v1/system/update/updates
 system_update_refresh                    /v1/system/update/refresh
@@ -234,6 +268,8 @@ system_user_view                         /system/user/{user_name}
 system_version                           /v1/system/update/version
 update_deployment_view                   /v1/system/update/deployments/{id}
 update_deployments_list                  /v1/system/update/deployments
+user_builtin_list                        /v1/system/users-builtin
+user_builtin_view                        /v1/system/users-builtin/{user}
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH

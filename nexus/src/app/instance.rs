@@ -11,7 +11,6 @@ use crate::app::sagas;
 use crate::authn;
 use crate::authz;
 use crate::cidata::InstanceCiData;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup;
@@ -21,6 +20,7 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
 use nexus_db_model::Name;
+use nexus_db_queries::context::OpContext;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
@@ -571,12 +571,12 @@ impl super::Nexus {
             .ssh_keys_list(
                 opctx,
                 &authz_user,
-                &DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: std::num::NonZeroU32::new(MAX_KEYS_PER_INSTANCE)
                         .unwrap(),
-                },
+                }),
             )
             .await?
             .into_iter()

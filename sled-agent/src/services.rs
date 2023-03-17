@@ -821,7 +821,6 @@ impl ServiceManager {
                                 ),
                                 ));
                             }
-
                             smfh.setprop(
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",
@@ -829,10 +828,6 @@ impl ServiceManager {
                             smfh.setprop(
                                 "config/board_rev",
                                 &self.inner.sidecar_revision,
-                            )?;
-                            smfh.setprop(
-                                "config/transceiver_interface",
-                                "tfportCPU0",
                             )?;
                         }
                         DendriteAsic::TofinoStub => smfh.setprop(
@@ -1003,6 +998,7 @@ impl ServiceManager {
                     ServiceType::ManagementGatewayService,
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Wicketd,
                 ]
             }
         };
@@ -1111,9 +1107,6 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
-                            // TODO: For this restart to be optional, Dendrite must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
                         }
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,

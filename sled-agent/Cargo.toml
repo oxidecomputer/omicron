@@ -21,6 +21,7 @@ ddm-admin-client.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
+flate2.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
 internal-dns.workspace = true
@@ -40,6 +41,7 @@ propolis-client.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
@@ -51,6 +53,7 @@ smf.workspace = true
 sp-sim.workspace = true
 sprockets-common.workspace = true
 sprockets-host.workspace = true
+tar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tofino.workspace = true

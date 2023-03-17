@@ -14,14 +14,16 @@ use futures::StreamExt;
 use slog::{error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{
+    unbounded_channel, UnboundedReceiver, UnboundedSender,
+};
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 use crate::ui::Screen;
-use crate::wicketd::{WicketdHandle, WicketdManager};
-use crate::{Action, Event, InventoryEvent, State};
+use crate::wicketd::{self, WicketdHandle, WicketdManager};
+use crate::{Action, Cmd, Event, InventoryEvent, KeyHandler, State};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -36,10 +38,10 @@ pub struct Runner {
     // The [`Runner`]'s main_loop is purely single threaded. Every interaction
     // with the outside world is via channels. All input from the outside world
     // comes in via an `Event` over a single channel.
-    events_rx: Receiver<Event>,
+    events_rx: UnboundedReceiver<Event>,
 
     // We save a copy here so we can hand it out to event producers
-    events_tx: Sender<Event>,
+    events_tx: UnboundedSender<Event>,
 
     // All global state managed by wicket.
     //
@@ -68,7 +70,7 @@ pub struct Runner {
 #[allow(clippy::new_without_default)]
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
-        let (events_tx, events_rx) = channel();
+        let (events_tx, events_rx) = unbounded_channel();
         let state = State::new();
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).unwrap();
@@ -79,7 +81,7 @@ impl Runner {
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
         Runner {
-            screen: Screen::new(),
+            screen: Screen::new(&log),
             events_rx,
             events_tx,
             state,
@@ -104,6 +106,8 @@ impl Runner {
     fn main_loop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
 
+        let mut key_handler = KeyHandler::default();
+
         // Size the initial screen
         let rect = self.terminal.get_frame().size();
         self.screen.resize(&mut self.state, rect.width, rect.height);
@@ -112,11 +116,11 @@ impl Runner {
         self.screen.draw(&self.state, &mut self.terminal)?;
 
         loop {
-            // unwrap is safe because we always hold onto a Sender
-            let event = self.events_rx.recv().unwrap();
+            // unwrap is safe because we always hold onto a UnboundedSender
+            let event = self.events_rx.blocking_recv().unwrap();
             match event {
                 Event::Tick => {
-                    let action = self.screen.on(&mut self.state, Event::Tick);
+                    let action = self.screen.on(&mut self.state, Cmd::Tick);
                     self.handle_action(action)?;
                 }
                 Event::Term(TermEvent::Key(key_event)) => {
@@ -124,11 +128,10 @@ impl Runner {
                         info!(self.log, "CTRL-C Pressed. Exiting.");
                         break;
                     }
-                    let action = self.screen.on(
-                        &mut self.state,
-                        Event::Term(TermEvent::Key(key_event)),
-                    );
-                    self.handle_action(action)?;
+                    if let Some(cmd) = key_handler.on(key_event) {
+                        let action = self.screen.on(&mut self.state, cmd);
+                        self.handle_action(action)?;
+                    }
                 }
                 Event::Term(TermEvent::Resize(width, height)) => {
                     self.screen.resize(&mut self.state, width, height);
@@ -137,7 +140,11 @@ impl Runner {
                 Event::Inventory(event) => {
                     self.handle_inventory_event(event)?;
                 }
-                _ => info!(self.log, "{:?}", event),
+                Event::UpdateArtifacts(artifacts) => {
+                    self.state.update_state.update_artifacts(artifacts);
+                    self.screen.draw(&self.state, &mut self.terminal)?;
+                }
+                _ => (),
             }
         }
         Ok(())
@@ -196,7 +203,11 @@ impl Runner {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Action::Update(_component_id) => todo!(),
+            Action::Update(component_id) => {
+                self.wicketd.tx.blocking_send(
+                    wicketd::Request::StartUpdate(component_id),
+                )?;
+            }
         }
         Ok(())
     }
@@ -220,7 +231,10 @@ fn is_control_c(key_event: &KeyEvent) -> bool {
 }
 
 /// Listen for terminal related events
-async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
+async fn run_event_listener(
+    log: slog::Logger,
+    events_tx: UnboundedSender<Event>,
+) {
     info!(log, "Starting event listener");
     tokio::spawn(async move {
         let mut events = EventStream::new();
