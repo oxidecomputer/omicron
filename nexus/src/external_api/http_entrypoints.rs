@@ -5812,14 +5812,6 @@ async fn vpc_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for VPC requests
-#[derive(Deserialize, JsonSchema)]
-struct VpcPathParam {
-    organization_name: Name,
-    project_name: Name,
-    vpc_name: Name,
-}
-
 /// Update a VPC
 #[endpoint {
     method = PUT,
@@ -5965,15 +5957,6 @@ async fn vpc_subnet_view(
         Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for VPC Subnet requests
-#[derive(Deserialize, JsonSchema)]
-struct VpcSubnetPathParam {
-    organization_name: Name,
-    project_name: Name,
-    vpc_name: Name,
-    subnet_name: Name,
 }
 
 /// Delete a subnet
@@ -6211,15 +6194,6 @@ async fn vpc_router_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for VPC Router requests
-#[derive(Deserialize, JsonSchema)]
-struct VpcRouterPathParam {
-    organization_name: Name,
-    project_name: Name,
-    vpc_name: Name,
-    router_name: Name,
-}
-
 /// Create a VPC router
 #[endpoint {
     method = POST,
@@ -6380,16 +6354,6 @@ async fn vpc_router_route_view(
         Ok(HttpResponseOk(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Router Route requests
-#[derive(Deserialize, JsonSchema)]
-struct RouterRoutePathParam {
-    organization_name: Name,
-    project_name: Name,
-    vpc_name: Name,
-    router_name: Name,
-    route_name: Name,
 }
 
 /// Create a router
