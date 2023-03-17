@@ -15,7 +15,7 @@ type ControlPlaneTestContext =
 async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let mut users = NexusRequest::object_get(testctx, "/v1/system/user")
+    let mut users = NexusRequest::object_get(testctx, "/system/user")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
