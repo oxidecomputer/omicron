@@ -133,7 +133,9 @@ project_view_v1                          /v1/projects/{project}
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
 role_list                                /roles
+role_list_v1                             /v1/roles
 role_view                                /roles/{role_name}
+role_view_v1                             /v1/roles/{role_name}
 
 API operations found with tag "session"
 OPERATION ID                             URL PATH

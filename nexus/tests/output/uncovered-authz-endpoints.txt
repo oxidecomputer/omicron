@@ -57,6 +57,8 @@ vpc_subnet_list                          (get    "/organizations/{organization_n
 vpc_subnet_view                          (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}")
 vpc_subnet_list_network_interfaces       (get    "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces")
 policy_view                              (get    "/policy")
+role_list                                (get    "/roles")
+role_view                                (get    "/roles/{role_name}")
 session_me                               (get    "/session/me")
 session_me_groups                        (get    "/session/me/groups")
 session_sshkey_list                      (get    "/session/me/sshkeys")

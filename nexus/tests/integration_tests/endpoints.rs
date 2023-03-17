@@ -1372,13 +1372,13 @@ lazy_static! {
         /* IAM */
 
         VerifyEndpoint {
-            url: "/roles",
+            url: "/v1/roles",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
         VerifyEndpoint {
-            url: "/roles/fleet.admin",
+            url: "/v1/roles/fleet.admin",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
