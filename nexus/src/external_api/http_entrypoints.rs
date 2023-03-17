@@ -326,6 +326,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_user_list)?;
         api.register(system_user_view)?;
 
+        api.register(user_builtin_list)?;
+        api.register(user_builtin_view)?;
+
         api.register(timeseries_schema_get)?;
 
         api.register(role_list)?;
@@ -8770,6 +8773,60 @@ struct BuiltinUserPathParam {
     tags = ["system"],
 }]
 async fn system_user_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<BuiltinUserPathParam>,
+) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let user_name = &path.user_name;
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
+        Ok(HttpResponseOk(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List built-in users
+#[endpoint {
+    method = GET,
+    path = "/v1/system/users-builtin",
+    tags = ["system"],
+}]
+async fn user_builtin_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams =
+        data_page_params_for(&rqctx, &query)?.map_name(|n| Name::ref_cast(n));
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let users = nexus
+            .users_builtin_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            users,
+            &marker_for_name,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a built-in user
+#[endpoint {
+    method = GET,
+    path = "/v1/system/users-builtin/{user_name}",
+    tags = ["system"],
+}]
+async fn user_builtin_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<BuiltinUserPathParam>,
 ) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {

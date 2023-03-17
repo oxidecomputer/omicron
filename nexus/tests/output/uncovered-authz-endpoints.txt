@@ -91,6 +91,8 @@ saml_identity_provider_view              (get    "/system/silos/{silo_name}/iden
 silo_policy_view                         (get    "/system/silos/{silo_name}/policy")
 silo_users_list                          (get    "/system/silos/{silo_name}/users/all")
 silo_user_view                           (get    "/system/silos/{silo_name}/users/id/{user_id}")
+system_user_list                         (get    "/system/user")
+system_user_view                         (get    "/system/user/{user_name}")
 user_list                                (get    "/users")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")

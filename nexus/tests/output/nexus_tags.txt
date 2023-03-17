@@ -272,6 +272,8 @@ system_user_view                         /system/user/{user_name}
 system_version                           /v1/system/update/version
 update_deployment_view                   /v1/system/update/deployments/{id}
 update_deployments_list                  /v1/system/update/deployments
+user_builtin_list                        /v1/system/users-builtin
+user_builtin_view                        /v1/system/users-builtin/{user_name}
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH
