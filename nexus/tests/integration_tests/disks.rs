@@ -1414,7 +1414,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Check the utilization info for the whole project too.
     let utilization_url = |id: Uuid| {
         format!(
-            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
+            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
             Utc::now() - chrono::Duration::seconds(10),
             Utc::now() + chrono::Duration::seconds(10),
             id,
